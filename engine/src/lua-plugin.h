@@ -573,6 +573,13 @@ struct LuaModelContext {
     int          latent_fps      = 25;     // latent frames per second
     int          latent_channels = 64;     // Oc (64 ACE, 128 MM3, 256 SA3)
     const char * model_id        = "ace";  // "ace", "mm3", "sa3"
+    // Measured RMS of this model's clean latent -- the number every
+    // rms_target / latent-pressure servo should default to. A plugin tuned
+    // against ACE's ~2.0 that is dropped onto SA3 (measured 0.685 on a 24-step
+    // native render) spends every step inflating the latent to 3x its natural
+    // magnitude. Plugins read it as `model_context.latent_rms` and fall back
+    // to 2.0 when absent, so ACE behaviour is unchanged. (HOT-Step)
+    float        latent_rms      = 2.0f;
 };
 
 static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx) {
@@ -581,6 +588,7 @@ static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx)
     lua_pushinteger(L, ctx.latent_fps);      lua_setfield(L, -2, "latent_fps");
     lua_pushinteger(L, ctx.latent_channels); lua_setfield(L, -2, "latent_channels");
     lua_pushstring(L, ctx.model_id);         lua_setfield(L, -2, "model_id");
+    lua_pushnumber(L, ctx.latent_rms);       lua_setfield(L, -2, "latent_rms");
     lua_setglobal(L, "model_context");
 }
 

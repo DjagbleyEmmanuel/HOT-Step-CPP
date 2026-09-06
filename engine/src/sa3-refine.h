@@ -302,8 +302,20 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                                           float strength, int steps,
                                           bool pingpong, uint64_t seed, bool zero_noise,
                                           std::vector<float> & out,
-                                          const Sa3PluginParams * sp = nullptr) {
-    if (!be || !audio || T44 <= 0 || steps < 1) return false;
+                                          const Sa3PluginParams * sp = nullptr,
+                                          bool noise_only = false,
+                                          const char * dump_latent_path = nullptr) {
+    // noise_only (HOT-Step /sa3-synth): text-to-audio from pure gaussian noise.
+    // `audio` is ignored (may be nullptr); T44 gives the requested output
+    // length; strength is forced to 1.0 so the schedule runs the full
+    // sigma_max -> 0 range. Everything after the latent init -- conditioning,
+    // plugin routing, schedule, denoise loop, decode, trim -- is the refine
+    // path unchanged. SDEdit (the default) is the secondary use of this model;
+    // this is what it was trained for.
+    if (noise_only) {
+        strength = 1.0f;
+    }
+    if (!be || (!noise_only && !audio) || T44 <= 0 || steps < 1) return false;
     float seconds_total = (float)T44 / SA3_SR;
 
     // Adapted sample size (mirrors _adapt_sample_size)
@@ -328,19 +340,27 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     memcpy(cross.data(), text_emb.data(), sizeof(float) * SA3_TOK_LEN * SA3_COND_DIM);
     memcpy(cross.data() + (size_t)SA3_TOK_LEN * SA3_COND_DIM, sec_emb.data(), sizeof(float) * SA3_COND_DIM);
 
-    // Pad audio to S, encode
-    std::vector<float> padded((size_t)2 * S, 0.0f);
-    memcpy(padded.data(),     audio,       sizeof(float) * T44);
-    memcpy(padded.data() + S, audio + T44, sizeof(float) * T44);
     std::vector<float> x;
-    if (!sa3_encode_tiled(be, padded.data(), S, x)) return false;
-
-    // Mix with noise: x = init*(1-s) + noise*s
     std::mt19937_64 rng(seed);
     std::normal_distribution<float> gauss(0.0f, 1.0f);
-    for (size_t i = 0; i < x.size(); i++) {
-        float n = zero_noise ? 0.0f : gauss(rng);
-        x[i] = x[i] * (1.0f - strength) + n * strength;
+    if (noise_only) {
+        // Pure noise init. Latent is SA3 channel-major [Oc][L] -- same layout
+        // sa3_encode_tiled produces, so the loop below is oblivious to which
+        // path filled it.
+        x.resize((size_t) SA3_LAT_CH * L);
+        for (auto & xi : x) xi = zero_noise ? 0.0f : gauss(rng);
+    } else {
+        // Pad audio to S, encode
+        std::vector<float> padded((size_t)2 * S, 0.0f);
+        memcpy(padded.data(),     audio,       sizeof(float) * T44);
+        memcpy(padded.data() + S, audio + T44, sizeof(float) * T44);
+        if (!sa3_encode_tiled(be, padded.data(), S, x)) return false;
+
+        // Mix with noise: x = init*(1-s) + noise*s
+        for (size_t i = 0; i < x.size(); i++) {
+            float n = zero_noise ? 0.0f : gauss(rng);
+            x[i] = x[i] * (1.0f - strength) + n * strength;
+        }
     }
 
     // ── Plugin resolution ──────────────────────────────────────────────
@@ -359,6 +379,9 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     sa3_lua_ctx.latent_fps      = SA3_SR / SA3_DS;
     sa3_lua_ctx.latent_channels = Oc;
     sa3_lua_ctx.model_id        = "sa3";
+    // Measured 2026-09-03: native pingpong, 24 steps, 180 s, seed 35602196465681.
+    // final latent rms=0.6854, per-channel [0.4645 .. 1.1730]. ACE's is ~2.0.
+    sa3_lua_ctx.latent_rms      = 0.685f;
 
     LuaPlugin * solver_plugin    = nullptr;
     LuaPlugin * guidance_plugin  = nullptr;
@@ -450,8 +473,13 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             ov[0] = strength;      // pin the start exactly, no float drift
             ov.push_back(0.0f);    // the override drops the x0 endpoint; the loop indexes sigmas[i+1]
             sigmas = ov;
-            fprintf(stderr, "[SA3] Scheduler '%s': rescaled sigma_max %.4f -> strength %.4f\n",
-                    sp->scheduler.c_str(), (double) sched_start, (double) strength);
+            if (noise_only) {
+                fprintf(stderr, "[SA3] Scheduler '%s': full range (synth, sigma_max 1.0)\n",
+                        sp->scheduler.c_str());
+            } else {
+                fprintf(stderr, "[SA3] Scheduler '%s': rescaled sigma_max %.4f -> strength %.4f\n",
+                        sp->scheduler.c_str(), (double) sched_start, (double) strength);
+            }
         }
     }
 
@@ -573,6 +601,57 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         }
     }
 
+    // HOT-Step diagnostic: latent statistics + optional raw dump. The Lua
+    // plugins were tuned against ACE's 64-channel latent (RMS ~2.0); SA3's
+    // 256-channel latent sits wherever it sits, and every rms_target slider
+    // needs that number. Always logs; only writes a file when asked.
+    {
+        const int Lv = valid > L ? L : valid;
+        double sum_sq = 0.0, sum_abs = 0.0;
+        float  vmin = x.empty() ? 0.0f : x[0], vmax = vmin;
+        std::vector<double> ch_sq((size_t) Oc, 0.0);
+        for (int cidx = 0; cidx < Oc; cidx++) {
+            for (int t = 0; t < Lv; t++) {
+                float v = x[(size_t) cidx * L + t];
+                double d = (double) v;
+                sum_sq  += d * d;
+                sum_abs += std::fabs(d);
+                ch_sq[(size_t) cidx] += d * d;
+                if (v < vmin) vmin = v;
+                if (v > vmax) vmax = v;
+            }
+        }
+        const double n_valid = (double) Oc * Lv;
+        const double rms  = std::sqrt(sum_sq / n_valid);
+        const double mabs = sum_abs / n_valid;
+        double ch_rms_min = 1e30, ch_rms_max = 0.0;
+        for (int cidx = 0; cidx < Oc; cidx++) {
+            double r = std::sqrt(ch_sq[(size_t) cidx] / (double) Lv);
+            if (r < ch_rms_min) ch_rms_min = r;
+            if (r > ch_rms_max) ch_rms_max = r;
+        }
+        fprintf(stderr, "[SA3] final latent: rms=%.4f mean|x|=%.4f min=%.3f max=%.3f "
+                        "per-ch rms [%.4f .. %.4f]  (Oc=%d L=%d valid=%d, %s)\n",
+                rms, mabs, vmin, vmax, ch_rms_min, ch_rms_max, Oc, L, Lv,
+                noise_only ? "synth" : "refine");
+        if (dump_latent_path && dump_latent_path[0]) {
+            // Flat f32, channel-major [Oc][L] exactly as held in memory.
+            // Header: int32 ndims=2, int64 shape[2]={Oc, L}, then data.
+            FILE * fp = fopen(dump_latent_path, "wb");
+            if (fp) {
+                const int32_t ndims = 2;
+                const int64_t shape[2] = { (int64_t) Oc, (int64_t) L };
+                fwrite(&ndims, sizeof(int32_t), 1, fp);
+                fwrite(shape, sizeof(int64_t), 2, fp);
+                fwrite(x.data(), sizeof(float), x.size(), fp);
+                fclose(fp);
+                fprintf(stderr, "[SA3] latent dumped -> %s (%zu floats)\n", dump_latent_path, x.size());
+            } else {
+                fprintf(stderr, "[SA3] WARNING: could not open %s for latent dump\n", dump_latent_path);
+            }
+        }
+    }
+
     // Decode, zero the padded region, trim to input length. No saturation —
     // see the note on `out` above.
     std::vector<float> decoded;
@@ -686,4 +765,18 @@ static inline bool sa3_refine_run_ggml(Sa3GgmlRefine * m,
                                   strength, steps, pingpong, seed, zero_noise, out, sp);
 }
 
+// HOT-Step /sa3-synth: text-to-audio from noise on the GGML backend.
+// T44 = requested output length in 44.1k samples.
+static inline bool sa3_synth_run_ggml(Sa3GgmlRefine * m,
+                                      int T44,
+                                      const int64_t * token_ids, int n_tokens,
+                                      int steps, bool pingpong, uint64_t seed, bool zero_noise,
+                                      std::vector<float> & out,
+                                      const Sa3PluginParams * sp = nullptr,
+                                      const char * dump_latent_path = nullptr) {
+    if (!m || !m->loaded) return false;
+    return sa3_refine_run_backend(m, nullptr, T44, token_ids, n_tokens,
+                                  1.0f, steps, pingpong, seed, zero_noise, out, sp,
+                                  /*noise_only=*/true, dump_latent_path);
+}
 #endif // SA3_REFINE_H

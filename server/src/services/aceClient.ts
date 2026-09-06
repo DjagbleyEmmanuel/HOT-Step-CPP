@@ -19,6 +19,39 @@ const TIMEOUT_POLL   =  30_000;   // job polling — fail fast, let watchdog dec
 const TIMEOUT_RESULT = 300_000;   // fetching large audio results (encode + transfer)
 const TIMEOUT_SA3    = 1_800_000; // /sa3-refine — first call may build a TensorRT engine (many minutes)
 
+/** Combines a caller-supplied AbortSignal with a timeout signal. Node 20+ has
+ *  AbortSignal.any(); server/package.json only requires >=18, so fall back to
+ *  a manual combine (whichever aborts first wins) when it's missing. */
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!signal) return timeoutSignal;
+  if (typeof (AbortSignal as any).any === 'function') {
+    return (AbortSignal as any).any([signal, timeoutSignal]);
+  }
+  const combined = new AbortController();
+  const onAbort = (src: AbortSignal) => {
+    if (!combined.signal.aborted) combined.abort((src as any).reason);
+  };
+  if (signal.aborted) onAbort(signal);
+  else signal.addEventListener('abort', () => onAbort(signal), { once: true });
+  if (timeoutSignal.aborted) onAbort(timeoutSignal);
+  else timeoutSignal.addEventListener('abort', () => onAbort(timeoutSignal), { once: true });
+  return combined.signal;
+}
+
+/** GET /sa3/props wire shape (engine hot-step-server.cpp, HOT-Step). */
+export interface Sa3Props {
+  backend: string;              // 'sa3'
+  model: string;                // 'Stable Audio 3'
+  available: boolean;           // any weight set present
+  synth_ready: boolean;         // weights + tokenizer present
+  backend_hint: 'onnx' | 'gguf' | 'none';
+  sample_rate: number;          // 44100
+  prompt_token_limit: number;   // 256
+  files?: { onnx?: { found: boolean }; gguf?: { found: boolean }; tokenizer?: { found: boolean } };
+  adapters: string[];           // sa3-adapters/*.gguf stems
+}
+
 /** Props response from GET /props */
 /** Sample format for a post-processing endpoint's WAV response (`out_fmt`).
  *
@@ -754,6 +787,87 @@ export const aceClient = {
     if (!res.ok) {
       const errBody = await res.text().catch(() => 'Unknown error');
       throw new Error(`ace-server POST /sa3-refine failed (${res.status}): ${errBody}`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    return Buffer.from(arrayBuf);
+  },
+
+  /** GET /sa3/props — HOT-Step SA3 primary backend readiness probe.
+   *  Cheap: file-existence checks only, never loads a model. Soft-fails to
+   *  null so backends/sa3/index.ts can report `up: false` without throwing. */
+  async sa3Props(): Promise<Sa3Props | null> {
+    try {
+      const res = await fetch(`${BASE}/sa3/props`, { signal: AbortSignal.timeout(5_000) });
+      if (!res.ok) return null;
+      return await res.json() as Sa3Props;
+    } catch {
+      return null;
+    }
+  },
+
+  /** POST /sa3-synth — HOT-Step SA3 text-to-audio from pure noise.
+   *
+   *  /sa3-refine minus the input: no WAV body, no strength, no level matching.
+   *  Same tokenized prompt, same steps/sampler/seed, same adapters, same Lua
+   *  plugin routing (engine hot-step-server.cpp /sa3-synth →
+   *  sa3_refine_run_backend with noise_only=true). Returns a WAV at 44.1k (or
+   *  outSr) of exactly `durationSec` seconds. */
+  async submitSa3Synth(
+    opts: {
+      tokens: number[];       // exactly 256 padded T5Gemma token ids
+      nTokens: number;        // real (non-pad) token count
+      durationSec: number;    // requested length, 1..600 s
+      steps?: number;         // sampler steps (engine default 8)
+      sampler?: 'pingpong' | 'euler';
+      seed?: number;
+      outSr?: number;
+      backend?: 'auto' | 'onnx' | 'gguf';
+      adapters?: Array<{ name: string; scale: number }>;
+      solver?: string;
+      scheduler?: string;
+      guidanceMode?: string;
+      guidanceScale?: number;
+      pluginParams?: Record<string, string | number>;
+      outFmt?: WavOutFormat;
+      /** Diagnostic: bare filename; engine writes the final latent (flat f32,
+       *  [256][L]) to models/sa3-latents/<name> and logs its RMS. */
+      dumpLatent?: string;
+      /** Cancellation: combined with the TIMEOUT_SA3 timeout signal so a user
+       *  cancel aborts the in-flight fetch instead of waiting the render out. */
+      signal?: AbortSignal;
+    },
+  ): Promise<Buffer> {
+    const params = new URLSearchParams();
+    params.set('tokens', opts.tokens.join(','));
+    params.set('n_tokens', String(opts.nTokens));
+    params.set('duration', String(opts.durationSec));
+    if (opts.dumpLatent) params.set('dump_latent', opts.dumpLatent);
+    if (opts.backend && opts.backend !== 'auto') params.set('backend', opts.backend);
+    if (opts.adapters && opts.adapters.length > 0) {
+      params.set('adapters', opts.adapters.map(a => `${a.name}:${a.scale}`).join(','));
+    }
+    if (opts.steps !== undefined) params.set('steps', String(opts.steps));
+    if (opts.sampler) params.set('sampler', opts.sampler);
+    if (opts.seed !== undefined) params.set('seed', String(opts.seed));
+    if (opts.outSr !== undefined) params.set('out_sr', String(opts.outSr));
+    if (opts.solver) params.set('solver', opts.solver);
+    if (opts.scheduler) params.set('scheduler', opts.scheduler);
+    if (opts.guidanceMode) params.set('guidance_mode', opts.guidanceMode);
+    if (opts.guidanceScale !== undefined && opts.guidanceScale > 1) {
+      params.set('guidance_scale', String(opts.guidanceScale));
+    }
+    if (opts.pluginParams && Object.keys(opts.pluginParams).length > 0) {
+      params.set('plugin_params', JSON.stringify(opts.pluginParams));
+    }
+    if (opts.outFmt) params.set('out_fmt', opts.outFmt);
+
+    const res = await fetch(`${BASE}/sa3-synth?${params.toString()}`, {
+      method: 'POST',
+      signal: withTimeout(opts.signal, TIMEOUT_SA3),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'Unknown error');
+      throw new Error(`ace-server POST /sa3-synth failed (${res.status}): ${errBody}`);
     }
     const arrayBuf = await res.arrayBuffer();
     return Buffer.from(arrayBuf);

@@ -33,7 +33,9 @@ const router = Router();
 // ─── Storage root ─────────────────────────────────────────────────────────────
 
 function seedsRoot(): string {
-  return path.join(config.data.dir, 'seeds');
+  // config.data.dir is the data root (matches scragnog's generate.ts pattern)
+  const dir = (config as any)?.data?.dir ?? (config as any)?.data?.audioDir ?? './output';
+  return path.join(dir, 'seeds');
 }
 
 function seedsDir(subdir = ''): string {
@@ -240,3 +242,14 @@ router.post('/:name/favorite', (req, res) => {
 });
 
 export default router;
+
+// ─── Mount instructions ───────────────────────────────────────────────────────
+//
+// In your main server entry (app.ts or server.ts), add:
+//
+//   import seedsRouter from './routes/seeds.js';
+//   app.use('/api/seeds', seedsRouter);
+//
+// Add BEFORE the generate router registration so /api/seeds/random and
+// /api/seeds/favorites don't get caught by /api/seeds/:name.
+// (Express matches routes in registration order.)
