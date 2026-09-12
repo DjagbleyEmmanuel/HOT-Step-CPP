@@ -463,7 +463,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         // sampler_build_scheduler_override reads g_hotstep_params.scheduler —
         // the caller sets and restores it around this call (hot-step-server.cpp).
         std::vector<float> ov;
-        sampler_build_scheduler_override(ov, steps, sigmas.data());
+        sampler_build_scheduler_override(ov, steps, sigmas.data(), sa3_lua_ctx);
         if (!ov.empty()) {
             const float sched_start = ov[0];
             if (sched_start > 1e-6f) {
@@ -474,11 +474,15 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             ov.push_back(0.0f);    // the override drops the x0 endpoint; the loop indexes sigmas[i+1]
             sigmas = ov;
             if (noise_only) {
-                fprintf(stderr, "[SA3] Scheduler '%s': full range (synth, sigma_max 1.0)\n",
-                        sp->scheduler.c_str());
+                fprintf(stderr, "[SA3] Scheduler '%s': full range (synth, sigma_max 1.0) "
+                                "model_context model_id=%s native_sr=%d latent_rms=%.3f\n",
+                        sp->scheduler.c_str(), sa3_lua_ctx.model_id, sa3_lua_ctx.native_sr,
+                        (double) sa3_lua_ctx.latent_rms);
             } else {
-                fprintf(stderr, "[SA3] Scheduler '%s': rescaled sigma_max %.4f -> strength %.4f\n",
-                        sp->scheduler.c_str(), (double) sched_start, (double) strength);
+                fprintf(stderr, "[SA3] Scheduler '%s': rescaled sigma_max %.4f -> strength %.4f "
+                                "model_context model_id=%s native_sr=%d latent_rms=%.3f\n",
+                        sp->scheduler.c_str(), (double) sched_start, (double) strength,
+                        sa3_lua_ctx.model_id, sa3_lua_ctx.native_sr, (double) sa3_lua_ctx.latent_rms);
             }
         }
     }
