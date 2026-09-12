@@ -3998,6 +3998,11 @@ int main(int argc, char ** argv) {
         if (req.has_param("solver"))        sa3_sp.solver        = req.get_param_value("solver");
         if (req.has_param("scheduler"))     sa3_sp.scheduler     = req.get_param_value("scheduler");
         if (req.has_param("guidance_mode")) sa3_sp.guidance_mode = req.get_param_value("guidance_mode");
+        // Postprocess plugin: replaces the built-in latent->audio decode.
+        // Same field name as ACE's request.h postprocess_plugin.
+        if (req.has_param("postprocess_plugin")) {
+            sa3_sp.postprocess_plugin = req.get_param_value("postprocess_plugin");
+        }
         if (req.has_param("guidance_scale")) {
             sa3_sp.guidance_scale = std::strtof(req.get_param_value("guidance_scale").c_str(), nullptr);
             if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;
@@ -4493,6 +4498,9 @@ int main(int argc, char ** argv) {
         if (req.has_param("solver"))        sa3_sp.solver        = req.get_param_value("solver");
         if (req.has_param("scheduler"))     sa3_sp.scheduler     = req.get_param_value("scheduler");
         if (req.has_param("guidance_mode")) sa3_sp.guidance_mode = req.get_param_value("guidance_mode");
+        if (req.has_param("postprocess_plugin")) {
+            sa3_sp.postprocess_plugin = req.get_param_value("postprocess_plugin");
+        }
         if (req.has_param("guidance_scale")) {
             sa3_sp.guidance_scale = std::strtof(req.get_param_value("guidance_scale").c_str(), nullptr);
             if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;

@@ -1029,7 +1029,8 @@ static int lua_call_postprocess(
     int           max_T_audio,
     PostprocessVaeDecodeFn vae_decode_fn,
     const std::unordered_map<std::string, std::string> & params,
-    const LuaModelContext & model_ctx = LuaModelContext{})
+    const LuaModelContext & model_ctx = LuaModelContext{},
+    int samples_per_frame = 1920)
 {
     lua_State * L = plugin.L;
     if (!L) return -1;
@@ -1046,7 +1047,7 @@ static int lua_call_postprocess(
         return -1;
     }
 
-    int upscale  = 1920;
+    int upscale  = samples_per_frame;
     int final_samples = T_latent * upscale;
 
     // Arg 1: latents as Lua table (1-indexed, channel-major [C_lat, T_latent])
@@ -1084,9 +1085,12 @@ static int lua_call_postprocess(
     // Captures the C++ decode function via light userdata.
     // Lua signature: vae_decode_fn(latent_table, T_latent) → audio_table, T_audio
     auto * fn_ptr = new PostprocessVaeDecodeFn(std::move(vae_decode_fn));
+    int samples_per_frame_capture = samples_per_frame;
     lua_pushlightuserdata(L, fn_ptr);
+    lua_pushinteger(L, samples_per_frame_capture);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
         auto * fn = (PostprocessVaeDecodeFn *) lua_touserdata(Ls, lua_upvalueindex(1));
+        int samples_per_frame_u = (int) lua_tointeger(Ls, lua_upvalueindex(2));
 
         // Read latent table from Lua (arg 1) — 1-indexed, channel-major [C, T]
         luaL_checktype(Ls, 1, LUA_TTABLE);
@@ -1107,7 +1111,7 @@ static int lua_call_postprocess(
         }
 
         // Decode
-        int max_T = T_lat * 1920;
+        int max_T = T_lat * samples_per_frame_u;
         std::vector<float> aud_buf(2 * max_T);
         int T_audio = (*fn)(lat_buf.data(), T_lat, aud_buf.data(), max_T);
 
@@ -1127,7 +1131,7 @@ static int lua_call_postprocess(
         }
         lua_pushinteger(Ls, T_audio);
         return 2;
-    }, 1);
+    }, 2);
 
     // 8 args: latents, B, C_lat, W, C_aud, final_samples, upscale_factor, vae_decode_fn
     // Returns: audio_table, T_audio

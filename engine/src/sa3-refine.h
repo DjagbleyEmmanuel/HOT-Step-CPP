@@ -255,8 +255,17 @@ struct Sa3PluginParams {
     float       guidance_scale = 1.0f;
     float       apg_norm_threshold = 2.5f;
     std::unordered_map<std::string, std::string> plugin_params;
+    // Postprocess plugin: name of the Lua postprocess plugin to use for the
+    // latent->audio decode. Mirrors ACE's request.h postprocess_plugin field
+    // and ops_vae_decode_postprocess (pipeline-synth-ops.cpp). Orthogonal to
+    // solver/scheduler/guidance -- it only replaces the SAME decoder call,
+    // not the denoise loop -- so it does NOT gate on those via any().
+    std::string postprocess_plugin;  // "" = built-in sa3_decode_tiled
 
-    bool any() const { return !solver.empty() || !scheduler.empty() || !guidance_mode.empty(); }
+    bool any() const {
+        return !solver.empty() || !scheduler.empty() || !guidance_mode.empty()
+            || !postprocess_plugin.empty();
+    }
 };
 
 // cm: channel-major [Oc][T], index c*T + t   (SA3)
@@ -658,9 +667,78 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
 
     // Decode, zero the padded region, trim to input length. No saturation —
     // see the note on `out` above.
+    //
+    // HOT-Step: optional Lua postprocess plugin, mirrors ACE's
+    // ops_vae_decode_postprocess (pipeline-synth-ops.cpp) -- routes the
+    // latent->audio decode through a Lua plugin's process() instead of the
+    // built-in tiled decoder. ACE's hook sits per-batch-item, once per output
+    // waveform (its own decode_fn is internally tiled, same as SA3's
+    // sa3_decode_tiled); SA3 only ever has one item per request, so this is
+    // a single call over the WHOLE latent `x` (not just the valid/trimmed
+    // region) -- exactly the same span the built-in path below decodes, so
+    // `S_dec = L * SA3_DS` below stays correct either way.
+    //
+    // Buffer contract, verified against lua-plugin.h's lua_call_postprocess:
+    //   - latents in:  time-major [T][C_lat], same as ACE's dit_out. SA3's
+    //     latent `x` is channel-major [Oc][L] (see CONVENTION 2 above), so it
+    //     is transposed with the existing sa3_to_ace_view() helper.
+    //   - audio out:   planar per-channel [C_aud][T_audio] (channel-major
+    //     blocks, NOT interleaved samples) -- identical to SA3's `out`/
+    //     `decoded` layout already used by sa3_decode_tiled(), so no
+    //     transpose is needed on the way back.
+    //   - the vae_decode_fn callback the plugin can invoke follows the same
+    //     time-major-in convention, so it transposes back to channel-major
+    //     before calling sa3_decode_tiled() and hands back planar audio.
+    LuaPlugin * pp_plugin = nullptr;
+    if (sp && !sp->postprocess_plugin.empty()) {
+        pp_plugin = PluginRegistry::instance().postprocess_lookup(sp->postprocess_plugin.c_str());
+        if (!pp_plugin) {
+            fprintf(stderr, "[SA3] Postprocess WARNING: plugin '%s' not found, falling back to built-in decode\n",
+                    sp->postprocess_plugin.c_str());
+        }
+    }
+
     std::vector<float> decoded;
     int valid_samples = valid * SA3_DS;
-    if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples)) return false;
+    bool decoded_ok = false;
+    if (pp_plugin) {
+        std::vector<float> tm_lat((size_t) L * Oc);
+        sa3_to_ace_view(x.data(), tm_lat.data(), Oc, L);
+
+        PostprocessVaeDecodeFn decode_fn =
+            [&](const float * latent_tm, int T_lat, float * aud_out, int max_T) -> int {
+                std::vector<float> cm_lat((size_t) Oc * T_lat);
+                sa3_from_ace_view(latent_tm, cm_lat.data(), Oc, T_lat);
+                std::vector<float> aud;
+                if (!sa3_decode_tiled(be, cm_lat.data(), T_lat, aud)) return -1;
+                int t_audio = T_lat * SA3_DS;
+                if (t_audio > max_T) t_audio = max_T;
+                memcpy(aud_out,          aud.data(),                  sizeof(float) * (size_t) t_audio);
+                memcpy(aud_out + max_T,  aud.data() + T_lat * SA3_DS, sizeof(float) * (size_t) t_audio);
+                return t_audio;
+            };
+
+        int max_T_audio = L * SA3_DS;
+        std::vector<float> pp_audio((size_t) 2 * max_T_audio);
+        int T_audio = lua_call_postprocess(*pp_plugin, tm_lat.data(), L, Oc, 2,
+                                           pp_audio.data(), max_T_audio, decode_fn,
+                                           sp->plugin_params, sa3_lua_ctx, SA3_DS);
+        if (T_audio > 0) {
+            decoded.assign((size_t) 2 * max_T_audio, 0.0f);
+            int n = T_audio < max_T_audio ? T_audio : max_T_audio;
+            memcpy(decoded.data(),               pp_audio.data(),               sizeof(float) * (size_t) n);
+            memcpy(decoded.data() + max_T_audio, pp_audio.data() + max_T_audio, sizeof(float) * (size_t) n);
+            decoded_ok = true;
+            fprintf(stderr, "[SA3] Postprocess '%s' decode: T_audio=%d (T_latent=%d)\n",
+                    pp_plugin->name.c_str(), T_audio, L);
+        } else {
+            fprintf(stderr, "[SA3] Postprocess '%s' ERROR: plugin decode failed, falling back to built-in decode\n",
+                    pp_plugin->name.c_str());
+        }
+    }
+    if (!decoded_ok) {
+        if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples)) return false;
+    }
     int S_dec = L * SA3_DS;
     out.assign((size_t)2 * T44, 0.0f);
     for (int chn = 0; chn < 2; chn++) {

@@ -55,6 +55,7 @@ interface Sa3SynthWire {
   guidanceMode?: string;
   guidanceScale?: number;
   pluginParams?: Record<string, string | number>;
+  postprocessPlugin?: string;
 }
 
 /** Same pattern as minimax's mapMinimaxSamplerPlugins: the solver / scheduler /
@@ -62,21 +63,26 @@ interface Sa3SynthWire {
  *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
  *  render stays on the parity-tested native pingpong path. */
 function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
-  'solver' | 'scheduler' | 'guidanceMode' | 'guidanceScale' | 'pluginParams'> {
+  'solver' | 'scheduler' | 'guidanceMode' | 'guidanceScale' | 'pluginParams' | 'postprocessPlugin'> {
   if (!params.samplerPluginsEnabled) return {};
   const out: ReturnType<typeof mapSa3SamplerPlugins> = {};
   if (params.inferMethod)  out.solver       = params.inferMethod;
   if (params.scheduler)    out.scheduler    = params.scheduler;
   if (params.guidanceMode) out.guidanceMode = params.guidanceMode;
+  // Postprocess plugin: replaces the built-in latent->audio decode. Same UI
+  // key ACE's backend uses (params.postprocessPlugin), gated behind the same
+  // opt-in toggle as solver/scheduler/guidance.
+  if (params.postprocessPlugin) out.postprocessPlugin = params.postprocessPlugin;
   const gs = Number(params.guidanceScale);
   if (Number.isFinite(gs) && gs > 1) out.guidanceScale = gs;
   // The shared pluginParams store holds every "<plugin>:<key>" the user has
   // ever touched, across every plugin -- easily 150+ entries. /sa3-synth takes
   // them on the query string (same wire as /sa3-refine), so sending the lot
-  // is an HTTP 414. Forward only the keys that belong to the three plugins
-  // actually selected; the rest can't reach anything on this render anyway.
+  // is an HTTP 414. Forward only the keys that belong to the plugins actually
+  // selected; the rest can't reach anything on this render anyway.
   if (params.pluginParams && Object.keys(params.pluginParams).length > 0) {
-    const wanted = [out.solver, out.scheduler, out.guidanceMode].filter(Boolean) as string[];
+    const wanted = [out.solver, out.scheduler, out.guidanceMode, out.postprocessPlugin]
+      .filter(Boolean) as string[];
     const pp: Record<string, string | number> = {};
     for (const [k, v] of Object.entries(params.pluginParams as Record<string, string | number>)) {
       const colon = k.indexOf(':');

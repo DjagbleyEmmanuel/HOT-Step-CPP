@@ -740,6 +740,9 @@ export const aceClient = {
       guidanceMode?: string;
       guidanceScale?: number;                          // only sent when > 1
       pluginParams?: Record<string, string | number>;  // "<plugin>:<key>" -> value
+      /** Postprocess plugin: replaces the built-in latent->audio decode.
+       *  Same field name/semantics as ACE's request.ts postprocessPlugin. */
+      postprocessPlugin?: string;
       /** Response sample format. Omitted = s16. */
       outFmt?: WavOutFormat;
     },
@@ -776,6 +779,7 @@ export const aceClient = {
     if (opts.pluginParams && Object.keys(opts.pluginParams).length > 0) {
       params.set('plugin_params', JSON.stringify(opts.pluginParams));
     }
+    if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
     const res = await aceFetch(`${BASE}/sa3-refine?${params.toString()}`, {
@@ -828,6 +832,9 @@ export const aceClient = {
       guidanceMode?: string;
       guidanceScale?: number;
       pluginParams?: Record<string, string | number>;
+      /** Postprocess plugin: replaces the built-in latent->audio decode.
+       *  Same field name/semantics as ACE's request.ts postprocessPlugin. */
+      postprocessPlugin?: string;
       outFmt?: WavOutFormat;
       /** Diagnostic: bare filename; engine writes the final latent (flat f32,
        *  [256][L]) to models/sa3-latents/<name> and logs its RMS. */
@@ -859,6 +866,7 @@ export const aceClient = {
     if (opts.pluginParams && Object.keys(opts.pluginParams).length > 0) {
       params.set('plugin_params', JSON.stringify(opts.pluginParams));
     }
+    if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
     const res = await fetch(`${BASE}/sa3-synth?${params.toString()}`, {
