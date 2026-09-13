@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -786,6 +787,14 @@ struct MonitorState {
 
     // Processing buffers (reused per block)
     std::vector<float> buf_a_L, buf_a_R, buf_b_L, buf_b_R;
+
+    // Linear resampler state (used only when the WASAPI device format could not
+    // be switched to the track's native rate; see monitor_resample_block()).
+    bool   rs_active = false;
+    double rs_phase  = 0.0;   // fractional position, in source-sample units, carried across callbacks
+    float  rs_last_L = 0.0f;  // last source sample emitted (history for interpolation continuity)
+    float  rs_last_R = 0.0f;
+    std::vector<float> rs_src_L, rs_src_R; // scratch: [0]=history, [1..] = freshly read source frames
 };
 
 static bool monitor_load_track(MonitorState & ms, const std::string & path) {
@@ -984,6 +993,53 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
     memcpy(out_R, cur_R, n * sizeof(float));
 }
 
+// Fallback path when the WASAPI device could not be switched to the track's
+// native sample rate (ms.sr). Reads `available` device-rate frames worth of
+// source audio via monitor_process_block() (advancing ms.pos in *source*
+// frames, so looping/seeking accounting is unaffected) and linearly
+// interpolates it up/down to dev_sr. A one-sample history is carried across
+// calls so no source samples are skipped or duplicated at block boundaries.
+static void monitor_resample_block(MonitorState & ms, float * out_L, float * out_R,
+                                    UINT32 available, int dev_sr) {
+    if (dev_sr <= 0 || ms.sr <= 0) {
+        memset(out_L, 0, available * sizeof(float));
+        memset(out_R, 0, available * sizeof(float));
+        return;
+    }
+
+    const double step = (double)ms.sr / (double)dev_sr; // source samples per device sample
+
+    // Combined buffer layout: index 0 = carried history sample, indices
+    // [1 .. srcNeeded-1] = freshly read source frames.
+    int srcNeeded = (int)std::ceil(ms.rs_phase + (double)available * step) + 2;
+    if (srcNeeded < 2) srcNeeded = 2;
+    if ((int)ms.rs_src_L.size() < srcNeeded) {
+        ms.rs_src_L.resize(srcNeeded);
+        ms.rs_src_R.resize(srcNeeded);
+    }
+    ms.rs_src_L[0] = ms.rs_last_L;
+    ms.rs_src_R[0] = ms.rs_last_R;
+    monitor_process_block(ms, ms.rs_src_L.data() + 1, ms.rs_src_R.data() + 1, srcNeeded - 1);
+
+    for (UINT32 i = 0; i < available; i++) {
+        double pos = ms.rs_phase + (double)i * step;
+        int idx = (int)pos;
+        if (idx > srcNeeded - 2) idx = srcNeeded - 2;
+        if (idx < 0) idx = 0;
+        double frac = pos - idx;
+        out_L[i] = (float)(ms.rs_src_L[idx] + (ms.rs_src_L[idx + 1] - ms.rs_src_L[idx]) * frac);
+        out_R[i] = (float)(ms.rs_src_R[idx] + (ms.rs_src_R[idx + 1] - ms.rs_src_R[idx]) * frac);
+    }
+
+    double nextPos = ms.rs_phase + (double)available * step;
+    int consumed = (int)nextPos;
+    if (consumed >= srcNeeded) consumed = srcNeeded - 1;
+    if (consumed < 0) consumed = 0;
+    ms.rs_phase  = nextPos - consumed;
+    ms.rs_last_L = ms.rs_src_L[consumed];
+    ms.rs_last_R = ms.rs_src_R[consumed];
+}
+
 // Window proc for plugin GUIs in monitor mode
 static MonitorState * g_monitorState = nullptr;
 static int g_monitorWindowCount = 0;
@@ -1149,22 +1205,70 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     fprintf(stderr, "[monitor] WASAPI: %d Hz, %d ch, %d bits\n",
             (int)pwfx->nSamplesPerSec, (int)pwfx->nChannels, (int)pwfx->wBitsPerSample);
 
+    // The track was decoded at ms.sr (44.1k for SA3/MM3, 48k for ACE) but the
+    // device mix format from GetMixFormat is typically 48k. If we Initialize
+    // with the mix format and just pump ms.sr-rate samples into it verbatim,
+    // playback runs at (dev_sr / ms.sr) speed -- audibly fast/sharp plus
+    // stutter. Prefer asking the shared-mode audio engine to do the rate
+    // conversion for us; fall back to a manual linear resampler if it can't.
+    std::vector<BYTE> modFmtBuf;
+    WAVEFORMATEX * pInitFmt = pwfx;
+    if (ms.sr > 0 && (DWORD)ms.sr != pwfx->nSamplesPerSec) {
+        modFmtBuf.assign((BYTE*)pwfx, (BYTE*)pwfx + sizeof(WAVEFORMATEX) + pwfx->cbSize);
+        WAVEFORMATEX * modFmt = (WAVEFORMATEX*)modFmtBuf.data();
+        modFmt->nSamplesPerSec  = (DWORD)ms.sr;
+        modFmt->nAvgBytesPerSec = modFmt->nSamplesPerSec * modFmt->nBlockAlign;
+
+        WAVEFORMATEX * closest = nullptr;
+        HRESULT hrFmt = pAudioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, modFmt, &closest);
+        if (closest) CoTaskMemFree(closest);
+
+        if (hrFmt == S_OK) {
+            pInitFmt = modFmt;
+            fprintf(stderr, "[vst-host] monitor: device %d Hz, track %d Hz -> requesting track rate (shared mode)\n",
+                    (int)pwfx->nSamplesPerSec, ms.sr);
+        } else {
+            ms.rs_active = true;
+            fprintf(stderr, "[vst-host] monitor: device %d Hz, track %d Hz -> linear resampling\n",
+                    (int)pwfx->nSamplesPerSec, ms.sr);
+        }
+    }
+
     REFERENCE_TIME bufDuration = 200000; // 20ms buffer
     hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                   bufDuration, 0, pwfx, nullptr);
+                                   bufDuration, 0, pInitFmt, nullptr);
+    if (FAILED(hr) && pInitFmt != pwfx) {
+        // Modified format was reported supported but Initialize still rejected it
+        // (rare, e.g. exclusive-mode-only endpoints). A WASAPI IAudioClient can
+        // only be Initialize()'d once -- calling it again on the same client
+        // after a failed attempt is undefined behavior. Release it and get a
+        // fresh IAudioClient from the still-in-scope device, then Initialize
+        // once with the device's native mix format + manual resampling.
+        fprintf(stderr, "[monitor] WASAPI Initialize with track rate failed (0x%08X), falling back to linear resampling\n", (unsigned)hr);
+        pAudioClient->Release();
+        pAudioClient = nullptr;
+        hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&pAudioClient);
+        if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to re-activate audio client: 0x%08X\n", (unsigned)hr); return 1; }
+        pInitFmt = pwfx;
+        ms.rs_active = true;
+        hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                       AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                       bufDuration, 0, pInitFmt, nullptr);
+    }
     if (FAILED(hr)) { fprintf(stderr, "[monitor] WASAPI Initialize failed: 0x%08X\n", (unsigned)hr); return 1; }
+    const int dev_sr = (int)pInitFmt->nSamplesPerSec;
     pAudioClient->SetEventHandle(hAudioEvent);
     pAudioClient->GetBufferSize(&bufferFrames);
     hr = pAudioClient->GetService(__uuidof(IAudioRenderClient), (void**)&pRenderClient);
     if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to get render client\n"); return 1; }
 
     fprintf(stderr, "[monitor] Buffer: %u frames (%.1f ms)\n",
-            bufferFrames, 1000.0f * bufferFrames / pwfx->nSamplesPerSec);
+            bufferFrames, 1000.0f * bufferFrames / dev_sr);
 
     // Pre-fill buffer
     {   BYTE * data; pRenderClient->GetBuffer(bufferFrames, &data);
-        memset(data, 0, bufferFrames * pwfx->nBlockAlign);
+        memset(data, 0, bufferFrames * pInitFmt->nBlockAlign);
         pRenderClient->ReleaseBuffer(bufferFrames, 0); }
 
     pAudioClient->Start();
@@ -1186,10 +1290,14 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             if (available > 0) {
                 BYTE * data = nullptr;
                 if (SUCCEEDED(pRenderClient->GetBuffer(available, &data))) {
-                    monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
+                    if (ms.rs_active) {
+                        monitor_resample_block(ms, proc_L.data(), proc_R.data(), available, dev_sr);
+                    } else {
+                        monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
+                    }
                     // Interleave into WASAPI buffer (float32, potentially >2 channels)
                     float * fdata = (float *)data;
-                    int ch = pwfx->nChannels;
+                    int ch = pInitFmt->nChannels;
                     for (UINT32 i = 0; i < available; i++) {
                         fdata[i * ch + 0] = proc_L[i];
                         fdata[i * ch + 1] = (ch >= 2) ? proc_R[i] : 0;
