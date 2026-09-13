@@ -261,6 +261,15 @@ struct Sa3PluginParams {
     // solver/scheduler/guidance -- it only replaces the SAME decoder call,
     // not the denoise loop -- so it does NOT gate on those via any().
     std::string postprocess_plugin;  // "" = built-in sa3_decode_tiled
+    // SA3 is a distilled model sampled with a pingpong renoise scheme; a Lua
+    // solver's ODE-style update skips that renoise, which on this model comes
+    // out ~2x hot and crackly regardless of plugin (final rms ~1.80 vs native
+    // ~0.89). true (default) wraps every Lua solver step in the same
+    // pingpong renoise the native path uses, driven by the solver's effective
+    // velocity over the step. false = old behaviour (solver update only, no
+    // renoise) for A/B. No effect when no solver is selected, or on the
+    // owns_loop path (see sa3-refine.h NOTE at the owns_loop branch).
+    bool sa3_lua_renoise = true;
 
     bool any() const {
         return !solver.empty() || !scheduler.empty() || !guidance_mode.empty()
@@ -292,8 +301,14 @@ static inline void sa3_from_ace_view(const float * tm, float * cm, int Oc, int T
 // zero_noise: replaces all noise draws with zeros (numerical validation vs
 // the Python harness — C++ RNG can't reproduce torch's stream).
 // sp: optional Lua solver/scheduler/guidance selection (nullptr = legacy path).
-//     NOTE: naming a solver replaces the pingpong renoise with that solver's
-//     own update — pingpong and a Lua solver are alternatives, not a stack.
+//     NOTE: SA3 is a distilled model tuned for the pingpong renoise scheme, not
+//     bare ODE integration -- a Lua solver step with no renoise runs ~2x hot on
+//     this model regardless of plugin. So (per-step, non-owns_loop) Lua solvers
+//     are, by default, wrapped in the same pingpong renoise the native path
+//     uses: `sa3_lua_renoise` (default true) computes the solver's effective
+//     velocity over the step and pingpongs from it. Set it false to fall back
+//     to the solver's own update with no renoise. owns_loop solvers always run
+//     without renoise (they drive the whole loop themselves).
 // out: planar stereo [2][T44] at 44.1kHz, NOT clamped.
 //
 // The decode used to saturate to [-1,1] here. A separated instrumental stem at
@@ -445,8 +460,15 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                     guidance_native_apg ? "apg (native)"
                                         : (guidance_plugin ? guidance_plugin->name.c_str() : "(none)"));
             if (use_lua_solver && pingpong) {
-                fprintf(stderr, "[SA3] NOTE: solver '%s' replaces the pingpong renoise — they are "
-                                "alternatives, not a stack.\n", solver_plugin->name.c_str());
+                if (solver_plugin->owns_loop) {
+                    fprintf(stderr, "[SA3] NOTE: owns_loop solver '%s' drives the whole loop itself — "
+                                    "it runs WITHOUT pingpong re-noise on SA3.\n", solver_plugin->name.c_str());
+                } else if (sp->sa3_lua_renoise) {
+                    fprintf(stderr, "[SA3] Lua solver re-noise wrapper: ON (pingpong after each step)\n");
+                } else {
+                    fprintf(stderr, "[SA3] Lua solver re-noise wrapper: OFF — solver '%s' update only, "
+                                    "no renoise.\n", solver_plugin->name.c_str());
+                }
             }
             if (use_lua_guidance) {
                 fprintf(stderr, "[SA3] NOTE: SA3 has no CFG uncond (trained at cfg=1); the cond velocity is "
@@ -506,8 +528,12 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     // Sampler loop (default pingpong, matching rf_denoiser production path)
     std::vector<float> v((size_t)n_lat);   // velocity, SA3 channel-major [Oc][T]
 
-    // Guidance scratch, ACE time-major view. Only allocated when guidance runs.
-    std::vector<float> tm_c, tm_v;
+    // Guidance/solver scratch, ACE time-major view. tm_v is shared by both
+    // roles -- guidance leaves the guided velocity there (see
+    // sa3_apply_guidance below), which is exactly the value a Lua solver's
+    // vt_readonly/vt_buf need to start from -- they are never live at once
+    // within a step. Only allocated when the corresponding lua path runs.
+    std::vector<float> tm_c, tm_x, tm_v;
     APGMomentumBuffer  apg_mbuf(-0.75f);
     APGWorkspace       apg_ws;
     GuidanceCtx        g_ctx = { 0, steps, 0.0f, 0.0f };
@@ -515,6 +541,33 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         tm_c.assign((size_t)n_lat, 0.0f);
         tm_v.assign((size_t)n_lat, 0.0f);
         apg_ws.resize(n_lat);
+    }
+    // Persistent scratch for the Lua solver path: SA3 keeps latents/velocity
+    // channel-major [Oc][T] natively, but solver plugins (step() and
+    // owns_loop's sample()) are written against ACE's time-major [T][Oc]
+    // view. Mirrors mm3-plugins.h's tm_x/tm_v. lua_model_native_x is the
+    // model callback's own scratch -- see sa3_model_fn_ace below.
+    std::vector<float> lua_model_native_x;
+    if (use_lua_solver) {
+        tm_x.assign((size_t)n_lat, 0.0f);
+        tm_v.assign((size_t)n_lat, 0.0f);
+        lua_model_native_x.assign((size_t)n_lat, 0.0f);
+        fprintf(stderr, "[SA3] Lua solver '%s': latents presented time-major (ACE view) Oc=%d L=%d\n",
+                solver_plugin->name.c_str(), Oc, T);
+    }
+
+    // Re-noise wrapper for the per-step Lua solver path (see Sa3PluginParams::
+    // sa3_lua_renoise above). x_prev is a native-layout (channel-major, same
+    // shape as `x`) snapshot taken right before the solver's step() call;
+    // after the solver updates x, x_prev/x/the interval give the solver's
+    // effective velocity over the step, which is then re-noised exactly like
+    // the native pingpong branch. Does not apply to owns_loop (no per-step
+    // boundary to hook) — see the NOTE at that branch.
+    const bool lua_renoise_active = use_lua_solver && pingpong
+        && !solver_plugin->owns_loop && sp->sa3_lua_renoise;
+    std::vector<float> x_prev;
+    if (lua_renoise_active) {
+        x_prev.assign((size_t)n_lat, 0.0f);
     }
 
     // Apply guidance in-place on `v`. SA3 has no uncond, so the cond velocity is
@@ -546,11 +599,38 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         sa3_apply_guidance();
     };
 
+    // Wrapped model callback for Lua solver paths only (step()'s multi-eval
+    // model_fn and owns_loop's sample()). Those plugins call back with an
+    // intermediate xt in ACE view, but dit_forward -- and sa3_model_fn's own
+    // guidance transpose -- require SA3's native channel-major layout.
+    // Convert in, evaluate via sa3_model_fn (which leaves the result, guided
+    // if applicable, in native `v`), then convert that into tm_v -- the same
+    // buffer registered with Lua as vt_buf. Mirrors mm3-plugins.h's
+    // multi_eval model_fn (mm3-pipeline.h ~376-399). The native pingpong path
+    // never calls this -- it uses sa3_model_fn directly on native x/v.
+    SolverModelFn sa3_model_fn_ace = [&](const float * xt_in_ace, float t_val) {
+        sa3_from_ace_view(xt_in_ace, lua_model_native_x.data(), Oc, T);
+        sa3_model_fn(lua_model_native_x.data(), t_val);
+        sa3_to_ace_view(v.data(), tm_v.data(), Oc, T);
+    };
+
     if (use_lua_solver && solver_plugin->owns_loop) {
         // Full-loop solver: it takes the whole schedule and drives its own
         // iteration. Safe here in a way it is not on MM3 — SA3 refines the clip
         // in one pass, so there is no per-step window-overlap blend to bypass.
-        LoopModelFn loop_model_fn = [&](const float * xt_in, float t_val) { sa3_model_fn(xt_in, t_val); };
+        // Full-loop solvers get the whole buffer up front (owns_loop hands the
+        // plugin the entire xt/vt for the run, not just one step) -- same ACE
+        // view conversion, just bracketing the single lua_call_solver_loop
+        // call instead of a per-step call.
+        //
+        // NOTE: unlike the per-step path below, there is no re-noise wrapper
+        // here — the plugin owns the whole loop, so there is no per-step
+        // boundary to pingpong at. owns_loop solvers run on SA3 without
+        // pingpong re-noise, period; sa3_lua_renoise does not apply to them.
+        sa3_to_ace_view(x.data(), tm_x.data(), Oc, T);
+        sa3_to_ace_view(v.data(), tm_v.data(), Oc, T);
+
+        LoopModelFn loop_model_fn = [&](const float * xt_in, float t_val) { sa3_model_fn_ace(xt_in, t_val); };
         LoopOnStepFn loop_on_step = [&](int step_idx, float t_curr, float t_next) -> bool {
             g_ctx.step_idx = step_idx;
             g_ctx.t_curr   = t_curr;
@@ -560,18 +640,21 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             return false;  // never cancelled
         };
 
-        lua_call_solver_loop(*solver_plugin, x.data(), v.data(), sigmas.data(), steps,
+        lua_call_solver_loop(*solver_plugin, tm_x.data(), tm_v.data(), sigmas.data(), steps,
                              n_lat, /*N=*/1, T, Oc, loop_model_fn, loop_on_step,
                              sp->plugin_params, sa3_lua_ctx);
+
+        sa3_from_ace_view(tm_x.data(), x.data(), Oc, T);
     } else {
         SolverState solver_state;
+        std::vector<float> tm_v_snap;  // ACE-view velocity snapshot for multi-eval solvers
         if (use_lua_solver) {
             solver_state.seeds   = nullptr;   // single-sample refine, no Philox batch
             solver_state.batch_n = 1;
             solver_state.n_per   = n_lat;
             solver_state.xt_scratch.assign((size_t)n_lat, 0.0f);  // multi-eval solvers expect this pre-sized
+            if (solver_plugin->needs_model) tm_v_snap.assign((size_t)n_lat, 0.0f);
         }
-        std::vector<float> v_snap;  // velocity snapshot for multi-eval solvers
 
         for (int i = 0; i < steps; i++) {
             float t_curr = sigmas[i], t_next = sigmas[i + 1];
@@ -584,20 +667,64 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             sa3_apply_guidance();
 
             if (use_lua_solver) {
+                // Snapshot x BEFORE the solver's step() call, native (channel-
+                // major) layout — the re-noise wrapper below needs the pre-step
+                // and post-step x to recover the solver's effective velocity
+                // over [t_curr, t_next].
+                if (lua_renoise_active) {
+                    memcpy(x_prev.data(), x.data(), sizeof(float) * n_lat);
+                }
+
+                // Present the latents/velocity in ACE's time-major view --
+                // plugins are written against that layout, not SA3's native
+                // channel-major one (see sa3_to_ace_view/sa3_from_ace_view
+                // above). tm_v already holds the guided velocity as of
+                // sa3_apply_guidance() above.
+                sa3_to_ace_view(x.data(), tm_x.data(), Oc, T);
+                sa3_to_ace_view(v.data(), tm_v.data(), Oc, T);
+
                 // Buffer separation, as hot-step-sampler.h does: a multi-eval
-                // solver's model_fn overwrites `v`, so the "original velocity"
-                // argument must be a snapshot or solvers that read it after
-                // calling model_fn (Heun's corrector, UniPC's history) silently
-                // degrade to Euler.
-                const float * vt_readonly = v.data();
+                // solver's model_fn overwrites tm_v (via sa3_model_fn_ace), so
+                // the "original velocity" argument must be a snapshot or
+                // solvers that read it after calling model_fn (Heun's
+                // corrector, UniPC's history) silently degrade to Euler.
+                const float * vt_readonly = tm_v.data();
                 if (solver_plugin->needs_model) {
-                    v_snap.assign(v.begin(), v.end());
-                    vt_readonly = v_snap.data();
+                    tm_v_snap.assign(tm_v.begin(), tm_v.end());
+                    vt_readonly = tm_v_snap.data();
                 }
                 solver_state.step_index = i;
-                lua_call_solver_step(*solver_plugin, x.data(), vt_readonly, t_curr, t_next,
-                                     n_lat, solver_state, sa3_model_fn, v.data(),
+                lua_call_solver_step(*solver_plugin, tm_x.data(), vt_readonly, t_curr, t_next,
+                                     n_lat, solver_state, sa3_model_fn_ace, tm_v.data(),
                                      sp->plugin_params, sa3_lua_ctx);
+
+                sa3_from_ace_view(tm_x.data(), x.data(), Oc, T);
+
+                // Re-noise wrapper (sa3_lua_renoise, default true): SA3 is a
+                // distilled model tuned for pingpong renoise, not bare ODE
+                // integration — without this, every Lua solver comes out ~2x
+                // hot/crackly on this model regardless of plugin. `v_eff` is
+                // the solver's effective velocity over the step (for a pure
+                // Euler plugin this equals the model velocity; for corrected
+                // solvers it folds in their correction) -- computed per-element
+                // as a local scalar, no extra n_lat scratch buffer needed
+                // (x_prev is the only new allocation this wrapper requires;
+                // `v`'s next use is next iteration's dit_forward, which
+                // overwrites it regardless, so there was nothing to protect by
+                // reusing it here). `denoised`/pingpong math below mirrors the
+                // native branch exactly, including drawing from the SAME
+                // `rng`/`gauss` stream at the SAME point in the per-step
+                // sequence a native pingpong step would, so per-step draw
+                // count and statistics match native step-for-step.
+                if (lua_renoise_active && t_curr > t_next + 1e-6f) {
+                    const float inv_dt = 1.0f / (t_curr - t_next);
+                    for (size_t k = 0; k < x.size(); k++) {
+                        float v_eff    = (x_prev[k] - x[k]) * inv_dt;
+                        float denoised = x_prev[k] - t_curr * v_eff;
+                        float n = zero_noise ? 0.0f : gauss(rng);
+                        x[k] = (t_next > 0.0f) ? ((1.0f - t_next) * denoised + t_next * n) : denoised;
+                    }
+                }
             } else if (pingpong) {
                 // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
                 for (size_t k = 0; k < x.size(); k++) {

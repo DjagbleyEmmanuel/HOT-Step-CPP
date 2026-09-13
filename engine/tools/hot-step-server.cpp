@@ -4008,6 +4008,11 @@ int main(int argc, char ** argv) {
             if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;
             if (sa3_sp.guidance_scale > 20.0f) sa3_sp.guidance_scale = 20.0f;
         }
+        // Default true (see Sa3PluginParams::sa3_lua_renoise in sa3-refine.h);
+        // "0" opts out for A/B against the un-wrapped solver update.
+        if (req.has_param("sa3_lua_renoise") && req.get_param_value("sa3_lua_renoise") == "0") {
+            sa3_sp.sa3_lua_renoise = false;
+        }
         // plugin_params: a flat JSON object {"<plugin>:<key>": value, ...},
         // the same shape /synth forwards to Lua plugins.
         if (req.has_param("plugin_params")) {
@@ -4505,6 +4510,11 @@ int main(int argc, char ** argv) {
             sa3_sp.guidance_scale = std::strtof(req.get_param_value("guidance_scale").c_str(), nullptr);
             if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;
             if (sa3_sp.guidance_scale > 20.0f) sa3_sp.guidance_scale = 20.0f;
+        }
+        // Default true (see Sa3PluginParams::sa3_lua_renoise in sa3-refine.h);
+        // "0" opts out for A/B against the un-wrapped solver update.
+        if (req.has_param("sa3_lua_renoise") && req.get_param_value("sa3_lua_renoise") == "0") {
+            sa3_sp.sa3_lua_renoise = false;
         }
         if (req.has_param("plugin_params")) {
             const std::string & pp_json = req.get_param_value("plugin_params");
