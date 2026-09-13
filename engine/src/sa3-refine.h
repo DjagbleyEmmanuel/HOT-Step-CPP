@@ -969,14 +969,39 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     }
     int S_dec = L * SA3_DS;
     out.assign((size_t)2 * T44, 0.0f);
+    int n_valid = 0;
     for (int chn = 0; chn < 2; chn++) {
         const float * src = decoded.data() + (size_t)chn * S_dec;
         float * dst = out.data() + (size_t)chn * T44;
         int n = T44 < valid_samples ? T44 : valid_samples;
+        n_valid = n;
         for (int k = 0; k < n; k++) {
             dst[k] = src[k];
         }
     }
+
+    // Audio-domain rms/peak in dBFS over the final trimmed planar-stereo
+    // output, for quick clip/level sanity checks in the engine log.
+    {
+        double sum_sq = 0.0;
+        float  peak   = 0.0f;
+        size_t count  = (size_t) 2 * n_valid;
+        for (int chn = 0; chn < 2; chn++) {
+            const float * dst = out.data() + (size_t)chn * T44;
+            for (int k = 0; k < n_valid; k++) {
+                float v = dst[k];
+                sum_sq += (double) v * (double) v;
+                float av = fabsf(v);
+                if (av > peak) peak = av;
+            }
+        }
+        float rms = count > 0 ? (float) sqrt(sum_sq / (double) count) : 0.0f;
+        float rms_db  = rms  > 0.0f ? 20.0f * log10f(rms)  : -120.0f;
+        float peak_db = peak > 0.0f ? 20.0f * log10f(peak) : -120.0f;
+        fprintf(stderr, "[SA3] audio: rms=%.1f dBFS peak=%.1f dBFS (%d ch, %d samples @ %d Hz)\n",
+                rms_db, peak_db, 2, n_valid, SA3_SR);
+    }
+
     return true;
 }
 
