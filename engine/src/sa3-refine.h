@@ -171,8 +171,28 @@ static inline bool sa3_encode_tiled(Sa3Backend * be, const float * audio, int S,
 static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int L,
                                     std::vector<float> & audio_out, int n_valid_samples = -1) {
     static const bool skip_pad = getenv("SA3_DEC_SKIP") == NULL || atoi(getenv("SA3_DEC_SKIP")) != 0;
+    if (L <= 0) return false;
     int S = L * SA3_DS;
     audio_out.assign((size_t)2 * S, 0.0f);
+    // The postprocess decode callback (decode_fn lambda feeding lua_call_postprocess,
+    // ~line 904) lets a plugin (e.g. md_audio_tiled) pick a tile size T_lat smaller
+    // than SA3_CHUNK_LAT. The SAME decoder graph (both ONNX and GGML backends) is
+    // traced/called at a fixed SA3_CHUNK_LAT input length, so short latents can't go
+    // through the overlap-tiled loop below (it would index negative into `latents`
+    // and corrupt the heap). Zero-pad up to one full chunk, decode once, and keep
+    // only the first L*SA3_DS samples.
+    if (L < SA3_CHUNK_LAT) {
+        std::vector<float> pad_lat((size_t)SA3_LAT_CH * SA3_CHUNK_LAT, 0.0f);
+        for (int c = 0; c < SA3_LAT_CH; c++) {
+            memcpy(pad_lat.data() + (size_t)c * SA3_CHUNK_LAT,
+                   latents + (size_t)c * L, sizeof(float) * L);
+        }
+        std::vector<float> aud_buf((size_t)2 * SA3_CHUNK_SAMPLES);
+        if (!be->same_decode_chunk(pad_lat.data(), aud_buf.data())) return false;
+        memcpy(audio_out.data(),     aud_buf.data(),                     sizeof(float) * S);
+        memcpy(audio_out.data() + S, aud_buf.data() + SA3_CHUNK_SAMPLES, sizeof(float) * S);
+        return true;
+    }
     int hop = SA3_CHUNK_LAT - SA3_OVERLAP_LAT;
     std::vector<int> starts;
     sa3_chunk_starts(L, SA3_CHUNK_LAT, hop, starts);
@@ -421,6 +441,16 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             solver_plugin = reg.solver_lookup(sp->solver.c_str());
             if (!solver_plugin) {
                 fprintf(stderr, "[SA3] WARNING: unknown solver '%s', using pingpong/euler\n", sp->solver.c_str());
+            } else if (solver_plugin->owns_loop && pingpong) {
+                // Mirrors mm3-plugins.h ~285-293: a full-loop solver drives its
+                // own iteration and would bypass the per-step re-noise the
+                // distilled pingpong model needs. Native pingpong takes over
+                // for this slot instead of a hard failure.
+                fprintf(stderr,
+                        "[SA3] NOTE: owns_loop solver '%s' not supported on SA3 (distilled pingpong model needs "
+                        "per-step re-noise) -- using native pingpong\n",
+                        solver_plugin->name.c_str());
+                solver_plugin = nullptr;
             } else {
                 use_lua_solver = true;
             }
@@ -460,9 +490,17 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                     guidance_native_apg ? "apg (native)"
                                         : (guidance_plugin ? guidance_plugin->name.c_str() : "(none)"));
             if (use_lua_solver && pingpong) {
-                if (solver_plugin->owns_loop) {
-                    fprintf(stderr, "[SA3] NOTE: owns_loop solver '%s' drives the whole loop itself — "
-                                    "it runs WITHOUT pingpong re-noise on SA3.\n", solver_plugin->name.c_str());
+                // owns_loop is already filtered out above when pingpong is on
+                // (native pingpong takes over instead). The wrapper applies to
+                // per-step Lua solvers that do NOT declare themselves
+                // stochastic -- those handle their own noise injection and
+                // must not also be re-noised by this wrapper (stacking the
+                // two diverged md_pingpong_simple to rms 7000+, observed
+                // 2026-09-13).
+                if (solver_plugin->stochastic) {
+                    fprintf(stderr, "[SA3] Lua solver re-noise wrapper: OFF (solver '%s' declares "
+                                    "stochastic; it handles its own noise. Observed 2026-09-13: wrapper + "
+                                    "md_pingpong_simple diverged to rms 7000+)\n", solver_plugin->name.c_str());
                 } else if (sp->sa3_lua_renoise) {
                     fprintf(stderr, "[SA3] Lua solver re-noise wrapper: ON (pingpong after each step)\n");
                 } else {
@@ -473,6 +511,10 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             if (use_lua_guidance) {
                 fprintf(stderr, "[SA3] NOTE: SA3 has no CFG uncond (trained at cfg=1); the cond velocity is "
                                 "passed as both preds, so APG-family guidance is a pass-through.\n");
+            }
+            if (use_lua_guidance && guidance_plugin && guidance_plugin->has_post_step) {
+                fprintf(stderr, "[SA3] Guidance '%s' post_step: enabled (cond-only evals)\n",
+                        guidance_plugin->name.c_str());
             }
             if (solver_plugin && solver_plugin->needs_model) {
                 fprintf(stderr, "[SA3] NOTE: '%s' is a multi-evaluation solver (%d NFE) — expect the refine "
@@ -541,17 +583,27 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         tm_c.assign((size_t)n_lat, 0.0f);
         tm_v.assign((size_t)n_lat, 0.0f);
         apg_ws.resize(n_lat);
+        if (guidance_plugin && guidance_plugin->has_post_step) {
+            // post_step needs tm_x too (xt in ACE view) even when there is no
+            // Lua solver -- the block below only allocates it for use_lua_solver.
+            tm_x.assign((size_t)n_lat, 0.0f);
+        }
     }
     // Persistent scratch for the Lua solver path: SA3 keeps latents/velocity
     // channel-major [Oc][T] natively, but solver plugins (step() and
     // owns_loop's sample()) are written against ACE's time-major [T][Oc]
     // view. Mirrors mm3-plugins.h's tm_x/tm_v. lua_model_native_x is the
-    // model callback's own scratch -- see sa3_model_fn_ace below.
+    // model callback's own scratch -- see sa3_model_fn_ace below. Also needed
+    // by post_step (sa3_post_step_eval calls sa3_model_fn_ace too) even when
+    // there is no Lua solver, so it is sized off use_lua_solver OR post_step.
+    const bool sa3_wants_post_step = use_lua_guidance && guidance_plugin && guidance_plugin->has_post_step;
     std::vector<float> lua_model_native_x;
+    if (use_lua_solver || sa3_wants_post_step) {
+        lua_model_native_x.assign((size_t)n_lat, 0.0f);
+    }
     if (use_lua_solver) {
         tm_x.assign((size_t)n_lat, 0.0f);
         tm_v.assign((size_t)n_lat, 0.0f);
-        lua_model_native_x.assign((size_t)n_lat, 0.0f);
         fprintf(stderr, "[SA3] Lua solver '%s': latents presented time-major (ACE view) Oc=%d L=%d\n",
                 solver_plugin->name.c_str(), Oc, T);
     }
@@ -561,10 +613,15 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     // shape as `x`) snapshot taken right before the solver's step() call;
     // after the solver updates x, x_prev/x/the interval give the solver's
     // effective velocity over the step, which is then re-noised exactly like
-    // the native pingpong branch. Does not apply to owns_loop (no per-step
-    // boundary to hook) — see the NOTE at that branch.
+    // the native pingpong branch. Does not apply to owns_loop (filtered out
+    // above when pingpong is on) or to solvers that declare stochastic=true --
+    // those handle their own noise injection and must not also be re-noised
+    // by this wrapper (stacking the two diverged md_pingpong_simple to rms
+    // 7000+, observed 2026-09-13). sa3_lua_ctx.engine_renoise mirrors this so
+    // stochastic solvers can see it is false and inject their own noise.
     const bool lua_renoise_active = use_lua_solver && pingpong
-        && !solver_plugin->owns_loop && sp->sa3_lua_renoise;
+        && !solver_plugin->owns_loop && !solver_plugin->stochastic && sp->sa3_lua_renoise;
+    sa3_lua_ctx.engine_renoise = lua_renoise_active;
     std::vector<float> x_prev;
     if (lua_renoise_active) {
         x_prev.assign((size_t)n_lat, 0.0f);
@@ -579,10 +636,16 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         if (guidance_native_apg) {
             apg_forward(tm_c.data(), tm_c.data(), sp->guidance_scale, apg_mbuf,
                         tm_v.data(), Oc, T, sp->apg_norm_threshold, apg_ws);
-        } else {
+        } else if (guidance_plugin->has_guide) {
             lua_call_guidance(*guidance_plugin, tm_c.data(), tm_c.data(), sp->guidance_scale,
                               apg_mbuf, tm_v.data(), Oc, T, g_ctx, sp->apg_norm_threshold,
                               sp->plugin_params, sa3_lua_ctx);
+        } else {
+            // post_step-only guidance plugin (no guide()): nothing to blend,
+            // pass the cond velocity through unchanged. Avoids the "no guide()
+            // function" error firing every step for a plugin that was never
+            // meant to have one.
+            memcpy(tm_v.data(), tm_c.data(), sizeof(float) * tm_c.size());
         }
         sa3_from_ace_view(tm_v.data(), v.data(), Oc, T);
     };
@@ -612,6 +675,30 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         sa3_from_ace_view(xt_in_ace, lua_model_native_x.data(), Oc, T);
         sa3_model_fn(lua_model_native_x.data(), t_val);
         sa3_to_ace_view(v.data(), tm_v.data(), Oc, T);
+    };
+
+    // post_step hook for guidance plugins that need extra model evals (e.g.
+    // manifold-projection corrections), mirrors mm3-plugins.h's
+    // mm3_plugins_post_step (~478-499). SA3 has no uncond forward -- both
+    // eval closures below run the cond model via sa3_model_fn_ace, and
+    // vt_cond_buf/vt_uncond_buf both point at tm_v since there is nothing to
+    // tell the two branches apart on this model. A post_step plugin written
+    // to depend on cond and uncond diverging sees identical preds here, same
+    // limitation guide() already has on SA3 (see the NOTE above). Skipped
+    // entirely for guidance plugins with no post_step() (has_post_step
+    // false), and for the final step (its output feeds nothing downstream).
+    PostStepModelFn sa3_post_step_eval = [&](const float * xt_ace, float t_val) {
+        sa3_model_fn_ace(xt_ace, t_val);
+    };
+    auto sa3_call_post_step = [&](int step_idx, float t_curr, float t_next) {
+        if (!sa3_wants_post_step) return;
+        if (step_idx >= steps - 1) return;
+        sa3_to_ace_view(x.data(), tm_x.data(), Oc, T);
+        GuidanceCtx ps_ctx = { step_idx, steps, t_curr - t_next, t_next };
+        lua_call_post_step(*guidance_plugin, tm_x.data(), t_next, n_lat,
+                           sa3_post_step_eval, sa3_post_step_eval, tm_v.data(), tm_v.data(),
+                           ps_ctx, sp->plugin_params, sa3_lua_ctx);
+        sa3_from_ace_view(tm_x.data(), x.data(), Oc, T);
     };
 
     if (use_lua_solver && solver_plugin->owns_loop) {
@@ -725,6 +812,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                         x[k] = (t_next > 0.0f) ? ((1.0f - t_next) * denoised + t_next * n) : denoised;
                     }
                 }
+                sa3_call_post_step(i, t_curr, t_next);
             } else if (pingpong) {
                 // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
                 for (size_t k = 0; k < x.size(); k++) {
@@ -732,9 +820,14 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                     float n = zero_noise ? 0.0f : gauss(rng);
                     x[k] = (1.0f - t_next) * denoised + t_next * n;
                 }
+                sa3_call_post_step(i, t_curr, t_next);
             } else {
                 float dt = t_next - t_curr;
                 for (size_t k = 0; k < x.size(); k++) x[k] += dt * v[k];
+                // NOTE: plain-ODE branch also needs post_step, mirroring the
+                // pingpong branch above -- without this call, guidance plugins
+                // relying on post_step() silently never fire when pingpong is off.
+                sa3_call_post_step(i, t_curr, t_next);
             }
             fprintf(stderr, "[SA3] step %d/%d t=%.4f->%.4f%s%s\n", i + 1, steps, t_curr, t_next,
                     use_lua_solver ? " [lua-solver]" : "", use_lua_guidance ? " [lua-guidance]" : "");
@@ -834,6 +927,14 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
 
         PostprocessVaeDecodeFn decode_fn =
             [&](const float * latent_tm, int T_lat, float * aud_out, int max_T) -> int {
+                // Decoder graphs (ONNX + GGML) are fixed at SA3_CHUNK_LAT, so the only
+                // short-tile path sa3_decode_tiled takes is zero-pad ("padded"); logged
+                // here because the tile size is chosen by the plugin (e.g. md_audio_tiled),
+                // not by this callback.
+                if (T_lat < SA3_CHUNK_LAT) {
+                    fprintf(stderr, "[SA3] Postprocess tile decode: T_lat=%d (%s)\n",
+                            T_lat, "padded");
+                }
                 std::vector<float> cm_lat((size_t) Oc * T_lat);
                 sa3_from_ace_view(latent_tm, cm_lat.data(), Oc, T_lat);
                 std::vector<float> aud;

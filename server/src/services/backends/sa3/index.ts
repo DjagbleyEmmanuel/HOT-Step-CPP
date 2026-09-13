@@ -144,12 +144,12 @@ async function capabilities(): Promise<BackendCapabilities> {
       // MM3: `plugins: false` picks the generic dropdown, `samplerPlugins:
       // true` renders the plugin controls beside the extensions.
       samplerPlugins: true,
-      // SA3 refines the whole clip in one pass — no per-step window-overlap
-      // blend, so full-loop (owns_loop) solvers are safe here in a way they
-      // are not on MM3. The engine dispatches them (sa3-refine.h:513). This
-      // flag tells SamplerPluginControls not to filter them out of the
-      // dropdown. MM3 does not set it and keeps its filter.
-      samplerPluginsOwnsLoop: true,
+      // SA3 medium is distilled for pingpong sampling and owns_loop solvers
+      // bypass the per-step re-noise that distillation needs, so they are
+      // filtered out of the dropdown like on MM3 (finding 2026-09-12). The
+      // engine mirrors this at the C++ level (sa3-refine.h resolves owns_loop
+      // solvers to native pingpong instead of dispatching them).
+      samplerPluginsOwnsLoop: false,
       // DoRA adapters in models/sa3-adapters/*.gguf. These are the StableStep
       // adapters — the same files, the same merge-at-load path. `adapters`
       // rather than `lmAdapters` because there is no LM; the catalogue comes
