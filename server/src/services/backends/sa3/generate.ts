@@ -34,6 +34,7 @@ import {
   startGenerationLog, logGeneration, logGenerationParams,
   finishGenerationLog, failGenerationLog,
 } from '../../logger.js';
+import { releaseMinimaxVramForAce } from '../minimax/generate.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import { SA3_MAX_DURATION_SEC } from './index.js';
 
@@ -122,6 +123,11 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
     logGeneration(job.id, level, msg);
   const timing: StageTiming[] = [];
   const pipelineStart = performance.now();
+
+  // Defensive residency arbitration (plan §4.4): an MM3 run may have left ~13 GB
+  // parked, and SA3 needs the card as much as ACE does. Idempotent and cheap
+  // when cold; short-fused so a hung engine can never stall an SA3 render.
+  await releaseMinimaxVramForAce();
 
   // ── Map params ────────────────────────────────────────────────────────
   const caption: string = String(job.params.caption ?? job.params.style ?? '').trim();
