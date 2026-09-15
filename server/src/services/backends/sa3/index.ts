@@ -22,13 +22,20 @@ import { engineReady } from '../../../engineState.js';
 import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { aceClient } from '../../aceClient.js';
 import type { Sa3Props } from '../../aceClient.js';
+import { runSa3Generation } from './generate.js';
 import type {
   EngineBackend,
   BackendCapabilities,
   BackendModels,
   BackendLifecycleStatus,
   BackendExtensionParam,
+  GenerationArtifact,
+  GenerationContext,
+  GenerationOperation,
+  GenerationOutcome,
+  ResolvedRequest,
 } from '../types.js';
+import type { GenerationJob } from '../../generation/jobTypes.js';
 
 /** Soft ceiling for the duration slider. The engine's tiled encode/decode
  *  handles any length (sa3_chunk_starts in sa3-refine.h); this bounds the UI
@@ -188,6 +195,68 @@ async function models(): Promise<BackendModels> {
   };
 }
 
+const SA3_OPERATIONS: readonly GenerationOperation[] = ['text2music'];
+
+function firstText(submission: Readonly<Record<string, unknown>>, keys: string[]): string {
+  for (const key of keys) {
+    const value = submission[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return '';
+}
+
+/** Pure descriptive snapshot, same contract as minimax/yue2's resolveRequest:
+ *  a frozen record of what was asked for at enqueue time. The live mapping
+ *  (defaults, clamping, plugin whitelist) stays in generate.ts's own readers
+ *  of job.params — this function never invokes them. */
+function resolveRequest(submission: Readonly<Record<string, unknown>>): ResolvedRequest {
+  const duration = typeof submission.duration === 'number' && Number.isFinite(submission.duration) && submission.duration > 0
+    ? submission.duration : undefined;
+  const options: Record<string, unknown> = {};
+  for (const key of Object.keys(submission)) {
+    if (key.startsWith('sa3')) options[key] = submission[key];
+  }
+  const common = {
+    // SA3 has no CFG-uncond negative-prompt slot and no vocals — the caption
+    // is the whole prompt (see generate.ts's header note on tokenisation).
+    caption: firstText(submission, ['caption', 'prompt', 'songDescription', 'style']),
+    lyrics: '',
+    ...(duration === undefined ? {} : { duration }),
+    ...(typeof submission.seed === 'number' && Number.isFinite(submission.seed) ? { seed: submission.seed } : {}),
+    ...(typeof submission.randomSeed === 'boolean' ? { randomSeed: submission.randomSeed } : {}),
+    ...(typeof submission.title === 'string' ? { title: submission.title } : {}),
+  };
+  return {
+    operation: 'text2music',
+    common,
+    // No quant ladder, no persisted selection — single model set, engine
+    // picks onnx/gguf by presence (see selectModel note below).
+    models: {},
+    options,
+    policy: { retry: { maxAttempts: 2, reseedOnRetry: true } },
+  };
+}
+
+function outcomeFromJob(job: GenerationJob): GenerationOutcome {
+  const result = job.result;
+  const artifacts: GenerationArtifact[] = (result?.audioUrls ?? []).map((url, trackIndex) => ({
+    kind: 'audio', trackIndex, url,
+  }));
+  const mastered = result?.masteredAudioUrls
+    ?? (result?.masteredAudioUrl ? [result.masteredAudioUrl] : []);
+  mastered.forEach((url, trackIndex) => {
+    if (url) artifacts.push({ kind: 'mastered', trackIndex, url });
+  });
+  return {
+    endReason: job.status === 'succeeded' ? 'completed' : job.status === 'cancelled' ? 'cancelled' : 'failed',
+    stages: result?.timing ?? [],
+    artifacts,
+    songIds: result?.songIds ?? [],
+    result,
+    error: job.error,
+  };
+}
+
 // ── Backend ─────────────────────────────────────────────────────────────────
 
 export const sa3Backend: EngineBackend = {
@@ -204,5 +273,19 @@ export const sa3Backend: EngineBackend = {
   capabilities,
   models,
   // No selectModel: single model set, engine picks onnx/gguf by presence.
-  // No releaseVram: nothing stays resident between /sa3-synth calls.
+  operations: SA3_OPERATIONS,
+  resolveRequest,
+  /** /sa3-synth is one synchronous call — no engine job id to poll, so
+   *  ctx.pollUntilDone is unused here (same shape as MM3/YuE2's generate, minus
+   *  the poll). The shared abort signal from the lane replaces the runner's
+   *  own AbortController, so a cancel/reset from the lane reaches the fetch
+   *  the same way it does on every other backend. */
+  async generate(job: GenerationJob, ctx: GenerationContext): Promise<GenerationOutcome> {
+    await runSa3Generation(job, { signal: ctx.signal });
+    return outcomeFromJob(job);
+  },
+  // No releaseVram: nothing stays resident between /sa3-synth calls. Cross-
+  // family VRAM arbitration is handled generically by routes/backends.ts,
+  // which calls the OUTGOING backend's own releaseVram() (e.g. MM3's) when
+  // the active backend changes — SA3 needs no defensive call of its own.
 };

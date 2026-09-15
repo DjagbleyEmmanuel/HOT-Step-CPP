@@ -34,10 +34,17 @@ import {
   startGenerationLog, logGeneration, logGenerationParams,
   finishGenerationLog, failGenerationLog,
 } from '../../logger.js';
-import type { GenerationJob, StageTiming } from '../../../routes/generate.js';
+import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import { SA3_MAX_DURATION_SEC } from './index.js';
 
 const TASK = 'sa3-text2music';
+
+/** /sa3-synth is one synchronous fetch — no engine job id to poll, so this
+ *  only needs the shared lane's abort signal (same deps shape as
+ *  minimax/generate.ts and yue2/generate.ts, minus pollUntilDone). */
+interface Sa3GenerationDeps {
+  signal: AbortSignal;
+}
 
 /** The wire request, as sent. Stored in generation_params so a reproduce
  *  re-submits the real inputs. */
@@ -110,7 +117,7 @@ function mapSa3Adapters(params: any): Array<{ name: string; scale: number }> {
     }));
 }
 
-export async function runSa3Generation(job: GenerationJob): Promise<void> {
+export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDeps): Promise<void> {
   const log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) =>
     logGeneration(job.id, level, msg);
   const timing: StageTiming[] = [];
@@ -147,11 +154,10 @@ export async function runSa3Generation(job: GenerationJob): Promise<void> {
   const adapters = mapSa3Adapters(job.params);
   const plugins  = mapSa3SamplerPlugins(job.params);
 
-  // /sa3-synth is one long synchronous fetch — without an abort controller a
-  // user cancel only flips job.status and the render keeps running to
-  // completion server-side. Same pattern as backends/minimax/generate.ts.
-  const abortController = new AbortController();
-  (job as any)._abort = abortController;
+  // /sa3-synth is one long synchronous fetch — the shared lane's abort signal
+  // (deps.signal) is what makes a user cancel actually stop it rather than
+  // just flip job.status while the render keeps running server-side.
+  const { signal } = deps;
 
   startGenerationLog(job.id, TASK);
 
@@ -196,7 +202,7 @@ export async function runSa3Generation(job: GenerationJob): Promise<void> {
       // final latent on disk + its RMS in the engine log.
       ...(job.params.sa3DumpLatent ? { dumpLatent: String(job.params.sa3DumpLatent) } : {}),
       ...plugins,
-      signal: abortController.signal,
+      signal,
     });
     const synthMs = Math.round(performance.now() - synthStart);
     timing.push({ name: 'SA3 synth', ms: synthMs });
