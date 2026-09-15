@@ -30,6 +30,7 @@
 #include <cstring>
 #include <utility>
 #include <cmath>
+#include <cstdio>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -223,6 +224,17 @@ struct Yue2Request {
     // fallback on a mismatch (fails the request outright).
     Yue2NoiseSource noise_source = YUE2_NOISE_NATIVE;
     std::string     noise_fixture_path;
+
+    // ---- HOT-Step: Lua postprocess hook (fork addition) ----
+    // Name of a registered Lua postprocess plugin to route the VAE tiled
+    // decode through, instead of the built-in yue2_vae_decode_tiled path.
+    // "" (default) = built-in decode, byte-identical to before this field
+    // existed. Mirrors ACE's request.h postprocess_plugin field and SA3's
+    // Sa3PluginParams::postprocess_plugin (sa3-refine.h). See
+    // yue2_run_vae_stage (yue2-pipeline.h) for the attach point.
+    std::string postprocess_plugin;
+    // The plugin reads the request's existing plugin_params map above.
+    // ---- end HOT-Step: Lua postprocess hook ----
 };
 
 static bool yue2_req_num(yyjson_val * root, const char * key, double * out, bool * present, std::string * err) {
@@ -877,6 +889,13 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     if ((out->plan_only || out->semantic_only) && out->synth_batch_size != 1) {
         out->synth_batch_size = 1;  // no NAR runs, so variations mean nothing
     }
+
+    // ---- HOT-Step: Lua postprocess hook (fork addition) ----
+    if (!yue2_req_str(root, "postprocess_plugin", &out->postprocess_plugin, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    // ---- end HOT-Step: Lua postprocess hook ----
 
     yyjson_doc_free(doc);
     return true;

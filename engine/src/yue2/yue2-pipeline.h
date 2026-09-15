@@ -37,6 +37,13 @@
 #include "yue2-vae-graph.h"
 #include "train/yue2-loudness.h"  // yue2_peak_scale
 
+// ---- HOT-Step: Lua postprocess hook (fork addition) ----
+// The SAME registry, plugins and dispatch entry points ACE/MM3/SA3 use for
+// their own postprocess hooks (see sa3-refine.h's identical include for
+// precedent). Nothing in engine/plugins/ knows YuE2 exists.
+#include "lua-plugin-registry.h"
+// ---- end HOT-Step: Lua postprocess hook ----
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -45,6 +52,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <numeric>
@@ -1294,15 +1302,127 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
     const int64_t core = std::min<int64_t>((int64_t) m.vae_cfg.decode_core_frames, 512);
     const int64_t halo = (int64_t) m.vae_cfg.decode_halo_frames;
     const int64_t n_tiles = core > 0 ? (total_frames + core - 1) / core : 1;
-    if (progress) {
-        progress({ YUE2_STAGE_VAE, 0, n_tiles });
+
+    // ---- HOT-Step: Lua postprocess hook (fork addition) ----
+    // Routes the latent->audio decode through a Lua postprocess plugin
+    // instead of the built-in yue2_vae_decode_tiled path below. Mirrors
+    // sa3-refine.h's identical hook (grep "lua_call_postprocess" there) and
+    // ACE's ops_vae_decode_postprocess (pipeline-synth-ops.cpp). Gated
+    // entirely on req.postprocess_plugin being non-empty; runs BEFORE the
+    // native decode so the native path is skipped whenever the plugin
+    // succeeds (pp_ok). When no plugin is requested (or it fails), pp_ok
+    // stays false and the native path below runs exactly as upstream did,
+    // same relative progress() order, byte-identical for that path.
+    bool pp_ok = false;
+    if (!req.postprocess_plugin.empty()) {
+        LuaPlugin * pp_plugin = PluginRegistry::instance().postprocess_lookup(req.postprocess_plugin.c_str());
+        if (!pp_plugin) {
+            fprintf(stderr, "[YuE2] Postprocess WARNING: plugin '%s' not found, keeping native decode\n",
+                    req.postprocess_plugin.c_str());
+        } else {
+            // yue2_ctx.latent_rms: unmeasured; measure by smoke render when
+            // GPU0 is free, see plan Phase 0 open items (docs/plans/
+            // yue2-integration-plan-v2.md, "Owner action items" #1). Unlike
+            // SA3 (0.685) and MM3 (2.35), no render-and-measure pass exists
+            // yet for YuE2, so this is a placeholder, not a measurement.
+            constexpr float YUE2_LATENT_RMS_PLACEHOLDER = 2.0f;
+
+            LuaModelContext yue2_ctx;
+            yue2_ctx.native_sr       = 48000;
+            yue2_ctx.latent_fps      = 25;
+            yue2_ctx.latent_channels = (int) LD;
+            yue2_ctx.model_id        = "yue2";
+            yue2_ctx.latent_rms      = YUE2_LATENT_RMS_PLACEHOLDER;
+
+            // song_latents is already time-major [T][LD] -- the exact layout
+            // lua_call_postprocess expects (unlike SA3, which is native
+            // channel-major and must transpose first; see sa3-refine.h
+            // CONVENTION 2). No transpose needed for this call.
+            //
+            // decode_fn: yue2_vae_decode_tiled only decodes a whole latent
+            // buffer handed to it, with no separate "sub-range of an
+            // already-loaded song" mode -- so a plugin-requested tile
+            // [T_lat][LD] is decoded by transposing that slice to
+            // channel-major and running it through the SAME tiled decode
+            // path as the whole-song call above, into a fresh output buffer.
+            PostprocessVaeDecodeFn decode_fn =
+                [&m, core, halo, LD](const float * latent_tm, int T_lat, float * aud_out, int max_T) -> int {
+                    // Short-tile diagnostic (mirrors sa3-refine.h's identical check):
+                    // below core+halo, the tiled decode has no cross-tile context to
+                    // draw on for this slice.
+                    if ((int64_t) T_lat < core + halo) {
+                        fprintf(stderr,
+                                "[YuE2] Postprocess tile decode: T_lat=%lld below core+halo (%lld), "
+                                "no cross-tile context\n",
+                                (long long) T_lat, (long long) (core + halo));
+                    }
+                    std::vector<float> slice_ct((size_t) (LD * T_lat));
+                    for (int64_t t = 0; t < T_lat; t++) {
+                        for (int64_t c = 0; c < LD; c++) {
+                            slice_ct[(size_t) (c * T_lat + t)] = latent_tm[(size_t) (t * LD + c)];
+                        }
+                    }
+                    std::vector<float> slice_audio;
+                    int64_t             slice_samples = 0;
+                    std::string         decode_err;
+                    if (!yue2_vae_decode_tiled(m, slice_ct.data(), T_lat, core, halo, &slice_audio, &slice_samples,
+                                               nullptr, &decode_err)) {
+                        fprintf(stderr, "[YuE2] Postprocess tile decode failed: %s\n", decode_err.c_str());
+                        return -1;
+                    }
+                    int t_audio = (int) slice_samples;
+                    if (t_audio > max_T) {
+                        t_audio = max_T;
+                    }
+                    memcpy(aud_out,         slice_audio.data(),                 sizeof(float) * (size_t) t_audio);
+                    memcpy(aud_out + max_T, slice_audio.data() + slice_samples, sizeof(float) * (size_t) t_audio);
+                    // Zero-fill the tail beyond t_audio (up to max_T) per channel,
+                    // so the lua-plugin.h bridge and any plugin that ignores the
+                    // returned count both read clean silence, not stale heap data.
+                    if (t_audio < max_T) {
+                        std::fill(aud_out + t_audio, aud_out + max_T, 0.0f);
+                        std::fill(aud_out + max_T + t_audio, aud_out + 2 * max_T, 0.0f);
+                    }
+                    return t_audio;
+                };
+
+            const int          max_T_audio = (int) (total_frames * 1920);
+            std::vector<float> pp_audio((size_t) 2 * max_T_audio);
+            int T_audio = lua_call_postprocess(*pp_plugin, song_latents.data(), (int) total_frames, (int) LD, 2,
+                                               pp_audio.data(), max_T_audio, decode_fn, req.plugin_params, yue2_ctx,
+                                               1920);
+            if (T_audio > 0) {
+                int n = T_audio < max_T_audio ? T_audio : max_T_audio;
+                audio_planar_out->assign((size_t) 2 * n, 0.0f);
+                memcpy(audio_planar_out->data(),     pp_audio.data(),               sizeof(float) * (size_t) n);
+                memcpy(audio_planar_out->data() + n, pp_audio.data() + max_T_audio, sizeof(float) * (size_t) n);
+                *samples_out = n;
+                pp_ok = true;
+                fprintf(stderr, "[YuE2] Postprocess '%s' decode: T_audio=%lld (T_latent=%lld)\n",
+                        req.postprocess_plugin.c_str(), (long long) n, (long long) total_frames);
+            } else {
+                fprintf(stderr, "[YuE2] Postprocess '%s' failed, keeping native decode\n",
+                        req.postprocess_plugin.c_str());
+            }
+        }
     }
-    if (!yue2_vae_decode_tiled(m, latent_ct.data(), total_frames, core, halo, audio_planar_out, samples_out, nullptr,
-                               err)) {
-        return false;
-    }
-    if (progress) {
-        progress({ YUE2_STAGE_VAE, n_tiles, n_tiles });
+    // ---- end HOT-Step: Lua postprocess hook ----
+
+    // Native tiled VAE decode -- skipped when the plugin above already
+    // produced audio (pp_ok). Same two progress() calls in the same
+    // relative order around the decode as upstream, so the no-plugin path
+    // (pp_ok always false) is byte-identical to before this hook existed.
+    if (!pp_ok) {
+        if (progress) {
+            progress({ YUE2_STAGE_VAE, 0, n_tiles });
+        }
+        if (!yue2_vae_decode_tiled(m, latent_ct.data(), total_frames, core, halo, audio_planar_out, samples_out,
+                                   nullptr, err)) {
+            return false;
+        }
+        if (progress) {
+            progress({ YUE2_STAGE_VAE, n_tiles, n_tiles });
+        }
     }
     return true;
 }

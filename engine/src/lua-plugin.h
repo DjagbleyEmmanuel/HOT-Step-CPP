@@ -572,7 +572,14 @@ struct LuaModelContext {
     int          native_sr       = 48000;  // audio sample rate (48000 ACE, 44100 MM3/SA3)
     int          latent_fps      = 25;     // latent frames per second
     int          latent_channels = 64;     // Oc (64 ACE, 128 MM3, 256 SA3)
-    const char * model_id        = "ace";  // "ace", "mm3", "sa3"
+    const char * model_id        = "ace";  // "ace", "mm3", "sa3", "yue2"
+    // Measured RMS of this model's clean latent -- the number every
+    // rms_target / latent-pressure servo should default to. A plugin tuned
+    // against ACE's ~2.0 that is dropped onto SA3 (measured 0.685 on a 24-step
+    // native render) spends every step inflating the latent to 3x its natural
+    // magnitude. Plugins read it as `model_context.latent_rms` and fall back
+    // to 2.0 when absent, so ACE behaviour is unchanged. (HOT-Step)
+    float        latent_rms      = 2.0f;
 };
 
 static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx) {
@@ -1109,13 +1116,22 @@ static int lua_call_postprocess(
             return 2;
         }
 
-        // Return audio as Lua table (1-indexed, [B * C_aud * T_audio])
+        // Return audio as Lua table (1-indexed, [B * C_aud * T_audio], contiguous
+        // per channel: ch0 at [1, T_audio], ch1 at [T_audio+1, 2*T_audio]).
+        // Source aud_buf is planar at stride max_T (ch0 in [0, max_T), ch1 in
+        // [max_T, 2*max_T)) -- the decode_fn contract used by both the native
+        // tiled decoders and the Lua-plugin decode_fn wrappers. T_audio may be
+        // less than max_T, so treating aud_buf as a flat 2*T_audio block would
+        // read channel 1's samples out of channel 0's tail region. Index each
+        // channel explicitly instead.
         lua_newtable(Ls);
-        int total = 2 * T_audio;
-        for (int i = 0; i < total; i++) {
-            lua_pushinteger(Ls, i + 1);
-            lua_pushnumber(Ls, (double) aud_buf[i]);
-            lua_settable(Ls, -3);
+        for (int c = 0; c < 2; c++) {
+            for (int i = 0; i < T_audio; i++) {
+                int lua_idx = c * T_audio + i + 1;
+                lua_pushinteger(Ls, lua_idx);
+                lua_pushnumber(Ls, (double) aud_buf[(size_t) c * max_T + i]);
+                lua_settable(Ls, -3);
+            }
         }
         lua_pushinteger(Ls, T_audio);
         return 2;
@@ -1141,17 +1157,24 @@ static int lua_call_postprocess(
         return -1;
     }
 
-    // Copy audio from Lua table to output buffer (1-indexed)
-    int total = 2 * T_audio;
+    // Copy audio from Lua table to output buffer (1-indexed).
+    // The Lua process() table is planar at stride final_samples (== max_T_audio,
+    // the arg6 passed into process() above): ch0 in [1, max_T_audio], ch1 in
+    // [max_T_audio+1, 2*max_T_audio]. T_audio may be less than max_T_audio, so
+    // reading it as a flat 2*T_audio block (the old assumption) pulls channel
+    // 1's data from channel 0's tail -- same bug as the decode_fn readback
+    // above. Index each channel at its real stride instead.
     if (T_audio > max_T_audio) {
         T_audio = max_T_audio;
-        total   = 2 * T_audio;
     }
-    for (int i = 0; i < total; i++) {
-        lua_pushinteger(L, i + 1);
-        lua_gettable(L, -3);
-        audio_out[i] = (float) lua_tonumber(L, -1);
-        lua_pop(L, 1);
+    for (int c = 0; c < 2; c++) {
+        for (int i = 0; i < T_audio; i++) {
+            int lua_idx = c * max_T_audio + i + 1;
+            lua_pushinteger(L, lua_idx);
+            lua_gettable(L, -3);
+            audio_out[(size_t) c * max_T_audio + i] = (float) lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
     }
 
     lua_pop(L, 2);
