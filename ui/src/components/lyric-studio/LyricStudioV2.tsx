@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import type { AlbumPreset } from '../../services/lireekApi';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
 import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
@@ -567,12 +568,12 @@ export const LyricStudioV2: React.FC = () => {
       <div className="flex-1 overflow-hidden">
         {nav.level === 'artists' && (
           <div className="h-full flex ls2-fade-in">
-            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
+            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={-1}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                 artistIdsWithAdapters={artistIdsWithAdapters} />
             </div>
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
               <div className="flex-shrink-0 flex items-center px-5 py-3 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
                 <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">{t('lyric.allArtists')}</span>
@@ -581,9 +582,18 @@ export const LyricStudioV2: React.FC = () => {
                     {artists.length}
                   </span>
                 )}
+                {/* Narrow: queue + prompt editor buttons since sidebar is hidden */}
+                <div className="max-[899px]:flex hidden items-center gap-2 ml-auto">
+                  <button onClick={openQueuePanel} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
+                    Queue
+                  </button>
+                  <button onClick={() => setPromptEditorOpen(true)} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
+                    Prompts
+                  </button>
+                </div>
               </div>
               <div className="flex-1 flex min-h-0">
-                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
+                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden">
                   <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
                     modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
                 </div>
@@ -602,23 +612,28 @@ export const LyricStudioV2: React.FC = () => {
 
         {nav.level === 'albums' && nav.selectedArtist && (
           <div className="h-full flex ls2-fade-in">
-            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
+            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                 artistIdsWithAdapters={artistIdsWithAdapters} />
             </div>
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
               <div className="flex-shrink-0 flex items-center px-5 py-3 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
-                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">{disguiseArtist(nav.selectedArtist.name)}</span>
+                {/* Narrow: back button to artists */}
+                <button onClick={handleBackToArtists} className="max-[899px]:flex hidden items-center gap-1 mr-3 text-xs text-zinc-500 hover:text-white transition-colors flex-shrink-0">
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  All Artists
+                </button>
+                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400 truncate min-w-0">{disguiseArtist(nav.selectedArtist.name)}</span>
                 {albums.length > 0 && (
-                  <span className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center bg-white/10 text-zinc-600 dark:text-zinc-400">
+                  <span className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center bg-white/10 text-zinc-600 dark:text-zinc-400 flex-shrink-0">
                     {albums.length}
                   </span>
                 )}
               </div>
               <div className="flex-1 flex min-h-0">
-                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
+                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden">
                   <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
                     onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
                     modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
@@ -639,14 +654,23 @@ export const LyricStudioV2: React.FC = () => {
 
         {nav.level === 'album-detail' && nav.selectedArtist && nav.selectedAlbum && (
           <div className="h-full flex flex-col ls2-fade-in">
+            {/* Narrow-screen nav bar: back to albums + album name */}
+            <div className="max-[899px]:flex hidden flex-shrink-0 items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
+              <button onClick={handleBackToAlbums} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-white transition-colors flex-shrink-0">
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Albums
+              </button>
+              <span className="text-zinc-600 dark:text-zinc-600 text-xs flex-shrink-0">/</span>
+              <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate min-w-0">{nav.selectedAlbum.album || 'Top Songs'}</span>
+            </div>
             <div className="flex-1 flex min-h-0">
               {/* Left: artist sidebar + album header */}
-              <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
+              <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden">
                 <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                   onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                   artistIdsWithAdapters={artistIdsWithAdapters} />
               </div>
-              <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative">
+              <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative max-[899px]:hidden">
                 <div className="relative z-[1] h-full">
                   <AlbumHeader
                     artist={nav.selectedArtist} album={nav.selectedAlbum}
@@ -658,7 +682,7 @@ export const LyricStudioV2: React.FC = () => {
               </div>
 
               {/* Middle: tabbed content */}
-              <div className="flex-1 overflow-hidden relative">
+              <div className="flex-1 overflow-hidden relative min-w-0">
                 {/* Cover art backdrop when playing */}
                 {isPlaying && currentPlaybackTrack?.coverUrl && (
                   <>
