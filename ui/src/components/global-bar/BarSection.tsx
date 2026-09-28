@@ -13,7 +13,7 @@ import { Toggle, type ToggleAccent } from '../shared/Toggle';
 // Tailwind JIT can't compile dynamic class names like `bg-${color}-500/10`,
 // so we map accent names to concrete classes.
 
-const ACCENT_STYLES: Record<string, {
+export const ACCENT_STYLES: Record<string, {
   bg: string;        // resting background tint
   bgHover: string;   // hover/active background tint (stronger)
   border: string;    // active bottom border

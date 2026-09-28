@@ -7,7 +7,7 @@
 // DOM hosts and wires their callbacks to the store.
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Menu } from 'lucide-react';
+// (Menu is used in GlobalParamBar's mobile compact row, not here)
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -1143,10 +1143,24 @@ const AppContent: React.FC = () => {
     }
 
     // Default: create view
+    // Layout: side-by-side on wide landscape, stacked vertically on narrow (<900px)
+    // and on portrait screens >= 900px (e.g. 1080x1920 at 100%).
     return (
-      <div className="flex flex-1 overflow-hidden">
-        {/* Create Panel — resizable */}
-        <DiscoPulseWrapper hue={DISCO.createPanel} className="flex-shrink-0 h-full border-r border-zinc-200 dark:border-white/5" style={{ width: createPanelWidth }}>
+      <div className="flex flex-1
+        min-[900px]:flex-row max-[899px]:flex-col
+        min-[900px]:overflow-hidden max-[899px]:overflow-visible
+        [@media(orientation:portrait)_and_(min-width:900px)]:flex-col
+        [@media(orientation:portrait)_and_(min-width:900px)]:overflow-visible">
+        {/* Create Panel — resizable on wide landscape, full-width on narrow/portrait.
+            Tailwind's ! prefix generates !important which overrides inline style. */}
+        <DiscoPulseWrapper
+          hue={DISCO.createPanel}
+          className="flex-shrink-0 border-zinc-200 dark:border-white/5
+            min-[900px]:h-full min-[900px]:border-r
+            max-[899px]:!w-full max-[899px]:border-b max-[899px]:h-auto max-[899px]:border-r-0
+            [@media(orientation:portrait)_and_(min-width:900px)]:!w-full [@media(orientation:portrait)_and_(min-width:900px)]:border-b [@media(orientation:portrait)_and_(min-width:900px)]:border-r-0 [@media(orientation:portrait)_and_(min-width:900px)]:h-auto"
+          style={{ width: createPanelWidth }}
+        >
           <CreatePanel
             onGenerate={handleGenerate}
             activeJobCount={activeJobCount}
@@ -1154,9 +1168,11 @@ const AppContent: React.FC = () => {
           />
         </DiscoPulseWrapper>
 
-        {/* Left resize handle */}
+        {/* Left resize handle — hidden on narrow and portrait */}
         <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
+          className="flex-shrink-0 w-1.5 cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
+            min-[900px]:h-full max-[899px]:hidden
+            [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -1219,12 +1235,13 @@ const AppContent: React.FC = () => {
         </DiscoPulseWrapper>
 
 
-        {/* Right Sidebar — resizable */}
+        {/* Right Sidebar — resizable; hidden on narrow / portrait stacked layout */}
         {showRightSidebar && selectedSong && (
           <>
             {/* Right resize handle */}
             <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
+              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
+                max-[899px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
               onMouseDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -1248,7 +1265,8 @@ const AppContent: React.FC = () => {
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
             </div>
             <DiscoPulseWrapper hue={DISCO.rightSidebar}
-              className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5"
+              className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5
+                max-[899px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
               style={{ width: rightSidebarWidth }}
             >
               <RightSidebar
@@ -1270,8 +1288,11 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
-      {/* Global Parameter Bar — full width, above everything */}
-      <GlobalParamBar />
+      {/* Global Parameter Bar — full width, above everything.
+          The mobile compact row (hamburger + Settings) lives inside
+          GlobalParamBar so both desktop and mobile bars share the same
+          backdrop and z-level. */}
+      <GlobalParamBar onOpenMobileNav={() => setMobileNavOpen(true)} />
 
       {/* Asks before running a generation queue restored from a previous
           session, rather than starting it unattended (issue #100). Renders
@@ -1279,19 +1300,6 @@ const AppContent: React.FC = () => {
       <NoModelsBanner />
       <RestoredQueueBanner />
       <AudioQueueMigrationBanner />
-
-      {/* Mobile-only nav bar — hamburger to open the sidebar drawer.
-          Hidden at desktop widths (>= 900 px). */}
-      <div className="max-[899px]:flex min-[900px]:hidden flex-shrink-0 items-center px-3 py-2 bg-white dark:bg-suno border-b border-zinc-200 dark:border-white/5">
-        <button
-          onClick={() => setMobileNavOpen(true)}
-          className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 transition-colors"
-          aria-label="Open navigation"
-          title="Open navigation"
-        >
-          <Menu size={20} />
-        </button>
-      </div>
 
       <div className="flex-1 flex overflow-hidden">
         <DiscoPulseWrapper hue={DISCO.sidebar}>
@@ -1337,7 +1345,7 @@ const AppContent: React.FC = () => {
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto relative">
+        <main className="flex-1 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:900px)]:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>
