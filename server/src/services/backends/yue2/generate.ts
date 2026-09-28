@@ -376,10 +376,13 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   if (params.pluginParams && typeof params.pluginParams === 'object') {
     for (const [k, v] of Object.entries(params.pluginParams as Record<string, unknown>)) {
       if (k in plugin_params) continue; // explicit mapping takes precedence
-      const n = Number(v);
-      if (Number.isFinite(n)) plugin_params[k] = n;
-      else if (typeof v === 'boolean') plugin_params[k] = v;
-      else if (typeof v === 'string') plugin_params[k] = v;
+      if (v === null || v === undefined || v === '') continue;
+      if (typeof v === 'boolean') { plugin_params[k] = v; continue; }
+      if (typeof v === 'number') { if (Number.isFinite(v)) plugin_params[k] = v; continue; }
+      if (typeof v === 'string') {
+        const n = Number(v);
+        plugin_params[k] = Number.isFinite(n) ? n : v;
+      }
     }
   }
   // Postprocess plugin: name of a Lua postprocess plugin to route YuE2's VAE
