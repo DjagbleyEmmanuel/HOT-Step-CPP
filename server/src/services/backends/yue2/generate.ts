@@ -369,6 +369,25 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   if (params.yue2NarScheduler && params.yue2NarScheduler !== 'stock' && !narScheduler) {
     notes.push(`Unknown YuE2 NAR scheduler "${params.yue2NarScheduler}" — using uniform steps`);
   }
+  // Generic plugin params passthrough (e.g. postprocess plugin params sent as
+  // "pluginName:key" entries -- same convention the solver/scheduler entries above use).
+  // Keys already set by the explicit solver/scheduler mapping above are left
+  // untouched so that the explicit mapping always wins over a generic override.
+  if (params.pluginParams && typeof params.pluginParams === 'object') {
+    for (const [k, v] of Object.entries(params.pluginParams as Record<string, unknown>)) {
+      if (k in plugin_params) continue; // explicit mapping takes precedence
+      const n = Number(v);
+      if (Number.isFinite(n)) plugin_params[k] = n;
+      else if (typeof v === 'boolean') plugin_params[k] = v;
+      else if (typeof v === 'string') plugin_params[k] = v;
+    }
+  }
+  // Postprocess plugin: name of a Lua postprocess plugin to route YuE2's VAE
+  // decode through (yue2-pipeline.h yue2_run_vae_stage hook). Mirrors ACE's
+  // own translateParams.ts postprocessPlugin -> postprocess_plugin mapping.
+  const postprocess_plugin = typeof params.postprocessPlugin === 'string' && params.postprocessPlugin.trim()
+    ? params.postprocessPlugin.trim()
+    : undefined;
   // Step-level velocity caching for the NAR midpoint solver (see
   // yue2-nar-graph.h). 0/unset = off, every step computed for real -- the
   // UI slider (index.ts's yue2NarCacheRatio extension) clamps to [0, 0.9],
@@ -526,6 +545,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     ...(narSolver ? { infer_method: narSolver } : {}),
     ...(narScheduler ? { scheduler: narScheduler } : {}),
     ...(Object.keys(plugin_params).length ? { plugin_params } : {}),
+    ...(postprocess_plugin ? { postprocess_plugin } : {}),
     vae_variant,
     seed,
   };
