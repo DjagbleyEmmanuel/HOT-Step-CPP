@@ -49,6 +49,17 @@ export const StemStudio: React.FC = () => {
   // Narrow-screen (<900 px) pane switcher — which of the three columns is visible
   const [narrowPane, setNarrowPane] = useState<'source' | 'tracks' | 'recent'>('tracks');
 
+  // Portrait-screen (>= 900 px, orientation portrait) — behaves like narrow
+  const [isPortrait, setIsPortrait] = useState(() =>
+    window.matchMedia('(orientation: portrait) and (min-width: 900px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: portrait) and (min-width: 900px)');
+    const handler = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   // Source audio (persisted across sessions for testing convenience)
   const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => localStorage.getItem('hs-stem-sourceUrl') || '');
   const [sourceFileName, _setSourceFileName] = useState(() => localStorage.getItem('hs-stem-sourceFile') || '');
@@ -273,8 +284,8 @@ export const StemStudio: React.FC = () => {
     <div className="flex flex-col w-full h-full overflow-hidden">
       {(modelsQuery.error) && <div role="alert" className="text-sm text-red-500">{(modelsQuery.error)?.message}</div>}
 
-      {/* Narrow-screen pane switcher — only rendered below 900 px */}
-      <div className="max-[899px]:flex min-[900px]:hidden flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
+      {/* Narrow/portrait pane switcher — rendered below 900 px and on portrait >= 900 px */}
+      <div className="max-[899px]:flex min-[900px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
         {(['source', 'tracks', 'recent'] as const).map(pane => (
           <button
             key={pane}
@@ -295,7 +306,7 @@ export const StemStudio: React.FC = () => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* Left — Source Audio + Optional Fields */}
-        <div className={`flex flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-shrink-0 min-[900px]:w-[300px] min-[900px]:flex ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
+        <div className={`flex flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-shrink-0 ${!isPortrait ? 'min-[900px]:w-[300px] min-[900px]:flex' : ''} ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
           <SourceSelector
             sourceAudioUrl={sourceAudioUrl}
             sourceFileName={sourceFileName}
@@ -337,7 +348,7 @@ export const StemStudio: React.FC = () => {
         </div>
 
         {/* Center — Track Selection + Mixer */}
-        <div className={`flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-1 min-w-0 min-[900px]:flex ${narrowPane === 'tracks' ? 'flex' : 'hidden'}`}>
+        <div className={`flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-1 min-w-0 ${!isPortrait ? 'min-[900px]:flex' : ''} ${narrowPane === 'tracks' ? 'flex' : 'hidden'}`}>
           {/* Model selector for Extract */}
           {mode === 'extract' && !modelsLoading && baseModels.length === 0 && (
             <div style={styles.noModelsWarning}>
@@ -420,7 +431,7 @@ export const StemStudio: React.FC = () => {
 
         {/* Resize handle — hidden on narrow screens */}
         <div
-          className="max-[899px]:hidden flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-purple-500/20 active:bg-purple-500/30 transition-colors"
+          className={`${isPortrait ? 'hidden' : 'max-[899px]:hidden'} flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-purple-500/20 active:bg-purple-500/30 transition-colors`}
           onMouseDown={handleSidebarResize}
         >
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-purple-400 transition-colors" />
@@ -428,7 +439,7 @@ export const StemStudio: React.FC = () => {
 
         {/* Right — Recent Extractions + Queue */}
         <div
-          className={`h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex-col min-[900px]:flex max-[899px]:!w-full ${narrowPane === 'recent' ? 'flex' : 'hidden'}`}
+          className={`h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex-col ${!isPortrait ? 'min-[900px]:flex' : ''} max-[899px]:!w-full ${narrowPane === 'recent' ? 'flex' : 'hidden'}`}
           style={{ width: sidebarWidth }}
         >
           <Section
