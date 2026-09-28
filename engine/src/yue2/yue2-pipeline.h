@@ -1320,19 +1320,18 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
             fprintf(stderr, "[YuE2] Postprocess WARNING: plugin '%s' not found, keeping native decode\n",
                     req.postprocess_plugin.c_str());
         } else {
-            // yue2_ctx.latent_rms: unmeasured; measure by smoke render when
-            // GPU0 is free, see plan Phase 0 open items (docs/plans/
-            // yue2-integration-plan-v2.md, "Owner action items" #1). Unlike
-            // SA3 (0.685) and MM3 (2.35), no render-and-measure pass exists
-            // yet for YuE2, so this is a placeholder, not a measurement.
-            constexpr float YUE2_LATENT_RMS_PLACEHOLDER = 2.0f;
+            // yue2_ctx.latent_rms: measured 2026-09-28 from [YuE2-Latent] logs
+            // over three renders (rms 0.9358, 0.9285, 0.9402; 64-ch NAR
+            // latents before VAE decode). Mean ~0.935. Compare SA3 (0.685)
+            // and MM3 (2.35).
+            constexpr float YUE2_LATENT_RMS = 0.935f;
 
             LuaModelContext yue2_ctx;
             yue2_ctx.native_sr       = 48000;
             yue2_ctx.latent_fps      = 25;
             yue2_ctx.latent_channels = (int) LD;
             yue2_ctx.model_id        = "yue2";
-            yue2_ctx.latent_rms      = YUE2_LATENT_RMS_PLACEHOLDER;
+            yue2_ctx.latent_rms      = YUE2_LATENT_RMS;
 
             // song_latents is already time-major [T][LD] -- the exact layout
             // lua_call_postprocess expects (unlike SA3, which is native
