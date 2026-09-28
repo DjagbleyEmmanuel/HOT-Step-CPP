@@ -44,6 +44,9 @@ export const RepaintStudio: React.FC = () => {
   const gp = useGlobalParamsStore();
   const { disguiseArtist } = useDisguiseMode();
 
+  // Narrow-screen (<900 px) pane switcher — which of the two columns is visible
+  const [narrowPane, setNarrowPane] = useState<'source' | 'lyrics'>('source');
+
   // ── Source song state ──
   const [sourceSong, setSourceSong] = useState<Song | null>(() => restore('sourceSong', null));
   const [sourceAssetId, setSourceAssetId] = useState(() => restore<string>('sourceAssetId', ''));
@@ -322,9 +325,27 @@ export const RepaintStudio: React.FC = () => {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
+      {/* Narrow-screen pane switcher — only rendered below 900 px */}
+      <div className="max-[899px]:flex min-[900px]:hidden flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
+        {(['source', 'lyrics'] as const).map(pane => (
+          <button
+            key={pane}
+            type="button"
+            onClick={() => setNarrowPane(pane)}
+            className={`flex-1 py-2 text-xs font-semibold transition-colors ${
+              narrowPane === pane
+                ? 'text-pink-400 border-b-2 border-pink-400'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {pane === 'source' ? 'Source' : 'Lyrics'}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* ── Left Panel: Source + Waveform ── */}
-        <div className="w-[360px] flex-shrink-0 flex flex-col border-r border-white/5 overflow-y-auto">
+        <div className={`flex-shrink-0 flex flex-col border-r border-white/5 overflow-y-auto min-[900px]:w-[360px] min-[900px]:flex ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
           {/* Source selector */}
           <div className="p-4 border-b border-white/5">
             <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -462,7 +483,7 @@ export const RepaintStudio: React.FC = () => {
         </div>
 
         {/* ── Center: Lyrics Editor ── */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r border-white/5">
+        <div className={`flex-col overflow-hidden border-r border-white/5 flex-1 min-w-0 min-[900px]:flex ${narrowPane === 'lyrics' ? 'flex' : 'hidden'}`}>
           <RegionLyricsEditor
             lrcText={lrcText}
             fallbackLyrics={lyrics}
