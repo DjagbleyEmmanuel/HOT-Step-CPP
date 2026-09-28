@@ -47,6 +47,17 @@ export const RepaintStudio: React.FC = () => {
   // Narrow-screen (<900 px) pane switcher — which of the two columns is visible
   const [narrowPane, setNarrowPane] = useState<'source' | 'lyrics'>('source');
 
+  // Portrait-screen (>= 900 px, orientation portrait) — behaves like narrow
+  const [isPortrait, setIsPortrait] = useState(() =>
+    window.matchMedia('(orientation: portrait) and (min-width: 900px)').matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: portrait) and (min-width: 900px)');
+    const handler = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   // ── Source song state ──
   const [sourceSong, setSourceSong] = useState<Song | null>(() => restore('sourceSong', null));
   const [sourceAssetId, setSourceAssetId] = useState(() => restore<string>('sourceAssetId', ''));
@@ -325,8 +336,8 @@ export const RepaintStudio: React.FC = () => {
         </div>
       )}
 
-      {/* Narrow-screen pane switcher — only rendered below 900 px */}
-      <div className="max-[899px]:flex min-[900px]:hidden flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
+      {/* Narrow/portrait pane switcher — rendered below 900 px and on portrait >= 900 px */}
+      <div className="max-[899px]:flex min-[900px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
         {(['source', 'lyrics'] as const).map(pane => (
           <button
             key={pane}
@@ -345,7 +356,7 @@ export const RepaintStudio: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* ── Left Panel: Source + Waveform ── */}
-        <div className={`flex-shrink-0 flex flex-col border-r border-white/5 overflow-y-auto min-[900px]:w-[360px] min-[900px]:flex ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
+        <div className={`flex-shrink-0 flex flex-col border-r border-white/5 overflow-y-auto ${!isPortrait ? 'min-[900px]:w-[360px] min-[900px]:flex' : ''} ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
           {/* Source selector */}
           <div className="p-4 border-b border-white/5">
             <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
@@ -483,7 +494,7 @@ export const RepaintStudio: React.FC = () => {
         </div>
 
         {/* ── Center: Lyrics Editor ── */}
-        <div className={`flex-col overflow-hidden border-r border-white/5 flex-1 min-w-0 min-[900px]:flex ${narrowPane === 'lyrics' ? 'flex' : 'hidden'}`}>
+        <div className={`flex-col overflow-hidden border-r border-white/5 flex-1 min-w-0 ${!isPortrait ? 'min-[900px]:flex' : ''} ${narrowPane === 'lyrics' ? 'flex' : 'hidden'}`}>
           <RegionLyricsEditor
             lrcText={lrcText}
             fallbackLyrics={lyrics}
