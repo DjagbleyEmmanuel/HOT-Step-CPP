@@ -159,8 +159,8 @@ export const MidiStudio: React.FC = () => {
   const fmtGB = (b: number) => `${(b / 1e9).toFixed(2)} GB`;
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-6 py-8 flex flex-col gap-6">
+    <div className="h-full w-full overflow-y-auto">
+      <div className="max-w-4xl mx-auto max-[899px]:px-3 min-[900px]:px-6 py-8 flex flex-col gap-6">
 
         {/* ── Header ── */}
         <div>
@@ -232,7 +232,7 @@ export const MidiStudio: React.FC = () => {
                 value={hfTokenInput}
                 onChange={e => setHfTokenInput(e.target.value)}
                 placeholder={t('midiStudio.hfTokenPlaceholder')}
-                className="flex-1 min-w-[220px] px-3 py-2 rounded-lg text-xs bg-zinc-100 dark:bg-black/30 border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white placeholder-zinc-400 outline-none focus:border-purple-500/40"
+                className="flex-1 min-[900px]:min-w-[220px] min-w-0 px-3 py-2 rounded-lg text-xs bg-zinc-100 dark:bg-black/30 border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white placeholder-zinc-400 outline-none focus:border-purple-500/40"
               />
               <button
                 onClick={() => handleSaveHfToken(hfTokenInput)}

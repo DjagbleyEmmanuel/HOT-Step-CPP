@@ -284,7 +284,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
       {sourceAudioUrl && <audio ref={audioRef} src={sourceAudioUrl} preload="metadata" />}
 
       {/* transport */}
-      <div className="flex items-center gap-3 flex-wrap mb-2">
+      <div className="flex items-center gap-3 gap-y-2 flex-wrap mb-2">
         <button
           onClick={togglePlay}
           disabled={!sourceAudioUrl}
