@@ -7,6 +7,7 @@
 // DOM hosts and wires their callbacks to the store.
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Menu } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -281,6 +282,7 @@ const AppContent: React.FC = () => {
   const [activeView, setActiveView] = useState(() => viewFromUrl());
   const songsQuery = useQuery({ ...songsOptions(token || ''), enabled: !!token });
   const songs = songsQuery.data?.songs ?? NO_SONGS;
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
 
   // Resizable panel widths (persisted)
@@ -1278,11 +1280,26 @@ const AppContent: React.FC = () => {
       <RestoredQueueBanner />
       <AudioQueueMigrationBanner />
 
+      {/* Mobile-only nav bar — hamburger to open the sidebar drawer.
+          Hidden at desktop widths (>= 900 px). */}
+      <div className="max-[899px]:flex min-[900px]:hidden flex-shrink-0 items-center px-3 py-2 bg-white dark:bg-suno border-b border-zinc-200 dark:border-white/5">
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 transition-colors"
+          aria-label="Open navigation"
+          title="Open navigation"
+        >
+          <Menu size={20} />
+        </button>
+      </div>
+
       <div className="flex-1 flex overflow-hidden">
         <DiscoPulseWrapper hue={DISCO.sidebar}>
         <Sidebar
           activeView={activeView}
           onViewChange={navigateTo}
+          mobileOpen={mobileNavOpen}
+          onMobileClose={() => setMobileNavOpen(false)}
           onQuit={() => {
             setConfirmDialog({
               title: t('app.quitDialog.title'),
@@ -1320,7 +1337,7 @@ const AppContent: React.FC = () => {
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 flex overflow-hidden relative">
+        <main className="flex-1 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>
