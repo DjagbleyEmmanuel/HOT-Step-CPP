@@ -1345,7 +1345,7 @@ const AppContent: React.FC = () => {
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:900px)]:overflow-y-auto relative">
+        <main className="flex-1 min-w-0 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:900px)]:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>

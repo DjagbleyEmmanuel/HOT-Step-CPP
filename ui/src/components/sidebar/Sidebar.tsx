@@ -264,7 +264,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* ── Mobile overlay backdrop — shown behind drawer at narrow widths ── */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 min-[900px]:hidden"
+          className="fixed inset-0 bg-black/60 z-40 min-[900px]:landscape:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
@@ -272,7 +272,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ── Mobile overlay drawer — slides in from the left ── */}
       {mobileOpen && (
-        <div className="fixed inset-y-0 left-0 z-50 min-[900px]:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
+        <div className="fixed inset-y-0 left-0 z-50 min-[900px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
           {/* Close button */}
           <div className="mb-6 flex items-center justify-between px-3">
             <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Menu</span>
@@ -301,7 +301,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* ── Desktop sidebar — hidden at narrow widths ── */}
       <div className={[
         'flex flex-col h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 flex-shrink-0 py-4 overflow-y-auto hide-scrollbar transition-all duration-300',
-        'max-[899px]:hidden',
+        'max-[899px]:hidden portrait:hidden',
         isOpen ? 'w-[200px]' : 'w-[72px]',
       ].join(' ')}>
         {/* Collapse / Expand toggle (logo moved to GlobalParamBar) */}

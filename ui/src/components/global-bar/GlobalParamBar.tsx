@@ -298,7 +298,7 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
          style={{ backdropFilter: 'blur(20px)' }}>
 
       {/* Mobile compact bar — hamburger + logo + Settings button (hidden >= 900 px) */}
-      <div className="max-[899px]:flex min-[900px]:hidden items-center gap-3 px-3 py-2">
+      <div className="hidden max-[899px]:flex portrait:flex items-center gap-3 px-3 py-2">
         <button
           onClick={onOpenMobileNav}
           className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 transition-colors"
@@ -320,7 +320,7 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
       </div>
 
       {/* Desktop bar — full 5-section layout (hidden < 900 px) */}
-      <div className="min-[900px]:flex max-[899px]:hidden items-stretch">
+      <div className="flex max-[899px]:hidden portrait:hidden items-stretch">
         {/* Logo */}
         <div className="flex items-center justify-center flex-shrink-0 border-r border-zinc-200 dark:border-white/5" style={{ width: '199px', backgroundColor: '#000' }}>
           <img src="/logo.webp" alt="HOT-Step" style={{ width: '140px' }} className="h-auto object-contain" draggable={false} />
