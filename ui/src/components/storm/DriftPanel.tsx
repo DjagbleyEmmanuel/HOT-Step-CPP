@@ -61,6 +61,13 @@ const YUE2_PARAM_SPECS: ParamSpec[] = [
   { key: 'yue2NarCacheRatio', min: 0,  max: 0.9, step: 0.05 },
 ];
 
+// Mirrors server/src/services/storm/drift.ts SA3_PARAM_SPECS
+const SA3_PARAM_SPECS: ParamSpec[] = [
+  { key: 'guidanceScale', min: 1,  max: 15,  step: 0.1       },
+  { key: 'sa3Steps',      min: 4,  max: 64,  step: 1, int: true },
+  { key: 'duration',      min: 5,  max: 600, step: 1, int: true },
+];
+
 // Display labels for param keys
 const PARAM_LABELS: Record<string, string> = {
   guidanceScale:      'Guidance',
@@ -71,6 +78,7 @@ const PARAM_LABELS: Record<string, string> = {
   yue2CfgScale:       'CFG Scale',
   yue2OdeSteps:       'ODE Steps',
   yue2NarCacheRatio:  'NAR Cache',
+  sa3Steps:           'SA3 Steps',
 };
 
 // ---------------------------------------------------------------------------
@@ -183,11 +191,12 @@ function TagWeightBar({ tag, weight }: { tag: string; weight: number }) {
 export interface DriftPanelProps {
   sa: ReturnType<typeof useStreamAudio>;
   isYue2: boolean;
+  isSa3?: boolean;
   streamId?: string;
 }
 
-export function DriftPanel({ sa, isYue2, streamId = 'default' }: DriftPanelProps) {
-  const specs = isYue2 ? YUE2_PARAM_SPECS : ACE_PARAM_SPECS;
+export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPanelProps) {
+  const specs = isYue2 ? YUE2_PARAM_SPECS : isSa3 ? SA3_PARAM_SPECS : ACE_PARAM_SPECS;
 
   // Persisted pressure
   const [pressure, setPressure] = usePersistedState<DriftPressure>(
