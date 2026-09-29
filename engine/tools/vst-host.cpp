@@ -805,9 +805,24 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
         return false;
     }
     if (ms.audio) free(ms.audio);
+    const int old_sr = ms.sr;
     ms.audio = audio;
     ms.T = T;
     ms.sr = sr;
+    // Track rate changed mid-session (e.g. 44.1k SA3/MM3 -> 48k ACE): the
+    // plugins were prepared at the old rate, so re-prepare them at the new one.
+    // The render loop picks the resampler whenever ms.sr != the device rate.
+    if (old_sr > 0 && old_sr != sr) {
+        for (auto & p : ms.plugins) {
+            if (!p.component) continue;
+            if (p.processor) p.processor->setProcessing(false);
+            p.component->setActive(false);
+            setup_processing(p, sr, 4096, kRealtime);
+        }
+        ms.rs_phase = 0.0;
+        ms.rs_last_L = ms.rs_last_R = 0.0f;
+        fprintf(stderr, "[monitor] Track rate changed %d -> %d Hz, plugins re-prepared\n", old_sr, sr);
+    }
     ms.pos = 0;
     ms.current_track = path;
     fprintf(stderr, "[monitor] Loaded: %s (%d frames, %d Hz, %.1fs)\n",
@@ -1290,7 +1305,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             if (available > 0) {
                 BYTE * data = nullptr;
                 if (SUCCEEDED(pRenderClient->GetBuffer(available, &data))) {
-                    if (ms.rs_active) {
+                    if (ms.rs_active || ms.sr != dev_sr) {
                         monitor_resample_block(ms, proc_L.data(), proc_R.data(), available, dev_sr);
                     } else {
                         monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
