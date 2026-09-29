@@ -772,6 +772,8 @@ struct MonitorState {
     std::string status_file;
     std::string current_track;
     FILETIME    control_mtime = {};
+    int64_t     control_seq = 0;       // last applied control seq (0 = none seen)
+    int64_t     control_seek_seq = 0;  // last applied seekSeq
     bool        running = true;
     bool        paused  = false;
 
@@ -800,7 +802,7 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
 static void monitor_check_control(MonitorState & ms) {
     if (ms.control_file.empty()) return;
     HANDLE hFile = CreateFileA(ms.control_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) return;
 
@@ -809,7 +811,6 @@ static void monitor_check_control(MonitorState & ms) {
     bool changed = (ft.dwHighDateTime != ms.control_mtime.dwHighDateTime ||
                     ft.dwLowDateTime  != ms.control_mtime.dwLowDateTime);
     if (!changed) { CloseHandle(hFile); return; }
-    ms.control_mtime = ft;
 
     DWORD size = GetFileSize(hFile, nullptr);
     if (size == 0 || size == INVALID_FILE_SIZE) { CloseHandle(hFile); return; }
@@ -819,8 +820,18 @@ static void monitor_check_control(MonitorState & ms) {
     CloseHandle(hFile);
 
     yyjson_doc * doc = yyjson_read(buf.data(), bytesRead, 0);
-    if (!doc) return;
+    if (!doc) return;  // partial or empty write: mtime not recorded, retry next poll
     yyjson_val * root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_obj(root)) { yyjson_doc_free(doc); return; }
+    ms.control_mtime = ft;  // record only after a successful parse
+
+    // Act only on a newer seq. Files without seq (older servers) act on mtime.
+    yyjson_val * seq_val = yyjson_obj_get(root, "seq");
+    if (seq_val && yyjson_is_num(seq_val)) {
+        int64_t seq = (int64_t)yyjson_get_num(seq_val);
+        if (seq <= ms.control_seq) { yyjson_doc_free(doc); return; }
+        ms.control_seq = seq;
+    }
 
     yyjson_val * action_val = yyjson_obj_get(root, "action");
     if (action_val) {
@@ -848,7 +859,14 @@ static void monitor_check_control(MonitorState & ms) {
 
     // Seek support: { "seek": 42.5 } = jump to 42.5 seconds
     yyjson_val * seek_val = yyjson_obj_get(root, "seek");
-    if (seek_val && yyjson_is_num(seek_val)) {
+    yyjson_val * seek_seq_val = yyjson_obj_get(root, "seekSeq");
+    bool seek_new = true;
+    if (seek_seq_val && yyjson_is_num(seek_seq_val)) {
+        int64_t sseq = (int64_t)yyjson_get_num(seek_seq_val);
+        seek_new = sseq > ms.control_seek_seq;
+        if (seek_new) ms.control_seek_seq = sseq;
+    }
+    if (seek_new && seek_val && yyjson_is_num(seek_val)) {
         double seek_sec = yyjson_get_num(seek_val);  // get_real reads a JSON integer as 0
         int new_pos = (int)(seek_sec * ms.sr);
         if (new_pos < 0) new_pos = 0;
@@ -1177,9 +1195,9 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             }
         }
 
-        // Check control file periodically (~500ms)
+        // Check control file periodically (~50ms; one stat when unchanged)
         DWORD now = GetTickCount();
-        if (now - controlCheckTick > 500) {
+        if (now - controlCheckTick > 50) {
             controlCheckTick = now;
             monitor_check_control(ms);
         }

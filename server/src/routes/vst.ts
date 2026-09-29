@@ -18,6 +18,7 @@ import type {
   GuiResponse, ProcessResponse, MonitorStartResponse, MonitorStopResponse, MonitorSwitchResponse,
   MonitorStatusResponse, MonitorSeekResponse, MonitorPauseResponse, MonitorResumeResponse, MonitorRestartResponse,
 } from '../contracts/vst.js';
+import { createControlWriter } from './vstControl.js';
 
 const execFileAsync = promisify(execFile);
 // macOS objc runtime prints 'Class X is implemented in both A and B' for every
@@ -250,8 +251,11 @@ let monitorCurrentTrack = '';  // track path currently loaded in monitor
 const monitorControlFile = () => path.join(config.vst.statesDir, 'monitor_control.json');
 const monitorStatusFile  = () => path.join(config.vst.statesDir, 'monitor_status.json');
 
-function writeMonitorControl(data: Record<string, unknown>): void {
-  fs.writeFileSync(monitorControlFile(), JSON.stringify(data), 'utf-8');
+// Atomic, seq-stamped, merging writes (see vstControl.ts). Pass reset=true only
+// when starting a fresh monitor process.
+const monitorControl = createControlWriter(monitorControlFile);
+function writeMonitorControl(data: Record<string, unknown>, reset = false): void {
+  monitorControl.write(data, reset);
 }
 
 function isMonitorAlive(): boolean {
@@ -350,7 +354,7 @@ router.post('/monitor/start', async (req, res) => {
   fs.writeFileSync(tempChainFile, JSON.stringify(chainData), 'utf-8');
 
   // Write initial control file
-  writeMonitorControl({ track: absTrackPath, action: 'play' });
+  writeMonitorControl({ track: absTrackPath, action: 'play' }, true);
   monitorPaused = false;
   monitorCurrentTrack = absTrackPath;
 
@@ -460,14 +464,8 @@ router.post('/monitor/seek', (req, res) => {
     return;
   }
 
-  // Read current control file and add seek field
-  let controlData: Record<string, unknown> = { action: 'play' };
-  try {
-    const raw = fs.readFileSync(monitorControlFile(), 'utf-8');
-    controlData = JSON.parse(raw);
-  } catch { /* start fresh */ }
-  controlData.seek = position;
-  writeMonitorControl(controlData);
+  // Merge the seek into the current control state (keeps any pending command)
+  writeMonitorControl({ seek: position });
 
   res.json({ ok: true, position } satisfies MonitorSeekResponse);
 });
@@ -491,12 +489,7 @@ router.post('/monitor/resume', (_req, res) => {
     return;
   }
   monitorPaused = false;
-  let ctrl: Record<string, unknown> = {};
-  try {
-    const raw = fs.readFileSync(monitorControlFile(), 'utf-8');
-    ctrl = JSON.parse(raw);
-  } catch { /* start fresh */ }
-  writeMonitorControl({ ...ctrl, action: 'play' });
+  writeMonitorControl({ action: 'play' });
   res.json({ ok: true } satisfies MonitorResumeResponse);
 });
 
@@ -543,7 +536,7 @@ router.post('/monitor/restart', async (_req, res) => {
     })),
   };
   fs.writeFileSync(tempChainFile, JSON.stringify(chainData), 'utf-8');
-  writeMonitorControl({ track, action: 'play' });
+  writeMonitorControl({ track, action: 'play' }, true);
   monitorCurrentTrack = track;
 
   console.log(`[VST] Restarting monitor: ${enabled.length} plugin(s), track=${path.basename(track)}`);
