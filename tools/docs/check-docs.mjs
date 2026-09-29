@@ -81,9 +81,15 @@ try {
 } catch { /* Without git metadata, read the working files as before. */ }
 const linkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 for (const file of [...tracked, ...untrackedNew]) {
-  const raw = skipWorktree.has(file)
-    ? execFileSync('git', ['show', `:${file}`], { cwd: ROOT, encoding: 'utf8' })
-    : fs.readFileSync(path.join(ROOT, file), 'utf8');
+  let raw;
+  try {
+    raw = skipWorktree.has(file)
+      ? execFileSync('git', ['show', `:${file}`], { cwd: ROOT, encoding: 'utf8' })
+      : fs.readFileSync(path.join(ROOT, file), 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') { warn.push(`${file}: unreadable (skipped — broken symlink?)`); continue; }
+    throw e;
+  }
   const text = raw.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
   for (const m of text.matchAll(linkRe)) {
     let target = m[1];
