@@ -266,6 +266,23 @@ function isMonitorAlive(): boolean {
   }
 }
 
+/** Ask the given monitor child to stop, wait for it to exit, then force-kill
+ *  it if it has not exited within timeoutMs. Targets the captured child, never
+ *  the shared monitorProcess variable, so a newer monitor is never killed. */
+function stopMonitorChild(child: ChildProcess | null, timeoutMs: number): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(); } };
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      setTimeout(finish, 500);
+    }, timeoutMs);
+    child.once('exit', finish);
+    writeMonitorControl({ action: 'stop' });
+  });
+}
+
 /** Resolve a trackPath (from the UI) to an absolute filesystem path.
  *  Handles: "/audio/uuid.wav", "http://localhost:3001/audio/uuid.wav",
  *  "D:\\...\\uuid.wav", and bare "uuid.wav". */
@@ -286,7 +303,7 @@ function resolveTrackPath(trackPath: string): string {
 }
 
 // POST /monitor/start — Start real-time monitoring
-router.post('/monitor/start', (req, res) => {
+router.post('/monitor/start', async (req, res) => {
   const { trackPath } = req.body;
   if (!trackPath) {
     res.status(400).json({ error: 'trackPath required' });
@@ -306,13 +323,12 @@ router.post('/monitor/start', (req, res) => {
     return;
   }
 
-  // Kill existing monitor if running
+  // Stop the existing monitor and wait for it to exit before spawning, so the
+  // new control file cannot overwrite its pending stop.
   if (isMonitorAlive()) {
-    writeMonitorControl({ action: 'stop' });
-    setTimeout(() => {
-      try { monitorProcess?.kill(); } catch {}
-      monitorProcess = null;
-    }, 1000);
+    const old = monitorProcess;
+    await stopMonitorChild(old, 3000);
+    if (monitorProcess === old) monitorProcess = null;
   }
 
   // Write temp chain JSON for the monitor (uses statePath for state files)
@@ -361,7 +377,7 @@ router.post('/monitor/start', (req, res) => {
 
   child.on('exit', (code) => {
     console.log(`[VST] Monitor exited (code ${code})`);
-    monitorProcess = null;
+    if (monitorProcess === child) monitorProcess = null;
     // Clean up temp chain
     try { fs.unlinkSync(tempChainFile); } catch {}
   });
@@ -378,11 +394,12 @@ router.post('/monitor/stop', (_req, res) => {
   writeMonitorControl({ action: 'stop' });
   monitorPaused = false;
   monitorCurrentTrack = '';
-  // Give it a moment to save state gracefully, then force-kill
+  // Give it a moment to save state gracefully, then force-kill the captured
+  // child (not whatever monitorProcess points to by then).
+  const old = monitorProcess;
   setTimeout(() => {
-    if (isMonitorAlive()) {
-      try { monitorProcess?.kill(); } catch {}
-      monitorProcess = null;
+    if (old && old.exitCode === null && old.signalCode === null) {
+      try { old.kill(); } catch {}
     }
   }, 3000);
   res.json({ ok: true, wasRunning: true } satisfies MonitorStopResponse);
@@ -549,7 +566,7 @@ router.post('/monitor/restart', async (_req, res) => {
 
   child.on('exit', (code) => {
     console.log(`[VST] Monitor exited (code ${code})`);
-    monitorProcess = null;
+    if (monitorProcess === child) monitorProcess = null;
     try { fs.unlinkSync(tempChainFile); } catch {}
   });
 
