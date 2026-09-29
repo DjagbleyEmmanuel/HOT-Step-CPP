@@ -30,6 +30,7 @@ import { wavDurationSec } from '../../audioCrop.js';
 import { tokenizeForSa3 } from '../../sa3Tokenizer.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import type { PostProcessParams } from '../../generation/postProcessing.js';
+import { normalizeLufs } from '../../generation/lufsNormalize.js';
 import {
   startGenerationLog, logGeneration, logGenerationParams,
   finishGenerationLog, failGenerationLog,
@@ -226,6 +227,29 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
     const measured = wavDurationSec(filepath);
     const duration = measured > 0 ? Math.round(measured) : Math.round(durationSec);
     log('INFO', `[SA3] Rendered ${duration}s in ${synthMs} ms → ${filename} (${(wavBuf.length / 1024).toFixed(0)} KB)`);
+
+    // ── Optional loudness normalization ───────────────────────────────────
+    // Off by default. When enabled, normalizes the WAV in place to the target
+    // integrated LUFS with a peak ceiling of -1 dBFS before post-processing.
+    // The raw SA3 output level swings ~18 dB across captions; this collapses
+    // that variance at the cost of one extra read+write pass on the file.
+    if (job.params.sa3LufsEnabled === true) {
+      const lufsTarget = Number(job.params.sa3LufsTarget);
+      const target = Number.isFinite(lufsTarget) && lufsTarget >= -40 && lufsTarget <= -3
+        ? lufsTarget : -14;
+      try {
+        const lufsStart = performance.now();
+        const lufsResult = normalizeLufs(filepath, target, -1.0, { outFormat: 'f32' });
+        const lufsMs = Math.round(performance.now() - lufsStart);
+        log('INFO', `[SA3] Loudness norm: measured ${lufsResult.measuredLufs.toFixed(1)} LUFS `
+          + `→ target ${target} LUFS, gain ${lufsResult.appliedGainDb.toFixed(2)} dB, `
+          + `peak after ${lufsResult.peakAfter.toFixed(4)}, limiter ${lufsResult.limiterActive ? 'active' : 'off'} `
+          + `(${lufsMs} ms)`);
+        timing.push({ name: 'LUFS normalize', ms: lufsMs });
+      } catch (lufsErr: any) {
+        log('WARNING', `[SA3] Loudness normalization failed (non-fatal): ${lufsErr?.message || lufsErr}`);
+      }
+    }
     timing.push({ name: 'Save', ms: Math.round(performance.now() - saveStart) });
 
     // ── Persist params ────────────────────────────────────────────────────

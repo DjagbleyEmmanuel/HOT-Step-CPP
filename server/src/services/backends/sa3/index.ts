@@ -111,6 +111,36 @@ const SA3_EXTENSIONS: BackendExtensionParam[] = [
     default: false,
     group: 'generation',
   },
+  // Optional output loudness normalization. Off by default — the output level
+  // swings roughly 18 dB across captions and this is the escape valve. Uses
+  // BS.1770-4 integrated LUFS measurement (audioLevel.integratedLufs) followed
+  // by a look-ahead peak limiter at -1 dBFS (audioLevel.limitPeaks). Applied
+  // after the engine WAV is written, before post-processing.
+  {
+    key: 'sa3LufsEnabled',
+    type: 'toggle',
+    label: 'Loudness Normalize',
+    hint: 'Normalize the SA3 output to a target integrated LUFS before '
+        + 'post-processing. The output level can swing ~18 dB depending on the '
+        + 'caption; this brings it to a consistent level. Peak ceiling is always '
+        + '-1 dBFS.',
+    default: false,
+    group: 'generation',
+  },
+  {
+    key: 'sa3LufsTarget',
+    type: 'slider',
+    label: 'LUFS Target',
+    default: -14,
+    min: -30,
+    max: -6,
+    step: 0.5,
+    hint: 'Integrated LUFS target after normalization. -14 LUFS is the streaming '
+        + 'standard; -18 to -23 suits material that will go through a mastering '
+        + 'chain. Peak ceiling is always -1 dBFS regardless.',
+    group: 'generation',
+    visible_when: { key: 'sa3LufsEnabled', equals: 'true' },
+  },
 ];
 
 async function capabilities(): Promise<BackendCapabilities> {
