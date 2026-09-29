@@ -153,12 +153,12 @@ export const Player: React.FC<PlayerProps> = ({
     <div className={[
       'flex-shrink-0 bg-white dark:bg-zinc-950 px-4',
       // Desktop: single row, fixed height
-      'min-[900px]:flex min-[900px]:items-center min-[900px]:h-14 min-[900px]:gap-4',
+      'min-[1024px]:flex min-[1024px]:items-center min-[1024px]:h-14 min-[1024px]:gap-4',
       // Mobile: two rows stacked, auto height
-      'max-[899px]:flex max-[899px]:flex-col max-[899px]:py-1.5 max-[899px]:gap-1',
+      'max-[1023px]:flex max-[1023px]:flex-col max-[1023px]:py-1.5 max-[1023px]:gap-1',
     ].join(' ')}>
       {/* Left: Song Info — row 1 on mobile */}
-      <div className="flex items-center gap-3 min-[900px]:w-[240px] min-[900px]:flex-shrink-0 max-[899px]:w-full max-[899px]:min-w-0">
+      <div className="flex items-center gap-3 min-[1024px]:w-[240px] min-[1024px]:flex-shrink-0 max-[1023px]:w-full max-[1023px]:min-w-0">
         <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0">
           <CoverImage url={currentSong.coverUrl} seed={currentSong.id} iconSize={20} />
         </div>
@@ -171,10 +171,10 @@ export const Player: React.FC<PlayerProps> = ({
       </div>
 
       {/* Row 2 on mobile: transport + right controls together */}
-      <div className="max-[899px]:flex max-[899px]:items-center max-[899px]:gap-2 max-[899px]:w-full min-[900px]:contents">
+      <div className="max-[1023px]:flex max-[1023px]:items-center max-[1023px]:gap-2 max-[1023px]:w-full min-[1024px]:contents">
 
       {/* Center: Transport Controls */}
-      <div className="flex-1 flex items-center justify-center gap-3 min-[900px]:max-w-[500px] min-[900px]:mx-auto max-[899px]:flex-1 max-[899px]:min-w-0 max-[899px]:gap-2">
+      <div className="flex-1 flex items-center justify-center gap-3 min-[1024px]:max-w-[500px] min-[1024px]:mx-auto max-[1023px]:flex-1 max-[1023px]:min-w-0 max-[1023px]:gap-2">
         <span className="text-[10px] text-zinc-500 font-mono w-10 text-right flex-shrink-0">{formatTime(currentTime)}</span>
         <button
           onClick={onToggleShuffle}
@@ -214,14 +214,14 @@ export const Player: React.FC<PlayerProps> = ({
         </button>
         <button
           onClick={onToggleSpectrum}
-          className={`p-1.5 rounded-lg transition-colors max-[899px]:hidden ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
+          className={`p-1.5 rounded-lg transition-colors max-[1023px]:hidden ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
           title={spectrumEnabled ? t('player.spectrumOn') : t('player.spectrumOff')}
         >
           <Activity size={16} />
         </button>
         <button
           onClick={onToggleDisco}
-          className={`p-1.5 rounded-lg transition-colors max-[899px]:hidden ${discoMode ? 'text-yellow-400 animate-pulse' : 'text-zinc-500 hover:text-yellow-400 hover:bg-yellow-500/5'}`}
+          className={`p-1.5 rounded-lg transition-colors max-[1023px]:hidden ${discoMode ? 'text-yellow-400 animate-pulse' : 'text-zinc-500 hover:text-yellow-400 hover:bg-yellow-500/5'}`}
           title={discoMode ? 'Disco mode ON' : 'Disco mode OFF'}
         >
           <DiscoIcon size={16} />
@@ -231,7 +231,7 @@ export const Player: React.FC<PlayerProps> = ({
 
       {/* Right: Volume + Actions — min-width keeps the layout stable, but the
           cluster may grow when the text variant switch is present */}
-      <div className="flex items-center gap-3 min-[900px]:min-w-[280px] min-[900px]:flex-shrink-0 max-[899px]:gap-2 justify-end">
+      <div className="flex items-center gap-3 min-[1024px]:min-w-[280px] min-[1024px]:flex-shrink-0 max-[1023px]:gap-2 justify-end">
         {/* Playback Rate — hidden on mobile */}
         <button
           onClick={() => {
@@ -239,7 +239,7 @@ export const Player: React.FC<PlayerProps> = ({
             const idx = rates.indexOf(playbackRate);
             onPlaybackRateChange(rates[(idx + 1) % rates.length]);
           }}
-          className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white px-1.5 py-0.5 rounded font-mono transition-colors max-[899px]:hidden"
+          className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white px-1.5 py-0.5 rounded font-mono transition-colors max-[1023px]:hidden"
           title={t('player.playbackSpeed')}
         >
           {playbackRate}x
@@ -251,7 +251,7 @@ export const Player: React.FC<PlayerProps> = ({
             AND slower is much harder to A/B than one that is only lower. */}
         <button
           onClick={onTogglePitch441}
-          className={`text-xs px-1.5 py-0.5 rounded font-mono transition-colors max-[899px]:hidden ${
+          className={`text-xs px-1.5 py-0.5 rounded font-mono transition-colors max-[1023px]:hidden ${
             pitch441
               ? 'text-amber-400 bg-amber-500/10'
               : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
@@ -267,7 +267,7 @@ export const Player: React.FC<PlayerProps> = ({
 
         {/* Variant switch — hidden on mobile (space-constrained), visible on desktop */}
         {!abMode && (currentSong.masteredAudioUrl || currentSong.noAdapterAudioUrl) && (
-          <div className="flex rounded-lg overflow-hidden border border-zinc-300 dark:border-white/10 flex-shrink-0 max-[899px]:hidden">
+          <div className="flex rounded-lg overflow-hidden border border-zinc-300 dark:border-white/10 flex-shrink-0 max-[1023px]:hidden">
             {currentSong.noAdapterAudioUrl && (
               <VariantSegment
                 active={playNoAdapter}
@@ -341,7 +341,7 @@ export const Player: React.FC<PlayerProps> = ({
         {/* Trim / Crop toggle — hidden on mobile */}
         <button
           onClick={onToggleTrimMode}
-          className={`p-1.5 rounded-lg transition-all max-[899px]:hidden ${
+          className={`p-1.5 rounded-lg transition-all max-[1023px]:hidden ${
             trimMode
               ? 'text-cyan-400 bg-cyan-500/10 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
               : 'text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/5'
@@ -367,7 +367,7 @@ export const Player: React.FC<PlayerProps> = ({
             step={0.01}
             value={volume}
             onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-            className="min-[900px]:w-20 min-[900px]:min-w-[80px] max-[899px]:w-14"
+            className="min-[1024px]:w-20 min-[1024px]:min-w-[80px] max-[1023px]:w-14"
           />
         </div>
 
@@ -375,7 +375,7 @@ export const Player: React.FC<PlayerProps> = ({
         {onReusePrompt && (
           <button
             onClick={onReusePrompt}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors max-[899px]:hidden"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors max-[1023px]:hidden"
             title={t('player.edit')}
           >
             <RotateCcw size={14} />
@@ -384,7 +384,7 @@ export const Player: React.FC<PlayerProps> = ({
         {onDownload && (
           <button
             onClick={onDownload}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors max-[899px]:hidden"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors max-[1023px]:hidden"
             title={t('player.download')}
           >
             <Download size={14} />
@@ -393,7 +393,7 @@ export const Player: React.FC<PlayerProps> = ({
         {onDelete && (
           <button
             onClick={onDelete}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors max-[899px]:hidden"
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors max-[1023px]:hidden"
             title={t('player.delete')}
           >
             <Trash2 size={14} />

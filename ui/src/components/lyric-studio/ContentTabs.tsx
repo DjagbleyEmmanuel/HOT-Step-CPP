@@ -48,7 +48,7 @@ export const ContentTabs: React.FC<ContentTabsProps> = ({
                 }`}
               >
                 {tab.icon}
-                <span className="max-[899px]:hidden">{tab.label}</span>
+                <span className="max-[1023px]:hidden">{tab.label}</span>
                 {tab.badge != null && tab.badge > 0 && (
                   <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center ${
                     isActive ? 'bg-pink-500/20 text-pink-300' : 'bg-white/10 text-zinc-600 dark:text-zinc-400'

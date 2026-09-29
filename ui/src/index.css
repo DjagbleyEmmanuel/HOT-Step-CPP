@@ -411,7 +411,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
    ======================================== */
 
 /* Wrapper: establishes stacking context for glow ring + scale pulse */
-/* In @layer components so utilities like max-[899px]:hidden can override
+/* In @layer components so utilities like max-[1023px]:hidden can override
    display:flex (unlayered, it won and kept "hidden" panels visible). */
 @layer components {
 .disco-wrapper {

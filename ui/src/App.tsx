@@ -1143,22 +1143,22 @@ const AppContent: React.FC = () => {
     }
 
     // Default: create view
-    // Layout: side-by-side on wide landscape, stacked vertically on narrow (<900px)
-    // and on portrait screens >= 900px (e.g. 1080x1920 at 100%).
+    // Layout: side-by-side on wide landscape, stacked vertically on narrow (<1024px)
+    // and on portrait screens >= 1024px (e.g. 1080x1920 at 100%).
     return (
       <div className="flex flex-1
-        min-[900px]:flex-row max-[899px]:flex-col
-        min-[900px]:overflow-hidden max-[899px]:overflow-visible
-        [@media(orientation:portrait)_and_(min-width:900px)]:flex-col
-        [@media(orientation:portrait)_and_(min-width:900px)]:overflow-visible">
+        min-[1024px]:flex-row max-[1023px]:flex-col
+        min-[1024px]:overflow-hidden max-[1023px]:overflow-visible
+        [@media(orientation:portrait)_and_(min-width:1024px)]:flex-col
+        [@media(orientation:portrait)_and_(min-width:1024px)]:overflow-visible">
         {/* Create Panel — resizable on wide landscape, full-width on narrow/portrait.
             Tailwind's ! prefix generates !important which overrides inline style. */}
         <DiscoPulseWrapper
           hue={DISCO.createPanel}
           className="flex-shrink-0 border-zinc-200 dark:border-white/5
-            min-[900px]:h-full min-[900px]:border-r
-            max-[899px]:!w-full max-[899px]:border-b max-[899px]:h-auto max-[899px]:border-r-0
-            [@media(orientation:portrait)_and_(min-width:900px)]:!w-full [@media(orientation:portrait)_and_(min-width:900px)]:border-b [@media(orientation:portrait)_and_(min-width:900px)]:border-r-0 [@media(orientation:portrait)_and_(min-width:900px)]:h-auto"
+            min-[1024px]:h-full min-[1024px]:border-r
+            max-[1023px]:!w-full max-[1023px]:border-b max-[1023px]:h-auto max-[1023px]:border-r-0
+            [@media(orientation:portrait)_and_(min-width:1024px)]:!w-full [@media(orientation:portrait)_and_(min-width:1024px)]:border-b [@media(orientation:portrait)_and_(min-width:1024px)]:border-r-0 [@media(orientation:portrait)_and_(min-width:1024px)]:h-auto"
           style={{ width: createPanelWidth }}
         >
           <CreatePanel
@@ -1171,8 +1171,8 @@ const AppContent: React.FC = () => {
         {/* Left resize handle — hidden on narrow and portrait */}
         <div
           className="flex-shrink-0 w-1.5 cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
-            min-[900px]:h-full max-[899px]:hidden
-            [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
+            min-[1024px]:h-full max-[1023px]:hidden
+            [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -1241,7 +1241,7 @@ const AppContent: React.FC = () => {
             {/* Right resize handle */}
             <div
               className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
-                max-[899px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
+                max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
               onMouseDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -1266,7 +1266,7 @@ const AppContent: React.FC = () => {
             </div>
             <DiscoPulseWrapper hue={DISCO.rightSidebar}
               className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5
-                max-[899px]:hidden [@media(orientation:portrait)_and_(min-width:900px)]:hidden"
+                max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
               style={{ width: rightSidebarWidth }}
             >
               <RightSidebar
@@ -1345,7 +1345,7 @@ const AppContent: React.FC = () => {
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 min-w-0 flex min-[900px]:overflow-hidden max-[899px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:900px)]:overflow-y-auto relative">
+        <main className="flex-1 min-w-0 flex min-[1024px]:overflow-hidden max-[1023px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:1024px)]:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>
@@ -1463,7 +1463,7 @@ const AppContent: React.FC = () => {
             every view, so the queue and the engine log are never more than a
             glance away regardless of which studio is open. */}
         <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors max-[899px]:hidden"
+          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors max-[1023px]:hidden"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -1486,7 +1486,7 @@ const AppContent: React.FC = () => {
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
         </div>
         <DiscoPulseWrapper hue={DISCO.activity}
-          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-[899px]:hidden"
+          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden"
           style={{ width: activitySidebarWidth }}
         >
           <ActivitySidebar

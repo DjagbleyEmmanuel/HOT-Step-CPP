@@ -138,7 +138,7 @@ export const DatasetList: React.FC = () => {
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder={t('trainingStudio.list.filter', 'Filter by dataset, artist or album…') as string}
-          className="flex-1 max-[899px]:max-w-full max-w-md rounded-lg bg-zinc-100 dark:bg-black/20 px-3 py-1.5 text-xs"
+          className="flex-1 max-[1023px]:max-w-full max-w-md rounded-lg bg-zinc-100 dark:bg-black/20 px-3 py-1.5 text-xs"
         />
         {isYue2 && (
           <div className="flex flex-col gap-1">

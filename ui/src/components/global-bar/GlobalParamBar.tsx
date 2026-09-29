@@ -7,6 +7,7 @@ import { aceModelsOptions } from '../../queries/global-models/options';
 // Sits full-width at the top of the entire window (above sidebar).
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark, AlertTriangle, Download, X, Menu, ChevronDown, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarSection, ToggleSwitch, ACCENT_STYLES } from './BarSection';
@@ -297,8 +298,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
     <div className="flex-shrink-0 relative z-40 bg-white/95 dark:bg-zinc-900/95 border-b border-zinc-200 dark:border-white/5"
          style={{ backdropFilter: 'blur(20px)' }}>
 
-      {/* Mobile compact bar — hamburger + logo + Settings button (hidden >= 900 px) */}
-      <div className="hidden max-[899px]:flex portrait:flex items-center gap-3 px-3 py-2">
+      {/* Mobile compact bar — hamburger + logo + Settings button (hidden >= 1024px) */}
+      <div className="hidden max-[1023px]:flex portrait:flex items-center gap-3 px-3 py-2">
         <button
           onClick={onOpenMobileNav}
           className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 transition-colors"
@@ -319,8 +320,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
         </button>
       </div>
 
-      {/* Desktop bar — full 5-section layout (hidden < 900 px) */}
-      <div className="flex max-[899px]:hidden portrait:hidden items-stretch">
+      {/* Desktop bar — full 5-section layout (hidden < 1024px) */}
+      <div className="flex max-[1023px]:hidden portrait:hidden items-stretch">
         {/* Logo */}
         <div className="flex items-center justify-center flex-shrink-0 border-r border-zinc-200 dark:border-white/5" style={{ width: '199px', backgroundColor: '#000' }}>
           <img src="/logo.webp" alt="HOT-Step" style={{ width: '140px' }} className="h-auto object-contain" draggable={false} />
@@ -505,9 +506,9 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
       )}
 
       {/* Mobile Settings Sheet — full-height overlay for narrow screens */}
-      {showMobileSettings && (
+      {showMobileSettings && createPortal(
         <div
-          className="fixed inset-0 z-[60] flex"
+          className="fixed inset-0 z-[55] flex"
           role="dialog"
           aria-modal="true"
           aria-label={t('globalBar.mobileSettingsTitle')}
@@ -624,7 +625,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
