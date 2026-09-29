@@ -10,6 +10,7 @@ import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useStreamAudio } from '../../hooks/useStreamAudio';
 import { StormLiveControls, type LyricsMode, type SlotMeta } from './StormLiveControls';
+import { DriftPanel } from './DriftPanel';
 import { expandWildcards, hasWildcards } from '../../utils/wildcardUtils';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { useBackendStore } from '../../stores/backendStore';
@@ -385,9 +386,19 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
     };
     if (mode === 'sequential') {
       onGenerate({ ...params, guidanceScale: liveParams.guidance_scale, inferenceSteps: liveParams.inference_steps, duration: liveParams.duration, bpm: liveParams.bpm });
-    } else if (mode === 'continuous') {
+    } else if (mode === 'continuous' || mode === 'drift') {
       sa.setXfadeBeats(xfadeBeats); // sync xfadeBeatsRef before stream starts
-      sa.start(params);
+      if (mode === 'drift') {
+        // Read persisted drift pressure from localStorage
+        let driftPressure: Record<string, unknown> = {};
+        try {
+          const stored = localStorage.getItem('hs-storm-drift-pressure');
+          if (stored) driftPressure = JSON.parse(stored);
+        } catch { /* ignore */ }
+        sa.start({ ...params, drift: driftPressure });
+      } else {
+        sa.start(params);
+      }
     }
   };
 
@@ -1230,21 +1241,9 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
         </div>
       )}
 
-      {/* ── Drift placeholder ── */}
+      {/* ── Directed Drift panel ── */}
       {mode==='drift' && (
-        <div className="flex-1 flex overflow-hidden p-4">
-          <div className="flex-1 flex items-start justify-center pt-16">
-            <div className="text-center space-y-3 max-w-md px-6">
-              <div className="text-4xl">🌊</div>
-              <h2 className="text-xl font-bold text-white">Directed Drift</h2>
-              <p className="text-sm text-zinc-400 leading-relaxed">
-                The stream never stops. It evolves forever. Inputs are pressure — not commands.
-                You're not programming it, you're steering it.
-              </p>
-              <p className="text-xs text-zinc-600">Coming soon — Plank H</p>
-            </div>
-          </div>
-        </div>
+        <DriftPanel sa={sa} isYue2={isYue2} />
       )}
     </div>
     </BackendCapabilityGate>
