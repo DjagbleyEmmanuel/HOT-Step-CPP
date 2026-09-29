@@ -506,3 +506,38 @@ export function snapshot(runtime: DriftRuntime): {
     targetCaption:  [...(runtime.pressure.targetCaption ?? [])],
   };
 }
+
+/** Fresh default pressure (no targets, locks or caption pool). */
+export function defaultDriftPressure(): DriftPressure {
+  return {
+    targets: {}, targetCaption: [], captionPool: [],
+    pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
+  };
+}
+
+/**
+ * Resolve the drift runtime at stream start.
+ * - ctrlDrift is kept only when driftPending is true (set by a POST
+ *   /storm/control while no stream was live). It is re-seeded with baseSeed
+ *   and any startDrift patch is applied on top.
+ * - Otherwise any leftover runtime is discarded: a fresh runtime is built from
+ *   the default pressure plus startDrift, or undefined when there is no startDrift.
+ * startDrift is always validated through updateDriftPressure (clamped).
+ */
+export function resolveStartDrift(
+  ctrlDrift: DriftRuntime | undefined,
+  driftPending: boolean,
+  startDrift: unknown,
+  baseSeed: number,
+): DriftRuntime | undefined {
+  const hasStart = !!startDrift && typeof startDrift === 'object' && !Array.isArray(startDrift);
+  if (driftPending && ctrlDrift) {
+    ctrlDrift.state = initDrift(baseSeed);
+    if (hasStart) updateDriftPressure(ctrlDrift, startDrift as Partial<DriftPressure>);
+    return ctrlDrift;
+  }
+  if (!hasStart) return undefined;
+  const rt: DriftRuntime = { state: initDrift(baseSeed), pressure: defaultDriftPressure() };
+  updateDriftPressure(rt, startDrift as Partial<DriftPressure>);
+  return rt;
+}

@@ -18,6 +18,8 @@ import {
   updateDriftPressure,
   applyDrift,
   snapshot,
+  resolveStartDrift,
+  defaultDriftPressure,
 } from './drift.js';
 
 import { buildSlotRequest, type StreamControlSnapshot } from './slot.js';
@@ -658,45 +660,59 @@ describe('one-shot priority in buildSlotRequest', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 16 (Issue 1+2 start-path clamping): building from a default pressure
-// and patching via updateDriftPressure clamps out-of-range values.
+// Test 16: resolveStartDrift (stream-start drift resolution).
 //
-// TEETH CHECK: the old generate.ts code raw-cast the incoming body:
-//   ctrl.drift = { state, pressure: b.drift as DriftPressure }
-// so pull=2, rate=-0.5 entered the runtime unchecked. Simulated below with a
-// direct object spread (no updateDriftPressure) -- the assertions on pull<=1
-// and rate>=0 FAIL. The real path (default + updateDriftPressure) PASSES.
+// TEETH CHECK: run against a helper that mimicked the old generate.ts logic
+// (any existing ctrl.drift treated as pending, start patch merged over it);
+// the leftover and stale-lock tests FAILED, then PASSED on the real helper.
 // ---------------------------------------------------------------------------
-describe('start-path clamping', () => {
-  it('TEETH: raw assignment lets out-of-range pull=2 through (expect failure)', () => {
-    // Simulate the OLD behaviour: raw spread, no validation.
-    const rawPressure: DriftPressure = {
-      targets: {}, targetCaption: [], captionPool: [],
-      pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
-      ...(({ pull: 2, rate: -0.5 }) as Partial<DriftPressure>),
-    };
-    const rawPull = rawPressure.pull;
-    const rawRate = rawPressure.rate;
-    console.log(`  TEETH raw: pull=${rawPull} rate=${rawRate} (expected pull>1 and rate<0 to show unfixed path)`);
-    // These assertions are intentionally inverted -- they PASS when the value is
-    // out of range, proving the raw path is broken.
-    assert.ok(rawPull > 1, `TEETH: raw pull should be >1 (got ${rawPull}), confirming bypass`);
-    assert.ok(rawRate < 0, `TEETH: raw rate should be <0 (got ${rawRate}), confirming bypass`);
+function staleRuntime(): DriftRuntime {
+  const rt: DriftRuntime = { state: initDrift(7), pressure: defaultDriftPressure() };
+  updateDriftPressure(rt, {
+    pull: 0.9, rate: 0.8, targets: { guidanceScale: 0.9 },
+    locks: { guidanceScale: true }, captionPool: ['stale tag'],
+  });
+  rt.state.slot = 12;
+  return rt;
+}
+
+describe('resolveStartDrift', () => {
+  it('leftover (not pending) and no start drift gives undefined', () => {
+    const out = resolveStartDrift(staleRuntime(), false, undefined, 123);
+    console.log(`  leftover/no-start: ${out === undefined ? 'undefined' : 'pull=' + out.pressure.pull}`);
+    assert.strictEqual(out, undefined);
   });
 
-  it('updateDriftPressure clamps pull=2 to 1.0 and rate=-0.5 to 0.0 on start path', () => {
-    // Simulate the NEW behaviour: default pressure + updateDriftPressure.
-    const state = initDrift(42);
-    const defaultPressure: DriftPressure = {
-      targets: {}, targetCaption: [], captionPool: [],
-      pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
-    };
-    const rt: DriftRuntime = { state, pressure: defaultPressure };
-    updateDriftPressure(rt, { pull: 2, rate: -0.5 });
-    const clampedPull = rt.pressure.pull;
-    const clampedRate = rt.pressure.rate;
-    console.log(`  startPath clamping: pull=${clampedPull} (expected 1.0), rate=${clampedRate} (expected 0.0)`);
-    assert.strictEqual(clampedPull, 1.0, `Expected pull clamped to 1.0, got ${clampedPull}`);
-    assert.strictEqual(clampedRate, 0.0, `Expected rate clamped to 0.0, got ${clampedRate}`);
+  it('leftover plus start drift gives fresh state without stale locks or targets', () => {
+    const out = resolveStartDrift(staleRuntime(), false, { pull: 0.3 }, 123);
+    assert.ok(out);
+    const p = out.pressure;
+    console.log(`  leftover+start: pull=${p.pull} rate=${p.rate} targets=${JSON.stringify(p.targets)} locks=${JSON.stringify(p.locks)} pool=${JSON.stringify(p.captionPool)} slot=${out.state.slot}`);
+    assert.strictEqual(p.pull, 0.3);
+    assert.strictEqual(p.rate, 0.5);
+    assert.deepStrictEqual(p.targets, {});
+    assert.deepStrictEqual(p.locks, {});
+    assert.deepStrictEqual(p.captionPool, []);
+    assert.strictEqual(out.state.slot, 0);
+    assert.strictEqual(out.state.rngSeed, 123);
+  });
+
+  it('pending plus no start drift keeps pending pressure, re-seeded to baseSeed', () => {
+    const out = resolveStartDrift(staleRuntime(), true, undefined, 555);
+    assert.ok(out);
+    console.log(`  pending: pull=${out.pressure.pull} rate=${out.pressure.rate} rngSeed=${out.state.rngSeed} slot=${out.state.slot}`);
+    assert.strictEqual(out.pressure.pull, 0.9);
+    assert.strictEqual(out.pressure.rate, 0.8);
+    assert.strictEqual(out.state.rngSeed, 555);
+    assert.strictEqual(out.state.slot, 0);
+  });
+
+  it('out-of-range start values are clamped', () => {
+    const out = resolveStartDrift(undefined, false, { pull: 2, rate: -0.5, jitter: 9 }, 1);
+    assert.ok(out);
+    console.log(`  clamp: pull=${out.pressure.pull} rate=${out.pressure.rate} jitter=${out.pressure.jitter}`);
+    assert.strictEqual(out.pressure.pull, 1);
+    assert.strictEqual(out.pressure.rate, 0);
+    assert.strictEqual(out.pressure.jitter, 1);
   });
 });

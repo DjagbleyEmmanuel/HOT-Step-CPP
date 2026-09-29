@@ -30,7 +30,7 @@ import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
 import { buildSlotRequest } from '../services/storm/slot.js';
-import { initDrift, updateDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
+import { initDrift, updateDriftPressure, resolveStartDrift, defaultDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
 import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
@@ -751,6 +751,8 @@ interface StreamControlState {
   drift?: DriftRuntime;
   /** baseSeed resolved at stream start; used by /storm/control pre-stream drift seeding. */
   baseSeed?: number;
+  /** True when ctrl.drift was set by /storm/control while no stream was live. */
+  driftPending?: boolean;
 }
 
 const streamRunning = new Map<string, boolean>();
@@ -774,7 +776,12 @@ function getStreamControl(streamId: string): StreamControlState {
 }
 
 function stopStream(streamId: string): void {
+  const wasRunning = streamRunning.get(streamId) === true;
   streamRunning.set(streamId, false);
+  // Drop the live drift runtime so it cannot leak into the next stream.
+  // A pending (idle-time) drift is left alone.
+  const c = streamControl.get(streamId);
+  if (c && wasRunning && !c.driftPending) c.drift = undefined;
   const aceJobId = streamAceJob.get(streamId);
   if (aceJobId) {
     aceClient.cancelJob(aceJobId).catch(() => {});
@@ -842,36 +849,10 @@ router.post('/storm/stream', async (req, res) => {
   // Record the resolved baseSeed so pre-stream /storm/control calls can use it.
   ctrl.baseSeed = baseSeed;
 
-  // Initialise (or re-seed) the drift runtime.
-  // If baseParams.drift is present: validate the incoming pressure through
-  // updateDriftPressure (never raw-cast it) so out-of-range values are clamped.
-  // If a pre-stream /storm/control already set ctrl.drift, keep its validated
-  // pressure and just re-seed the state; then apply any stream-start overrides.
-  // Without drift in baseParams: clear any leftover runtime from a prior stream
-  // so it cannot leak into a later Continuous stream that was not started with drift.
-  if (baseParams.drift && typeof baseParams.drift === 'object' && !Array.isArray(baseParams.drift)) {
-    const driftState = initDrift(baseSeed);
-    if (ctrl.drift) {
-      // Pre-stream drift exists: re-seed state, keep validated pressure, then
-      // apply any stream-start overrides as a final patch.
-      ctrl.drift.state = driftState;
-      updateDriftPressure(ctrl.drift, baseParams.drift as Partial<DriftPressure>);
-    } else {
-      const defaultPressure: DriftPressure = {
-        targets: {}, targetCaption: [], captionPool: [],
-        pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
-      };
-      const driftRuntime: DriftRuntime = { state: driftState, pressure: defaultPressure };
-      updateDriftPressure(driftRuntime, baseParams.drift as Partial<DriftPressure>);
-      ctrl.drift = driftRuntime;
-    }
-  } else if (ctrl.drift) {
-    // Stream started without drift in baseParams but pre-stream drift was pending.
-    // Re-seed with the actual baseSeed so the drift positions start correctly.
-    ctrl.drift.state = initDrift(baseSeed);
-  } else {
-    ctrl.drift = undefined;
-  }
+  // Resolve the drift runtime. A pre-stream /storm/control drift is kept only
+  // when it is flagged pending; leftovers from a finished stream are dropped.
+  ctrl.drift = resolveStartDrift(ctrl.drift, ctrl.driftPending === true, baseParams.drift, baseSeed);
+  ctrl.driftPending = false;
 
   console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed}, backend=${streamBackend})`);
   pushLog(`[STORM ${streamId}] stream started`);
@@ -965,8 +946,17 @@ router.post('/storm/stream', async (req, res) => {
     console.error(`[STORM stream ${streamId}] error:`, err);
   } finally {
     stopStream(streamId);
+    // Keep a drift that a POST /storm/control set as pending after the stream
+    // ended; everything else (including live drift) is discarded.
+    const endCtrl = streamControl.get(streamId);
+    const pendingDrift = endCtrl?.driftPending ? endCtrl.drift : undefined;
     streamControl.delete(streamId);
     session?.end();
+    if (pendingDrift) {
+      const fresh = getStreamControl(streamId);
+      fresh.drift = pendingDrift;
+      fresh.driftPending = true;
+    }
     console.log(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     pushLog(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     res.end();
@@ -1014,22 +1004,21 @@ router.post('/storm/control', (req, res) => {
   }
   // Drift pressure patch -- ignore bad fields, never throw.
   if (b.drift && typeof b.drift === 'object' && !Array.isArray(b.drift)) {
-    if (ctrl.drift) {
+    const live = streamRunning.get(streamId) === true;
+    if (live && ctrl.drift) {
       // Stream is live: merge into existing runtime.
       updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
+    } else if (!live && ctrl.drift && ctrl.driftPending) {
+      // Already pending: merge further idle-time patches.
+      updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
     } else {
-      // No live stream: store as pending. Validate via updateDriftPressure so
-      // out-of-range values are clamped. Seed from ctrl.baseSeed if a stream was
-      // ever started; the state will be re-seeded with the real baseSeed when
-      // the next stream starts (see the stream-start block above).
-      const pendingSeed = ctrl.baseSeed ?? Math.floor(Math.random() * 2147483647);
-      const defaultPressure: DriftPressure = {
-        targets: {}, targetCaption: [], captionPool: [],
-        pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
-      };
-      const driftRuntime: DriftRuntime = { state: initDrift(pendingSeed), pressure: defaultPressure };
+      // Fresh runtime. When idle it is stored as pending; state is re-seeded
+      // with the real baseSeed at stream start (resolveStartDrift).
+      const seed = ctrl.baseSeed ?? Math.floor(Math.random() * 2147483647);
+      const driftRuntime: DriftRuntime = { state: initDrift(seed), pressure: defaultDriftPressure() };
       updateDriftPressure(driftRuntime, b.drift as Partial<DriftPressure>);
       ctrl.drift = driftRuntime;
+      ctrl.driftPending = !live;
     }
   }
 
