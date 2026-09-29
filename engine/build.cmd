@@ -34,8 +34,7 @@ REM Skip vcvars if already sourced (prevents PATH overflow on repeated runs)
 if defined VSCMD_VER (
     echo Using cached VS environment ^(VSCMD_VER=%VSCMD_VER%^)
 ) else (
-    echo Using: %VCVARS%
-    call "%VCVARS%"
+    call :source_vcvars
 )
 
 REM ── cuDNN 9 for CUDA stem separation ───────────────────────────────
@@ -114,3 +113,11 @@ set BUILD_RC=%ERRORLEVEL%
 
 cd ..
 exit /b %BUILD_RC%
+
+goto :eof
+
+REM Kept outside any parenthesized block: "(x86)" in the path would close it.
+:source_vcvars
+echo Using: "%VCVARS%"
+call "%VCVARS%"
+goto :eof
