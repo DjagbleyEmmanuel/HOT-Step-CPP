@@ -369,13 +369,27 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   if (params.yue2NarScheduler && params.yue2NarScheduler !== 'stock' && !narScheduler) {
     notes.push(`Unknown YuE2 NAR scheduler "${params.yue2NarScheduler}" — using uniform steps`);
   }
-  // Generic plugin params passthrough (e.g. postprocess plugin params sent as
-  // "pluginName:key" entries -- same convention the solver/scheduler entries above use).
-  // Keys already set by the explicit solver/scheduler mapping above are left
-  // untouched so that the explicit mapping always wins over a generic override.
+  // Generic plugin params passthrough (e.g. NAR solver/scheduler params sent
+  // as "pluginName:key" entries -- same convention the explicit mappings above
+  // use). Keys already set by the explicit solver/scheduler mapping above are
+  // left untouched so that the explicit mapping always wins over a generic
+  // override.
+  //
+  // The global ACE postprocess plugin (params.postprocessPlugin, e.g.
+  // "md_audio_tiled V2") is NOT forwarded here. YuE2 has no postprocess picker
+  // in its UI, so inheriting the ACE global would silently attach a tile-decode
+  // pass to every YuE2 render -- the 156 s seam issue. The engine hook in
+  // yue2-pipeline.h stays intact for future use; wire it up when a
+  // yue2PostprocessPlugin UI field exists. Until then, drop any pluginParams
+  // key whose prefix matches the global postprocess plugin name (they are
+  // postprocess-specific and meaningless to the NAR/VAE path here).
+  const globalPpPlugin = typeof params.postprocessPlugin === 'string'
+    ? params.postprocessPlugin.trim() : '';
   if (params.pluginParams && typeof params.pluginParams === 'object') {
     for (const [k, v] of Object.entries(params.pluginParams as Record<string, unknown>)) {
       if (k in plugin_params) continue; // explicit mapping takes precedence
+      // Drop postprocess-plugin params that leaked from the global ACE setting.
+      if (globalPpPlugin && k.startsWith(globalPpPlugin + ':')) continue;
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'boolean') { plugin_params[k] = v; continue; }
       if (typeof v === 'number') { if (Number.isFinite(v)) plugin_params[k] = v; continue; }
@@ -385,12 +399,11 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
       }
     }
   }
-  // Postprocess plugin: name of a Lua postprocess plugin to route YuE2's VAE
-  // decode through (yue2-pipeline.h yue2_run_vae_stage hook). Mirrors ACE's
-  // own translateParams.ts postprocessPlugin -> postprocess_plugin mapping.
-  const postprocess_plugin = typeof params.postprocessPlugin === 'string' && params.postprocessPlugin.trim()
-    ? params.postprocessPlugin.trim()
-    : undefined;
+  // Postprocess plugin: YuE2 has no UI picker for postprocess, so the global
+  // ACE setting (params.postprocessPlugin) is intentionally NOT forwarded.
+  // The yue2-pipeline.h hook exists for future use; a yue2PostprocessPlugin
+  // field can re-enable it when that UI is added.
+  const postprocess_plugin: string | undefined = undefined;
   // Step-level velocity caching for the NAR midpoint solver (see
   // yue2-nar-graph.h). 0/unset = off, every step computed for real -- the
   // UI slider (index.ts's yue2NarCacheRatio extension) clamps to [0, 0.9],
