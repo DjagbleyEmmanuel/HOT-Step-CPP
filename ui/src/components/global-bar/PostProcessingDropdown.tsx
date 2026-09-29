@@ -318,7 +318,11 @@ export const PostProcessingDropdown: React.FC = () => {
   const { registry } = usePluginRegistry();
   const postprocessPlugins = registry.postprocess ?? [];
   useEffect(() => {
-    if (postprocessPlugins.length && !gp.postprocessPlugin) gp.setPostprocessPlugin(postprocessPlugins[0].name);
+    // Auto-select first plugin if none selected; prefer V2.1 for ideal defaults
+    if (postprocessPlugins.length && !gp.postprocessPlugin) {
+      const preferred = postprocessPlugins.find((p: any) => p.name === 'md_audio_tiled V2.1') || postprocessPlugins[0];
+      gp.setPostprocessPlugin(preferred.name);
+    }
   }, [postprocessPlugins, gp.postprocessPlugin, gp.setPostprocessPlugin]);
 
   const selectedPostprocessPlugin = postprocessPlugins.find((p: any) => p.name === gp.postprocessPlugin) || postprocessPlugins[0] || null;
