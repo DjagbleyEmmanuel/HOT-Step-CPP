@@ -138,7 +138,7 @@ const DeckPanel: React.FC<DeckProps> = ({ id, label, otherCamelot, crossfadeGain
   const allSlots  = Array.from({ length: slotCount }, (_, i) => i);
 
   return (
-    <div className={`flex flex-col flex-1 min-w-0 rounded-xl border p-3 gap-2.5 overflow-y-auto hide-scrollbar ${sa.isPlaying ? 'border-red-500/40 bg-zinc-900/60' : 'border-zinc-700 bg-zinc-900/30'}`}>
+    <div className={`flex flex-col flex-1 min-w-0 shrink-0 lg:shrink rounded-xl border p-3 gap-2.5 lg:overflow-y-auto hide-scrollbar ${sa.isPlaying ? 'border-red-500/40 bg-zinc-900/60' : 'border-zinc-700 bg-zinc-900/30'}`}>
       {/* Deck header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -623,7 +623,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
     <BackendCapabilityGate feature="streaming">
     <div className="h-full flex flex-col bg-zinc-950 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 lg:px-6 py-3 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-3">
           <Zap size={18} className="text-red-400" />
           <span className="text-sm font-bold text-white tracking-wide">STORM</span>
@@ -637,7 +637,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
         </div>
         {/* Global start/stop for seq/cont */}
         {/* Always reserve right-side space so tabs stay centered in all modes */}
-        <div className="w-[120px] flex justify-end">
+        <div className="lg:w-[120px] flex justify-end">
           {(mode==='sequential'||mode==='continuous') && (
             <button
               onClick={sa.isPlaying ? handleStop : handleStart}
@@ -710,10 +710,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
             </div>
 
             {/* ── Three-column body ───────────────────────────────── */}
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
 
               {/* Left — Compose */}
-              <div className="w-[380px] shrink-0 overflow-y-auto hide-scrollbar p-4 space-y-3 border-r border-zinc-800/60">
+              <div className="w-full lg:w-[380px] shrink-0 lg:overflow-y-auto hide-scrollbar p-4 space-y-3 border-b lg:border-b-0 lg:border-r border-zinc-800/60">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <ParamLabel label="Style" className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -834,7 +834,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
               </div>
 
               {/* Middle — Sampler */}
-              <div className="w-[310px] shrink-0 overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-r border-zinc-800/60">
+              <div className="w-full lg:w-[310px] shrink-0 lg:overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-b lg:border-b-0 lg:border-r border-zinc-800/60">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{isYue2 ? 'YuE2 NAR' : 'Sampler'}</span>
                 {/* YuE2-specific controls */}
                 {isYue2 && (() => {
@@ -1112,7 +1112,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
               </div>
 
               {/* Right — Live Controls */}
-              <div className="flex-1 min-w-0 overflow-y-auto hide-scrollbar">
+              <div className="lg:flex-1 min-w-0 lg:overflow-y-auto hide-scrollbar">
                 <StormLiveControls
                   sa={sa}
                   lyrics={lyrics}
@@ -1147,14 +1147,14 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
 
       {/* ── DJ Mode ── */}
       {mode==='dj' && (
-        <div className="flex-1 flex overflow-hidden p-4">
-          <div className="flex gap-4 w-full h-full">
+        <div className="flex-1 flex overflow-y-auto lg:overflow-hidden p-4">
+          <div className="flex flex-col lg:flex-row gap-4 w-full lg:h-full">
             {/* Deck A */}
             <DeckPanel id="deck-a" label="Deck A" otherCamelot={camelotB} crossfadeGain={gainA}
               onRegister={sa => { deckARef.current = sa; setDeckAKey(sa.detectedKey); }} />
 
             {/* Crossfader center column */}
-            <div className="flex flex-col items-center justify-start pt-4 gap-4 w-48 shrink-0">
+            <div className="flex flex-col items-center justify-start pt-4 gap-4 w-full lg:w-48 shrink-0">
               {/* Camelot compatibility */}
               {camelotA && camelotB && (
                 <div className={`text-center px-3 py-2 rounded-lg border text-xs font-medium ${
