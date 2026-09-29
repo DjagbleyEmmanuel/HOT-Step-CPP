@@ -289,6 +289,8 @@ Parameters can be shown/hidden based on another parameter's value:
   hint = "Only visible when Mode is set to Quality" }
 ```
 
+> **Note:** Use string values for `equals` (e.g. `"true"`, `"2"`) for maximum compatibility. The engine also accepts Lua booleans (`true`/`false`) and numbers directly, so `equals = true` now works. Older builds only accept strings, so prefer strings if you distribute plugins for use with unpatched releases.
+
 ### Transform Expressions
 
 The `transform` field allows the UI to apply a mathematical transformation to the displayed value before sending it to the plugin. This is useful when the internal value differs from what the user sees:
