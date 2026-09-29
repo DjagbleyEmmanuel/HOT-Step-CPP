@@ -11,7 +11,7 @@
 import type { Song } from '../../types';
 import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
 
-export type Backend = 'ace' | 'minimax-m3' | 'yue2';
+export type Backend = 'ace' | 'minimax-m3' | 'yue2' | 'sa3';
 
 export interface Fact {
   label: string;
@@ -33,6 +33,7 @@ export const BACKEND_LABELS: Record<Backend, string> = {
   'ace': 'ACE-Step 1.5',
   'minimax-m3': 'MiniMax-Music3',
   'yue2': 'YuE2',
+  'sa3': 'Stable Audio 3',
 };
 
 export function songBackend(song: Song): Backend {
@@ -40,6 +41,7 @@ export function songBackend(song: Song): Backend {
   const raw = String(song.backend || gp?.backend || 'ace');
   if (raw === 'minimax-m3' || raw === 'mm3' || raw === 'minimax') return 'minimax-m3';
   if (raw === 'yue2') return 'yue2';
+  if (raw === 'sa3' || raw === 'stable-audio-3') return 'sa3';
   return 'ace';
 }
 
@@ -307,6 +309,50 @@ function yue2Facts(gp: any): FactGroup[] {
   return groups;
 }
 
+/** Stable Audio 3. gp is the whole global blob, so ditModel, lmModel,
+ *  inferenceSteps and friends are ACE leftovers. Only sa3Request (the wire as
+ *  sent) and sa3 (render stamp) are truth. The solver/scheduler/guidance
+ *  pickers only reach the wire when plugins were enabled; when absent the
+ *  render ran the native sampler, and on rows that predate sa3Request we say
+ *  "Unknown" rather than guess from the ACE keys. */
+function sa3Facts(gp: any): FactGroup[] {
+  const req = gp.sa3Request;
+  const s = gp.sa3 || {};
+  const groups: FactGroup[] = [];
+
+  const models: Fact[] = [];
+  add(models, 'Model', 'Stable Audio 3');
+  const adapters: any[] = Array.isArray(req?.adapters) ? req.adapters : [];
+  for (const a of adapters) {
+    if (!a?.name) continue;
+    add(models, 'Adapter', `${basename(String(a.name))}${a.scale !== undefined && a.scale !== 1 ? ` @ ${a.scale}` : ''}`,
+      { title: String(a.name) });
+  }
+  groups.push({ title: 'Models', facts: models });
+
+  const sampling: Fact[] = [];
+  if (!req) {
+    add(sampling, 'Parameters', 'Unknown (older render)');
+  } else {
+    add(sampling, 'Steps', num(req.steps ?? s.steps));
+    const native = !req.solver && !req.scheduler && !req.guidanceMode;
+    add(sampling, 'Sampler', native ? pretty(String(req.sampler ?? s.sampler ?? 'pingpong')) : 'Plugins');
+    if (req.solver) add(sampling, 'Solver', pretty(String(req.solver)));
+    if (req.scheduler) add(sampling, 'Schedule', pretty(String(req.scheduler)));
+    if (req.guidanceMode) add(sampling, 'Guidance', pretty(String(req.guidanceMode)));
+    if (req.guidanceScale !== undefined) add(sampling, 'CFG scale', num(req.guidanceScale));
+    if (req.postprocessPlugin) add(sampling, 'Decode', pretty(String(req.postprocessPlugin)));
+    if (req.nTokens ?? s.prompt_tokens) add(sampling, 'Prompt tokens', num(req.nTokens ?? s.prompt_tokens), { mono: true });
+  }
+  if (s.sample_rate) add(sampling, 'Sample rate', `${(Number(s.sample_rate) / 1000).toFixed(1)} kHz`);
+  if (sampling.length) groups.push({ title: 'Sampling', facts: sampling });
+
+  const seeds: Fact[] = [];
+  add(seeds, 'Seed', num(req?.seed ?? gp.seed), { mono: true });
+  if (seeds.length) groups.push({ title: 'Reproduction', facts: seeds });
+  return groups;
+}
+
 /** Everything the panel shows under "How it was made", for this song's backend. */
 export function buildFactGroups(song: Song): FactGroup[] {
   const gp = params(song);
@@ -314,6 +360,7 @@ export function buildFactGroups(song: Song): FactGroup[] {
   switch (songBackend(song)) {
     case 'minimax-m3': return mm3Facts(gp);
     case 'yue2': return yue2Facts(gp);
+    case 'sa3': return sa3Facts(gp);
     default: return aceFacts(gp);
   }
 }
