@@ -241,10 +241,14 @@ export function DriftPanel({ sa, isYue2, streamId = 'default' }: DriftPanelProps
   }, [streamId, pressure, snapshot, setPressure]);
 
   // Watch snapshot slot counter; restore pull after the slot at press advances.
+  // Guard: if slotAtPress is -1 (no snapshot existed at press time), wait until
+  // the slot counter is at least 1 before restoring -- otherwise slot 0 fires
+  // the restore immediately and the pull-now has no effect on any real slot.
   useEffect(() => {
     if (!snapshot || !pullRestoreRef.current) return;
     const { prevPull, slotAtPress } = pullRestoreRef.current;
-    if (snapshot.slot > slotAtPress) {
+    const threshold = slotAtPress < 0 ? 0 : slotAtPress;
+    if (snapshot.slot > threshold) {
       pullRestoreRef.current = null;
       setPressure(prev => ({ ...prev, pull: prevPull }));
       fetch('/api/generate/storm/control', {

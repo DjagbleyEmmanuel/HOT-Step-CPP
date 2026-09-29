@@ -749,6 +749,8 @@ interface StreamControlState {
   guidanceMode: string | null;
   /** Active drift runtime, set at stream start when baseParams.drift is present. */
   drift?: DriftRuntime;
+  /** baseSeed resolved at stream start; used by /storm/control pre-stream drift seeding. */
+  baseSeed?: number;
 }
 
 const streamRunning = new Map<string, boolean>();
@@ -837,12 +839,36 @@ router.post('/storm/stream', async (req, res) => {
   const streamBackend = getActiveBackendId();
   let slotIdx = 0;
 
-  // If the request carries drift pressure, initialise the drift runtime.
-  // Without drift, clear any leftover runtime from a prior stream so it cannot
-  // leak into a later Continuous stream that was not started with drift.
+  // Record the resolved baseSeed so pre-stream /storm/control calls can use it.
+  ctrl.baseSeed = baseSeed;
+
+  // Initialise (or re-seed) the drift runtime.
+  // If baseParams.drift is present: validate the incoming pressure through
+  // updateDriftPressure (never raw-cast it) so out-of-range values are clamped.
+  // If a pre-stream /storm/control already set ctrl.drift, keep its validated
+  // pressure and just re-seed the state; then apply any stream-start overrides.
+  // Without drift in baseParams: clear any leftover runtime from a prior stream
+  // so it cannot leak into a later Continuous stream that was not started with drift.
   if (baseParams.drift && typeof baseParams.drift === 'object' && !Array.isArray(baseParams.drift)) {
     const driftState = initDrift(baseSeed);
-    ctrl.drift = { state: driftState, pressure: baseParams.drift as DriftPressure };
+    if (ctrl.drift) {
+      // Pre-stream drift exists: re-seed state, keep validated pressure, then
+      // apply any stream-start overrides as a final patch.
+      ctrl.drift.state = driftState;
+      updateDriftPressure(ctrl.drift, baseParams.drift as Partial<DriftPressure>);
+    } else {
+      const defaultPressure: DriftPressure = {
+        targets: {}, targetCaption: [], captionPool: [],
+        pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
+      };
+      const driftRuntime: DriftRuntime = { state: driftState, pressure: defaultPressure };
+      updateDriftPressure(driftRuntime, baseParams.drift as Partial<DriftPressure>);
+      ctrl.drift = driftRuntime;
+    }
+  } else if (ctrl.drift) {
+    // Stream started without drift in baseParams but pre-stream drift was pending.
+    // Re-seed with the actual baseSeed so the drift positions start correctly.
+    ctrl.drift.state = initDrift(baseSeed);
   } else {
     ctrl.drift = undefined;
   }
@@ -992,9 +1018,18 @@ router.post('/storm/control', (req, res) => {
       // Stream is live: merge into existing runtime.
       updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
     } else {
-      // Stream not yet started or drift not initialised: seed 0 placeholder
-      // state will be replaced on next stream start.
-      ctrl.drift = { state: initDrift(0), pressure: b.drift as DriftPressure };
+      // No live stream: store as pending. Validate via updateDriftPressure so
+      // out-of-range values are clamped. Seed from ctrl.baseSeed if a stream was
+      // ever started; the state will be re-seeded with the real baseSeed when
+      // the next stream starts (see the stream-start block above).
+      const pendingSeed = ctrl.baseSeed ?? Math.floor(Math.random() * 2147483647);
+      const defaultPressure: DriftPressure = {
+        targets: {}, targetCaption: [], captionPool: [],
+        pull: 0, rate: 0.5, jitter: 0, locks: {}, seedMode: 'lock',
+      };
+      const driftRuntime: DriftRuntime = { state: initDrift(pendingSeed), pressure: defaultPressure };
+      updateDriftPressure(driftRuntime, b.drift as Partial<DriftPressure>);
+      ctrl.drift = driftRuntime;
     }
   }
 
