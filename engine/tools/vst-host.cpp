@@ -526,11 +526,18 @@ static IPlugView * g_plugView = nullptr;
 static PluginInstance * g_guiInst = nullptr;
 static const char * g_guiStatePath = nullptr;
 static bool g_guiRunning = true;
+static bool g_plugViewRemoved = false;
 
 static LRESULT CALLBACK VstWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CLOSE:
             g_guiRunning = false;
+            // Detach the editor while its window still exists (JUCE plugins
+            // crash if removed() runs after the HWND is gone).
+            if (g_plugView && !g_plugViewRemoved) {
+                g_plugView->removed();
+                g_plugViewRemoved = true;
+            }
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
@@ -633,8 +640,8 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
         DispatchMessage(&msg);
     }
 
-    // Detach view
-    view->removed();
+    // Detach view (already done in WM_CLOSE if the user closed the window)
+    if (!g_plugViewRemoved) view->removed();
     view->release();
 
     // Save state on close
@@ -983,9 +990,16 @@ static int g_monitorWindowCount = 0;
 
 static LRESULT CALLBACK MonitorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-        case WM_CLOSE:
+        case WM_CLOSE: {
+            // Detach the editor before its window is destroyed.
+            auto * view = reinterpret_cast<IPlugView *>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
+            if (view) {
+                SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
+                view->removed();
+            }
             DestroyWindow(hwnd);
             return 0;
+        }
         case WM_DESTROY:
             g_monitorWindowCount--;
             if (g_monitorWindowCount <= 0 && g_monitorState) {
@@ -1074,6 +1088,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     // Open GUI for each plugin
     std::vector<IPlugView*> views;
     std::vector<SimplePlugFrame*> plugFrames;
+    std::vector<HWND> viewWindows;  // parallel to views
     for (size_t i = 0; i < ms.plugins.size(); i++) {
         auto ctrl = ms.plugins[i].provider->getController();
         if (!ctrl) continue;
@@ -1102,9 +1117,12 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
         if (view->attached(hwnd, kPlatformTypeHWND) != kResultOk) {
             view->release(); DestroyWindow(hwnd); continue;
         }
+        // GWLP_USERDATA holds the view while it is attached; WM_CLOSE clears it.
+        SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(view));
         ShowWindow(hwnd, SW_SHOW);
         g_monitorWindowCount++;
         views.push_back(view);
+        viewWindows.push_back(hwnd);
     }
 
     fprintf(stderr, "[monitor] %d plugin GUI(s) opened\n", g_monitorWindowCount);
@@ -1233,7 +1251,18 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     CloseHandle(hAudioEvent);
 
     // Detach and release views
-    for (auto * v : views) { v->removed(); v->release(); }
+    // Detach each still-open editor while its window exists, then destroy the
+    // window. Editors the user already closed were detached in WM_CLOSE.
+    for (size_t i = 0; i < views.size(); i++) {
+        HWND hwnd = viewWindows[i];
+        if (IsWindow(hwnd) &&
+            GetWindowLongPtrA(hwnd, GWLP_USERDATA) == reinterpret_cast<LONG_PTR>(views[i])) {
+            SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
+            views[i]->removed();
+            DestroyWindow(hwnd);
+        }
+        views[i]->release();
+    }
     for (auto * f : plugFrames) delete f;
 
     // Save all plugin states

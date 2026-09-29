@@ -508,16 +508,14 @@ router.post('/monitor/restart', async (_req, res) => {
     return;
   }
 
-  // Gracefully stop the existing process
+  // Gracefully stop the existing process: send stop, wait for it to exit
+  // (it saves plugin state on the way out), force-kill only after a timeout.
   if (isMonitorAlive()) {
-    writeMonitorControl({ action: 'stop' });
-    try { monitorProcess?.kill(); } catch {}
-    monitorProcess = null;
+    const old = monitorProcess;
+    await stopMonitorChild(old, 3000);
+    if (monitorProcess === old) monitorProcess = null;
   }
   monitorPaused = false;
-
-  // Brief pause for process cleanup and state file flush
-  await new Promise(r => setTimeout(r, 800));
 
   // Reload chain — picks up any GUI state file changes
   const chain = loadChain();
