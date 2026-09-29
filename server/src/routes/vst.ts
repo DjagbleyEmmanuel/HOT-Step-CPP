@@ -136,6 +136,8 @@ router.put('/chain', (req, res) => {
   res.json(chain satisfies UpdateChainResponse);
 });
 
+const guiProcs = new Map<string, ChildProcess>();
+
 // ── POST /gui — Launch plugin GUI ───────────────────────────
 
 router.post('/gui', (req, res) => {
@@ -157,6 +159,14 @@ router.post('/gui', (req, res) => {
     args.push('--state', statePath);
   }
 
+  // One editor process per chain entry: a second click must not spawn a
+  // duplicate window that reopens after the user closes the first one.
+  const existing = uid ? guiProcs.get(uid) : undefined;
+  if (existing && existing.exitCode === null && !existing.killed) {
+    res.json({ ok: true, pid: existing.pid, alreadyOpen: true });
+    return;
+  }
+
   console.log(`[VST] Launching GUI: ${path.basename(pluginPath)}`);
 
   // Spawn detached — the GUI process lives independently
@@ -165,8 +175,20 @@ router.post('/gui', (req, res) => {
     stdio: 'ignore',
   });
   child.unref();
+  if (uid) {
+    guiProcs.set(uid, child);
+    const clear = () => { if (guiProcs.get(uid) === child) guiProcs.delete(uid); };
+    child.on('exit', clear);
+    child.on('error', clear);
+  }
 
   res.json({ ok: true, pid: child.pid } satisfies GuiResponse);
+});
+
+// ── GET /gui/open — uids whose editor process is still running ──
+
+router.get('/gui/open', (_req, res) => {
+  res.json({ uids: [...guiProcs.keys()] });
 });
 
 // ── POST /process — Process audio through the VST chain ─────

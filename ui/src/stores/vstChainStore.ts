@@ -99,6 +99,8 @@ interface VstChainState {
   deletePreset: (key: string) => Promise<void>;
 }
 
+let guiPollTimer: ReturnType<typeof setInterval> | null = null;
+
 /** A preset collection whose changes are mirrored into the store. */
 function attachPresets(set: (partial: Partial<VstChainState>) => void) {
   const presetCollection = createVstPresetCollection();
@@ -214,6 +216,20 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
         // flag that state files may be dirty if monitor is running
         pendingGuiChanges: s.monitoring ? true : s.pendingGuiChanges,
       }));
+      // Poll until every editor window has been closed, so the open marker
+      // clears when the user closes the window.
+      if (!guiPollTimer) {
+        guiPollTimer = setInterval(async () => {
+          try {
+            const { uids } = await vstApi.openGuis();
+            set(s => ({ openGuiUids: s.openGuiUids.filter(u => uids.includes(u)) }));
+            if (get().openGuiUids.length === 0 && guiPollTimer) {
+              clearInterval(guiPollTimer);
+              guiPollTimer = null;
+            }
+          } catch { /* server unavailable; retry next tick */ }
+        }, 1500);
+      }
     } catch (err) {
       console.error('[VST] Failed to open GUI:', err);
     }
