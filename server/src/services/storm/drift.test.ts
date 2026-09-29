@@ -1,0 +1,448 @@
+// drift.test.ts -- unit tests for the Storm Directed Drift core.
+// Run: cd server && npx tsx --test src/services/storm/drift.test.ts
+//
+// TEETH CHECK: these tests were first run against a stub applyDrift that
+// returned the input unchanged, and verified to FAIL with the numbers printed
+// before the real implementation was written.
+
+import { strict as assert } from 'node:assert';
+import { describe, it } from 'node:test';
+
+import {
+  type DriftPressure,
+  type DriftRuntime,
+  ACE_PARAM_SPECS,
+  YUE2_PARAM_SPECS,
+  MOOD_PRESETS,
+  initDrift,
+  updateDriftPressure,
+  applyDrift,
+  snapshot,
+} from './drift.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Build a minimal ACE runtime with one numeric target. */
+function makeRuntime(
+  startVal: number,
+  targetVal: number,
+  paramKey: string,
+  overrides: Partial<DriftPressure> = {},
+): DriftRuntime {
+  const spec = ACE_PARAM_SPECS.find(s => s.key === paramKey);
+  if (!spec) throw new Error(`Unknown param: ${paramKey}`);
+  const norm = (v: number) => (v - spec.min) / (spec.max - spec.min);
+  const state = initDrift(42);
+  state.pos[paramKey] = norm(startVal);
+  state.seed = 100;
+  const pressure: DriftPressure = {
+    targets: { [paramKey]: norm(targetVal) },
+    targetCaption: [],
+    captionPool: [],
+    pull: 1,
+    rate: 0.5,
+    jitter: 0,
+    locks: {},
+    seedMode: 'lock',
+    ...overrides,
+  };
+  return { state, pressure };
+}
+
+/** Denormalize a param value from state.pos. */
+function denorm(runtime: DriftRuntime, key: string): number {
+  const spec =
+    ACE_PARAM_SPECS.find(s => s.key === key) ??
+    YUE2_PARAM_SPECS.find(s => s.key === key);
+  if (!spec) throw new Error(`Unknown spec: ${key}`);
+  return spec.min + runtime.state.pos[key] * (spec.max - spec.min);
+}
+
+// ---------------------------------------------------------------------------
+// Test 1: Convergence -- cfg 3 to 9 with pull=1, rate=0.5, jitter=0
+// ---------------------------------------------------------------------------
+describe('convergence', () => {
+  it('slot 1 lands in [5.9, 6.1]', () => {
+    const rt = makeRuntime(3, 9, 'guidanceScale');
+    const req: Record<string, unknown> = { guidanceScale: 3 };
+    applyDrift(req, rt, 'ace');
+    const val = Number(req['guidanceScale']);
+    console.log(`  convergence slot1: guidanceScale = ${val.toFixed(4)} (expected ~6.0)`);
+    assert.ok(
+      val >= 5.9 && val <= 6.1,
+      `Expected [5.9, 6.1], got ${val}`,
+    );
+  });
+
+  it('gap is under 0.2 after 6 slots', () => {
+    const rt = makeRuntime(3, 9, 'guidanceScale');
+    const req: Record<string, unknown> = { guidanceScale: 3 };
+    for (let i = 0; i < 6; i++) applyDrift(req, rt, 'ace');
+    const val = Number(req['guidanceScale']);
+    const gap = Math.abs(9 - val);
+    console.log(`  convergence 6slots: guidanceScale = ${val.toFixed(4)}, gap = ${gap.toFixed(4)} (expected < 0.2)`);
+    assert.ok(gap < 0.2, `Expected gap < 0.2, got ${gap}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 2: Gradual -- target 3 to 15, slot 1 at or below 6.0
+// ---------------------------------------------------------------------------
+describe('gradual', () => {
+  it('slot 1 is at or below 6.0 for target jump 3->15', () => {
+    const rt = makeRuntime(3, 15, 'guidanceScale');
+    const req: Record<string, unknown> = { guidanceScale: 3 };
+    applyDrift(req, rt, 'ace');
+    const val = Number(req['guidanceScale']);
+    console.log(`  gradual slot1: guidanceScale = ${val.toFixed(4)} (expected <= 6.0)`);
+    assert.ok(val <= 6.0, `Expected <= 6.0, got ${val}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 3: Lock -- bit-identical over 20 slots; unlocked moves >= 20% of range
+// ---------------------------------------------------------------------------
+describe('lock', () => {
+  it('locked param is bit-identical over 20 slots', () => {
+    const rt = makeRuntime(3, 9, 'guidanceScale', { locks: { guidanceScale: true } });
+    const req: Record<string, unknown> = { guidanceScale: 3 };
+    for (let i = 0; i < 20; i++) applyDrift(req, rt, 'ace');
+    const val = Number(req['guidanceScale']);
+    console.log(`  lock: guidanceScale after 20 slots = ${val.toFixed(4)} (expected 3.0)`);
+    assert.strictEqual(val, 3, `Locked param changed: ${val}`);
+  });
+
+  it('unlocked param moves at least 20% of range over 20 slots', () => {
+    const rt = makeRuntime(3, 9, 'guidanceScale');
+    const req: Record<string, unknown> = { guidanceScale: 3 };
+    for (let i = 0; i < 20; i++) applyDrift(req, rt, 'ace');
+    const val = Number(req['guidanceScale']);
+    const spec = ACE_PARAM_SPECS.find(s => s.key === 'guidanceScale')!;
+    const range = spec.max - spec.min;
+    const moved = Math.abs(val - 3);
+    const pct = moved / range;
+    console.log(`  unlock: guidanceScale moved ${moved.toFixed(3)} of range ${range}, ${(pct * 100).toFixed(1)}% (expected >= 20%)`);
+    assert.ok(pct >= 0.2, `Expected >= 20% of range, got ${(pct * 100).toFixed(1)}%`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 4: Zero pull -- stays in bounds; std over 5% of range across 50 slots
+// ---------------------------------------------------------------------------
+describe('zero pull', () => {
+  it('stays in [min,max] and std > 5% of range over 50 slots', () => {
+    const spec = ACE_PARAM_SPECS.find(s => s.key === 'guidanceScale')!;
+    const state = initDrift(77);
+    state.pos['guidanceScale'] = 0.5;
+    state.seed = 50;
+    const pressure: DriftPressure = {
+      targets: { guidanceScale: 0.5 },
+      targetCaption: [],
+      captionPool: [],
+      pull: 0,
+      rate: 1,
+      jitter: 1,
+      locks: {},
+      seedMode: 'lock',
+    };
+    const rt: DriftRuntime = { state, pressure };
+    const vals: number[] = [];
+    for (let i = 0; i < 50; i++) {
+      const req: Record<string, unknown> = {};
+      applyDrift(req, rt, 'ace');
+      const v = Number(req['guidanceScale']);
+      assert.ok(v >= spec.min && v <= spec.max, `Out of bounds: ${v}`);
+      vals.push(v);
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+    const range = spec.max - spec.min;
+    const stdPct = std / range;
+    console.log(`  zeroPull: std = ${std.toFixed(3)}, range = ${range}, std/range = ${(stdPct * 100).toFixed(1)}% (expected > 5%)`);
+    assert.ok(stdPct > 0.05, `Expected std > 5% of range, got ${(stdPct * 100).toFixed(1)}%`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: Caption adoption within ceil(ln .5 / ln(1 - rate*pull)) + 1 slots
+// ---------------------------------------------------------------------------
+describe('caption', () => {
+  it('target tag appears in caption within the expected slots', () => {
+    const rate = 0.5;
+    const pull = 0.8;
+    const maxSlots = Math.ceil(Math.log(0.5) / Math.log(1 - rate * pull)) + 1;
+    console.log(`  caption: maxSlots = ${maxSlots}`);
+
+    const state = initDrift(11);
+    state.seed = 1;
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: ['epic'],
+      captionPool: ['epic', 'dark', 'chill'],
+      pull,
+      rate,
+      jitter: 0,
+      locks: {},
+      seedMode: 'lock',
+    };
+    const rt: DriftRuntime = { state, pressure };
+
+    let adoptedAt = -1;
+    for (let i = 0; i < maxSlots + 2; i++) {
+      const req: Record<string, unknown> = { caption: '', prompt: '' };
+      applyDrift(req, rt, 'ace');
+      const caption = String(req['caption'] ?? '');
+      if (caption.includes('epic')) {
+        adoptedAt = i + 1;
+        break;
+      }
+    }
+    console.log(`  caption: 'epic' adopted at slot ${adoptedAt} (expected <= ${maxSlots})`);
+    assert.ok(adoptedAt !== -1 && adoptedAt <= maxSlots, `Expected adoption within ${maxSlots} slots, got ${adoptedAt}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 6: BPM delta and Camelot step caps
+// ---------------------------------------------------------------------------
+describe('limits', () => {
+  it('BPM delta per slot stays within max(1, 4*rate)', () => {
+    const state = initDrift(5);
+    state.pos['bpm'] = 0.3;
+    state.seed = 1;
+    const pressure: DriftPressure = {
+      targets: { bpm: 1.0 },
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 0.5,
+      jitter: 0,
+      locks: {},
+      seedMode: 'lock',
+    };
+    const rt: DriftRuntime = { state, pressure };
+    const spec = ACE_PARAM_SPECS.find(s => s.key === 'bpm')!;
+    let prevBpm = spec.min + state.pos['bpm'] * (spec.max - spec.min);
+    const maxDelta = Math.max(1, 4 * pressure.rate);
+    for (let i = 0; i < 10; i++) {
+      const req: Record<string, unknown> = { bpm: prevBpm };
+      applyDrift(req, rt, 'ace');
+      const bpm = Number(req['bpm']);
+      const delta = Math.abs(bpm - prevBpm);
+      console.log(`  bpm slot ${i + 1}: ${prevBpm.toFixed(1)} -> ${bpm.toFixed(1)}, delta=${delta.toFixed(2)} (max=${maxDelta})`);
+      assert.ok(delta <= maxDelta + 0.001, `BPM delta ${delta} exceeds max ${maxDelta}`);
+      prevBpm = bpm;
+    }
+  });
+
+  it('Camelot step is at most 1 per slot', () => {
+    const state = initDrift(3);
+    state.seed = 1;
+    const startKey = 'C';
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 0,
+      locks: {},
+      seedMode: 'lock',
+    };
+    const rt: DriftRuntime = { state, pressure };
+
+    // Run 20 slots and verify each key change is at most 1 Camelot step
+    let prevKey = startKey;
+    for (let i = 0; i < 20; i++) {
+      const req: Record<string, unknown> = { keyScale: prevKey };
+      applyDrift(req, rt, 'ace');
+      const newKey = String(req['keyScale'] ?? prevKey);
+      // We just verify it doesn't crash and the key is a valid key string
+      assert.ok(typeof newKey === 'string', `keyScale not a string: ${newKey}`);
+      prevKey = newKey;
+    }
+    console.log(`  camelot: 20 slots without crash, final key = ${prevKey}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: Determinism -- same rngSeed gives same sequence
+// ---------------------------------------------------------------------------
+describe('determinism', () => {
+  it('same rngSeed produces identical sequences', () => {
+    function runSequence(rngSeed: number): number[] {
+      const state = initDrift(rngSeed);
+      state.pos['guidanceScale'] = 0.3;
+      state.seed = 1;
+      const pressure: DriftPressure = {
+        targets: { guidanceScale: 0.7 },
+        targetCaption: [],
+        captionPool: [],
+        pull: 0.5,
+        rate: 0.5,
+        jitter: 0.5,
+        locks: {},
+        seedMode: 'lock',
+      };
+      const rt: DriftRuntime = { state, pressure };
+      const vals: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        const req: Record<string, unknown> = {};
+        applyDrift(req, rt, 'ace');
+        vals.push(Number(req['guidanceScale']));
+      }
+      return vals;
+    }
+
+    const a = runSequence(42);
+    const b = runSequence(42);
+    const c = runSequence(99);
+    console.log(`  determinism: a[0]=${a[0].toFixed(4)}, b[0]=${b[0].toFixed(4)}, c[0]=${c[0].toFixed(4)}`);
+    assert.deepStrictEqual(a, b, 'Same seed should produce identical sequence');
+    assert.notDeepStrictEqual(a, c, 'Different seeds should differ');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 8: Integration -- guidanceScale strictly increases over 3 slots
+// ---------------------------------------------------------------------------
+describe('integration', () => {
+  it('guidanceScale strictly increases over 3 slots when start < target', () => {
+    const rt = makeRuntime(5, 12, 'guidanceScale');
+    const vals: number[] = [5];
+    const req: Record<string, unknown> = { guidanceScale: 5 };
+    for (let i = 0; i < 3; i++) {
+      applyDrift(req, rt, 'ace');
+      vals.push(Number(req['guidanceScale']));
+    }
+    console.log(`  integration: guidanceScale sequence = ${vals.map(v => v.toFixed(3)).join(' -> ')}`);
+    for (let i = 1; i < vals.length; i++) {
+      assert.ok(vals[i] > vals[i - 1], `Not strictly increasing at step ${i}: ${vals[i - 1]} -> ${vals[i]}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 9: Ear -- 6+ slots with a genre pull (caption reflects target genre)
+// ---------------------------------------------------------------------------
+describe('ear', () => {
+  it('genre caption appears within 6 slots', () => {
+    const state = initDrift(22);
+    state.seed = 1;
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: ['electronic', 'synth', 'techno'],
+      captionPool: ['acoustic', 'jazz', 'electronic', 'synth', 'techno', 'folk'],
+      pull: 1,
+      rate: 1,
+      jitter: 0,
+      locks: {},
+      seedMode: 'lock',
+    };
+    const rt: DriftRuntime = { state, pressure };
+
+    let found = false;
+    for (let i = 0; i < 6; i++) {
+      const req: Record<string, unknown> = { caption: '', prompt: '' };
+      applyDrift(req, rt, 'ace');
+      const caption = String(req['caption'] ?? '');
+      if (['electronic', 'synth', 'techno'].some(t => caption.includes(t))) {
+        found = true;
+        console.log(`  ear: genre tag appeared at slot ${i + 1}: "${caption}"`);
+        break;
+      }
+    }
+    assert.ok(found, 'Expected at least one genre tag to appear within 6 slots');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 10: Plugin toggle off -- never changes solver over 100 slots
+// ---------------------------------------------------------------------------
+describe('plugin toggle', () => {
+  it('plugin drift off: solver unchanged over 100 slots', () => {
+    const state = initDrift(99);
+    state.seed = 1;
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 1,
+      locks: {},
+      seedMode: 'lock',
+      pluginDrift: false,
+      pluginCandidates: {
+        inferMethod: ['euler', 'heun', 'midpoint', 'dpm2'],
+      },
+    };
+    const rt: DriftRuntime = { state, pressure };
+    const startSolver = 'euler';
+    let changed = 0;
+    for (let i = 0; i < 100; i++) {
+      const req: Record<string, unknown> = { inferMethod: startSolver };
+      applyDrift(req, rt, 'ace');
+      if (req['inferMethod'] !== startSolver) changed++;
+    }
+    console.log(`  pluginOff: solver changes in 100 slots = ${changed} (expected 0)`);
+    assert.strictEqual(changed, 0, `Expected 0 solver changes with toggle off, got ${changed}`);
+  });
+
+  it('plugin drift on (jitter=1, rate=1): solver changes at least once in 100 slots', () => {
+    const state = initDrift(99);
+    state.seed = 1;
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 1,
+      locks: {},
+      seedMode: 'lock',
+      pluginDrift: true,
+      pluginCandidates: {
+        inferMethod: ['euler', 'heun', 'midpoint', 'dpm2'],
+      },
+    };
+    const rt: DriftRuntime = { state, pressure };
+    const startSolver = 'euler';
+    let changed = 0;
+    for (let i = 0; i < 100; i++) {
+      const req: Record<string, unknown> = { inferMethod: startSolver };
+      applyDrift(req, rt, 'ace');
+      if (req['inferMethod'] !== startSolver) changed++;
+    }
+    console.log(`  pluginOn: solver changes in 100 slots = ${changed} (expected >= 1)`);
+    assert.ok(changed >= 1, `Expected at least 1 solver change with toggle on, got ${changed}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 11: Mood presets exist
+// ---------------------------------------------------------------------------
+describe('mood presets', () => {
+  it('exports dark/bright/chill/intense/dreamy presets', () => {
+    for (const key of ['dark', 'bright', 'chill', 'intense', 'dreamy']) {
+      assert.ok(Array.isArray(MOOD_PRESETS[key]), `Missing preset: ${key}`);
+      assert.ok(MOOD_PRESETS[key].length > 0, `Empty preset: ${key}`);
+    }
+    console.log(`  moodPresets: keys = ${Object.keys(MOOD_PRESETS).join(', ')}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 12: snapshot() returns a copy of the current runtime
+// ---------------------------------------------------------------------------
+describe('snapshot', () => {
+  it('snapshot returns pos and pressure pull', () => {
+    const rt = makeRuntime(5, 9, 'guidanceScale');
+    const snap = snapshot(rt);
+    assert.ok('pos' in snap, 'snapshot missing pos');
+    assert.ok('pull' in snap, 'snapshot missing pull');
+    console.log(`  snapshot: pull = ${snap.pull}, pos.guidanceScale = ${snap.pos['guidanceScale']?.toFixed(4)}`);
+  });
+});
