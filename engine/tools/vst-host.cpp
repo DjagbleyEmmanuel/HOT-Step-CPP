@@ -797,6 +797,22 @@ struct MonitorState {
     std::vector<float> rs_src_L, rs_src_R; // scratch: [0]=history, [1..] = freshly read source frames
 };
 
+// Flush plugin DSP state (reverb/delay tails, lookahead buffers) without a
+// full re-prepare: the VST3 spec requires plugins to reset their processing
+// state on setActive(false) -> setActive(true). Rate/block setup is unchanged,
+// so this is cheap and does not interfere with the rate re-prepare path.
+static void monitor_flush_plugins(MonitorState & ms) {
+    for (auto & p : ms.plugins) {
+        if (!p.component || !p.active) continue;
+        if (p.processor) p.processor->setProcessing(false);
+        p.component->setActive(false);
+        p.component->setActive(true);
+        if (p.processor) p.processor->setProcessing(true);
+    }
+    ms.rs_phase = 0.0;
+    ms.rs_last_L = ms.rs_last_R = 0.0f;
+}
+
 static bool monitor_load_track(MonitorState & ms, const std::string & path) {
     int T = 0, sr = 0;
     float * audio = audio_io_read_wav(path.c_str(), &T, &sr);
@@ -903,6 +919,7 @@ static void monitor_check_control(MonitorState & ms) {
         if (new_pos < 0) new_pos = 0;
         if (new_pos >= ms.T) new_pos = ms.T - 1;
         ms.pos = new_pos;
+        monitor_flush_plugins(ms);  // drop tails from the old position
     }
 
     yyjson_doc_free(doc);
