@@ -1,0 +1,144 @@
+// services/storm/slot.ts -- per-slot wire-request builder for the Storm stream loop.
+//
+// Isolates the ACE and YuE2 request builds from routes/generate.ts so each
+// branch is testable without spinning up the full route, and so a later
+// Drifter pass can import this module without depending on Express.
+//
+// Called once per loop iteration by the /storm/stream handler.
+// Reads ctrl but NEVER mutates it -- the route clears one-shot fields after
+// calling this function.
+
+import { translateParams } from '../generation/translateParams.js';
+import { mapYue2Params } from '../backends/yue2/generate.js';
+import type { AceRequest } from '../aceClient.js';
+import type { Yue2SynthRequest } from '../backends/yue2/client.js';
+
+// Mirror of StreamControlState in routes/generate.ts.
+// Kept in sync by hand; if you add a field to StreamControlState add it here.
+export interface StreamControlSnapshot {
+  guidanceScale: number;
+  lssStrength: number;
+  inferenceSteps: number;
+  duration: number;
+  bpm: number;
+  seedLock: boolean;
+  nextSeed: number | null;
+  nextPrompt: string | null;
+  nextLyrics: string | null;
+  nextBpm: number | null;
+  nextDuration: number | null;
+  baseCaption: string | null;
+  baseLyrics: string | null;
+  baseInstrumental: boolean | null;
+  streamPaused: boolean;
+  extraPluginParams: Record<string, number | string>;
+  inferMethod: string | null;
+  scheduler: string | null;
+  guidanceMode: string | null;
+}
+
+export interface AceSlotResult {
+  kind: 'ace';
+  aceReq: AceRequest;
+}
+
+export interface Yue2SlotResult {
+  kind: 'yue2';
+  yue2Req: Yue2SynthRequest;
+}
+
+export type SlotResult = AceSlotResult | Yue2SlotResult;
+
+/**
+ * Build the wire request for one Storm slot.
+ *
+ * For the ACE backend the returned aceReq is byte-for-byte the same as the
+ * inline logic in routes/generate.ts produced before this helper existed.
+ *
+ * For the YuE2 backend, the subset the plan defines is applied:
+ *   - prompt/lyrics (one-shot and sticky)
+ *   - seed lock/walk
+ *   - cfg_scale  (mapped from ctrl.guidanceScale)
+ *   - ode_steps  (from baseParams.yue2OdeSteps)
+ *   - nar_cache_ratio  (from baseParams.yue2NarCacheRatio)
+ *   - md_wasserstein_yue2 plugin params ("plugin:key")
+ *   - postprocess_plugin (from baseParams.yue2PostprocessPlugin)
+ * ACE-only fields (solver, scheduler, guidance mode, BPM, LSS) are ignored
+ * by mapYue2Params even when present in slotReq.
+ *
+ * One-shot fields (nextPrompt, nextLyrics, nextSeed, nextBpm, nextDuration)
+ * are READ here but NOT cleared -- the caller clears them after this returns
+ * so it can log them first.
+ *
+ * TODO: applyDrift(slotReq, ctrl.drift, backend) goes here once the Drifter
+ * system is available.
+ */
+export function buildSlotRequest(
+  baseParams: Record<string, unknown>,
+  ctrl: StreamControlSnapshot,
+  slotIndex: number,
+  baseSeed: number,
+  backend: string,
+): SlotResult {
+  const mergedPluginParams = {
+    ...(typeof baseParams.pluginParams === 'object' && baseParams.pluginParams !== null
+      ? baseParams.pluginParams as Record<string, unknown> : {}),
+    ...ctrl.extraPluginParams,
+  };
+
+  // NOTE: keys here must match what translateParams reads (camelCase for
+  // UI-facing params). An explicit per-slot seed also requires
+  // randomSeed=false or translateParams re-randomizes it.
+  const slotReq: Record<string, unknown> = {
+    ...baseParams,
+    randomSeed: false,
+    seed: ctrl.nextSeed !== null
+      ? ctrl.nextSeed
+      : (ctrl.seedLock ? baseSeed : baseSeed + slotIndex),
+    guidanceScale: ctrl.guidanceScale,
+    ...(ctrl.lssStrength > 0 ? { lssStrength: ctrl.lssStrength } : {}),
+    ...(ctrl.inferenceSteps > 0 ? { inferenceSteps: ctrl.inferenceSteps } : {}),
+    ...(ctrl.nextBpm !== null ? { bpm: ctrl.nextBpm } : ctrl.bpm > 0 ? { bpm: ctrl.bpm } : {}),
+    ...(ctrl.nextDuration !== null ? { duration: ctrl.nextDuration } : ctrl.duration > 0 ? { duration: ctrl.duration } : {}),
+    // Solver / scheduler / guidance live overrides -- null keeps the snapshot value
+    ...(ctrl.inferMethod ? { inferMethod: ctrl.inferMethod } : {}),
+    ...(ctrl.scheduler ? { scheduler: ctrl.scheduler } : {}),
+    ...(ctrl.guidanceMode ? { guidanceMode: ctrl.guidanceMode } : {}),
+    ...(Object.keys(mergedPluginParams).length > 0 ? { pluginParams: mergedPluginParams } : {}),
+  };
+
+  // One-shot caption/lyrics overrides (APPLIED, not cleared -- caller clears)
+  if (ctrl.nextPrompt !== null) {
+    slotReq.caption = ctrl.nextPrompt;
+    slotReq.prompt = ctrl.nextPrompt;
+  } else if (ctrl.baseCaption !== null) {
+    slotReq.caption = ctrl.baseCaption;
+    slotReq.prompt = ctrl.baseCaption;
+  }
+  if (ctrl.nextLyrics !== null) {
+    slotReq.lyrics = ctrl.nextLyrics;
+    slotReq.instrumental = false;
+  } else if (ctrl.baseLyrics !== null) {
+    slotReq.lyrics = ctrl.baseLyrics;
+    slotReq.instrumental = false;
+  } else if (ctrl.baseInstrumental === false) {
+    slotReq.instrumental = false;
+  }
+
+  if (backend === 'yue2') {
+    // YuE2 subset. Map guidanceScale -> yue2CfgScale so the live guidance
+    // knob controls YuE2 cfg_scale (mapYue2Params reads yue2CfgScale, not the
+    // generic guidanceScale key).
+    slotReq.yue2CfgScale = ctrl.guidanceScale;
+
+    // TODO: applyDrift(slotReq, ctrl.drift, backend)
+
+    const mapping = mapYue2Params(slotReq);
+    return { kind: 'yue2', yue2Req: mapping.req };
+  }
+
+  // ACE branch -- byte-for-byte the same request as the inline logic that
+  // routes/generate.ts used before this helper was extracted.
+  const aceReq = translateParams(slotReq);
+  return { kind: 'ace', aceReq };
+}

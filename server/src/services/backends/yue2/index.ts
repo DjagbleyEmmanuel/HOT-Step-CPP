@@ -564,7 +564,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       repaint: false,
       lego: false,
       extract: false,
-      streaming: false,
+      streaming: true,
       training: false,
       midi: false,
       stems: false,
