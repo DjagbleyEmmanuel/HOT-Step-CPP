@@ -1188,15 +1188,15 @@ static int dit_ggml_generate(DiTGGML *           model,
             g_hotstep_params.plugin_params, LuaModelContext{},
             solver_state.seeds ? solver_state.seeds[0] : 0);
 
-        if (!lua_ok) {
-            fprintf(stderr, "[DiT] FATAL: full-loop solver '%s' failed (Lua error or missing sample())\n",
-                    solver_plugin->name.c_str());
+        if (graph_alloc_failed) {
             static_graph_release(&dit_graph, model->sched);
             ggml_free(ctx);
             return -1;
         }
 
-        if (graph_alloc_failed) {
+        if (!lua_ok) {
+            fprintf(stderr, "[DiT] FATAL: full-loop solver '%s' failed (Lua error or missing sample())\n",
+                    solver_plugin->name.c_str());
             static_graph_release(&dit_graph, model->sched);
             ggml_free(ctx);
             return -1;

@@ -519,9 +519,13 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             return false;  // never cancelled
         };
 
-        lua_call_solver_loop(*solver_plugin, x.data(), v.data(), sigmas.data(), steps,
-                             n_lat, /*N=*/1, T, Oc, loop_model_fn, loop_on_step,
-                             sp->plugin_params, sa3_lua_ctx);
+        if (!lua_call_solver_loop(*solver_plugin, x.data(), v.data(), sigmas.data(), steps,
+                                  n_lat, /*N=*/1, T, Oc, loop_model_fn, loop_on_step,
+                                  sp->plugin_params, sa3_lua_ctx)) {
+            fprintf(stderr, "[SA3] FATAL: full-loop solver '%s' failed (Lua error or missing sample())\n",
+                    solver_plugin->name.c_str());
+            return false;
+        }
     } else {
         SolverState solver_state;
         if (use_lua_solver) {
