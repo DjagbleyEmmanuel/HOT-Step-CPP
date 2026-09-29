@@ -900,7 +900,8 @@ static bool yue2_nar_solve_plugins(
     const std::vector<float> & initial_noise, int steps,
     const std::string & solver_name, const std::string & scheduler_name,
     const std::unordered_map<std::string, std::string> & plugin_params,
-    Yue2NarSolveResult * out, std::string * err, const Yue2NarStepFn & on_step = {}) {
+    Yue2NarSolveResult * out, std::string * err, const Yue2NarStepFn & on_step = {},
+    int64_t seed = 0) {
     if (steps <= 0 || chunk.n_var != 1 ||
         initial_noise.size() != (size_t) (chunk.chunk_len * m.lm_cfg.latent_dim)) {
         if (err) *err = "YuE2 NAR plugin solve: invalid steps or noise shape (plugins solve one variation at a time)";

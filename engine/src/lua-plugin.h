@@ -715,7 +715,9 @@ static int lua_on_step_closure(lua_State * L) {
 }
 
 // Call a full-loop Lua solver's sample(xt, vt_buf, schedule, n, model_fn)
-static void lua_call_solver_loop(
+// Returns false when sample() is missing or raises a Lua error. A cancel via
+// on_step is not an error: sample() returns normally and this returns true.
+static bool lua_call_solver_loop(
     LuaPlugin &  plugin,
     float *      xt,
     float *      vt,
@@ -732,7 +734,7 @@ static void lua_call_solver_loop(
     int64_t      seed = 0)
 {
     lua_State * L = plugin.L;
-    if (!L) return;
+    if (!L) return false;
 
     lua_inject_params(L, params, plugin.name);
     lua_inject_model_context(L, model_ctx);
@@ -757,7 +759,7 @@ static void lua_call_solver_loop(
         fprintf(stderr, "[Plugins] ERROR: full-loop solver '%s' has no sample() function\n",
                 plugin.name.c_str());
         lua_pop(L, 1);
-        return;
+        return false;
     }
 
     // Arg 1: xt (FloatArray, mutable)
@@ -789,13 +791,16 @@ static void lua_call_solver_loop(
     }, 1);
 
     // 5 args: xt, vt_buf, schedule, n, model_fn
+    bool ok = true;
     if (lua_pcall(L, 5, 0, 0) != LUA_OK) {
         fprintf(stderr, "[Plugins] ERROR in full-loop solver '%s' sample(): %s\n",
                 plugin.name.c_str(), lua_tostring(L, -1));
         lua_pop(L, 1);
+        ok = false;
     }
 
     delete mfn_ptr;
+    return ok;
 }
 
 
