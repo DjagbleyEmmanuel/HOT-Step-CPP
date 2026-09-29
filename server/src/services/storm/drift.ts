@@ -76,9 +76,23 @@ export const YUE2_PARAM_SPECS: ParamSpec[] = [
   { key: 'yue2NarCacheRatio', min: 0, max: 0.9, step: 0.05 },
 ];
 
+/**
+ * Numeric params that drift for the SA3 backend.
+ *
+ * guidanceScale is the live knob value; mapSa3SamplerPlugins gates it behind
+ * samplerPluginsEnabled before sending to the engine. sa3Steps maps to the
+ * steps param; duration is shared with ACE.
+ */
+export const SA3_PARAM_SPECS: ParamSpec[] = [
+  { key: 'guidanceScale', min: 1, max: 15, step: 0.1       },
+  { key: 'sa3Steps',      min: 4, max: 64, step: 1, int: true },
+  { key: 'duration',      min: 5, max: 600, step: 1, int: true },
+];
+
 const SPEC_BY_BACKEND: Record<string, ParamSpec[]> = {
   ace: ACE_PARAM_SPECS,
   yue2: YUE2_PARAM_SPECS,
+  sa3: SA3_PARAM_SPECS,
 };
 
 // ---------------------------------------------------------------------------

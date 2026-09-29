@@ -29,6 +29,7 @@ import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
+import { tokenizeForSa3 } from '../services/sa3Tokenizer.js';
 import { buildSlotRequest } from '../services/storm/slot.js';
 import { initDrift, updateDriftPressure, resolveStartDrift, defaultDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
 import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
@@ -888,6 +889,31 @@ router.post('/storm/stream', async (req, res) => {
       if (ctrl.nextSeed !== null) ctrl.nextSeed = null;
       if (ctrl.nextBpm !== null) ctrl.nextBpm = null;
       if (ctrl.nextDuration !== null) ctrl.nextDuration = null;
+
+      // SA3 is a single synchronous fetch -- no job poll needed.
+      if (slotResult.kind === 'sa3') {
+        const { ids, nTokens } = await tokenizeForSa3(slotResult.caption);
+        const sa3Buf = await aceClient.submitSa3Synth({
+          tokens: ids,
+          nTokens,
+          durationSec: slotResult.durationSec,
+          steps: slotResult.steps,
+          sampler: slotResult.sampler,
+          seed: slotResult.seed,
+          adapters: slotResult.adapters,
+          outFmt: 'f32',
+          ...(slotResult.solver        ? { solver:        slotResult.solver }        : {}),
+          ...(slotResult.scheduler     ? { scheduler:     slotResult.scheduler }     : {}),
+          ...(slotResult.guidanceMode  ? { guidanceMode:  slotResult.guidanceMode }  : {}),
+          ...(slotResult.guidanceScale !== undefined ? { guidanceScale: slotResult.guidanceScale } : {}),
+          ...(slotResult.pluginParams  ? { pluginParams:  slotResult.pluginParams }  : {}),
+          ...(slotResult.postprocessPlugin ? { postprocessPlugin: slotResult.postprocessPlugin } : {}),
+        });
+        if (!streamRunning.get(streamId)) break;
+        res.write(sa3Buf);
+        slotIdx++;
+        continue;
+      }
 
       // Submit to the right backend and get a shared-job id.
       let synthJobId: string;

@@ -320,6 +320,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const { capabilities } = useCapabilities();
   const isYue2 = activeBackendId === 'yue2';
+  const isSa3  = activeBackendId === 'sa3';
   // YuE2 extension params from capabilities manifest (solver/scheduler/wasserstein/nar)
   const yue2Extensions: BackendExtensionParam[] = capabilities?.extensions?.filter(e =>
     ['yue2OdeSteps','yue2NarCacheRatio','yue2NarSolver','yue2NarScheduler',
@@ -835,7 +836,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
 
               {/* Middle — Sampler */}
               <div className="w-full lg:w-[310px] shrink-0 lg:overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-b lg:border-b-0 lg:border-r border-zinc-800/60">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{isYue2 ? 'YuE2 NAR' : 'Sampler'}</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{isYue2 ? 'YuE2 NAR' : isSa3 ? 'Stable Audio 3' : 'Sampler'}</span>
                 {/* YuE2-specific controls */}
                 {isYue2 && (() => {
                   const bpVal = gpBackendParams;
@@ -910,7 +911,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   );
                 })()}
                 {/* ACE-only sampler controls */}
-                {!isYue2 && (<>
+                {!isYue2 && !isSa3 && (<>
                 {activeSolverParams.map(s => {
                   const isStormParam = activeSolverKey === 'storm';
                   const stormSetters: Record<string, (v: number) => void> = {
@@ -1135,7 +1136,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   activeSolver={liveInferMethod?(pluginRegistry.solvers.find(p=>p.name===liveInferMethod)?.display??liveInferMethod.replace(/^md_/,'').replace(/_/g,' ')):undefined}
                   activeScheduler={liveScheduler?(pluginRegistry.schedulers.find(p=>p.name===liveScheduler)?.display??liveScheduler.replace(/^md_/,'').replace(/_/g,' ')):undefined}
                   activeGuidanceMode={liveGuidanceMode?(pluginRegistry.guidance.find(p=>p.name===liveGuidanceMode)?.display??liveGuidanceMode.replace(/^md_/,'').replace(/_/g,' ')):undefined}
-                  hideAceControls={isYue2}
+                  hideAceControls={isYue2 || isSa3}
                   onSlotMetaUpdate={setSlotMeta}
                 />
               </div>
@@ -1243,7 +1244,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
 
       {/* ── Directed Drift panel ── */}
       {mode==='drift' && (
-        <DriftPanel sa={sa} isYue2={isYue2} />
+        <DriftPanel sa={sa} isYue2={isYue2} isSa3={isSa3} />
       )}
     </div>
     </BackendCapabilityGate>

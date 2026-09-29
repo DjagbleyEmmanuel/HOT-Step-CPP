@@ -80,8 +80,11 @@ interface Sa3SynthWire {
 /** Same pattern as minimax's mapMinimaxSamplerPlugins: the solver / scheduler /
  *  guidance pickers are SHARED global UI state, so they only reach the wire
  *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
- *  render stays on the parity-tested native pingpong path. */
-function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
+ *  render stays on the parity-tested native pingpong path.
+ *
+ *  Exported so the Storm slot builder can reuse it without duplicating the
+ *  plugin-filtering logic. */
+export function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
   'solver' | 'scheduler' | 'guidanceMode' | 'guidanceScale' | 'pluginParams' | 'postprocessPlugin'> {
   if (!params.samplerPluginsEnabled) return {};
   const out: ReturnType<typeof mapSa3SamplerPlugins> = {};
@@ -117,8 +120,11 @@ function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
 /** StableStep adapters, reused as-is: the same models/sa3-adapters/*.gguf,
  *  the same merge-at-load path. The UI stores them under the StableStep keys
  *  (stableStepAdapters: [{name, scale}]) — read those so one adapter picker
- *  serves both the refine and the primary render. */
-function mapSa3Adapters(params: any): Array<{ name: string; scale: number }> {
+ *  serves both the refine and the primary render.
+ *
+ *  Exported so the Storm slot builder can reuse it without duplicating the
+ *  adapter-filtering logic. */
+export function mapSa3Adapters(params: any): Array<{ name: string; scale: number }> {
   const raw = params.sa3Adapters ?? params.stableStepAdapters;
   if (!Array.isArray(raw)) return [];
   return raw

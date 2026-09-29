@@ -10,6 +10,7 @@
 
 import { translateParams } from '../generation/translateParams.js';
 import { mapYue2Params } from '../backends/yue2/generate.js';
+import { mapSa3SamplerPlugins, mapSa3Adapters } from '../backends/sa3/generate.js';
 import { applyDrift } from './drift.js';
 import type { DriftRuntime } from './drift.js';
 import type { AceRequest } from '../aceClient.js';
@@ -51,7 +52,26 @@ export interface Yue2SlotResult {
   yue2Req: Yue2SynthRequest;
 }
 
-export type SlotResult = AceSlotResult | Yue2SlotResult;
+/** Pre-tokenization SA3 slot params. The route tokenizes caption -> tokens
+ *  before calling aceClient.submitSa3Synth, since tokenization is async and
+ *  cannot happen inside this sync helper. */
+export interface Sa3SlotResult {
+  kind: 'sa3';
+  caption: string;
+  durationSec: number;
+  steps: number;
+  seed: number;
+  sampler: 'pingpong' | 'euler';
+  adapters: Array<{ name: string; scale: number }>;
+  guidanceScale?: number;
+  solver?: string;
+  scheduler?: string;
+  guidanceMode?: string;
+  pluginParams?: Record<string, string | number>;
+  postprocessPlugin?: string;
+}
+
+export type SlotResult = AceSlotResult | Yue2SlotResult | Sa3SlotResult;
 
 /**
  * Build the wire request for one Storm slot.
@@ -151,6 +171,29 @@ export function buildSlotRequest(
 
     const mapping = mapYue2Params(slotReq);
     return { kind: 'yue2', yue2Req: mapping.req };
+  }
+
+  if (backend === 'sa3') {
+    // SA3 subset: caption, duration, steps, seed, adapters, and optional
+    // sampler-plugin params. ACE-only fields (solver/scheduler/guidance on ACE,
+    // BPM, LSS, inferMethod) are not forwarded. guidanceScale is passed through
+    // mapSa3SamplerPlugins which gates it behind samplerPluginsEnabled.
+    const caption = String(slotReq.caption ?? slotReq.prompt ?? '').trim();
+
+    let durationSec = Number(slotReq.duration);
+    if (!Number.isFinite(durationSec) || durationSec < 1) durationSec = 30;
+
+    let steps = Number(slotReq.sa3Steps);
+    if (!Number.isFinite(steps) || steps < 1) steps = 24;
+    if (steps > 64) steps = 64;
+
+    const sampler: 'pingpong' | 'euler' = slotReq.sa3Sampler === 'euler' ? 'euler' : 'pingpong';
+    const seed = Math.floor(Number(slotReq.seed) || 0);
+
+    const adapters = mapSa3Adapters(slotReq);
+    const plugins  = mapSa3SamplerPlugins(slotReq);
+
+    return { kind: 'sa3', caption, durationSec, steps, seed, sampler, adapters, ...plugins };
   }
 
   // ACE branch -- byte-for-byte the same request as the inline logic that
