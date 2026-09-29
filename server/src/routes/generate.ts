@@ -838,10 +838,13 @@ router.post('/storm/stream', async (req, res) => {
   let slotIdx = 0;
 
   // If the request carries drift pressure, initialise the drift runtime.
-  // The pressure object is validated leniently: non-object values are ignored.
+  // Without drift, clear any leftover runtime from a prior stream so it cannot
+  // leak into a later Continuous stream that was not started with drift.
   if (baseParams.drift && typeof baseParams.drift === 'object' && !Array.isArray(baseParams.drift)) {
     const driftState = initDrift(baseSeed);
     ctrl.drift = { state: driftState, pressure: baseParams.drift as DriftPressure };
+  } else {
+    ctrl.drift = undefined;
   }
 
   console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed}, backend=${streamBackend})`);

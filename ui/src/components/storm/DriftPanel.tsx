@@ -218,15 +218,42 @@ export function DriftPanel({ sa, isYue2, streamId = 'default' }: DriftPanelProps
     }, 400);
   }, [streamId]);
 
-  // Pull-now: send immediately, no debounce
+  // Ref for one-slot pull restore: stores prevPull + slot counter at press time.
+  // Cleared after the restore fires.
+  const pullRestoreRef = useRef<{ prevPull: number; slotAtPress: number } | null>(null);
+
+  // Pull-now: set pull=1 locally and on server for one slot, then restore.
+  // One-slot restore: watches the snapshot slot counter -- when it advances
+  // past slotAtPress the pull is restored. Chosen over the simple local-only
+  // approach because the snapshot exposes a slot counter.
   const pullNow = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    const prevPull = pressure.pull;
+    const slotAtPress = snapshot?.slot ?? -1;
+    // Update local state so UI and server agree immediately.
+    setPressure(prev => ({ ...prev, pull: 1 }));
     fetch('/api/generate/storm/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ streamId, drift: { ...pressure, pull: 1 } }),
+      body: JSON.stringify({ streamId, drift: { pull: 1 } }),
     }).catch(() => {});
-  }, [streamId, pressure]);
+    pullRestoreRef.current = { prevPull, slotAtPress };
+  }, [streamId, pressure, snapshot, setPressure]);
+
+  // Watch snapshot slot counter; restore pull after the slot at press advances.
+  useEffect(() => {
+    if (!snapshot || !pullRestoreRef.current) return;
+    const { prevPull, slotAtPress } = pullRestoreRef.current;
+    if (snapshot.slot > slotAtPress) {
+      pullRestoreRef.current = null;
+      setPressure(prev => ({ ...prev, pull: prevPull }));
+      fetch('/api/generate/storm/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ streamId, drift: { pull: prevPull } }),
+      }).catch(() => {});
+    }
+  }, [snapshot, streamId, setPressure]);
 
   // Update pressure + trigger debounced POST
   const update = useCallback((patch: Partial<DriftPressure>) => {

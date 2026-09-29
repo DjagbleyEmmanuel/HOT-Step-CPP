@@ -93,17 +93,19 @@ export function buildSlotRequest(
   // NOTE: keys here must match what translateParams reads (camelCase for
   // UI-facing params). An explicit per-slot seed also requires
   // randomSeed=false or translateParams re-randomizes it.
+  //
+  // One-shot fields (nextSeed, nextBpm, nextDuration) are intentionally
+  // excluded from this initial build -- they are applied AFTER drift below so
+  // they always take precedence over whatever drift sets.
   const slotReq: Record<string, unknown> = {
     ...baseParams,
     randomSeed: false,
-    seed: ctrl.nextSeed !== null
-      ? ctrl.nextSeed
-      : (ctrl.seedLock ? baseSeed : baseSeed + slotIndex),
+    seed: ctrl.seedLock ? baseSeed : baseSeed + slotIndex,
     guidanceScale: ctrl.guidanceScale,
     ...(ctrl.lssStrength > 0 ? { lssStrength: ctrl.lssStrength } : {}),
     ...(ctrl.inferenceSteps > 0 ? { inferenceSteps: ctrl.inferenceSteps } : {}),
-    ...(ctrl.nextBpm !== null ? { bpm: ctrl.nextBpm } : ctrl.bpm > 0 ? { bpm: ctrl.bpm } : {}),
-    ...(ctrl.nextDuration !== null ? { duration: ctrl.nextDuration } : ctrl.duration > 0 ? { duration: ctrl.duration } : {}),
+    ...(ctrl.bpm > 0 ? { bpm: ctrl.bpm } : {}),
+    ...(ctrl.duration > 0 ? { duration: ctrl.duration } : {}),
     // Solver / scheduler / guidance live overrides -- null keeps the snapshot value
     ...(ctrl.inferMethod ? { inferMethod: ctrl.inferMethod } : {}),
     ...(ctrl.scheduler ? { scheduler: ctrl.scheduler } : {}),
@@ -111,10 +113,17 @@ export function buildSlotRequest(
     ...(Object.keys(mergedPluginParams).length > 0 ? { pluginParams: mergedPluginParams } : {}),
   };
 
-  // Apply drift pressure before one-shot overrides so user overrides win.
+  // Apply drift pressure first -- one-shot overrides below always win.
   if (ctrl.drift) {
     applyDrift(slotReq, ctrl.drift, backend);
   }
+
+  // User one-shot overrides applied after drift so they always take precedence.
+  // seedLock overrides drift seed; nextSeed overrides seedLock too.
+  if (ctrl.seedLock) slotReq.seed = baseSeed;
+  if (ctrl.nextSeed !== null) slotReq.seed = ctrl.nextSeed;
+  if (ctrl.nextBpm !== null) slotReq.bpm = ctrl.nextBpm;
+  if (ctrl.nextDuration !== null) slotReq.duration = ctrl.nextDuration;
 
   // One-shot caption/lyrics overrides (APPLIED, not cleared -- caller clears)
   if (ctrl.nextPrompt !== null) {

@@ -20,6 +20,8 @@ import {
   snapshot,
 } from './drift.js';
 
+import { buildSlotRequest, type StreamControlSnapshot } from './slot.js';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -474,5 +476,183 @@ describe('snapshot', () => {
     assert.ok('pos' in snap, 'snapshot missing pos');
     assert.ok('pull' in snap, 'snapshot missing pull');
     console.log(`  snapshot: pull = ${snap.pull}, pos.guidanceScale = ${snap.pos['guidanceScale']?.toFixed(4)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 13 (Issue 2): initDrift seeds from baseSeed so walk starts there
+// TEETH CHECK: fails on seed:0 (slot0 seed = 1 < 12345), passes after fix.
+// ---------------------------------------------------------------------------
+describe('initDrift baseSeed', () => {
+  it('walk mode: first slot seed > baseSeed and < baseSeed+10', () => {
+    const baseSeed = 12345;
+    const state = initDrift(baseSeed);
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 0,
+      locks: {},
+      seedMode: 'walk',
+    };
+    const rt: DriftRuntime = { state, pressure };
+    const req: Record<string, unknown> = {};
+    applyDrift(req, rt, 'ace');
+    const seed = Number(req['seed']);
+    console.log(`  initDrift baseSeed: seed after 1 walk slot = ${seed} (expected > ${baseSeed} and < ${baseSeed + 10})`);
+    assert.ok(seed > baseSeed, `Expected seed > ${baseSeed}, got ${seed}`);
+    assert.ok(seed < baseSeed + 10, `Expected seed < ${baseSeed + 10}, got ${seed}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 14 (Issue 4): updateDriftPressure validates and clamps inputs
+// TEETH CHECK: fails with Object.assign (rate becomes "abc", NaN enters
+// targets), passes after full validation is added.
+// ---------------------------------------------------------------------------
+describe('updateDriftPressure validation', () => {
+  it('rate "abc" and targets {guidanceScale: NaN, bogus: 5} leave state valid', () => {
+    const state = initDrift(1);
+    const pressure: DriftPressure = {
+      targets: { guidanceScale: 0.5 },
+      targetCaption: [],
+      captionPool: [],
+      pull: 0.5,
+      rate: 0.5,
+      jitter: 0.1,
+      locks: {},
+      seedMode: 'walk',
+    };
+    const rt: DriftRuntime = { state, pressure };
+
+    updateDriftPressure(rt, {
+      rate: 'abc' as unknown as number,
+      targets: { guidanceScale: NaN, bogus: 5 } as Record<string, number>,
+    } as Partial<DriftPressure>);
+
+    const rateValid = typeof rt.pressure.rate === 'number' && Number.isFinite(rt.pressure.rate);
+    const gsValid = typeof rt.pressure.targets['guidanceScale'] === 'number'
+      && Number.isFinite(rt.pressure.targets['guidanceScale']);
+    const noBogus = !('bogus' in rt.pressure.targets);
+    console.log(`  validation: rate=${rt.pressure.rate} (finite=${rateValid}), guidanceScale=${rt.pressure.targets['guidanceScale']} (finite=${gsValid}), bogus absent=${noBogus}`);
+    assert.ok(rateValid, `rate should be finite, got ${rt.pressure.rate}`);
+    assert.ok(gsValid, `guidanceScale target should be finite, got ${rt.pressure.targets['guidanceScale']}`);
+    assert.ok(noBogus, `bogus key should not appear in targets`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 15 (Issue 1): one-shot fields win over drift in buildSlotRequest
+// TEETH CHECK: fails in old slot.ts where nextSeed/bpm/duration are placed
+// in slotReq before applyDrift, so drift overwrites them. Passes after the
+// fix that applies one-shots after drift.
+// ---------------------------------------------------------------------------
+describe('one-shot priority in buildSlotRequest', () => {
+  it('nextSeed=777, nextBpm=140, nextDuration=90 survive walk-mode drift', () => {
+    const baseSeed = 9999;
+    const state = initDrift(baseSeed);
+    const pressure: DriftPressure = {
+      targets: { bpm: 1.0, duration: 1.0 },
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 0,
+      locks: {},
+      seedMode: 'walk',
+    };
+    const driftRt: DriftRuntime = { state, pressure };
+
+    const baseParams: Record<string, unknown> = {
+      guidanceScale: 7,
+      randomSeed: false,
+      seed: baseSeed,
+    };
+    const ctrl: StreamControlSnapshot = {
+      guidanceScale: 7,
+      lssStrength: 0,
+      inferenceSteps: 0,
+      duration: 0,
+      bpm: 0,
+      seedLock: false,
+      nextSeed: 777,
+      nextBpm: 140,
+      nextDuration: 90,
+      nextPrompt: null,
+      nextLyrics: null,
+      baseCaption: null,
+      baseLyrics: null,
+      baseInstrumental: null,
+      streamPaused: false,
+      extraPluginParams: {},
+      inferMethod: null,
+      scheduler: null,
+      guidanceMode: null,
+      drift: driftRt,
+    };
+
+    const result = buildSlotRequest(baseParams, ctrl, 0, baseSeed, 'ace');
+    assert.strictEqual(result.kind, 'ace');
+    const aceReq = result.aceReq as unknown as Record<string, unknown>;
+    const seed = Number(aceReq.seed);
+    const bpm = Number(aceReq.bpm);
+    const duration = Number(aceReq.duration);
+    console.log(`  oneshot priority: seed=${seed} (expected 777), bpm=${bpm} (expected 140), duration=${duration} (expected 90)`);
+    assert.strictEqual(seed, 777, `seed should be 777 (one-shot), got ${seed}`);
+    assert.strictEqual(bpm, 140, `bpm should be 140 (one-shot), got ${bpm}`);
+    assert.strictEqual(duration, 90, `duration should be 90 (one-shot), got ${duration}`);
+  });
+
+  it('seedLock=true keeps seed at baseSeed=12345 for 10 slots with walk drift', () => {
+    const baseSeed = 12345;
+    const state = initDrift(baseSeed);
+    const pressure: DriftPressure = {
+      targets: {},
+      targetCaption: [],
+      captionPool: [],
+      pull: 1,
+      rate: 1,
+      jitter: 0,
+      locks: {},
+      seedMode: 'walk',
+    };
+    const driftRt: DriftRuntime = { state, pressure };
+
+    const baseParams: Record<string, unknown> = { guidanceScale: 7, randomSeed: false, seed: baseSeed };
+    const ctrl: StreamControlSnapshot = {
+      guidanceScale: 7,
+      lssStrength: 0,
+      inferenceSteps: 0,
+      duration: 0,
+      bpm: 0,
+      seedLock: true,
+      nextSeed: null,
+      nextBpm: null,
+      nextDuration: null,
+      nextPrompt: null,
+      nextLyrics: null,
+      baseCaption: null,
+      baseLyrics: null,
+      baseInstrumental: null,
+      streamPaused: false,
+      extraPluginParams: {},
+      inferMethod: null,
+      scheduler: null,
+      guidanceMode: null,
+      drift: driftRt,
+    };
+
+    const seeds: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const result = buildSlotRequest(baseParams, ctrl, i, baseSeed, 'ace');
+      assert.strictEqual(result.kind, 'ace');
+      seeds.push(Number((result.aceReq as unknown as Record<string, unknown>).seed));
+    }
+    console.log(`  seedLock: seeds over 10 slots = ${seeds.join(', ')} (expected all ${baseSeed})`);
+    for (let i = 0; i < 10; i++) {
+      assert.strictEqual(seeds[i], baseSeed, `slot ${i}: expected seed=${baseSeed}, got ${seeds[i]}`);
+    }
   });
 });

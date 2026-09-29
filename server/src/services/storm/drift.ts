@@ -217,21 +217,110 @@ export function initDrift(rngSeed: number): DriftState {
   return {
     pos: {},
     captionWeights: {},
-    seed: 0,
+    seed: rngSeed,
     slot: 0,
     rngSeed,
   };
 }
 
+// Keys that are valid lock targets.
+const LOCKABLE_KEYS = new Set<string>([
+  ...ACE_PARAM_SPECS.map(s => s.key),
+  ...YUE2_PARAM_SPECS.map(s => s.key),
+  'keyScale', 'seed',
+]);
+
 /**
- * Merge a partial pressure patch into the runtime.
+ * Merge a partial pressure patch into the runtime with full validation.
  * Called by the control-endpoint handler on POST /storm/control.
+ * Silently ignores unknown keys and invalid values; never throws.
  */
 export function updateDriftPressure(
   runtime: DriftRuntime,
   patch: Partial<DriftPressure>,
 ): void {
-  Object.assign(runtime.pressure, patch);
+  const p = runtime.pressure;
+
+  // pull / rate / jitter: finite numbers clamped to [0, 1].
+  if (typeof patch.pull === 'number' && Number.isFinite(patch.pull)) {
+    p.pull = Math.max(0, Math.min(1, patch.pull));
+  }
+  if (typeof patch.rate === 'number' && Number.isFinite(patch.rate)) {
+    p.rate = Math.max(0, Math.min(1, patch.rate));
+  }
+  if (typeof patch.jitter === 'number' && Number.isFinite(patch.jitter)) {
+    p.jitter = Math.max(0, Math.min(1, patch.jitter));
+  }
+
+  // targets: only known ParamSpec keys with finite normalized values [0, 1].
+  if (patch.targets !== null && typeof patch.targets === 'object' && !Array.isArray(patch.targets)) {
+    const allSpecs = [...ACE_PARAM_SPECS, ...YUE2_PARAM_SPECS];
+    for (const [k, v] of Object.entries(patch.targets)) {
+      const spec = allSpecs.find(s => s.key === k);
+      if (!spec) continue;
+      const num = Number(v);
+      if (!Number.isFinite(num)) continue;
+      p.targets[k] = Math.max(0, Math.min(1, num));
+    }
+  }
+
+  // locks: array of known key strings, or Record<string, boolean>.
+  if (patch.locks !== undefined) {
+    if (Array.isArray(patch.locks)) {
+      const newLocks: Record<string, boolean> = {};
+      for (const k of patch.locks) {
+        if (typeof k === 'string' && LOCKABLE_KEYS.has(k)) newLocks[k] = true;
+      }
+      p.locks = newLocks;
+    } else if (typeof patch.locks === 'object' && patch.locks !== null) {
+      const newLocks: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(patch.locks)) {
+        if (LOCKABLE_KEYS.has(k) && typeof v === 'boolean') newLocks[k] = v;
+      }
+      p.locks = newLocks;
+    }
+  }
+
+  // seedMode: one of lock | walk | jump.
+  const VALID_SEED_MODES = new Set<string>(['lock', 'walk', 'jump']);
+  if (typeof patch.seedMode === 'string' && VALID_SEED_MODES.has(patch.seedMode)) {
+    p.seedMode = patch.seedMode as SeedMode;
+  }
+
+  // targetCaption / captionPool: string arrays.
+  if (Array.isArray(patch.targetCaption)) {
+    p.targetCaption = patch.targetCaption.filter((t): t is string => typeof t === 'string');
+  }
+  if (Array.isArray(patch.captionPool)) {
+    p.captionPool = patch.captionPool.filter((t): t is string => typeof t === 'string');
+  }
+
+  // pluginDrift boolean.
+  if (typeof patch.pluginDrift === 'boolean') p.pluginDrift = patch.pluginDrift;
+
+  // pluginCandidates: string arrays per known field.
+  if (patch.pluginCandidates !== null && typeof patch.pluginCandidates === 'object') {
+    const cands = patch.pluginCandidates;
+    const validated: DriftPressure['pluginCandidates'] = {};
+    for (const field of ['inferMethod', 'scheduler', 'guidanceMode'] as const) {
+      if (Array.isArray(cands[field])) {
+        validated[field] = (cands[field] as unknown[]).filter(
+          (v): v is string => typeof v === 'string',
+        );
+      }
+    }
+    p.pluginCandidates = validated;
+  }
+
+  // customTagSets: Record<string, string[]>.
+  if (patch.customTagSets !== null && typeof patch.customTagSets === 'object'
+      && !Array.isArray(patch.customTagSets)) {
+    const sets: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(patch.customTagSets)) {
+      if (Array.isArray(v)) sets[k] = v.filter((t): t is string => typeof t === 'string');
+    }
+    p.customTagSets = sets;
+  }
 }
 
 /**
