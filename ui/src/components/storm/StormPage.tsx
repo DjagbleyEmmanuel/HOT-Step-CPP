@@ -6,11 +6,15 @@ import { studioPluginsOptions } from '../../queries/studios/shared';
 import React, { useState, useEffect } from 'react';
 import { Zap, Square, Play, Music } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useStreamAudio } from '../../hooks/useStreamAudio';
 import { StormLiveControls, type LyricsMode, type SlotMeta } from './StormLiveControls';
 import { expandWildcards, hasWildcards } from '../../utils/wildcardUtils';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
+import { useBackendStore } from '../../stores/backendStore';
+import type { BackendExtensionParam } from '../../stores/backendStore';
+import { useCapabilities } from '../../hooks/useCapabilities';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -308,6 +312,23 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const [extraSolverParams,    setExtraSolverParams]    = usePersistedState<Record<string, number>>('hs-storm-solver-extra', {});
   const [extraSchedulerParams, setExtraSchedulerParams] = usePersistedState<Record<string, number|string>>('hs-storm-scheduler-extra', {});
   const [extraGuiderParams,    setExtraGuiderParams]    = usePersistedState<Record<string, number|string>>('hs-storm-guider-extra', {});
+
+  // Backend detection for YuE2 control set
+  const gpBackendParams = useGlobalParamsStore((s: any) => s.backendParams as Record<string, unknown>) ?? {};
+  const gpSetBackendParam = useGlobalParamsStore((s: any) => s.setBackendParam as (key: string, v: unknown) => void);
+  const activeBackendId = useBackendStore(s => s.activeBackendId);
+  const { capabilities } = useCapabilities();
+  const isYue2 = activeBackendId === 'yue2';
+  // YuE2 extension params from capabilities manifest (solver/scheduler/wasserstein/nar)
+  const yue2Extensions: BackendExtensionParam[] = capabilities?.extensions?.filter(e =>
+    ['yue2OdeSteps','yue2NarCacheRatio','yue2NarSolver','yue2NarScheduler',
+     'yue2WassTau','yue2WassSpectral','yue2WassRmsWeight','yue2WassRmsTarget',
+     'yue2WassGate','yue2WassIterations','yue2WassProject','yue2WassLatentRms',
+     'yue2HtKinetic','yue2HtDamping','yue2HtCritical','yue2HtIntensity',
+     'yue2HtWell','yue2HtFloor','yue2HtPoly','yue2HtBlend','yue2HtSmooth',
+     'yue2HtDense','yue2HtShift',
+    ].includes(e.key)
+  ) ?? [];
 
   // DJ deck refs (for nudge + quantized start)
   const deckARef = React.useRef<ReturnType<typeof useStreamAudio>|null>(null);
@@ -803,8 +824,82 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
 
               {/* Middle — Sampler */}
               <div className="w-[310px] shrink-0 overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-r border-zinc-800/60">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Sampler</span>
-                {/* Unified solver params — swaps automatically based on dropdown selection */}
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{isYue2 ? 'YuE2 NAR' : 'Sampler'}</span>
+                {/* YuE2-specific controls */}
+                {isYue2 && (() => {
+                  const bpVal = gpBackendParams;
+                  const visibleExts = yue2Extensions.filter(e => {
+                    if (!e.visible_when) return true;
+                    const current = String(bpVal[e.visible_when.key] ?? '');
+                    return current === e.visible_when.equals;
+                  });
+                  // Primary sliders and dropdowns: ode_steps, nar_cache_ratio, solver, scheduler first
+                  const PRIMARY_KEYS = ['yue2OdeSteps','yue2NarCacheRatio','yue2NarSolver','yue2NarScheduler'];
+                  const primaryExts = yue2Extensions.filter(e => PRIMARY_KEYS.includes(e.key));
+                  return (
+                    <div className="space-y-2">
+                      {primaryExts.map(e => {
+                        const val = bpVal[e.key];
+                        const defVal = e.default ?? (e.type === 'slider' ? (e.min ?? 0) : '');
+                        const current = val !== undefined ? val : defVal;
+                        if (e.type === 'slider') {
+                          return (
+                            <div key={e.key} className="flex items-center gap-2">
+                              <ParamLabel label={e.label} info={e.hint} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                              <input type="range" min={e.min} max={e.max} step={e.step}
+                                value={Number(current)}
+                                onChange={ev => gpSetBackendParam(e.key, Number(ev.target.value))}
+                                className="flex-1 accent-red-500 h-1"/>
+                              <span className="text-[11px] text-zinc-300 w-9 text-right tabular-nums">{Number(current).toFixed((e.step??1)<1?2:0)}</span>
+                            </div>
+                          );
+                        }
+                        if (e.type === 'select' && e.options) {
+                          return (
+                            <div key={e.key} className="flex items-center gap-1.5">
+                              <ParamLabel label={e.label} info={e.hint} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                              <StyledSelect accent="pink" size="sm"
+                                value={String(current)}
+                                onChange={v => gpSetBackendParam(e.key, v)}
+                                options={e.options.map(o => ({value:o.value, label:o.label}))}
+                                className="flex-1 min-w-0"/>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
+                      {/* Wasserstein / HT V3 conditional params */}
+                      {visibleExts.filter(e => !PRIMARY_KEYS.includes(e.key)).map(e => {
+                        const val = bpVal[e.key];
+                        const defVal = e.default ?? (e.type === 'slider' ? (e.min ?? 0) : e.type === 'toggle' ? false : '');
+                        const current = val !== undefined ? val : defVal;
+                        if (e.type === 'toggle') {
+                          return (
+                            <div key={e.key} className="flex items-center gap-2">
+                              <ParamLabel label={e.label} info={e.hint} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                              <Toggle accent="pink" size="sm" checked={Boolean(current)} onChange={v => gpSetBackendParam(e.key, v)} label="" />
+                            </div>
+                          );
+                        }
+                        if (e.type === 'slider') {
+                          return (
+                            <div key={e.key} className="flex items-center gap-2">
+                              <ParamLabel label={e.label} info={e.hint} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                              <input type="range" min={e.min} max={e.max} step={e.step}
+                                value={Number(current)}
+                                onChange={ev => gpSetBackendParam(e.key, Number(ev.target.value))}
+                                className="flex-1 accent-red-500 h-1"/>
+                              <span className="text-[11px] text-zinc-300 w-9 text-right tabular-nums">{Number(current).toFixed((e.step??1)<1?2:0)}</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  );
+                })()}
+                {/* ACE-only sampler controls */}
+                {!isYue2 && (<>
                 {activeSolverParams.map(s => {
                   const isStormParam = activeSolverKey === 'storm';
                   const stormSetters: Record<string, (v: number) => void> = {
@@ -965,6 +1060,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     ))}
                   </div>
                 )}
+                </>)}
                 {/* XFade */}
                 <div className="flex items-center gap-2">
                   <ParamLabel label="XFade" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
@@ -1028,6 +1124,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   activeSolver={liveInferMethod?(pluginRegistry.solvers.find(p=>p.name===liveInferMethod)?.display??liveInferMethod.replace(/^md_/,'').replace(/_/g,' ')):undefined}
                   activeScheduler={liveScheduler?(pluginRegistry.schedulers.find(p=>p.name===liveScheduler)?.display??liveScheduler.replace(/^md_/,'').replace(/_/g,' ')):undefined}
                   activeGuidanceMode={liveGuidanceMode?(pluginRegistry.guidance.find(p=>p.name===liveGuidanceMode)?.display??liveGuidanceMode.replace(/^md_/,'').replace(/_/g,' ')):undefined}
+                  hideAceControls={isYue2}
                   onSlotMetaUpdate={setSlotMeta}
                 />
               </div>
