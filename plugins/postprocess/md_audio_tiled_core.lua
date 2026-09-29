@@ -156,13 +156,15 @@ function M.build_fixed_schedule(W, tile_size, overlap, start_offset)
     return schedule
 end
 
--- Default ceiling for auto single tile, in latent frames (15000 = 600 s at
--- 25 fps, ACE's maximum song length). The engine's vae_decode_fn already
--- runs the native chunked decode (chunk 1024 / overlap 64), so GPU VRAM is
--- flat regardless of how many frames one plugin tile asks for (ace_engine.log:
--- "[VRAM] before/after VAE used ~1157 MB" on 163 s songs). The real cost of a
--- bigger tile is host RAM for the Lua tables (~3 x 2ch x T_audio doubles).
-M.AUTO_MAX_SINGLE_TILE = 15000
+-- Default ceiling for auto single tile, in latent frames.
+-- 6000 = 240 s at 25 fps (ACE). GPU VRAM is flat because vae_decode_fn
+-- already runs the native chunked decode (chunk 1024 / overlap 64), so
+-- the engine sees the same footprint regardless of how many frames the
+-- plugin tile covers. The real cost of a larger tile is host RAM for the
+-- Lua number arrays: each array is ~16 B/value; one tile holds
+-- frames * 1920 samples/frame * 2 ch values; chunk + write_chunk +
+-- audio_out = ~3 arrays => 6000 * 1920 * 2 * 3 * 16 B ~ 1.1 GB.
+M.AUTO_MAX_SINGLE_TILE = 6000
 
 ---Auto schedule: ONE tile when W fits in max_single, else the fewest
 ---equal-length tiles (each <= max_single) with `overlap` frames of crossfade.
@@ -188,14 +190,21 @@ function M.build_auto_schedule(W, max_single, overlap)
     if overlap < 0 then overlap = 0 end
     -- overlap >= tile would never advance; cap it at a quarter tile
     overlap = math.min(overlap, math.floor(max_single / 4))
-    local n   = math.ceil((W - overlap) / (max_single - overlap))
-    local len = math.ceil((W + (n - 1) * overlap) / n)
-    local hop = len - overlap
+    local n     = math.ceil((W - overlap) / (max_single - overlap))
+    -- Distribute remainder evenly so tile lengths differ by at most 1.
+    -- total_extent = W + (n-1)*overlap is how many frames are "spent"
+    -- across all tile starts (hops) plus one final tile length.
+    local total = W + (n - 1) * overlap
+    local base  = math.floor(total / n)
+    local rem   = total - base * n   -- 0 to n-1 tiles get base+1
     local schedule = {}
+    local cursor = 0
     for i = 0, n - 1 do
-        local s = i * hop
-        local e = (i == n - 1) and W or math.min(W, s + len)
+        local this_len = base + (i < rem and 1 or 0)
+        local s = cursor
+        local e = (i == n - 1) and W or math.min(W, s + this_len)
         table.insert(schedule, {start = s, end_ = e, overlap = overlap})
+        cursor = cursor + this_len - overlap
     end
     return schedule
 end

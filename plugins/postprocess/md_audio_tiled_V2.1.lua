@@ -7,9 +7,9 @@ Wraps md_audio_tiled_core.lua (v3.1.0)
 V2.1: "Auto Single Tile" (default on). Decodes the whole song as ONE tile
 when it fits under "Max Single Tile", so there is no seam (V2 put a
 crossfade seam at frame 3904 = 156 s with tile 4096 / overlap 192). Longer
-songs get the fewest equal-length tiles instead of a long tile plus a stub. to conform to the HOT-Step
-postprocess plugin contract. The core module is loaded via require()
-and exposes execute_tiled_decode() as the entry point.
+songs use the fewest equal-length tiles (lengths differ by at most 1 frame).
+Conforms to the HOT-Step postprocess plugin contract. The core module is
+loaded via require() and exposes execute_tiled_decode() as the entry point.
 
 © 2026 Alexander Allan (MDMAchine) | A&E Concepts
 GPL v3
@@ -29,12 +29,13 @@ postprocess = {
           default = true,
           hint = "Decode the whole song in one tile (no seam) when it fits under Max Single Tile. Longer songs get equal tiles. Off = V2 fixed tiling." },
         { key = "max_single_tile", type = "slider", label = "Max Single Tile (Frames)",
-          default = 15000, min = 1024, max = 30000, step = 256,
-          hint = "Largest tile auto mode will decode (15000 = 600 s at 25 fps). GPU VRAM is flat since the engine decodes in native chunks; lower this only to save host RAM.",
-          visible_when = { key = "auto_single_tile", equals = true } },
+          default = 6000, min = 1024, max = 30000, step = 256,
+          hint = "Largest tile auto mode will decode in one pass (6000 = 240 s at 25 fps, ~1.1 GB host RAM). GPU VRAM is flat since the engine decodes in native chunks; lower this only to save host RAM.",
+          visible_when = { key = "auto_single_tile", equals = "true" } },
         { key = "tile_size", type = "slider", label = "Tile Size (Frames)",
           default = 1024, min = 256, max = 4096, step = 128,
-          hint = "Latent frames per VAE decode chunk. Lower = less VRAM, higher = faster." },
+          hint = "Latent frames per VAE decode chunk. Lower = less VRAM, higher = faster.",
+          visible_when = { key = "auto_single_tile", equals = "false" } },
         { key = "overlap", type = "slider", label = "Overlap (Frames)",
           default = 64, min = 16, max = 256, step = 16,
           hint = "Overlap between tiles for crossfading. Higher = smoother seams but more compute." },
