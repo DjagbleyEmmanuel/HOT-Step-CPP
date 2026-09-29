@@ -30,6 +30,8 @@ import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
 import { buildSlotRequest } from '../services/storm/slot.js';
+import { initDrift, updateDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
+import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
@@ -745,6 +747,8 @@ interface StreamControlState {
   inferMethod: string | null;
   scheduler: string | null;
   guidanceMode: string | null;
+  /** Active drift runtime, set at stream start when baseParams.drift is present. */
+  drift?: DriftRuntime;
 }
 
 const streamRunning = new Map<string, boolean>();
@@ -832,6 +836,13 @@ router.post('/storm/stream', async (req, res) => {
   // is not supported; a new stream must be started after a backend switch.
   const streamBackend = getActiveBackendId();
   let slotIdx = 0;
+
+  // If the request carries drift pressure, initialise the drift runtime.
+  // The pressure object is validated leniently: non-object values are ignored.
+  if (baseParams.drift && typeof baseParams.drift === 'object' && !Array.isArray(baseParams.drift)) {
+    const driftState = initDrift(baseSeed);
+    ctrl.drift = { state: driftState, pressure: baseParams.drift as DriftPressure };
+  }
 
   console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed}, backend=${streamBackend})`);
   pushLog(`[STORM ${streamId}] stream started`);
@@ -972,6 +983,17 @@ router.post('/storm/control', (req, res) => {
       if (typeof v === 'number' || typeof v === 'string') ctrl.extraPluginParams[k] = v;
     }
   }
+  // Drift pressure patch -- ignore bad fields, never throw.
+  if (b.drift && typeof b.drift === 'object' && !Array.isArray(b.drift)) {
+    if (ctrl.drift) {
+      // Stream is live: merge into existing runtime.
+      updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
+    } else {
+      // Stream not yet started or drift not initialised: seed 0 placeholder
+      // state will be replaced on next stream start.
+      ctrl.drift = { state: initDrift(0), pressure: b.drift as DriftPressure };
+    }
+  }
 
   res.json({ ok: true, streamId });
 });
@@ -979,9 +1001,12 @@ router.post('/storm/control', (req, res) => {
 // GET /api/generate/storm/control — read back a stream's live state
 router.get('/storm/control', (req, res) => {
   const streamId = typeof req.query.streamId === 'string' ? req.query.streamId : 'default';
+  const ctrl = getStreamControl(streamId);
+  const { drift: _drift, ...ctrlWithoutDrift } = ctrl;
   res.json({
     running: streamRunning.get(streamId) ?? false,
-    ...getStreamControl(streamId),
+    ...ctrlWithoutDrift,
+    ...(ctrl.drift ? { drift: driftSnapshot(ctrl.drift) } : {}),
   });
 });
 

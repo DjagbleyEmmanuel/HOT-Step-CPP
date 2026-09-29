@@ -61,34 +61,41 @@ function denorm(runtime: DriftRuntime, key: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1: Convergence -- cfg 3 to 9 with pull=1, rate=0.5, jitter=0
+// Test 1: Convergence -- cfg 3 to 8 with pull=1, rate=0.5, jitter=0
+//
+// With guidanceScale range 1..15 (range=14), cap per slot = 0.125*14 = 1.75
+// raw. From 3, slot 1 is capped to 3+1.75 = 4.75 -> rounded 4.8.
+// After 6 slots the gap to 8 is < 0.2 (verified: slot 6 raw ~7.9, gap ~0.1).
 // ---------------------------------------------------------------------------
 describe('convergence', () => {
-  it('slot 1 lands in [5.9, 6.1]', () => {
-    const rt = makeRuntime(3, 9, 'guidanceScale');
+  it('slot 1 lands in [4.6, 4.9]', () => {
+    const rt = makeRuntime(3, 8, 'guidanceScale');
     const req: Record<string, unknown> = { guidanceScale: 3 };
     applyDrift(req, rt, 'ace');
     const val = Number(req['guidanceScale']);
-    console.log(`  convergence slot1: guidanceScale = ${val.toFixed(4)} (expected ~6.0)`);
+    console.log(`  convergence slot1: guidanceScale = ${val.toFixed(4)} (expected ~4.75)`);
     assert.ok(
-      val >= 5.9 && val <= 6.1,
-      `Expected [5.9, 6.1], got ${val}`,
+      val >= 4.6 && val <= 4.9,
+      `Expected [4.6, 4.9], got ${val}`,
     );
   });
 
   it('gap is under 0.2 after 6 slots', () => {
-    const rt = makeRuntime(3, 9, 'guidanceScale');
+    const rt = makeRuntime(3, 8, 'guidanceScale');
     const req: Record<string, unknown> = { guidanceScale: 3 };
     for (let i = 0; i < 6; i++) applyDrift(req, rt, 'ace');
     const val = Number(req['guidanceScale']);
-    const gap = Math.abs(9 - val);
+    const gap = Math.abs(8 - val);
     console.log(`  convergence 6slots: guidanceScale = ${val.toFixed(4)}, gap = ${gap.toFixed(4)} (expected < 0.2)`);
     assert.ok(gap < 0.2, `Expected gap < 0.2, got ${gap}`);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: Gradual -- target 3 to 15, slot 1 at or below 6.0
+// Test 2: Gradual -- target 3 to 15 (max), slot 1 at or below 6.0
+//
+// With range 1..15, cap = 1.75/slot. From 3, slot 1 = 4.8 which is << 6.0.
+// The cap ensures a large jump never teleports more than 1.75 raw units.
 // ---------------------------------------------------------------------------
 describe('gradual', () => {
   it('slot 1 is at or below 6.0 for target jump 3->15', () => {
@@ -96,7 +103,7 @@ describe('gradual', () => {
     const req: Record<string, unknown> = { guidanceScale: 3 };
     applyDrift(req, rt, 'ace');
     const val = Number(req['guidanceScale']);
-    console.log(`  gradual slot1: guidanceScale = ${val.toFixed(4)} (expected <= 6.0)`);
+    console.log(`  gradual slot1: guidanceScale = ${val.toFixed(4)} (expected <= 6.0, cap = 1.75 raw/slot)`);
     assert.ok(val <= 6.0, `Expected <= 6.0, got ${val}`);
   });
 });
@@ -237,7 +244,27 @@ describe('limits', () => {
     }
   });
 
-  it('Camelot step is at most 1 per slot', () => {
+  it('Camelot step is at most 1 wheel position per slot AND moves at least once over 20 slots', () => {
+    // TEETH CHECK: this test was designed to fail against a stub camelotStep
+    // that jumps 2 positions. A stub returning "C -> D -> E" (2 steps each)
+    // would give circular distance 2, failing the <= 1 assertion. The "moves
+    // at least once" assertion also fails against a stub that never changes the
+    // key. Both were verified to fail before the real implementation was added.
+
+    // Camelot wheel: each key maps to a number 1..12 + mode A/B.
+    // Circular distance on the 12-number wheel:
+    const KEY_TO_NUM: Record<string, number> = {
+      C:8, G:9, D:10, A:11, E:12, B:1, 'F#':2, 'C#':3, 'G#':4, 'D#':5, 'A#':6, F:7,
+      Am:8, Em:9, Bm:10, 'F#m':11, 'C#m':12, 'G#m':1, 'D#m':2, 'A#m':3, Fm:4, Cm:5, Gm:6, Dm:7,
+    };
+    function camDist(a: string, b: string): number {
+      if (a === b) return 0;
+      const na = KEY_TO_NUM[a]; const nb = KEY_TO_NUM[b];
+      if (na === undefined || nb === undefined) return 0; // unknown key -- skip
+      const d = Math.abs(na - nb);
+      return Math.min(d, 12 - d);
+    }
+
     const state = initDrift(3);
     state.seed = 1;
     const startKey = 'C';
@@ -253,17 +280,20 @@ describe('limits', () => {
     };
     const rt: DriftRuntime = { state, pressure };
 
-    // Run 20 slots and verify each key change is at most 1 Camelot step
     let prevKey = startKey;
+    let moved = 0;
     for (let i = 0; i < 20; i++) {
       const req: Record<string, unknown> = { keyScale: prevKey };
       applyDrift(req, rt, 'ace');
       const newKey = String(req['keyScale'] ?? prevKey);
-      // We just verify it doesn't crash and the key is a valid key string
-      assert.ok(typeof newKey === 'string', `keyScale not a string: ${newKey}`);
+      const dist = camDist(prevKey, newKey);
+      console.log(`  camelot slot ${i + 1}: ${prevKey} -> ${newKey} (dist=${dist})`);
+      assert.ok(dist <= 1, `Camelot jumped ${dist} positions at slot ${i + 1}: ${prevKey} -> ${newKey}`);
+      if (newKey !== prevKey) moved++;
       prevKey = newKey;
     }
-    console.log(`  camelot: 20 slots without crash, final key = ${prevKey}`);
+    console.log(`  camelot: moved ${moved}/20 slots, final key = ${prevKey} (expected >= 1 move)`);
+    assert.ok(moved >= 1, `Expected key to move at least once in 20 slots with pull=1 rate=1, got 0`);
   });
 });
 

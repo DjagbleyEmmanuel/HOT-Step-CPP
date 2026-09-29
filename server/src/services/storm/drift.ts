@@ -58,12 +58,11 @@ export interface ParamSpec {
 /**
  * Numeric params that drift for the ACE backend.
  *
- * guidanceScale uses range 24 (min=1, max=25) so that the test case of
- * start=3, target=9, pull=1, rate=0.5, jitter=0 yields a slot-1 value of
- * exactly 6.0 (step = 0.5*(6/24) = 0.125 = clamp boundary at that rate).
+ * guidanceScale range matches the UI slider max (StormPage.tsx, StormLiveControls.tsx):
+ * min=1, max=15. Range=14 in raw units; cap=0.125*14=1.75 per slot at rate=0.5.
  */
 export const ACE_PARAM_SPECS: ParamSpec[] = [
-  { key: 'guidanceScale',   min: 1,  max: 25,  step: 0.1  },
+  { key: 'guidanceScale',   min: 1,  max: 15,  step: 0.1  },
   { key: 'lssStrength',     min: 0,  max: 1,   step: 0.05 },
   { key: 'inferenceSteps',  min: 10, max: 100, step: 1, int: true },
   { key: 'bpm',             min: 60, max: 220, step: 1, int: true },

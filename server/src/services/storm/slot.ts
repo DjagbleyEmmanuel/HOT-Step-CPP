@@ -10,6 +10,8 @@
 
 import { translateParams } from '../generation/translateParams.js';
 import { mapYue2Params } from '../backends/yue2/generate.js';
+import { applyDrift } from './drift.js';
+import type { DriftRuntime } from './drift.js';
 import type { AceRequest } from '../aceClient.js';
 import type { Yue2SynthRequest } from '../backends/yue2/client.js';
 
@@ -35,6 +37,8 @@ export interface StreamControlSnapshot {
   inferMethod: string | null;
   scheduler: string | null;
   guidanceMode: string | null;
+  /** Active drift runtime for this stream, or undefined if drift is not running. */
+  drift?: DriftRuntime;
 }
 
 export interface AceSlotResult {
@@ -70,8 +74,8 @@ export type SlotResult = AceSlotResult | Yue2SlotResult;
  * are READ here but NOT cleared -- the caller clears them after this returns
  * so it can log them first.
  *
- * TODO: applyDrift(slotReq, ctrl.drift, backend) goes here once the Drifter
- * system is available.
+ * Drift pressure (ctrl.drift) is applied before one-shot overrides so that
+ * any user one-shot value still takes precedence.
  */
 export function buildSlotRequest(
   baseParams: Record<string, unknown>,
@@ -107,6 +111,11 @@ export function buildSlotRequest(
     ...(Object.keys(mergedPluginParams).length > 0 ? { pluginParams: mergedPluginParams } : {}),
   };
 
+  // Apply drift pressure before one-shot overrides so user overrides win.
+  if (ctrl.drift) {
+    applyDrift(slotReq, ctrl.drift, backend);
+  }
+
   // One-shot caption/lyrics overrides (APPLIED, not cleared -- caller clears)
   if (ctrl.nextPrompt !== null) {
     slotReq.caption = ctrl.nextPrompt;
@@ -130,8 +139,6 @@ export function buildSlotRequest(
     // knob controls YuE2 cfg_scale (mapYue2Params reads yue2CfgScale, not the
     // generic guidanceScale key).
     slotReq.yue2CfgScale = ctrl.guidanceScale;
-
-    // TODO: applyDrift(slotReq, ctrl.drift, backend)
 
     const mapping = mapYue2Params(slotReq);
     return { kind: 'yue2', yue2Req: mapping.req };
