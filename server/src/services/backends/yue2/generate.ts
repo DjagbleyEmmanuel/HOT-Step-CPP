@@ -367,6 +367,16 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
       plugin_params[`${narScheduler}:snr_space`] = params.yue2HtSnr;
     }
   }
+  // CADS conditioning noise on the NAR plan conditioning (engine-side, works
+  // with any solver/scheduler). Strength 0 sends nothing: bit-identical output.
+  const cadsStrength = Number(params.yue2CadsStrength);
+  if (Number.isFinite(cadsStrength) && cadsStrength > 0) {
+    plugin_params['yue2:cads_strength'] = Math.min(1, cadsStrength);
+    copyNumbers('yue2', { yue2CadsT1: 'cads_t1', yue2CadsT2: 'cads_t2' });
+    if (typeof params.yue2CadsRescale === 'boolean') {
+      plugin_params['yue2:cads_rescale'] = params.yue2CadsRescale;
+    }
+  }
   if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
     notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);
   }

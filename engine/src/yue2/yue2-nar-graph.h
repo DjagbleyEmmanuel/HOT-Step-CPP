@@ -98,6 +98,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <random>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -131,6 +132,11 @@ struct Yue2NarVelocityGraph {
     bool attn_constants_uploaded = false;
     ggml_tensor * x_embed_tap = nullptr;
     ggml_tensor * velocity_out = nullptr;
+    // CADS conditioning noise (only built when the chunk's cads_strength > 0).
+    ggml_tensor * in_cads_zk = nullptr;
+    ggml_tensor * in_cads_zv = nullptr;
+    ggml_tensor * in_cads_coef = nullptr;  // [2]: sqrt(gamma), s*sqrt(1-gamma)
+    bool cads_z_uploaded = false;
 };
 
 static void yue2_nar_velocity_graph_free(Yue2NarVelocityGraph * g) {
@@ -156,7 +162,43 @@ struct Yue2NarChunk {
     // before the concat. state/noise/velocity buffers are [M][chunk_len][64].
     int64_t         n_var = 1;
     mutable Yue2NarVelocityGraph velocity_graph; // serial ODE calls share one shape
+    // CADS-style conditioning noise on the AR-prefix K/V (the NAR's plan
+    // conditioning). strength 0 builds no extra node (bit-identical output).
+    // t runs 1 (pure noise) -> 0 (clean), as in the ODE solvers: gamma = 1
+    // (clean cond) for t <= cads_t1, 0 (fully noised) for t >= cads_t2, linear
+    // between, so the conditioning is noisiest early (CADS paper convention).
+    float    cads_strength = 0.0f;
+    float    cads_t1       = 0.6f;
+    float    cads_t2       = 0.9f;
+    bool     cads_rescale  = true;
+    uint64_t cads_seed     = 0;
 };
+
+// CADS schedule gamma(t) on the solver's t (1 = noise, 0 = clean).
+static double yue2_cads_gamma(double t, double t1, double t2) {
+    if (t <= t1) return 1.0;
+    if (t >= t2 || t2 <= t1) return 0.0;
+    return (t2 - t) / (t2 - t1);
+}
+
+// noisy = sqrt(g)*cond + s*sqrt(1-g)*std_row(cond)*z, then (optionally) the
+// CADS rescale back to cond's own per-row mean/std. Rows are head_dim vectors
+// (one per prefix token per KV head). z is scaled by the row std so strength
+// is relative to the K/V magnitude, which differs a lot between layers.
+static ggml_tensor * yue2_cads_apply(ggml_context * ctx, ggml_tensor * ar, ggml_tensor * z, ggml_tensor * coef,
+                                     bool rescale) {
+    const ggml_type ty = ar->type;
+    ggml_tensor * x    = ty == GGML_TYPE_F32 ? ar : ggml_cast(ctx, ar, GGML_TYPE_F32);
+    ggml_tensor * mean = ggml_mean(ctx, x);                                   // [1, T, Nkv, 1]
+    ggml_tensor * sd   = ggml_sqrt(ctx, ggml_mean(ctx, ggml_sqr(ctx, ggml_sub(ctx, x, mean))));
+    ggml_tensor * a    = ggml_view_1d(ctx, coef, 1, 0);
+    ggml_tensor * b    = ggml_view_1d(ctx, coef, 1, sizeof(float));
+    ggml_tensor * y    = ggml_add(ctx, ggml_mul(ctx, x, a), ggml_mul(ctx, ggml_mul(ctx, z, sd), b));
+    if (rescale) {
+        y = ggml_add(ctx, ggml_mul(ctx, ggml_norm(ctx, y, 1e-6f), sd), mean);
+    }
+    return ty == GGML_TYPE_F32 ? y : ggml_cast(ctx, y, ty);
+}
 
 // Builds this chunk's AR-prefix KV via a fresh causal prefill (yue2_ar_prefill,
 // yue2-lm-graph.h — same math as the semantic-stage AR decode, deliberately
@@ -635,6 +677,21 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     // passes the tensor itself, as before.
     const Yue2ArKvCache & kc = *chunk.cache;
     const bool whole = kc.n_sets == 1 && kc.capacity == ar_length;
+    if (chunk.cads_strength > 0.0f) {
+        // One z pair shared by every layer (per-layer z would cost 2*L prefix
+        // copies of VRAM); the per-row std scaling adapts it to each layer.
+        const ggml_tensor * k0 = kc.k[0];
+        const ggml_tensor * v0 = kc.v[0];
+        g.in_cads_zk = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, k0->ne[0], ar_length, k0->ne[2], 1);
+        g.in_cads_zv = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, v0->ne[0], ar_length, v0->ne[2], 1);
+        g.in_cads_coef = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 2);
+        ggml_set_name(g.in_cads_zk, "yue2_nar_cads_zk");
+        ggml_set_name(g.in_cads_zv, "yue2_nar_cads_zv");
+        ggml_set_name(g.in_cads_coef, "yue2_nar_cads_coef");
+        ggml_set_input(g.in_cads_zk);
+        ggml_set_input(g.in_cads_zv);
+        ggml_set_input(g.in_cads_coef);
+    }
     for (int i = 0; i < L; i++) {
         ggml_tensor * ar_k = kc.k[(size_t) i];
         ggml_tensor * ar_v = kc.v[(size_t) i];
@@ -643,6 +700,10 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
                                                 ar_k->nb[2], ar_k->nb[3], (size_t) chunk.set * ar_k->nb[3]));
             ar_v = ggml_cont(ctx, ggml_view_4d(ctx, ar_v, ar_v->ne[0], ar_length, ar_v->ne[2], 1, ar_v->nb[1],
                                                 ar_v->nb[2], ar_v->nb[3], (size_t) chunk.set * ar_v->nb[3]));
+        }
+        if (g.in_cads_coef) {
+            ar_k = yue2_cads_apply(ctx, ar_k, g.in_cads_zk, g.in_cads_coef, chunk.cads_rescale);
+            ar_v = yue2_cads_apply(ctx, ar_v, g.in_cads_zv, g.in_cads_coef, chunk.cads_rescale);
         }
         x = yue2_nar_block(ctx, c, m.lm.nar_blk[(size_t) i], x, in_rope_pos, ar_k, ar_v, use_flash,
                            g.in_attn_mask, g.in_attn_zeros, &m, i);
@@ -677,6 +738,24 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     ggml_backend_tensor_set(g.in_local_idx, local_idx_host.data(), 0, local_idx_host.size() * sizeof(int32_t));
     ggml_backend_tensor_set(g.in_rope_pos, rope_pos_host.data(), 0, rope_pos_host.size() * sizeof(int32_t));
     ggml_backend_tensor_set(g.in_content_idx, content_idx_host.data(), 0, content_idx_host.size() * sizeof(int32_t));
+    if (g.in_cads_coef) {
+        if (!g.cads_z_uploaded) {
+            // z drawn once per chunk from the chunk's seed: reproducible, and
+            // held fixed across every ODE step of the chunk.
+            std::mt19937_64 rng(chunk.cads_seed);
+            std::normal_distribution<float> nd(0.0f, 1.0f);
+            for (ggml_tensor * zt : { g.in_cads_zk, g.in_cads_zv }) {
+                std::vector<float> z((size_t) ggml_nelements(zt));
+                for (auto & v : z) v = nd(rng);
+                ggml_backend_tensor_set(zt, z.data(), 0, z.size() * sizeof(float));
+            }
+            g.cads_z_uploaded = true;
+        }
+        const double t     = 1.0 / (1.0 + std::exp(-raw_t));  // undo yue2_nar_logit_clamped
+        const double gamma = yue2_cads_gamma(t, chunk.cads_t1, chunk.cads_t2);
+        const float  coef[2] = { (float) std::sqrt(gamma), (float) (chunk.cads_strength * std::sqrt(1.0 - gamma)) };
+        ggml_backend_tensor_set(g.in_cads_coef, coef, 0, sizeof(coef));
+    }
     if (g.in_attn_mask && !g.attn_constants_uploaded) {
         std::vector<uint16_t> mask_host((size_t) (kv_pad * nar_len), ggml_fp32_to_fp16(-INFINITY));
         for (int64_t row = 0; row < nar_len; ++row) {
