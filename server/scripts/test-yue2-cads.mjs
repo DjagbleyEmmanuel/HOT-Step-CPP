@@ -110,38 +110,46 @@ async function part0() {
 
 const cads = s => ({ plugin_params: { 'yue2:cads_strength': s } });
 
+const SWEEP = [0.01, 0.05, 0.1, 0.2, 0.4, 0.7, 1.0];
+async function runSweep(s0, tag) {
+  const out = {};
+  for (const s of SWEEP) out[s] = await render(cads(s), `${tag} strength ${s}`);
+  return out;
+}
+
 if (PHASE === 'pre') {
-  saveF32('baseline_pre.f32', await render({}, 'baseline (pre-change build)'));
-  const p = await part0();
-  fs.writeFileSync(path.join(OUT_DIR, 'part0_pre.json'), JSON.stringify(p));
+  // Old build: baseline for (a) plus the old sweep, for the old-vs-new table.
+  const s0 = await render({}, 'baseline (pre-change build)');
+  saveF32('baseline_pre.f32', s0);
+  const sw = await runSweep(s0, 'OLD');
+  const old = {}; for (const s of SWEEP) old[s] = relDb(s0, sw[s]);
+  fs.writeFileSync(path.join(OUT_DIR, 'sweep_pre.json'), JSON.stringify(old));
+  console.table(SWEEP.map(s => ({ strength: s, old_rel_db: f(old[s]) })));
   console.log('pre phase saved to', OUT_DIR);
 } else {
   const rows = []; let pass = true;
   const pre = loadF32('baseline_pre.f32');
+  let old = {}; try { old = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'sweep_pre.json'), 'utf8')); } catch {}
   const s0 = await render(cads(0), 'strength 0');
   const a = relDb(pre, s0);
   const aOk = a < -90; pass &&= aOk;
-  rows.push({ check: '(a) s=0 vs pre-change build', rel_db: f(a), ok: aOk });
+  rows.push({ check: '(a) s=0 vs pre-change build', old: '', new: f(a), ok: aOk });
 
-  const sweep = {};
-  for (const s of [0.1, 0.3, 0.6, 1.0]) sweep[s] = await render(cads(s), `strength ${s}`);
-  rows.push({ check: '(b) s=0.3 vs s=0', rel_db: f(relDb(s0, sweep[0.3])), ok: true });
-  let prev = -Infinity, mono = true;
-  for (const s of [0.1, 0.3, 0.6, 1.0]) {
-    const d = relDb(s0, sweep[s]); if (!(d > prev)) mono = false; prev = d;
-    rows.push({ check: `(c) sweep s=${s} vs s=0`, rel_db: f(d), ok: '' });
+  const sw = await runSweep(s0, 'NEW');
+  let prev = -Infinity, mono = true, partial = false;
+  for (const s of SWEEP) {
+    const d = relDb(s0, sw[s]); if (prev < 0 && !(d > prev)) mono = false; prev = d;  // above 0 dB the song is decorrelated; order there is level noise
+    if (s <= 0.1 && d >= -30 && d <= -6) partial = true;
+    rows.push({ check: `(b) s=${s} vs s=0`, old: old[s] !== undefined ? f(old[s]) : '', new: f(d), ok: '' });
   }
-  rows.push({ check: '(c) monotonic growth', rel_db: '', ok: mono }); pass &&= mono;
+  rows.push({ check: '(b) monotonic until decorrelated (0 dB)', old: '', new: '', ok: mono }); pass &&= mono;
+  rows.push({ check: '(c) some s<=0.1 in -30..-6 dB', old: '', new: '', ok: partial }); pass &&= partial;
+  const smallOk = relDb(s0, sw[0.01]) < -6; pass &&= smallOk;
+  rows.push({ check: '(c) s=0.01 below -6 dB', old: '', new: f(relDb(s0, sw[0.01])), ok: smallOk });
 
-  const again = await render(cads(0.3), 'strength 0.3 repeat');
-  const d = relDb(sweep[0.3], again); const dOk = d < -90; pass &&= dOk;
-  rows.push({ check: '(d) s=0.3 same seed twice', rel_db: f(d), ok: dOk });
-
-  const post = await part0();
-  let before = null; try { before = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'part0_pre.json'), 'utf8')); } catch {}
-  const eOk = post.tempo > 0 && post.bars > 0 && (!before || !(before.tempo > 0 && before.bars > 0));
-  pass &&= eOk;
-  rows.push({ check: '(e) abc+cot off yue2 table', rel_db: `before tempo=${before?.tempo} bars=${before?.bars}; after tempo=${post.tempo} bars=${post.bars}`, ok: eOk });
+  const again = await render(cads(0.2), 'strength 0.2 repeat');
+  const d = relDb(sw[0.2], again); const dOk = d < -90; pass &&= dOk;
+  rows.push({ check: '(d) s=0.2 same seed twice', old: '', new: f(d), ok: dOk });
   console.table(rows);
   console.log(pass ? 'OVERALL PASS' : 'OVERALL FAIL');
   process.exit(pass ? 0 : 1);

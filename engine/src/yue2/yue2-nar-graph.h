@@ -813,7 +813,14 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         }
         const double t     = 1.0 / (1.0 + std::exp(-raw_t));  // undo yue2_nar_logit_clamped
         const double gamma = yue2_cads_gamma(t, chunk.cads_t1, chunk.cads_t2);
-        const float  coef[2] = { (float) std::sqrt(gamma), (float) (chunk.cads_strength * std::sqrt(1.0 - gamma)) };
+        // strength s is a dial on the schedule itself: gamma_eff = 1 - min(s,1)*(1-gamma),
+        // so both the signal removal and the noise vanish continuously as s -> 0
+        // (plain CADS with gamma=0 for t >= t2 zeroes the cond for ANY s > 0, and
+        // the rescale then blows s*z up to full-scale noise: strength had no effect).
+        // s > 1 keeps gamma_eff = gamma and scales the noise further, as in the paper.
+        const double s     = (double) chunk.cads_strength;
+        const double ge    = 1.0 - std::min(s, 1.0) * (1.0 - gamma);
+        const float  coef[2] = { (float) std::sqrt(ge), (float) (std::max(s, 1.0) * std::sqrt(1.0 - ge)) };
         ggml_backend_tensor_set(g.in_cads_coef, coef, 0, sizeof(coef));
     }
     if (g.in_plan_w) {
