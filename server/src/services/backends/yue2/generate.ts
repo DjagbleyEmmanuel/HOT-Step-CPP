@@ -1080,6 +1080,13 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
         && Number(job.params.seed) >= 0) {
       job.params.baseSeed = job.params.seed;
     }
+    for (const m of members.slice(1)) {
+      if (m.job.params.baseSeed === undefined && !m.job.params.randomSeed
+          && (typeof m.job.params.seed === 'number' || typeof m.job.params.seed === 'string')
+          && Number(m.job.params.seed) >= 0) {
+        m.job.params.baseSeed = m.job.params.seed;
+      }
+    }
     if (Number(reqSeed) >= 0) {
       deps.attempt.effective.seed = reqSeed;
       job.params.seed = reqSeed;
