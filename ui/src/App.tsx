@@ -1146,7 +1146,7 @@ const AppContent: React.FC = () => {
     // Layout: side-by-side on wide landscape, stacked vertically on narrow (<1024px)
     // and on portrait screens >= 1024px (e.g. 1080x1920 at 100%).
     return (
-      <div className="flex flex-1
+      <div className="flex flex-1 min-w-0
         min-[1024px]:flex-row max-[1023px]:flex-col
         min-[1024px]:overflow-hidden max-[1023px]:overflow-visible
         portrait-wide:flex-col
@@ -1155,7 +1155,7 @@ const AppContent: React.FC = () => {
             Tailwind's ! prefix generates !important which overrides inline style. */}
         <DiscoPulseWrapper
           hue={DISCO.createPanel}
-          className="flex-shrink-0 border-zinc-200 dark:border-white/5
+          className="flex-shrink-0 min-w-0 border-zinc-200 dark:border-white/5
             min-[1024px]:h-full min-[1024px]:border-r
             max-[1023px]:!w-full max-[1023px]:border-b max-[1023px]:h-auto max-[1023px]:border-r-0
             portrait-wide:!w-full portrait-wide:border-b portrait-wide:border-r-0 portrait-wide:h-auto"

@@ -484,11 +484,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   });
 
   return (
-    <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
+    <div className="h-full min-w-0 flex flex-col bg-zinc-50 dark:bg-suno">
       <TrainingDraftBar />
       <StudioDraftPicker control={draft} textKey="hs-title" apply={applyDraft} refuse={refuseDraft} />
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
         <div className="flex items-center gap-2">
           <button
