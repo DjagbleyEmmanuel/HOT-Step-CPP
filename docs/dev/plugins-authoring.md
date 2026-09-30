@@ -411,6 +411,28 @@ for i = 0, num_steps - 1 do output[i] = 1.0 - (i / num_steps) ^ gamma end
 `plugins/schedulers/md_plan_aware_yue2.lua` is the full version, and it logs
 the table once per chunk.
 
+#### `plan_strength` (YuE2 NAR schedulers only)
+
+A YuE2 NAR scheduler may also set a global array `plan_strength` with one
+number per step (1-indexed, length `num_steps`). After `schedule()` returns,
+the engine reads it, clears it, and scales the plan conditioning (the AR-prefix
+V the NAR decoder attends to) by `plan_strength[i + 1]` during step `i`.
+1 = stock, below 1 loosens the plan, above 1 leans on it harder (clamped to
+0..4). If it is missing or the wrong length, the engine uses the
+`yue2:plan_w_start` / `yue2:plan_w_end` / `yue2:plan_w_curve` (linear or
+cosine) params instead, which default to 1 (off, bit-identical).
+
+```lua
+local w = {}
+for i = 0, num_steps - 1 do
+  output[i] = 1.0 - i / num_steps
+  w[i + 1] = math.min(1.0, 0.5 + i / num_steps)  -- loose early, locked later
+end
+plan_strength = w
+```
+
+`plugins/schedulers/md_plan_loose_yue2.lua` is the full version.
+
 ---
 
 ## Sandbox

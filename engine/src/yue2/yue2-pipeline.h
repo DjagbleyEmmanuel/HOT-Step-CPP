@@ -1331,6 +1331,26 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
             if (!yue2_nar_chunk_bind(nar_cache, cp.set, chunk_len, M, &chunk, err)) {
                 return false;
             }
+            // CADS conditioning noise (plugin_params yue2:cads_*); strength 0 = off.
+            {
+                auto pf = [&](const char * k, float d) {
+                    auto it = req.plugin_params.find(k);
+                    if (it == req.plugin_params.end()) return d;
+                    try { return std::stof(it->second); } catch (...) { return d; }
+                };
+                chunk.cads_strength = std::clamp(pf("yue2:cads_strength", 0.0f), 0.0f, 1.0f);
+                chunk.cads_t1       = std::clamp(pf("yue2:cads_t1", 0.6f), 0.0f, 1.0f);
+                chunk.cads_t2       = std::clamp(pf("yue2:cads_t2", 0.9f), 0.0f, 1.0f);
+                const auto rs       = req.plugin_params.find("yue2:cads_rescale");
+                chunk.cads_rescale  = rs == req.plugin_params.end() ||
+                                      !(rs->second == "0" || rs->second == "false");
+                chunk.plan_w_start  = pf("yue2:plan_w_start", 1.0f);
+                chunk.plan_w_end    = pf("yue2:plan_w_end", 1.0f);
+                const auto pc       = req.plugin_params.find("yue2:plan_w_curve");
+                chunk.plan_w_cosine = pc != req.plugin_params.end() && pc->second == "cosine";
+                chunk.cads_seed     = (uint64_t) yue2_chunk_solver_seed(
+                    (songs[(size_t) cp.song].noise_seed + (uint64_t) j0) ^ 0xCAD5CAD5CAD5CAD5ull, (uint64_t) cp.a);
+            }
             std::vector<float> noise_slice;
             noise_slice.reserve((size_t) (M * chunk_len * LD));
             for (int j = j0; j < j0 + M; j++) {

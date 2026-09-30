@@ -733,6 +733,7 @@ async function capabilities(): Promise<BackendCapabilities> {
           { value: 'stock', label: 'Uniform (stock)' },
           { value: 'ht_v3', label: 'HT V3 (experimental)' },
           { value: 'plan_aware', label: 'Plan-Aware (section-targeted, experimental)' },
+          { value: 'plan_loose', label: 'Plan-Loose (loose plan early, experimental)' },
         ],
       },
       { key: 'yue2CadsStrength', type: 'slider', label: 'Plan Conditioning Noise (CADS)',
@@ -740,6 +741,15 @@ async function capabilities(): Promise<BackendCapabilities> {
             + 'early in the NAR solve, fading out as the audio settles. More variety between renders '
             + 'of the same plan at some cost to plan adherence. 0 = off (identical to before). Experimental.',
         default: 0, min: 0, max: 1, step: 0.05 },
+      { key: 'yue2PlanWStart', type: 'slider', label: 'Plan Strength (start)',
+        hint: 'Scales the plan conditioning (the AR prefix the NAR decoder attends to) at the first NAR step. '
+            + 'Below 1 loosens the plan, above 1 leans on it harder. 1 and 1 = off (identical to before). Experimental.',
+        default: 1, min: 0, max: 2, step: 0.05 },
+      { key: 'yue2PlanWEnd', type: 'slider', label: 'Plan Strength (end)', default: 1, min: 0, max: 2, step: 0.05,
+        hint: 'Plan conditioning scale at the last NAR step; interpolated between start and end.' },
+      { key: 'yue2PlanWCurve', type: 'select', label: 'Plan Strength Curve', default: 'linear',
+        options: [ { value: 'linear', label: 'Linear' }, { value: 'cosine', label: 'Cosine' } ],
+        hint: 'Shape of the start-to-end interpolation. A scheduler plugin can override the whole curve.' },
       { key: 'yue2CadsT1', type: 'slider', label: 'CADS Clean Below t', default: 0.6, min: 0, max: 1, step: 0.05,
         hint: 't runs 1 (noise) to 0 (clean). Below this t the conditioning is untouched.',
         visible_when: { key: 'yue2CadsStrength', not_equals: '0' } },

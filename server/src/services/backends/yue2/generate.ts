@@ -333,6 +333,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     : undefined;
   const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3'
     : params.yue2NarScheduler === 'plan_aware' ? 'md_plan_aware_yue2'
+    : params.yue2NarScheduler === 'plan_loose' ? 'md_plan_loose_yue2'
     : undefined;
   const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
   const copyNumbers = (plugin: string, fields: Record<string, string>) => {
@@ -376,6 +377,15 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     if (typeof params.yue2CadsRescale === 'boolean') {
       plugin_params['yue2:cads_rescale'] = params.yue2CadsRescale;
     }
+  }
+  // Plan-strength curve w(step) on the NAR plan conditioning. w = 1 at both
+  // ends sends nothing: bit-identical output.
+  const wStart = Number(params.yue2PlanWStart), wEnd = Number(params.yue2PlanWEnd);
+  const wS = Number.isFinite(wStart) ? wStart : 1, wE = Number.isFinite(wEnd) ? wEnd : 1;
+  if (wS !== 1 || wE !== 1) {
+    plugin_params['yue2:plan_w_start'] = Math.min(2, Math.max(0, wS));
+    plugin_params['yue2:plan_w_end'] = Math.min(2, Math.max(0, wE));
+    if (params.yue2PlanWCurve === 'cosine') plugin_params['yue2:plan_w_curve'] = 'cosine';
   }
   if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
     notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);

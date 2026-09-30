@@ -137,6 +137,8 @@ struct Yue2NarVelocityGraph {
     ggml_tensor * in_cads_zv = nullptr;
     ggml_tensor * in_cads_coef = nullptr;  // [2]: sqrt(gamma), s*sqrt(1-gamma)
     bool cads_z_uploaded = false;
+    // Plan-strength w (only built when the chunk's plan_w_active is set).
+    ggml_tensor * in_plan_w = nullptr;     // [1]: w for the current step
 };
 
 static void yue2_nar_velocity_graph_free(Yue2NarVelocityGraph * g) {
@@ -172,7 +174,54 @@ struct Yue2NarChunk {
     float    cads_t2       = 0.9f;
     bool     cads_rescale  = true;
     uint64_t cads_seed     = 0;
+    // Plan-strength curve w(step): the AR-prefix V (plan conditioning) is
+    // scaled by w each step. w = 1 everywhere builds no node (bit-identical).
+    // start/end/curve come from plugin_params; a scheduler plugin may override
+    // the whole table via the Lua global plan_strength. The solver fills
+    // plan_w_times (steps+1, descending t) and plan_w_vals (steps) before the
+    // first velocity call; velocity() maps its t back to the step it lies in.
+    float plan_w_start = 1.0f;
+    float plan_w_end   = 1.0f;
+    bool  plan_w_cosine = false;
+    mutable bool plan_w_active = false;
+    mutable std::vector<float> plan_w_times;
+    mutable std::vector<float> plan_w_vals;
 };
+
+// Fill the per-step plan-strength table from start/end/curve (or from an
+// explicit override table of length steps). Sets plan_w_active iff any w != 1.
+static void yue2_plan_w_fill(const Yue2NarChunk & chunk, const std::vector<float> & times, int steps,
+                             const std::vector<float> * override_vals = nullptr) {
+    chunk.plan_w_times = times;
+    chunk.plan_w_vals.assign((size_t) steps, 1.0f);
+    for (int i = 0; i < steps; i++) {
+        float w;
+        if (override_vals && (int) override_vals->size() == steps) {
+            w = (*override_vals)[(size_t) i];
+        } else {
+            double p = steps > 1 ? (double) i / (double) (steps - 1) : 0.0;
+            if (chunk.plan_w_cosine) p = 0.5 * (1.0 - std::cos(3.14159265358979323846 * p));
+            w = (float) (chunk.plan_w_start + (chunk.plan_w_end - chunk.plan_w_start) * p);
+        }
+        chunk.plan_w_vals[(size_t) i] = std::isfinite(w) ? std::clamp(w, 0.0f, 4.0f) : 1.0f;
+    }
+    chunk.plan_w_active = false;
+    for (float w : chunk.plan_w_vals) if (std::abs(w - 1.0f) > 1e-6f) chunk.plan_w_active = true;
+    if (chunk.plan_w_active) {
+        fprintf(stderr, "[YuE2-NAR] plan strength w: step0=%.3f last=%.3f (%d steps)%s\n",
+                chunk.plan_w_vals.front(), chunk.plan_w_vals.back(), steps, override_vals ? " [plugin table]" : "");
+    }
+}
+
+// w for the ODE step whose interval [times[i], times[i+1]) contains t.
+static float yue2_plan_w_at(const Yue2NarChunk & chunk, double t) {
+    const auto & tt = chunk.plan_w_times;
+    const int steps = (int) chunk.plan_w_vals.size();
+    for (int i = 0; i < steps; i++) {
+        if (t > (double) tt[(size_t) i + 1] + 1e-7) return chunk.plan_w_vals[(size_t) i];
+    }
+    return steps ? chunk.plan_w_vals.back() : 1.0f;
+}
 
 // CADS schedule gamma(t) on the solver's t (1 = noise, 0 = clean).
 static double yue2_cads_gamma(double t, double t1, double t2) {
@@ -692,6 +741,11 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         ggml_set_input(g.in_cads_zv);
         ggml_set_input(g.in_cads_coef);
     }
+    if (chunk.plan_w_active) {
+        g.in_plan_w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+        ggml_set_name(g.in_plan_w, "yue2_nar_plan_w");
+        ggml_set_input(g.in_plan_w);
+    }
     for (int i = 0; i < L; i++) {
         ggml_tensor * ar_k = kc.k[(size_t) i];
         ggml_tensor * ar_v = kc.v[(size_t) i];
@@ -704,6 +758,12 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         if (g.in_cads_coef) {
             ar_k = yue2_cads_apply(ctx, ar_k, g.in_cads_zk, g.in_cads_coef, chunk.cads_rescale);
             ar_v = yue2_cads_apply(ctx, ar_v, g.in_cads_zv, g.in_cads_coef, chunk.cads_rescale);
+        }
+        if (g.in_plan_w) {
+            const ggml_type ty = ar_v->type;
+            ggml_tensor * v32 = ty == GGML_TYPE_F32 ? ar_v : ggml_cast(ctx, ar_v, GGML_TYPE_F32);
+            v32 = ggml_mul(ctx, v32, g.in_plan_w);
+            ar_v = ty == GGML_TYPE_F32 ? v32 : ggml_cast(ctx, v32, ty);
         }
         x = yue2_nar_block(ctx, c, m.lm.nar_blk[(size_t) i], x, in_rope_pos, ar_k, ar_v, use_flash,
                            g.in_attn_mask, g.in_attn_zeros, &m, i);
@@ -755,6 +815,10 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         const double gamma = yue2_cads_gamma(t, chunk.cads_t1, chunk.cads_t2);
         const float  coef[2] = { (float) std::sqrt(gamma), (float) (chunk.cads_strength * std::sqrt(1.0 - gamma)) };
         ggml_backend_tensor_set(g.in_cads_coef, coef, 0, sizeof(coef));
+    }
+    if (g.in_plan_w) {
+        const float w = yue2_plan_w_at(chunk, 1.0 / (1.0 + std::exp(-raw_t)));
+        ggml_backend_tensor_set(g.in_plan_w, &w, 0, sizeof(float));
     }
     if (g.in_attn_mask && !g.attn_constants_uploaded) {
         std::vector<uint16_t> mask_host((size_t) (kv_pad * nar_len), ggml_fp32_to_fp16(-INFINITY));
@@ -889,6 +953,11 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
     }
 
     const double dt = 1.0 / (double) steps;
+    {
+        std::vector<float> tt((size_t) steps + 1);
+        for (int i = 0; i <= steps; i++) tt[(size_t) i] = (float) (1.0 - (double) i * dt);
+        yue2_plan_w_fill(chunk, tt, steps);
+    }
     std::vector<float> state = initial_noise;
     std::vector<float> v_cached;
     bool have_cached_v = false;
@@ -1009,12 +1078,29 @@ static bool yue2_nar_solve_plugins(
     }
 
     std::vector<float> times((size_t) steps + 1, 0.0f);
+    std::vector<float> plan_w_override;
     if (scheduler) {
         std::vector<float> emitted((size_t) steps, std::numeric_limits<float>::quiet_NaN());
         LuaModelContext ctx;
         ctx.model_id = "yue2";
         ctx.yue2     = plan_info;
         lua_call_scheduler(*scheduler, emitted.data(), steps, 1.0f, plugin_params, ctx);
+        // Optional plan-strength table set by the scheduler (global plan_strength,
+        // array of `steps` numbers). Cleared after reading: the lua_State is shared.
+        if (lua_State * L = scheduler->L) {
+            lua_getglobal(L, "plan_strength");
+            if (lua_istable(L, -1) && (int) lua_rawlen(L, -1) == steps) {
+                plan_w_override.resize((size_t) steps);
+                for (int i = 0; i < steps; i++) {
+                    lua_rawgeti(L, -1, i + 1);
+                    plan_w_override[(size_t) i] = lua_isnumber(L, -1) ? (float) lua_tonumber(L, -1) : 1.0f;
+                    lua_pop(L, 1);
+                }
+            }
+            lua_pop(L, 1);
+            lua_pushnil(L);
+            lua_setglobal(L, "plan_strength");
+        }
         for (int i = 0; i < steps; i++) times[(size_t) i] = emitted[(size_t) i];
     } else {
         for (int i = 0; i < steps; i++) {
@@ -1035,6 +1121,7 @@ static bool yue2_nar_solve_plugins(
         }
     }
 
+    yue2_plan_w_fill(chunk, times, steps, plan_w_override.empty() ? nullptr : &plan_w_override);
     fprintf(stderr, "[YuE2-NAR-Plugins] solver=%s scheduler=%s steps=%d\n",
             solver ? solver->name.c_str() : "midpoint",
             scheduler ? scheduler->name.c_str() : "uniform", steps);
