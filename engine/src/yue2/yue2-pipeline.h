@@ -277,10 +277,6 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         sg.score_abc.clear();
     }
 
-    if (req.cot == YUE2_COT_OFF) {
-        for (auto & sg : songs) sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
-        return true;
-    }
     // Songs that brought a score skip the model; the rest plan together as one
     // batch, set p of the cache holding song plan_idx[p]. A coalesced batch
     // mixes both freely (an approved preview beside a fresh prompt).
@@ -288,7 +284,13 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
         if (!sg.abc_given) {
-            plan_idx.push_back(b);
+            // cot=off plans nothing; a song that brought an abc still gets its
+            // score_abc below so the Lua yue2 plan table is populated.
+            if (req.cot == YUE2_COT_OFF) {
+                sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
+            } else {
+                plan_idx.push_back(b);
+            }
             continue;
         }
         if (req.cot == YUE2_COT_OFF) {
@@ -1214,6 +1216,22 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
             Yue2NarChunk chunk;
             if (!yue2_nar_chunk_bind(nar_cache, cp.set, chunk_len, M, &chunk, err)) {
                 return false;
+            }
+            // CADS conditioning noise (plugin_params yue2:cads_*); strength 0 = off.
+            {
+                auto pf = [&](const char * k, float d) {
+                    auto it = req.plugin_params.find(k);
+                    if (it == req.plugin_params.end()) return d;
+                    try { return std::stof(it->second); } catch (...) { return d; }
+                };
+                chunk.cads_strength = std::clamp(pf("yue2:cads_strength", 0.0f), 0.0f, 1.0f);
+                chunk.cads_t1       = std::clamp(pf("yue2:cads_t1", 0.6f), 0.0f, 1.0f);
+                chunk.cads_t2       = std::clamp(pf("yue2:cads_t2", 0.9f), 0.0f, 1.0f);
+                const auto rs       = req.plugin_params.find("yue2:cads_rescale");
+                chunk.cads_rescale  = rs == req.plugin_params.end() ||
+                                      !(rs->second == "0" || rs->second == "false");
+                chunk.cads_seed     = (uint64_t) yue2_chunk_solver_seed(
+                    (songs[(size_t) cp.song].noise_seed + (uint64_t) j0) ^ 0xCAD5CAD5CAD5CAD5ull, (uint64_t) cp.a);
             }
             std::vector<float> noise_slice;
             noise_slice.reserve((size_t) (M * chunk_len * LD));
