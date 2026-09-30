@@ -19,6 +19,7 @@ import type {
   MonitorStatusResponse, MonitorSeekResponse, MonitorPauseResponse, MonitorResumeResponse, MonitorRestartResponse,
 } from '../contracts/vst.js';
 import { createControlWriter } from './vstControl.js';
+import { getSessionDir } from '../services/logger.js';
 
 const execFileAsync = promisify(execFile);
 // macOS objc runtime prints 'Class X is implemented in both A and B' for every
@@ -27,6 +28,34 @@ const execFileAsync = promisify(execFile);
 const isObjcNoise = (line: string): boolean => /^objc\[\d+\]: Class .* is implemented in both/.test(line.trim());
 
 const router = Router();
+
+// ── vst-host lifecycle log (logs/<session>/vst_host.log) ────
+// Spawn, exit and the child's own stdout/stderr ([lifecycle] lines for plugin
+// load/unload, editor open/close, sample-rate change, seek, device start/stop).
+function vstLog(line: string): void {
+  const dir = getSessionDir();
+  if (!dir) return;
+  try {
+    fs.appendFileSync(path.join(dir, 'vst_host.log'), `${new Date().toISOString()} ${line}\n`);
+  } catch { /* logging must never break VST */ }
+}
+
+function attachVstLog(child: ChildProcess, label: string, args: string[]): void {
+  vstLog(`[${label}] spawn pid=${child.pid ?? '?'} args=${JSON.stringify(args)}`);
+  const pipe = (stream: NodeJS.ReadableStream | null | undefined, tag: string) => {
+    stream?.on('data', (data: Buffer) => {
+      for (const line of data.toString().split(/\r?\n/)) {
+        if (line.trim() && !isObjcNoise(line)) vstLog(`[${label} ${child.pid} ${tag}] ${line.trim()}`);
+      }
+    });
+  };
+  pipe(child.stdout, 'out');
+  pipe(child.stderr, 'err');
+  child.on('exit', (code, signal) => {
+    vstLog(`[${label}] exit pid=${child.pid ?? '?'} code=${code} signal=${signal ?? 'none'}`);
+  });
+  child.on('error', (err) => vstLog(`[${label}] spawn error: ${err.message}`));
+}
 
 // VstPlugin, ChainEntry and ChainConfig are now contracts/vst.ts's shared
 // definitions — this file used to declare its own copy, next to api.ts's.
@@ -86,6 +115,7 @@ router.get('/scan', async (_req, res) => {
       for (const line of stderr.split('\n')) {
         if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
       }
+      vstLog(`[process-chain] ${stderr.trim()}`);
     }
 
     if (!stdout || stdout.trim().length === 0) {
@@ -172,9 +202,10 @@ router.post('/gui', (req, res) => {
   // Spawn detached — the GUI process lives independently
   const child = spawn(exe, args, {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.unref();
+  attachVstLog(child, 'gui', args);
   if (uid) {
     guiProcs.set(uid, child);
     const clear = () => { if (guiProcs.get(uid) === child) guiProcs.delete(uid); };
@@ -252,6 +283,7 @@ router.post('/process', async (req, res) => {
       for (const line of stderr.split('\n')) {
         if (line.trim() && !isObjcNoise(line)) console.log(`[VST] ${line.trim()}`);
       }
+      vstLog(`[process-chain] ${stderr.trim()}`);
     }
 
     // Clean up temp chain file
@@ -389,10 +421,11 @@ router.post('/monitor/start', async (req, res) => {
     '--control', monitorControlFile(),
     '--status', monitorStatusFile(),
   ], {
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
   monitorProcess = child;
+  attachVstLog(child, 'monitor', child.spawnargs.slice(1));
 
   // Log stderr
   child.stderr?.on('data', (data: Buffer) => {
@@ -567,9 +600,10 @@ router.post('/monitor/restart', async (_req, res) => {
     '--input', track,
     '--control', monitorControlFile(),
     '--status', monitorStatusFile(),
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   monitorProcess = child;
+  attachVstLog(child, 'monitor', child.spawnargs.slice(1));
 
   child.stderr?.on('data', (data: Buffer) => {
     for (const line of data.toString().split('\n')) {

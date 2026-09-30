@@ -194,8 +194,11 @@ struct PluginInstance {
     int32                      numActiveInputBuses  = 1;
     int32                      numActiveOutputBuses = 1;
     ParamChangeHandler *       paramHandler = nullptr;  // realtime param bridge
+    std::string                lc_uid, lc_name;          // lifecycle log only
 
     ~PluginInstance() {
+        if (!lc_name.empty())
+            fprintf(stderr, "[lifecycle] plugin unload uid=%s name=%s\n", lc_uid.c_str(), lc_name.c_str());
         if (active && processor) {
             processor->setProcessing(false);
             component->setActive(false);
@@ -216,6 +219,9 @@ static bool load_plugin(const std::string & path, PluginInstance & inst) {
     for (auto & classInfo : factory.classInfos()) {
         if (classInfo.category() == kVstAudioEffectClass) {
             inst.provider = owned(new PlugProvider(factory, classInfo, true));
+            inst.lc_uid  = classInfo.ID().toString();
+            inst.lc_name = classInfo.name();
+            fprintf(stderr, "[lifecycle] plugin load uid=%s name=%s\n", inst.lc_uid.c_str(), inst.lc_name.c_str());
             break;
         }
     }
@@ -633,6 +639,7 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
     UpdateWindow(hwnd);
 
     fprintf(stderr, "[vst-host] Plugin GUI opened (%dx%d). Close window to save state.\n", w, h);
+    fprintf(stderr, "[lifecycle] editor open name=%s\n", inst.lc_name.c_str());
 
     // Message loop
     MSG msg;
@@ -644,6 +651,7 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
     // Detach view (already done in WM_CLOSE if the user closed the window)
     if (!g_plugViewRemoved) view->removed();
     view->release();
+    fprintf(stderr, "[lifecycle] editor close name=%s\n", inst.lc_name.c_str());
 
     // Save state on close
     if (state_path && state_path[0]) {
@@ -838,6 +846,7 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
         ms.rs_phase = 0.0;
         ms.rs_last_L = ms.rs_last_R = 0.0f;
         fprintf(stderr, "[monitor] Track rate changed %d -> %d Hz, plugins re-prepared\n", old_sr, sr);
+        fprintf(stderr, "[lifecycle] sample-rate change %d -> %d\n", old_sr, sr);
     }
     ms.pos = 0;
     ms.current_track = path;
@@ -918,6 +927,7 @@ static void monitor_check_control(MonitorState & ms) {
         int new_pos = (int)(seek_sec * ms.sr);
         if (new_pos < 0) new_pos = 0;
         if (new_pos >= ms.T) new_pos = ms.T - 1;
+        fprintf(stderr, "[lifecycle] seek %.3fs (frame %d -> %d)\n", seek_sec, ms.pos, new_pos);
         ms.pos = new_pos;
         monitor_flush_plugins(ms);  // drop tails from the old position
     }
@@ -1084,6 +1094,7 @@ static LRESULT CALLBACK MonitorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             if (view) {
                 SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
                 view->removed();
+                fprintf(stderr, "[lifecycle] editor close (user)\n");
             }
             DestroyWindow(hwnd);
             return 0;
@@ -1209,6 +1220,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
         SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(view));
         ShowWindow(hwnd, SW_SHOW);
         g_monitorWindowCount++;
+        fprintf(stderr, "[lifecycle] editor open name=%s\n", ms.plugins[i].lc_name.c_str());
         views.push_back(view);
         viewWindows.push_back(hwnd);
     }
@@ -1304,6 +1316,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
         pRenderClient->ReleaseBuffer(bufferFrames, 0); }
 
     pAudioClient->Start();
+    fprintf(stderr, "[lifecycle] device start (%u frames)\n", bufferFrames);
     fprintf(stderr, "[monitor] Playing... Close all plugin windows to stop.\n");
 
     // Temp buffers for processed audio
@@ -1383,6 +1396,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
 
     // ── Cleanup ──
     pAudioClient->Stop();
+    fprintf(stderr, "[lifecycle] device stop\n");
     if (pRenderClient) pRenderClient->Release();
     if (pAudioClient)  pAudioClient->Release();
     if (pDevice)       pDevice->Release();
@@ -1399,6 +1413,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             GetWindowLongPtrA(hwnd, GWLP_USERDATA) == reinterpret_cast<LONG_PTR>(views[i])) {
             SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
             views[i]->removed();
+            fprintf(stderr, "[lifecycle] editor close name=%s\n", ms.plugins[i].lc_name.c_str());
             DestroyWindow(hwnd);
         }
         views[i]->release();
@@ -1434,6 +1449,15 @@ static void usage(const char * prog) {
 
 int main(int argc, char * argv[]) {
     if (argc < 2) { usage(argv[0]); return 1; }
+    {
+        std::string a;
+        for (int i = 1; i < argc; i++) { a += ' '; a += argv[i]; }
+#ifdef _WIN32
+        fprintf(stderr, "[lifecycle] start pid=%lu args=%s\n", (unsigned long)GetCurrentProcessId(), a.c_str());
+#else
+        fprintf(stderr, "[lifecycle] start args=%s\n", a.c_str());
+#endif
+    }
 
     const char * mode    = nullptr;
     const char * plugin  = nullptr;
