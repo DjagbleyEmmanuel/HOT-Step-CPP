@@ -291,6 +291,13 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
             plan_idx.push_back(b);
             continue;
         }
+        if (req.cot == YUE2_COT_OFF) {
+            // cot=off has no ABC span: expose the supplied plan to Lua via
+            // score_abc only, without encoding or validating it.
+            sg.score_abc = sg.abc_text;
+            sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
+            continue;
+        }
         try {
             sg.abc_ids = yue2_bpe_encode(&tok, sg.abc_text);
             yue2_validate_abc_ids(sg.abc_ids, "yue2_run_plan_stage");
@@ -656,7 +663,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     std::vector<int64_t> cap((size_t) B);
     int64_t              max_cap = 0;
     for (int b = 0; b < B; b++) {
-        cap[(size_t) b] = yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
+        // cot=off never caps on a plan (its score_abc is informational only).
+        cap[(size_t) b] = legacy_off ? sp.max_tokens : yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
         max_cap         = std::max(max_cap, cap[(size_t) b]);
     }
     for (int b = 0; resume && b < B; b++) {
