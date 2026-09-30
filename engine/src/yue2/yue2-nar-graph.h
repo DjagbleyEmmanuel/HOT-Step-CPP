@@ -130,6 +130,9 @@ struct Yue2NarVelocityGraph {
     ggml_tensor * in_attn_mask = nullptr;
     ggml_tensor * in_attn_zeros = nullptr;
     bool attn_constants_uploaded = false;
+    // Which mask is currently uploaded when plan CFG shares in_attn_mask:
+    // 0 none, 1 cond (plan keys visible), 2 uncond (plan keys at -inf).
+    int attn_mask_state = 0;
     ggml_tensor * x_embed_tap = nullptr;
     ggml_tensor * velocity_out = nullptr;
     // CADS conditioning noise (only built when the chunk's cads_strength > 0).
@@ -194,6 +197,7 @@ struct Yue2NarChunk {
     float plan_cfg    = 1.0f;
     float plan_cfg_t1 = 0.0f;
     float plan_cfg_t2 = 1.0f;
+    mutable int plan_cfg_uncond_calls = 0;  // uncond (plan-masked) forwards this solve
 };
 
 // Fill the per-step plan-strength table from start/end/curve (or from an
@@ -553,7 +557,8 @@ static ggml_tensor * yue2_nar_block(ggml_context * ctx, const Yue2LmConfig & c, 
         attn = ggml_flash_attn_ext(ctx, q4, k_cat, v_cat, attn_mask, scale, 0.0f, 0.0f);
         ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
     } else {
-        attn = yue2_lm_attn_f32(ctx, q4, k_cat, v_cat, nullptr, scale);
+        // attn_mask is only non-null here for plan CFG (pad_gqa needs flash).
+        attn = yue2_lm_attn_f32(ctx, q4, k_cat, v_cat, attn_mask, scale);
     }
     attn = ggml_reshape_3d(ctx, attn, H, T, M);
 
@@ -699,6 +704,13 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
             ggml_set_name(g.in_attn_zeros, "yue2_nar_padding_zeros");
             ggml_set_input(g.in_attn_zeros);
         }
+    } else if (chunk.plan_cfg > 1.0f) {
+        // Plan CFG needs a key mask so the uncond pass can hide the AR prefix
+        // (plan) keys entirely. Only built when plan CFG is on, so the
+        // plan_cfg=1 graph is unchanged.
+        g.in_attn_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, kv_len, nar_len);
+        ggml_set_name(g.in_attn_mask, "yue2_nar_plan_cfg_mask");
+        ggml_set_input(g.in_attn_mask);
     }
 
     // Input embedding: vae2llm(padded state) + time_embedder(shifted t) + pos_emb[local_idx].
@@ -838,13 +850,24 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     }
     const bool cfg_on = g.in_plan_w && chunk.plan_cfg > 1.0f &&
                         t_plain >= (double) chunk.plan_cfg_t1 - 1e-7 && t_plain <= (double) chunk.plan_cfg_t2 + 1e-7;
-    if (g.in_attn_mask && !g.attn_constants_uploaded) {
-        std::vector<uint16_t> mask_host((size_t) (kv_pad * nar_len), ggml_fp32_to_fp16(-INFINITY));
+    const int64_t mask_w = g.in_attn_mask ? g.in_attn_mask->ne[0] : 0;
+    // uncond = true hides the AR prefix (plan) keys [0, ar_length) with -inf,
+    // so softmax spends no mass on them: a true "no plan" branch, not just
+    // plan V zeroed. Columns past kv_len are alignment padding (always -inf).
+    auto upload_mask = [&](bool uncond) {
+        const uint16_t ninf = ggml_fp32_to_fp16(-INFINITY);
+        const uint16_t zero = ggml_fp32_to_fp16(0.0f);
+        std::vector<uint16_t> mask_host((size_t) (mask_w * nar_len), ninf);
+        const int64_t c0 = uncond ? ar_length : 0;
         for (int64_t row = 0; row < nar_len; ++row) {
-            std::fill(mask_host.begin() + (size_t) (row * kv_pad),
-                      mask_host.begin() + (size_t) (row * kv_pad + kv_len), ggml_fp32_to_fp16(0.0f));
+            std::fill(mask_host.begin() + (size_t) (row * mask_w + c0),
+                      mask_host.begin() + (size_t) (row * mask_w + kv_len), zero);
         }
         ggml_backend_tensor_set(g.in_attn_mask, mask_host.data(), 0, mask_host.size() * sizeof(uint16_t));
+        g.attn_mask_state = uncond ? 2 : 1;
+    };
+    if (g.in_attn_mask && g.attn_mask_state != 1) upload_mask(false);
+    if (g.in_attn_mask && !g.attn_constants_uploaded) {
         if (g.in_attn_zeros) {
             std::vector<uint16_t> zeros(ggml_nelements(g.in_attn_zeros), 0);
             ggml_backend_tensor_set(g.in_attn_zeros, zeros.data(), 0, zeros.size() * sizeof(uint16_t));
@@ -868,9 +891,9 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
             want_input_embedding = false;
         }
         if (cfg_on) {
-            // Unconditional pass: same graph, plan V scaled to zero.
-            const float w0 = 0.0f;
-            ggml_backend_tensor_set(g.in_plan_w, &w0, 0, sizeof(float));
+            // Unconditional pass: same graph, plan (AR prefix) keys masked to -inf.
+            upload_mask(true);
+            chunk.plan_cfg_uncond_calls++;
             ok = ggml_backend_sched_graph_compute(g.sched, g.gf) == GGML_STATUS_SUCCESS;
             if (!ok) {
                 if (err) *err = "YuE2 NAR velocity graph compute failed (plan CFG uncond pass)";
@@ -880,11 +903,6 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
             ggml_backend_tensor_get(g.velocity_out, vu.data(), 0, vu.size() * sizeof(float));
             const float s = chunk.plan_cfg;
             for (size_t i = 0; i < vu.size(); i++) out->velocity[i] = vu[i] + s * (out->velocity[i] - vu[i]);
-        }
-        if (want_input_embedding) {
-            out->input_embedding.assign((size_t) (M * nar_len * H), 0.0f);
-            ggml_backend_tensor_get(g.x_embed_tap, out->input_embedding.data(), 0,
-                                    (size_t) (M * nar_len * H) * sizeof(float));
         }
     }
     return ok;
@@ -1071,6 +1089,11 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
         }
     }
 
+    if (chunk.plan_cfg > 1.0f) {
+        fprintf(stderr, "[YuE2-NAR] plan CFG: %d uncond (plan-masked) passes / %d velocity calls\n",
+                chunk.plan_cfg_uncond_calls, out->velocity_calls);
+        chunk.plan_cfg_uncond_calls = 0;
+    }
     out->final_latents = std::move(state);
     return true;
 }
@@ -1211,6 +1234,11 @@ static bool yue2_nar_solve_plugins(
             if (err) *err = "cancelled";
             return false;
         }
+    }
+    if (chunk.plan_cfg > 1.0f) {
+        fprintf(stderr, "[YuE2-NAR] plan CFG: %d uncond (plan-masked) passes / %d velocity calls\n",
+                chunk.plan_cfg_uncond_calls, out->velocity_calls);
+        chunk.plan_cfg_uncond_calls = 0;
     }
     out->final_latents = std::move(state);
     return true;

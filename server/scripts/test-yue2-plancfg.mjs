@@ -134,7 +134,13 @@ if (PHASE === 'pre') {
   const rows = []; let pass = true;
   const pre = loadF32('baseline_pre.f32');
   const preMeta = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'baseline_pre.json'), 'utf8'));
+  const loadWav = n => { const fp = path.join(AB_DIR, n); return fs.existsSync(fp) ? decodeWav(fs.readFileSync(fp), 'wav') : null; };
+  const before1 = loadWav('cfg1_before.wav'), vzero2 = loadWav('cfg2_vzero.wav');
   const r1 = await render(cfg1, 'plan_cfg 1.0');
+  if (before1) {
+    const a2 = relDb(before1, r1); const ok = a2 < -90; pass &&= ok;
+    rows.push({ check: '(a2) cfg=1 vs V-zero build cfg=1 WAV', value: f(a2) + ' dB', ok });
+  }
   const a = relDb(pre, r1); const aOk = a < -90; pass &&= aOk;
   rows.push({ check: '(a) cfg=1 vs pre-change build', value: f(a) + ' dB', ok: aOk });
   rows.push({ check: '(a) time / peak VRAM pre vs cfg=1', value: `${preMeta.secs.toFixed(1)}s/${preMeta.peak} vs ${r1.secs.toFixed(1)}s/${r1.peak} MiB`, ok: '' });
@@ -142,14 +148,30 @@ if (PHASE === 'pre') {
   const s1 = stats(r1);
   rows.push({ check: '(stats) cfg=1', value: `rms ${s1.rmsDb.toFixed(1)} dB peak ${s1.peak.toFixed(3)} clip ${s1.clipPct.toFixed(3)}%`, ok: '' });
   const sw = {};
+  const passCounts = txt => [...txt.matchAll(/plan CFG: (\d+) uncond \(plan-masked\) passes \/ (\d+) velocity calls/g)].map(m => [+m[1], +m[2]]);
   for (const s of [1.5, 2, 3]) {
+    const off = logSize();
     const r = sw[s] = await render(cfg(s), `plan_cfg ${s}`);
+    const pc = passCounts(logSince(off));
+    const pcOk = pc.length > 0 && pc.every(([u, v]) => u === v && v > 0); pass &&= pcOk;
+    rows.push({ check: `(f) cfg=${s} uncond passes/velocity calls per chunk`, value: pc.map(x => x.join('/')).join(' ') || 'none logged', ok: pcOk });
+    if (s === 2 && vzero2) {
+      const e = relDb(vzero2, r); const eOk = e > -60; pass &&= eOk;
+      rows.push({ check: '(e) cfg=2 key-masked vs cfg=2 V-zero (teeth)', value: f(e) + ' dB', ok: eOk });
+    }
     saveWav(path.join(AB_DIR, `plancfg_${s.toFixed(1)}.wav`), r);
     const d = relDb(r1, r); const dOk = d > -60; pass &&= dOk;
     rows.push({ check: `(b) cfg=${s} vs cfg=1`, value: f(d) + ' dB', ok: dOk });
     const st = stats(r);
     const sane = st.nan === 0 && st.clipPct < 1 && st.rmsDb > s1.rmsDb - 12 && st.rmsDb < s1.rmsDb + 12; pass &&= sane;
     rows.push({ check: `(sane) cfg=${s}`, value: `nan ${st.nan} rms ${st.rmsDb.toFixed(1)} dB peak ${st.peak.toFixed(3)} clip ${st.clipPct.toFixed(3)}%`, ok: sane });
+  }
+  {
+    const off = logSize();
+    await render({ plugin_params: { 'yue2:plan_cfg': 2, 'yue2:plan_cfg_t1': 0.9, 'yue2:plan_cfg_t2': 0.3 } }, 'plan_cfg 2 t1>t2');
+    const txt = logSince(off), pc = passCounts(txt);
+    const ok = /plan_cfg_t1 0\.90 > plan_cfg_t2 0\.30, swapping/.test(txt) && pc.length > 0 && pc.every(([u, v]) => u > 0 && u < v); pass &&= ok;
+    rows.push({ check: '(g) t1=0.9 t2=0.3 swapped, windowed uncond/calls', value: pc.map(x => x.join('/')).join(' ') || 'none', ok });
   }
   const again = await render(cfg(2), 'plan_cfg 2 repeat');
   const c = relDb(sw[2], again); const cOk = c < -90; pass &&= cOk;

@@ -1350,6 +1350,11 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                 chunk.plan_cfg      = std::clamp(pf("yue2:plan_cfg", 1.0f), 1.0f, 8.0f);
                 chunk.plan_cfg_t1   = std::clamp(pf("yue2:plan_cfg_t1", 0.0f), 0.0f, 1.0f);
                 chunk.plan_cfg_t2   = std::clamp(pf("yue2:plan_cfg_t2", 1.0f), 0.0f, 1.0f);
+                if (chunk.plan_cfg_t1 > chunk.plan_cfg_t2) {
+                    fprintf(stderr, "[YuE2-NAR] WARNING: plan_cfg_t1 %.2f > plan_cfg_t2 %.2f, swapping\n",
+                            chunk.plan_cfg_t1, chunk.plan_cfg_t2);
+                    std::swap(chunk.plan_cfg_t1, chunk.plan_cfg_t2);
+                }
                 if (chunk.plan_cfg > 1.0f) {
                     fprintf(stderr, "[YuE2-NAR] plan CFG %.2f for t in [%.2f, %.2f] (2 forwards per velocity call)\n",
                             chunk.plan_cfg, chunk.plan_cfg_t1, chunk.plan_cfg_t2);
