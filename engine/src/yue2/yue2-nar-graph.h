@@ -889,6 +889,16 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
     return true;
 }
 
+// Deterministic per-chunk solver seed: splitmix64 finalizer over (seed, chunk
+// start). Masked to 53 bits so it survives a Lua number round trip.
+static inline int64_t yue2_chunk_solver_seed(uint64_t seed, uint64_t chunk_start) {
+    uint64_t z = seed + 0x9E3779B97F4A7C15ull * (chunk_start + 1);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    return (int64_t) (z & 0x1FFFFFFFFFFFFFull);
+}
+
 // Optional YuE2 NAR Lua path. The native midpoint function above remains the
 // untouched default and continues to serve the forced-replay parity harness.
 // A scheduler may be selected on its own (variable-step midpoint), or with
