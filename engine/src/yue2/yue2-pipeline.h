@@ -1347,6 +1347,13 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                 chunk.plan_w_start  = pf("yue2:plan_w_start", 1.0f);
                 chunk.plan_w_end    = pf("yue2:plan_w_end", 1.0f);
                 const auto pc       = req.plugin_params.find("yue2:plan_w_curve");
+                chunk.plan_cfg      = std::clamp(pf("yue2:plan_cfg", 1.0f), 1.0f, 8.0f);
+                chunk.plan_cfg_t1   = std::clamp(pf("yue2:plan_cfg_t1", 0.0f), 0.0f, 1.0f);
+                chunk.plan_cfg_t2   = std::clamp(pf("yue2:plan_cfg_t2", 1.0f), 0.0f, 1.0f);
+                if (chunk.plan_cfg > 1.0f) {
+                    fprintf(stderr, "[YuE2-NAR] plan CFG %.2f for t in [%.2f, %.2f] (2 forwards per velocity call)\n",
+                            chunk.plan_cfg, chunk.plan_cfg_t1, chunk.plan_cfg_t2);
+                }
                 chunk.plan_w_cosine = pc != req.plugin_params.end() && pc->second == "cosine";
                 chunk.cads_seed     = (uint64_t) yue2_chunk_solver_seed(
                     (songs[(size_t) cp.song].noise_seed + (uint64_t) j0) ^ 0xCAD5CAD5CAD5CAD5ull, (uint64_t) cp.a);

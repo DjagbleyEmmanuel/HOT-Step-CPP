@@ -186,6 +186,14 @@ struct Yue2NarChunk {
     mutable bool plan_w_active = false;
     mutable std::vector<float> plan_w_times;
     mutable std::vector<float> plan_w_vals;
+    // Classifier-free guidance on the plan: cfg = 1 is off (no extra pass, no
+    // extra node). cfg > 1 runs a second forward per velocity call with the
+    // plan V zeroed (w = 0, the "no plan" branch of the plan_w node) and
+    // returns v_u + cfg*(v_c - v_u). Applied only while t2 >= t >= t1
+    // (solver t: 1 = noise, 0 = clean).
+    float plan_cfg    = 1.0f;
+    float plan_cfg_t1 = 0.0f;
+    float plan_cfg_t2 = 1.0f;
 };
 
 // Fill the per-step plan-strength table from start/end/curve (or from an
@@ -741,7 +749,7 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         ggml_set_input(g.in_cads_zv);
         ggml_set_input(g.in_cads_coef);
     }
-    if (chunk.plan_w_active) {
+    if (chunk.plan_w_active || chunk.plan_cfg > 1.0f) {
         g.in_plan_w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
         ggml_set_name(g.in_plan_w, "yue2_nar_plan_w");
         ggml_set_input(g.in_plan_w);
@@ -823,10 +831,13 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
         const float  coef[2] = { (float) std::sqrt(ge), (float) (std::max(s, 1.0) * std::sqrt(1.0 - ge)) };
         ggml_backend_tensor_set(g.in_cads_coef, coef, 0, sizeof(coef));
     }
+    const double t_plain = 1.0 / (1.0 + std::exp(-raw_t));
     if (g.in_plan_w) {
-        const float w = yue2_plan_w_at(chunk, 1.0 / (1.0 + std::exp(-raw_t)));
+        const float w = yue2_plan_w_at(chunk, t_plain);
         ggml_backend_tensor_set(g.in_plan_w, &w, 0, sizeof(float));
     }
+    const bool cfg_on = g.in_plan_w && chunk.plan_cfg > 1.0f &&
+                        t_plain >= (double) chunk.plan_cfg_t1 - 1e-7 && t_plain <= (double) chunk.plan_cfg_t2 + 1e-7;
     if (g.in_attn_mask && !g.attn_constants_uploaded) {
         std::vector<uint16_t> mask_host((size_t) (kv_pad * nar_len), ggml_fp32_to_fp16(-INFINITY));
         for (int64_t row = 0; row < nar_len; ++row) {
@@ -850,6 +861,26 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     } else {
         out->velocity.assign((size_t) (M * chunk_len * LD), 0.0f);
         ggml_backend_tensor_get(g.velocity_out, out->velocity.data(), 0, (size_t) (M * chunk_len * LD) * sizeof(float));
+        if (want_input_embedding) {
+            out->input_embedding.assign((size_t) (M * nar_len * H), 0.0f);
+            ggml_backend_tensor_get(g.x_embed_tap, out->input_embedding.data(), 0,
+                                    (size_t) (M * nar_len * H) * sizeof(float));
+            want_input_embedding = false;
+        }
+        if (cfg_on) {
+            // Unconditional pass: same graph, plan V scaled to zero.
+            const float w0 = 0.0f;
+            ggml_backend_tensor_set(g.in_plan_w, &w0, 0, sizeof(float));
+            ok = ggml_backend_sched_graph_compute(g.sched, g.gf) == GGML_STATUS_SUCCESS;
+            if (!ok) {
+                if (err) *err = "YuE2 NAR velocity graph compute failed (plan CFG uncond pass)";
+                return false;
+            }
+            std::vector<float> vu(out->velocity.size());
+            ggml_backend_tensor_get(g.velocity_out, vu.data(), 0, vu.size() * sizeof(float));
+            const float s = chunk.plan_cfg;
+            for (size_t i = 0; i < vu.size(); i++) out->velocity[i] = vu[i] + s * (out->velocity[i] - vu[i]);
+        }
         if (want_input_embedding) {
             out->input_embedding.assign((size_t) (M * nar_len * H), 0.0f);
             ggml_backend_tensor_get(g.x_embed_tap, out->input_embedding.data(), 0,

@@ -387,6 +387,12 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     plugin_params['yue2:plan_w_end'] = Math.min(2, Math.max(0, wE));
     if (params.yue2PlanWCurve === 'cosine') plugin_params['yue2:plan_w_curve'] = 'cosine';
   }
+  // Plan CFG: 1 = off (nothing sent, identical output, no extra pass).
+  const planCfg = Number(params.yue2PlanCfg);
+  if (Number.isFinite(planCfg) && planCfg > 1) {
+    plugin_params['yue2:plan_cfg'] = Math.min(8, planCfg);
+    copyNumbers('yue2', { yue2PlanCfgT1: 'plan_cfg_t1', yue2PlanCfgT2: 'plan_cfg_t2' });
+  }
   if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
     notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);
   }
