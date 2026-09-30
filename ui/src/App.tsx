@@ -1146,7 +1146,7 @@ const AppContent: React.FC = () => {
     // Layout: side-by-side on wide landscape, stacked vertically on narrow (<1024px)
     // and on portrait screens >= 1024px (e.g. 1080x1920 at 100%).
     return (
-      <div className="flex flex-1 min-w-0
+      <div className="flex flex-1 min-w-0 min-h-0
         min-[1024px]:flex-row max-[1023px]:flex-col
         min-[1024px]:overflow-clip max-[1023px]:overflow-visible
         portrait-wide:flex-col
@@ -1301,7 +1301,7 @@ const AppContent: React.FC = () => {
       <RestoredQueueBanner />
       <AudioQueueMigrationBanner />
 
-      <div className="flex-1 flex overflow-clip">
+      <div className="flex-1 min-h-0 flex overflow-clip">
         <DiscoPulseWrapper hue={DISCO.sidebar}>
         <Sidebar
           activeView={activeView}
@@ -1344,8 +1344,8 @@ const AppContent: React.FC = () => {
         {/* Left stack — everything the activity column does NOT cover. The
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-clip">
-        <main className="flex-1 min-w-0 flex min-[1024px]:overflow-clip max-[1023px]:overflow-y-auto portrait-wide:overflow-y-auto relative">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-clip">
+        <main className="flex-1 min-w-0 min-h-0 flex min-[1024px]:overflow-clip max-[1023px]:overflow-y-auto portrait-wide:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>

@@ -503,7 +503,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       </div>
 
       {/* Scrollable body — now much slimmer */}
-      <div className="flex-1 overflow-y-auto hide-scrollbar px-4 py-3 space-y-1">
+      {/* overflow-x-hidden alone still lets focus/shift-wheel set scrollLeft, which slides the
+          form's left edge out of view (looks like it is under the sidebar rail). Pin it to 0. */}
+      <div
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden hide-scrollbar px-4 py-3 space-y-1"
+        onScroll={(e) => { if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0; }}
+      >
         <ContentSection
           caption={caption} onCaptionChange={setCaption}
           lyrics={lyrics} onLyricsChange={setLyrics}
