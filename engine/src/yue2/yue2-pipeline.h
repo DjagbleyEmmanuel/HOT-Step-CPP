@@ -1420,6 +1420,41 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                 cp.song, ci, (long long) chunk_len, (long long) nar_cache.filled[(size_t) cp.set], nar_solve_ms,
                 velocity_ms, velocity_calls, n_var);
     }
+
+    // ---- HOT-Step: plan CFG level match (fork addition) ----
+    // Plan CFG (even std-rescaled) pushes the NAR latent RMS well above the
+    // no-CFG level (1.33 vs ~0.935 at cfg 2), which the VAE turns into
+    // +3.6 LU (cfg 2) / +9 LU (cfg 3). With yue2:plan_cfg_level_match on
+    // (default) and plan_cfg > 1, scale each finished song/variation latent by
+    // one scalar so its whole-song RMS equals YUE2_NOCFG_LATENT_RMS, the
+    // measured no-CFG level. Whole-song, not per chunk: one gain keeps the
+    // chunk-to-chunk dynamics the model produced. cfg 1 never enters this
+    // block, so that path stays byte-identical.
+    {
+        auto it_cfg = req.plugin_params.find("yue2:plan_cfg");
+        float cfg = 1.0f;
+        if (it_cfg != req.plugin_params.end()) { try { cfg = std::stof(it_cfg->second); } catch (...) {} }
+        const auto it_lm = req.plugin_params.find("yue2:plan_cfg_level_match");
+        const bool lm = it_lm == req.plugin_params.end() ||
+                        !(it_lm->second == "0" || it_lm->second == "false");
+        constexpr float YUE2_NOCFG_LATENT_RMS = 0.935f;  // same measurement as YUE2_LATENT_RMS (VAE stage)
+        if (cfg > 1.0f && lm) {
+            for (int b = 0; b < B; b++) {
+                for (int j = 0; j < n_var; j++) {
+                    auto & lat = (*latents_out)[(size_t) b][(size_t) j];
+                    if (lat.empty()) continue;
+                    double s2 = 0.0;
+                    for (float v : lat) s2 += (double) v * (double) v;
+                    const double rms = std::sqrt(s2 / (double) lat.size());
+                    if (!(rms > 1e-6)) continue;
+                    const float g = (float) (YUE2_NOCFG_LATENT_RMS / rms);
+                    for (float & v : lat) v *= g;
+                    fprintf(stderr, "[YuE2-NAR] plan CFG level match: song=%d var=%d rms %.4f -> %.4f (gain %.2f dB)\n",
+                            b, j, rms, (double) YUE2_NOCFG_LATENT_RMS, 20.0 * std::log10((double) g));
+                }
+            }
+        }
+    }
     return true;
 }
 

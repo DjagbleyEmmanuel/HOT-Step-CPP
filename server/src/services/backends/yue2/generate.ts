@@ -392,6 +392,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   if (Number.isFinite(planCfg) && planCfg > 1) {
     plugin_params['yue2:plan_cfg'] = Math.min(8, planCfg);
     copyNumbers('yue2', { yue2PlanCfgT1: 'plan_cfg_t1', yue2PlanCfgT2: 'plan_cfg_t2', yue2PlanCfgRescale: 'plan_cfg_rescale' });
+    if (typeof params.yue2PlanCfgLevelMatch === 'boolean') {
+      plugin_params['yue2:plan_cfg_level_match'] = params.yue2PlanCfgLevelMatch;
+    }
   }
   if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
     notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);

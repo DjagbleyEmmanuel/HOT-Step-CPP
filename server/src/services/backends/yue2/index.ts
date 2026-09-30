@@ -764,6 +764,10 @@ async function capabilities(): Promise<BackendCapabilities> {
         hint: 'Pulls the guided result back toward the level of the plain one so higher CFG does not blow up loudness '
             + 'and clip. 0 = raw CFG, 0.7 = usual setting.',
         visible_when: { key: 'yue2PlanCfg', not_equals: '1' } },
+      { key: 'yue2PlanCfgLevelMatch', type: 'toggle', label: 'Plan CFG Level Match', default: true,
+        hint: 'Scales the guided latent back to the no-CFG level before decode, so raising CFG changes the music, '
+            + 'not the loudness.',
+        visible_when: { key: 'yue2PlanCfg', not_equals: '1' } },
       { key: 'yue2CadsT1', type: 'slider', label: 'CADS Clean Below t', default: 0.6, min: 0, max: 1, step: 0.05,
         hint: 't runs 1 (noise) to 0 (clean). Below this t the conditioning is untouched.',
         visible_when: { key: 'yue2CadsStrength', not_equals: '0' } },
