@@ -720,6 +720,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         options: [
           { value: 'stock', label: 'Midpoint (stock)' },
           { value: 'wasserstein', label: 'Wasserstein Flow (experimental)' },
+          { value: 'ancestral', label: 'Ancestral Euler (churn, experimental)' },
         ],
       },
       {

@@ -328,7 +328,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const odeRaw = Number(params.yue2OdeSteps);
   const ode_steps = Number.isFinite(odeRaw) && odeRaw > 0 ? Math.round(odeRaw) : 32;
 
-  const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2' : undefined;
+  const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2'
+    : params.yue2NarSolver === 'ancestral' ? 'md_ancestral_yue2'
+    : undefined;
   const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3' : undefined;
   const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
   const copyNumbers = (plugin: string, fields: Record<string, string>) => {

@@ -953,6 +953,10 @@ static bool yue2_nar_solve_plugins(
     SolverState solver_state;
     solver_state.batch_n = 1;
     solver_state.n_per = n;
+    // step() solvers re-seed their Lua RNG from seeds[0] at step 0
+    // (lua-plugin.h); without this they always got seed 0.
+    const int64_t step_seed = seed;
+    solver_state.seeds = &step_seed;
     LuaModelContext ctx;
     ctx.model_id = "yue2";
     auto eval = [&](const std::vector<float> & s, float t, Yue2NarVelocityResult * result) -> bool {
