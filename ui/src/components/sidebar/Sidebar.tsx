@@ -2,6 +2,7 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -262,16 +263,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* ── Mobile overlay backdrop — shown behind drawer at narrow widths ── */}
-      {mobileOpen && (
+      {/* Portaled to body: the disco wrapper around the sidebar sets will-change: transform,
+          which makes position: fixed relative to that (hidden) wrapper instead of the viewport. */}
+      {mobileOpen && createPortal(<>
         <div
           className="fixed inset-0 bg-black/60 z-40 min-[1024px]:landscape:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
-      )}
-
       {/* ── Mobile overlay drawer — slides in from the left ── */}
-      {mobileOpen && (
         <div className="fixed inset-y-0 left-0 z-50 min-[1024px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
           {/* Close button */}
           <div className="mb-6 flex items-center justify-between px-3">
@@ -296,7 +296,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onToggleAssistant={onToggleAssistant}
           />
         </div>
-      )}
+      </>, document.body)}
 
       {/* ── Desktop sidebar — hidden at narrow widths ── */}
       <div className={[

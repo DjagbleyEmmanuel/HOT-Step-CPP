@@ -323,7 +323,7 @@ export const StemBuilder: React.FC = () => {
       )}
 
       {/* Narrow/portrait pane switcher — rendered below 1024px and on portrait >= 1024px */}
-      <div className="max-[1023px]:flex min-[1024px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
+      <div className="max-[1023px]:flex min-[1024px]:hidden portrait-wide:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
         {(['source', 'build', 'recent'] as const).map(pane => (
           <button
             key={pane}

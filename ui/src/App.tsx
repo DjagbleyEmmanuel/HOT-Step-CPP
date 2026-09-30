@@ -1149,8 +1149,8 @@ const AppContent: React.FC = () => {
       <div className="flex flex-1
         min-[1024px]:flex-row max-[1023px]:flex-col
         min-[1024px]:overflow-hidden max-[1023px]:overflow-visible
-        [@media(orientation:portrait)_and_(min-width:1024px)]:flex-col
-        [@media(orientation:portrait)_and_(min-width:1024px)]:overflow-visible">
+        portrait-wide:flex-col
+        portrait-wide:overflow-visible">
         {/* Create Panel — resizable on wide landscape, full-width on narrow/portrait.
             Tailwind's ! prefix generates !important which overrides inline style. */}
         <DiscoPulseWrapper
@@ -1158,7 +1158,7 @@ const AppContent: React.FC = () => {
           className="flex-shrink-0 border-zinc-200 dark:border-white/5
             min-[1024px]:h-full min-[1024px]:border-r
             max-[1023px]:!w-full max-[1023px]:border-b max-[1023px]:h-auto max-[1023px]:border-r-0
-            [@media(orientation:portrait)_and_(min-width:1024px)]:!w-full [@media(orientation:portrait)_and_(min-width:1024px)]:border-b [@media(orientation:portrait)_and_(min-width:1024px)]:border-r-0 [@media(orientation:portrait)_and_(min-width:1024px)]:h-auto"
+            portrait-wide:!w-full portrait-wide:border-b portrait-wide:border-r-0 portrait-wide:h-auto"
           style={{ width: createPanelWidth }}
         >
           <CreatePanel
@@ -1172,7 +1172,7 @@ const AppContent: React.FC = () => {
         <div
           className="flex-shrink-0 w-1.5 cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
             min-[1024px]:h-full max-[1023px]:hidden
-            [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
+            portrait-wide:hidden"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -1241,7 +1241,7 @@ const AppContent: React.FC = () => {
             {/* Right resize handle */}
             <div
               className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
-                max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
+                max-[1023px]:hidden portrait-wide:hidden"
               onMouseDown={(e) => {
                 e.preventDefault();
                 const startX = e.clientX;
@@ -1266,7 +1266,7 @@ const AppContent: React.FC = () => {
             </div>
             <DiscoPulseWrapper hue={DISCO.rightSidebar}
               className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5
-                max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden"
+                max-[1023px]:hidden portrait-wide:hidden"
               style={{ width: rightSidebarWidth }}
             >
               <RightSidebar
@@ -1345,7 +1345,7 @@ const AppContent: React.FC = () => {
             player lives in here rather than spanning the window, so the
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <main className="flex-1 min-w-0 flex min-[1024px]:overflow-hidden max-[1023px]:overflow-y-auto [@media(orientation:portrait)_and_(min-width:1024px)]:overflow-y-auto relative">
+        <main className="flex-1 min-w-0 flex min-[1024px]:overflow-hidden max-[1023px]:overflow-y-auto portrait-wide:overflow-y-auto relative">
           <ErrorBoundary resetKey={activeView}>
             {renderContent()}
           </ErrorBoundary>

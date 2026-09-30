@@ -568,7 +568,7 @@ export const LyricStudioV2: React.FC = () => {
       <div className="flex-1 overflow-hidden">
         {nav.level === 'artists' && (
           <div className="h-full flex ls2-fade-in">
-            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={-1}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                 artistIdsWithAdapters={artistIdsWithAdapters} />
@@ -583,7 +583,7 @@ export const LyricStudioV2: React.FC = () => {
                   </span>
                 )}
                 {/* Narrow/portrait: queue + prompt editor buttons since sidebar is hidden */}
-                <div className="max-[1023px]:flex [@media(orientation:portrait)_and_(min-width:1024px)]:flex hidden items-center gap-2 ml-auto">
+                <div className="max-[1023px]:flex portrait-wide:flex hidden items-center gap-2 ml-auto">
                   <button onClick={openQueuePanel} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
                     Queue
                   </button>
@@ -593,7 +593,7 @@ export const LyricStudioV2: React.FC = () => {
                 </div>
               </div>
               <div className="flex-1 flex min-h-0">
-                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
                   <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
                     modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
                 </div>
@@ -612,7 +612,7 @@ export const LyricStudioV2: React.FC = () => {
 
         {nav.level === 'albums' && nav.selectedArtist && (
           <div className="h-full flex ls2-fade-in">
-            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+            <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                 artistIdsWithAdapters={artistIdsWithAdapters} />
@@ -621,7 +621,7 @@ export const LyricStudioV2: React.FC = () => {
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
               <div className="flex-shrink-0 flex items-center px-5 py-3 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
                 {/* Narrow/portrait: back button to artists */}
-                <button onClick={handleBackToArtists} className="max-[1023px]:flex [@media(orientation:portrait)_and_(min-width:1024px)]:flex hidden items-center gap-1 mr-3 text-xs text-zinc-500 hover:text-white transition-colors flex-shrink-0">
+                <button onClick={handleBackToArtists} className="max-[1023px]:flex portrait-wide:flex hidden items-center gap-1 mr-3 text-xs text-zinc-500 hover:text-white transition-colors flex-shrink-0">
                   <ChevronLeft className="w-3.5 h-3.5" />
                   All Artists
                 </button>
@@ -633,7 +633,7 @@ export const LyricStudioV2: React.FC = () => {
                 )}
               </div>
               <div className="flex-1 flex min-h-0">
-                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+                <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
                   <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
                     onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
                     modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
@@ -655,7 +655,7 @@ export const LyricStudioV2: React.FC = () => {
         {nav.level === 'album-detail' && nav.selectedArtist && nav.selectedAlbum && (
           <div className="h-full flex flex-col ls2-fade-in">
             {/* Narrow/portrait nav bar: back to albums + album name */}
-            <div className="max-[1023px]:flex [@media(orientation:portrait)_and_(min-width:1024px)]:flex hidden flex-shrink-0 items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
+            <div className="max-[1023px]:flex portrait-wide:flex hidden flex-shrink-0 items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/30 dark:bg-zinc-950/30">
               <button onClick={handleBackToAlbums} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-white transition-colors flex-shrink-0">
                 <ChevronLeft className="w-3.5 h-3.5" />
                 Albums
@@ -665,12 +665,12 @@ export const LyricStudioV2: React.FC = () => {
             </div>
             <div className="flex-1 flex min-h-0">
               {/* Left: artist sidebar + album header */}
-              <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+              <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
                 <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                   onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
                   artistIdsWithAdapters={artistIdsWithAdapters} />
               </div>
-              <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative max-[1023px]:hidden [@media(orientation:portrait)_and_(min-width:1024px)]:hidden">
+              <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative max-[1023px]:hidden portrait-wide:hidden">
                 <div className="relative z-[1] h-full">
                   <AlbumHeader
                     artist={nav.selectedArtist} album={nav.selectedAlbum}
