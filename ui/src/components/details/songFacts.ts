@@ -295,7 +295,13 @@ function yue2Facts(gp: any): FactGroup[] {
   const seeds: Fact[] = [];
   const seed = gp.seed ?? req.seed;
   const noise = y.noise_seed ?? req.noise_seed;
-  add(seeds, 'Seed', num(seed), { mono: true });
+  // baseSeed is what the user typed; seed is what rendered (base + variation
+  // index, or a re-plan seed). Rows before baseSeed existed show only one.
+  const base = gp.baseSeed;
+  add(seeds, 'Seed', num(base ?? seed), { mono: true });
+  if (base !== undefined && seed !== undefined && String(base) !== String(seed)) {
+    add(seeds, 'Rendered seed', num(seed), { mono: true });
+  }
   // Only worth a line when it is actually a second seed.
   if (noise !== undefined && String(noise) !== String(seed)) {
     add(seeds, 'Noise seed', num(noise), { mono: true });
