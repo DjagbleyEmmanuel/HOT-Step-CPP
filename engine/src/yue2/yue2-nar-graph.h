@@ -911,7 +911,7 @@ static bool yue2_nar_solve_plugins(
     const std::string & solver_name, const std::string & scheduler_name,
     const std::unordered_map<std::string, std::string> & plugin_params,
     Yue2NarSolveResult * out, std::string * err, const Yue2NarStepFn & on_step = {},
-    int64_t seed = 0) {
+    int64_t seed = 0, const LuaYue2Plan * plan_info = nullptr) {
     if (steps <= 0 || chunk.n_var != 1 ||
         initial_noise.size() != (size_t) (chunk.chunk_len * m.lm_cfg.latent_dim)) {
         if (err) *err = "YuE2 NAR plugin solve: invalid steps or noise shape (plugins solve one variation at a time)";
@@ -934,6 +934,7 @@ static bool yue2_nar_solve_plugins(
         std::vector<float> emitted((size_t) steps, std::numeric_limits<float>::quiet_NaN());
         LuaModelContext ctx;
         ctx.model_id = "yue2";
+        ctx.yue2     = plan_info;
         lua_call_scheduler(*scheduler, emitted.data(), steps, 1.0f, plugin_params, ctx);
         for (int i = 0; i < steps; i++) times[(size_t) i] = emitted[(size_t) i];
     } else {
@@ -969,6 +970,7 @@ static bool yue2_nar_solve_plugins(
     solver_state.seeds = &step_seed;
     LuaModelContext ctx;
     ctx.model_id = "yue2";
+    ctx.yue2     = plan_info;
     auto eval = [&](const std::vector<float> & s, float t, Yue2NarVelocityResult * result) -> bool {
         const auto start = std::chrono::steady_clock::now();
         const bool ok = yue2_nar_velocity(m, chunk, s, yue2_nar_logit_clamped(t), false, result, err);

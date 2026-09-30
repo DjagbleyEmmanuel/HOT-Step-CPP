@@ -369,6 +369,50 @@ want a stream that is independent of what else the plugin drew).
 
 ---
 
+### `model_context.yue2` (YuE2 NAR solvers and schedulers only)
+
+On the YuE2 NAR path (a Lua `infer_method` or `scheduler` on `/yue2/synth`),
+`model_context.yue2` carries the song plan (the ABC score the LM wrote or the
+user supplied) plus the chunk being solved. It is `nil` on every other path
+(ACE, MM3, SA3, YuE2 postprocess), so guard with
+`local y = model_context and model_context.yue2`.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `tempo` | number | quarter-note bpm from the plan's `Q:` line, 0 if missing |
+| `meter`, `beats_per_bar` | string, int | `M:` text (e.g. `"4/4"`) and its numerator |
+| `bars` | int | vocal-voice bars (`Z4` counts as 4) |
+| `vocal_bars`, `vocal_pct` | int, number | bars with at least one sung note, and that as a percent of `bars` |
+| `total_s` | number | `bars * beats_per_bar * 60 / tempo` (0 without a tempo) |
+| `sections` | array | `{name, start_s, end_s, start_bar, end_bar}` from the plan's `% name` comment lines (lowercased, e.g. `"chorus"`, `"pre-chorus"`), empty if the plan has none |
+| `frame_rate` | number | NAR latent frames per second (25) |
+| `song`, `song_frames` | int | batch song index and its total latent frames |
+| `chunk` | table | `{index, count, start_frame, end_frame, start_s, end_s}`; index is 0-based, end is exclusive |
+
+Section times are plan time at a constant tempo; the rendered audio can run a
+little long or short of them, and a preview render (`preview_max_frames`)
+only covers the start. Schedulers run once per chunk, so a scheduler can shape
+each chunk differently:
+
+```lua
+local y = model_context and model_context.yue2
+local dense = false
+if y then
+    for _, s in ipairs(y.sections) do
+        if s.name == "chorus" and s.start_s < y.chunk.end_s and s.end_s > y.chunk.start_s then
+            dense = true
+        end
+    end
+end
+local gamma = dense and 2.5 or 1.0
+for i = 0, num_steps - 1 do output[i] = 1.0 - (i / num_steps) ^ gamma end
+```
+
+`plugins/schedulers/md_plan_aware_yue2.lua` is the full version, and it logs
+the table once per chunk.
+
+---
+
 ## Sandbox
 
 Each plugin runs in an isolated LuaJIT 2.1 VM (Lua 5.1 with LuaJIT's Lua 5.2 extensions, including `goto`) with:

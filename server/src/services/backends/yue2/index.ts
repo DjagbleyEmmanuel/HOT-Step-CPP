@@ -732,6 +732,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         options: [
           { value: 'stock', label: 'Uniform (stock)' },
           { value: 'ht_v3', label: 'HT V3 (experimental)' },
+          { value: 'plan_aware', label: 'Plan-Aware (section-targeted, experimental)' },
         ],
       },
       { key: 'yue2WassTau', type: 'slider', label: 'Proximal Scale', default: 1, min: 0.1, max: 5, step: 0.05,

@@ -331,7 +331,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2'
     : params.yue2NarSolver === 'ancestral' ? 'md_ancestral_yue2'
     : undefined;
-  const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3' : undefined;
+  const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3'
+    : params.yue2NarScheduler === 'plan_aware' ? 'md_plan_aware_yue2'
+    : undefined;
   const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
   const copyNumbers = (plugin: string, fields: Record<string, string>) => {
     for (const [field, key] of Object.entries(fields)) {

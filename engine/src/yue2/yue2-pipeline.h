@@ -525,6 +525,101 @@ static int64_t yue2_plan_seconds(const std::string & abc) {
     return (int64_t) std::llround((double) bars * beats * 60.0 / tempo);
 }
 
+// Plan metadata for Lua NAR plugins (model_context.yue2). Same bar counting as
+// yue2_plan_seconds above (vocal voice, Z<n> = n bars, chord-only segments
+// count), plus: "% name" comment lines open a section, and a vocal bar counts
+// toward vocal_bars when its quote-stripped text holds a note letter. Section
+// times assume a constant tempo and meter (the last Q:/M: seen).
+static LuaYue2Plan yue2_plan_info(const std::string & abc) {
+    LuaYue2Plan info;
+    bool in_vocal = false;
+    auto lower = [](std::string s) {
+        for (char & ch : s) ch = (char) std::tolower((unsigned char) ch);
+        return s;
+    };
+    size_t pos = 0;
+    while (pos <= abc.size()) {
+        size_t nl = abc.find('\n', pos);
+        if (nl == std::string::npos) nl = abc.size();
+        std::string line = abc.substr(pos, nl - pos);
+        pos = nl + 1;
+        const size_t a = line.find_first_not_of(" \t\r");
+        if (a == std::string::npos) continue;
+        line = line.substr(a, line.find_last_not_of(" \t\r") - a + 1);
+        if (line[0] == '%') {
+            if (line.size() > 1 && line[1] == '%') continue;  // %% directives
+            const size_t n0 = line.find_first_not_of(" \t", 1);
+            if (n0 == std::string::npos) continue;
+            if (!info.sections.empty()) info.sections.back().end_bar = info.bars;
+            LuaYue2Section sec;
+            sec.name      = lower(line.substr(n0));
+            sec.start_bar = info.bars;
+            sec.end_bar   = info.bars;
+            info.sections.push_back(sec);
+            continue;
+        }
+        if (line.size() >= 2 && line[1] == ':' && std::isalpha((unsigned char) line[0])) {
+            if (line[0] == 'Q') {
+                const size_t eq = line.find('=');
+                if (eq != std::string::npos) {
+                    const char * p = line.c_str() + eq + 1;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (std::isdigit((unsigned char) *p)) info.tempo = std::strtod(p, nullptr);
+                }
+            } else if (line[0] == 'M') {
+                const size_t m0 = line.find_first_not_of(" \t", 2);
+                info.meter = m0 == std::string::npos ? "" : line.substr(m0);
+                const int n = std::atoi(line.c_str() + 2);
+                info.beats_per_bar = n > 0 ? n : 4;
+            } else if (line[0] == 'V') {
+                const std::string rest  = line.substr(2);
+                const size_t      s0    = rest.find_first_not_of(" \t");
+                const std::string first = s0 == std::string::npos ? "" : rest.substr(s0, rest.find_first_of(" \t", s0) - s0);
+                in_vocal = lower(first).find("vocal") != std::string::npos ||
+                           lower(line).find("name=\"vocal") != std::string::npos;
+            }
+            continue;
+        }
+        if (!in_vocal) continue;
+        size_t s = 0;
+        while (s <= line.size()) {
+            size_t e = line.find('|', s);
+            if (e == std::string::npos) e = line.size();
+            std::string seg;
+            bool        quoted = false;
+            for (size_t i = s; i < e; i++) {
+                if (line[i] == '"') quoted = !quoted;
+                else if (!quoted) seg += line[i];
+            }
+            const size_t t0 = seg.find_first_not_of(" \t");
+            if (line.find_first_not_of(" \t", s) < e) {
+                int64_t n = 1;
+                if (t0 != std::string::npos) {
+                    const std::string t = seg.substr(t0, seg.find_last_not_of(" \t") - t0 + 1);
+                    if (t[0] == 'Z' && t.find_first_not_of("0123456789", 1) == std::string::npos && t.size() > 1) {
+                        n = std::max<int64_t>(1, std::atoll(t.c_str() + 1));
+                    }
+                }
+                bool note = false;
+                for (char ch : seg) {
+                    if ((ch >= 'A' && ch <= 'G') || (ch >= 'a' && ch <= 'g')) { note = true; break; }
+                }
+                info.bars += n;
+                if (note) info.vocal_bars += n;
+            }
+            s = e + 1;
+        }
+    }
+    if (!info.sections.empty()) info.sections.back().end_bar = info.bars;
+    const double spb = info.tempo > 0.0 ? (double) info.beats_per_bar * 60.0 / info.tempo : 0.0;
+    info.total_s = (double) info.bars * spb;
+    for (auto & sec : info.sections) {
+        sec.start_s = (double) sec.start_bar * spb;
+        sec.end_s   = (double) sec.end_bar * spb;
+    }
+    return info;
+}
+
 // Where a stream counts as a runaway: plan_cutoff x the plan's length + 20 s,
 // never past the stage cap and never before min_tokens + 10 s.
 static int64_t yue2_plan_cap_frames(const Yue2Request & req, const Yue2SamplingParams & sp, const std::string & abc) {
@@ -1200,6 +1295,19 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         progress({ YUE2_STAGE_NAR, 0, nar_steps_total });
     }
 
+    // Plan metadata for Lua plugins (model_context.yue2), parsed once per song.
+    std::vector<LuaYue2Plan> plan_info;
+    std::vector<int>         chunk_seen((size_t) B, 0), chunk_total((size_t) B, 0);
+    if (plugins) {
+        plan_info.reserve((size_t) B);
+        for (int b = 0; b < B; b++) {
+            plan_info.push_back(yue2_plan_info(songs[(size_t) b].score_abc));
+            plan_info.back().song        = b;
+            plan_info.back().song_frames = (int64_t) songs[(size_t) b].codec_ids.size();
+        }
+        for (const auto & cp : plan) chunk_total[(size_t) cp.song]++;
+    }
+
     for (size_t ci = 0; ci < plan.size(); ci++) {
         if (cancel && cancel->load()) {
             if (err) *err = "cancelled";
@@ -1207,6 +1315,14 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         }
         const Yue2ChunkPlan & cp = plan[ci];
         const int64_t chunk_len  = cp.b - cp.a;
+        LuaYue2Plan * chunk_info = nullptr;
+        if (plugins) {
+            chunk_info = &plan_info[(size_t) cp.song];
+            chunk_info->chunk_index       = chunk_seen[(size_t) cp.song]++;
+            chunk_info->chunk_count       = chunk_total[(size_t) cp.song];
+            chunk_info->chunk_start_frame = cp.a;
+            chunk_info->chunk_end_frame   = cp.b;
+        }
         double nar_solve_ms = 0.0, velocity_ms = 0.0;
         int    velocity_calls = 0;
         for (int j0 = 0; j0 < n_var; j0 += group) {
@@ -1246,7 +1362,8 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                                          // noise (a shared seed repeated churn noise every chunk).
                                          // Keyed on cp.a, not ci, so batch coalescing can't shift it.
                                          yue2_chunk_solver_seed(songs[(size_t) cp.song].noise_seed + (uint64_t) j0,
-                                                                (uint64_t) cp.a));
+                                                                (uint64_t) cp.a),
+                                         chunk_info);
             nar_solve_ms += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - nar_solve_start).count();
             velocity_ms += solve.total_velocity_ms;
