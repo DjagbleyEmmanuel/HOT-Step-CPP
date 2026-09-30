@@ -760,6 +760,10 @@ async function capabilities(): Promise<BackendCapabilities> {
       { key: 'yue2PlanCfgT2', type: 'slider', label: 'Plan CFG To t', default: 1, min: 0, max: 1, step: 0.05,
         hint: 'Upper end of the CFG window (1 = from the very first step).',
         visible_when: { key: 'yue2PlanCfg', not_equals: '1' } },
+      { key: 'yue2PlanCfgRescale', type: 'slider', label: 'Plan CFG Rescale', default: 0.7, min: 0, max: 1, step: 0.05,
+        hint: 'Pulls the guided result back toward the level of the plain one so higher CFG does not blow up loudness '
+            + 'and clip. 0 = raw CFG, 0.7 = usual setting.',
+        visible_when: { key: 'yue2PlanCfg', not_equals: '1' } },
       { key: 'yue2CadsT1', type: 'slider', label: 'CADS Clean Below t', default: 0.6, min: 0, max: 1, step: 0.05,
         hint: 't runs 1 (noise) to 0 (clean). Below this t the conditioning is untouched.',
         visible_when: { key: 'yue2CadsStrength', not_equals: '0' } },

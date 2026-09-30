@@ -197,6 +197,7 @@ struct Yue2NarChunk {
     float plan_cfg    = 1.0f;
     float plan_cfg_t1 = 0.0f;
     float plan_cfg_t2 = 1.0f;
+    float plan_cfg_rescale = 0.7f;  // phi: CFG-rescale blend (Lin et al. 2023), only when plan_cfg > 1
     mutable int plan_cfg_uncond_calls = 0;  // uncond (plan-masked) forwards this solve
 };
 
@@ -903,6 +904,35 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
             ggml_backend_tensor_get(g.velocity_out, vu.data(), 0, vu.size() * sizeof(float));
             const float s = chunk.plan_cfg;
             for (size_t i = 0; i < vu.size(); i++) out->velocity[i] = vu[i] + s * (out->velocity[i] - vu[i]);
+            // CFG rescale (Lin et al. 2023, "Common Diffusion Noise Schedules..."):
+            // v <- phi * v * std(vc)/std(v) + (1-phi) * v. The reference takes std
+            // over all non-batch dims; here it is taken per latent channel (over
+            // the chunk's frames), per batch item. Measured 2026-09-30 (seed 1234,
+            // 20 s): phi 0.7 takes cfg 3 from +15.4 dB / 30.6% clip to +9.2 dB /
+            // 0.94% clip vs cfg 1; whole-chunk std measured the same within 0.1 dB.
+            const float phi = chunk.plan_cfg_rescale;
+            if (phi > 0.0f) {
+                const size_t T = (size_t) chunk_len, C = (size_t) LD;
+                for (int64_t m = 0; m < M; m++) {
+                    const size_t base = (size_t) m * T * C;
+                    float * v = out->velocity.data() + base;
+                    const float * u = vu.data() + base;
+                    for (size_t c = 0; c < C; c++) {
+                        double sc = 0, sc2 = 0, sv = 0, sv2 = 0;
+                        for (size_t t = 0; t < T; t++) {
+                            const double x = v[t * C + c], xu = u[t * C + c];
+                            const double xc = xu + (x - xu) / s;  // recover vc
+                            sc += xc; sc2 += xc * xc; sv += x; sv2 += x * x;
+                        }
+                        const double n = (double) T;
+                        const double std_c = std::sqrt(std::max(0.0, sc2 / n - (sc / n) * (sc / n)));
+                        const double std_v = std::sqrt(std::max(0.0, sv2 / n - (sv / n) * (sv / n)));
+                        if (std_v <= 1e-12) continue;
+                        const float fct = (float) (phi * (std_c / std_v) + (1.0 - phi));
+                        for (size_t t = 0; t < T; t++) v[t * C + c] *= fct;
+                    }
+                }
+            }
         }
     }
     return ok;

@@ -6,6 +6,8 @@
 //                                           [--base URL] [--timeout S]
 // pre (old build): saves the plan_cfg=1 baseline and a plan_cfg=2 render.
 // post (new build): all checks. Running post on the old build fails (b)/(d).
+// rescale: plan_cfg_rescale checks (cfg 2/3 at rescale 0 vs 0.7). The rescale-0 rows
+// are the teeth case: they fail the level/clip limits, 0.7 must pass them.
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -125,7 +127,35 @@ fs.mkdirSync(AB_DIR, { recursive: true });
 const cfg = s => (s === 1 ? {} : { plugin_params: { 'yue2:plan_cfg': s } });
 const cfg1 = { plugin_params: { 'yue2:plan_cfg': 1 } };
 
-if (PHASE === 'pre') {
+if (PHASE === 'rescale') {
+  const rows = []; let pass = true;
+  const loadWav = n => { const fp = path.join(AB_DIR, n); return fs.existsSync(fp) ? decodeWav(fs.readFileSync(fp), 'wav') : null; };
+  const pre1 = loadWav('cfg1_prerescale.wav');
+  const r1 = await render(cfg1, 'plan_cfg 1.0');
+  if (pre1) {
+    const a = relDb(pre1, r1); const ok = a < -90; pass &&= ok;
+    rows.push({ check: 'cfg=1 vs pre-rescale build', value: f(a) + ' dB', ok });
+  }
+  const s1 = stats(r1);
+  rows.push({ check: 'cfg=1', value: `rms ${s1.rmsDb.toFixed(1)} dB peak ${s1.peak.toFixed(3)} clip ${s1.clipPct.toFixed(3)}%`, ok: '' });
+  const out = {};
+  for (const s of [2, 3]) for (const phi of [0, 0.7]) {
+    const r = out[`${s}_${phi}`] = await render({ plugin_params: { 'yue2:plan_cfg': s, 'yue2:plan_cfg_rescale': phi } }, `cfg ${s} rescale ${phi}`);
+    const st = stats(r);
+    const ok = st.nan === 0 && st.clipPct < 1 && Math.abs(st.rmsDb - s1.rmsDb) <= 4;
+    if (phi > 0) pass &&= ok;   // phi=0 is the unfixed (teeth) case, reported only
+    const d = relDb(r1, r);
+    rows.push({ check: `cfg=${s} rescale=${phi}${phi ? '' : ' (unfixed)'}`, value: `rms ${st.rmsDb.toFixed(1)} dB (${(st.rmsDb - s1.rmsDb).toFixed(1)}) peak ${st.peak.toFixed(3)} clip ${st.clipPct.toFixed(3)}% vs cfg1 ${f(d)} dB`, ok });
+    if (phi > 0) { const dOk = d > -40; pass &&= dOk; rows.push({ check: `cfg=${s} r0.7 vs cfg=1 still differs`, value: f(d) + ' dB', ok: dOk });
+      saveWav(path.join(AB_DIR, `cfg${s}_r07.wav`), r); }
+  }
+  const again = await render({ plugin_params: { 'yue2:plan_cfg': 3, 'yue2:plan_cfg_rescale': 0.7 } }, 'cfg 3 r0.7 repeat');
+  const c = relDb(out['3_0.7'], again); const cOk = c < -90; pass &&= cOk;
+  rows.push({ check: 'cfg=3 r0.7 same seed twice', value: f(c) + ' dB', ok: cOk });
+  console.table(rows);
+  console.log(pass ? 'OVERALL PASS' : 'OVERALL FAIL');
+  process.exit(pass ? 0 : 1);
+} else if (PHASE === 'pre') {
   const b = await render({}, 'baseline (pre-change build)');
   saveF32('baseline_pre.f32', b);
   fs.writeFileSync(path.join(OUT_DIR, 'baseline_pre.json'), JSON.stringify({ secs: b.secs, peak: b.peak }));
