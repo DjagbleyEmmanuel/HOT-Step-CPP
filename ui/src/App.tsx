@@ -1148,7 +1148,7 @@ const AppContent: React.FC = () => {
     return (
       <div className="flex flex-1 min-w-0
         min-[1024px]:flex-row max-[1023px]:flex-col
-        min-[1024px]:overflow-hidden max-[1023px]:overflow-visible
+        min-[1024px]:overflow-clip max-[1023px]:overflow-visible
         portrait-wide:flex-col
         portrait-wide:overflow-visible">
         {/* Create Panel — resizable on wide landscape, full-width on narrow/portrait.
