@@ -63,7 +63,7 @@ function parsePlugin(file) {
 }
 function pluginTables() {
   const sources = [['engine/plugins', 'built in'], ['plugins', 'community']];
-  const all = sources.flatMap(([dir, origin]) => walk(path.join(ROOT, dir), (p) => p.endsWith('.lua')).map(parsePlugin).filter(Boolean).map((p) => ({ ...p, origin })));
+  const all = sources.flatMap(([dir, origin]) => walk(path.join(ROOT, dir), (p) => p.endsWith('.lua') && !/_INTERNAL/i.test(path.basename(p)) && !/[\/](archive|debug)[\/]/i.test(path.relative(ROOT, p))).map(parsePlugin).filter(Boolean).map((p) => ({ ...p, origin })));
   const by = (t) => all.filter((p) => p.type === t).sort((a, b) => a.display.localeCompare(b.display) || a.name.localeCompare(b.name));
   const params = (p) => (p.params ? `${p.params}` : '');
   return {
