@@ -33,10 +33,15 @@ import { useGlobalParamsStore } from '../../stores/globalParamsStore';
  *  The server clamps temperature to 1.0 then; this tells the user up front. */
 const Yue2SemanticWarning: React.FC = () => {
   const bp = useGlobalParamsStore((s: any) => s.backendParams as Record<string, unknown>) ?? {};
+  // Checkpoint's own composer temperature (the control's declared default),
+  // which is what the engine uses when the slider is untouched.
+  const ckptDefault = useBackendExtensions('lm').find(p => p.key === 'yue2SemTemperature')?.default;
   const set = (v: unknown) => v !== undefined && v !== null && v !== '';
-  if (!set(bp.yue2SemTopK) || Number(bp.yue2SemTopK) !== 0) return null;
-  const temp = set(bp.yue2SemTemperature) ? Number(bp.yue2SemTemperature) : 1.0;
-  if (!(temp > 1.0)) return null;
+  // The engine truncates top_k to int, so 0.5 is unlimited too.
+  if (!set(bp.yue2SemTopK) || Math.trunc(Number(bp.yue2SemTopK)) !== 0) return null;
+  const temp = set(bp.yue2SemTemperature) ? Number(bp.yue2SemTemperature)
+    : (typeof ckptDefault === 'number' && Number.isFinite(ckptDefault) ? ckptDefault : 1.0);
+  if (typeof temp !== 'number' || !Number.isFinite(temp) || !(temp > 1.0)) return null;
   return (
     <p className="text-[11px] text-amber-400 leading-relaxed border border-amber-500/40 rounded px-2 py-1">
       Composer Top-K 0 (unlimited) with Composer Temperature {temp.toFixed(2)} breaks the song.
