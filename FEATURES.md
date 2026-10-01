@@ -57,6 +57,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 | Cover Studio | Transcribes a source into a reviewed ABC lead sheet, or accepts pasted ABC or imported MusicXML with a lyric verse fallback, then composes from that score. SheetSage2 is optional when you provide the score. |
 | Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
 | Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
+| What changes what | Character (melody, arrangement, structure) comes from the composer stage: seed, composer sampling, CFG, style words and the ABC sketch. Solvers, schedulers and refiner plugins only change the finish. See [YuE2](docs/user/backends.md#what-changes-what-on-yue2). |
 | Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |
 | ComfyUI adapter import | Splits a single-file YuE2 adapter from ComfyUI or ai-toolkit into the AR and NAR pair and selects both. See [Adapters](docs/user/adapters.md#importing-comfyui-adapters). |
 | Companion decoder | A small decoder adapter that ships in every YuE2 pack is applied to every GGUF generation. |

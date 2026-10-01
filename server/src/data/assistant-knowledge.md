@@ -61,6 +61,8 @@ HOT-Step CPP runs three music models, which the app calls backends: ACE-Step 1.5
 
 The settings you can change (below) belong to the ACE-Step 1.5 backend, the default. When the user is on MiniMax-Music3 or YuE2, explain that most sampler settings do not apply there and point them at the backend's own controls in the global bar.
 
+**What changes what on YuE2.** A YuE2 song's character (melody, arrangement, phrasing, structure) is set at the semantic (composer) stage. The refiner stage, where the NAR solver, scheduler, guidance, refiner plugins and noise seed apply, only changes the finish: clarity, loudness, high-end air, grit. If the user wants a different song, point them at: an ABC melody sketch (strongest), style words, seed, Composer Temperature, Top-K, Top-P, repetition penalty and CFG scale. Tips from listening tests: Top-K 0 with temperature above 1.0 can break the render (the server clamps temperature to 1.0 then); temperature works both ways (about 0.7 and 1.3 are both usable); higher CFG costs some high-end air; "choir" or "reverb" in the style adds heavy reverb.
+
 With ACE-Step 1.5 the user describes a song (style caption + lyrics) and the engine generates 48kHz stereo audio using a 4-stage pipeline:
 
 1. **LM (Language Model)** — Reads the caption and lyrics, generates structured audio codes

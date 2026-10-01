@@ -260,6 +260,29 @@ What sets it apart:
 - Lyric timestamps come from a forced aligner run after the render, switched on per
   render in the Post-Processing cluster. It needs the `mms-fa-f32.gguf` model.
 
+### What changes what on YuE2
+
+A YuE2 song's character (melody, arrangement, phrasing, structure) is decided at the
+semantic stage, when the composer writes the codec frames. The refiner stage that turns
+those frames into audio is where the NAR solver, scheduler, guidance, refiner plugins and
+the noise seed apply, and it only changes the finish: clarity, loudness, high-end air and
+grit. Swapping solvers will not give you a different song.
+
+Dials that change the song itself, roughly strongest first:
+
+- An ABC melody sketch (pasted lead sheet) is the strongest lever.
+- Style words in the prompt.
+- Seed, Composer Temperature, Top-K, Top-P and repetition penalty.
+- CFG scale.
+
+Tips from listening tests:
+
+- Top-K 0 (unlimited) with temperature above 1.0 can break the render; the server clamps
+  temperature to 1.0 for that combination.
+- Temperature works in both directions: around 0.7 and around 1.3 are both usable.
+- Higher CFG follows the style more closely but costs some high-end air.
+- Words like "choir" or "reverb" in the style add heavy reverb.
+
 Models: a language model GGUF and a VAE GGUF, selected separately in the Models cluster.
 The packs:
 
