@@ -74,6 +74,7 @@ export function jobCover(job: GenerationJob): { cover: Yue2CoverSubmission; abc:
   const abc = typeof opts.yue2Abc === 'string' ? opts.yue2Abc : '';
   return { cover, abc };
 }
+import { applyYue2DurationCap, YUE2_TRIM_FADE_SEC } from './durationCap.js';
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -398,9 +399,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const requestedDuration = Number(params.duration);
   if (requestedDuration > 0) {
     notes.push(
-      `duration: model-ended — the requested ${Math.round(requestedDuration)}s was ignored `
-      + `(YuE2 has no length field on the wire; the plan/semantic stages end on their own `
-      + `terminator, capped at roughly ${YUE2_MAX_DURATION_SEC}s).`,
+      `duration: model-ended, the requested ${Math.round(requestedDuration)}s is applied as a ceiling `
+      + `(YuE2 has no length field on the wire; a longer render is trimmed to length with a `
+      + `short fade-out after decode, capped at roughly ${YUE2_MAX_DURATION_SEC}s).`,
     );
   }
 
@@ -1311,7 +1312,16 @@ async function finishYue2Job(
 
       // 48 kHz native (yue2vae.sample_rate) — read from the WAV header rather
       // than assumed, same as every other backend.
-      const measured = wavDurationSec(filepath);
+      // A requested duration is a ceiling: YuE2 cannot bound its own length on
+      // the wire, so trim the render here (durationCap.ts). Never fatal.
+      let measured = wavDurationSec(filepath);
+      try {
+        const cap = applyYue2DurationCap(filepath, job.params);
+        if (cap.trimmed) log('INFO', `[YuE2] Trimmed ${filename} from ${Math.round(measured)}s to requested ${Math.round(cap.durationSec)}s (${YUE2_TRIM_FADE_SEC}s fade-out)`);
+        measured = cap.durationSec;
+      } catch (e: any) {
+        log('WARNING', `[YuE2] Duration trim failed (non-fatal, kept full length): ${e?.message ?? e}`);
+      }
       durations.push(measured);
       log('INFO', `[YuE2] Saved ${filename} (${(parts[i].length / 1024).toFixed(0)} KB, ${Math.round(measured)}s)`
         + (parts.length > 1 ? ` — song ${td.song + 1}, variation ${td.variation + 1}, seed ${td.seed}, noise ${td.noise_seed}` : ''));
