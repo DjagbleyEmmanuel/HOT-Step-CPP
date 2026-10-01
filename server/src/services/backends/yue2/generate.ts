@@ -27,6 +27,7 @@
 //   • adapters, latents, source audio, task modes (v1 operations: text2music only).
 //   • MM3's plank/hiddens/streaming/takes/LRC machinery — no YuE2 analog yet.
 
+import { clampYue2SemanticSampling } from './semanticGuard.js';
 import fs from 'fs';
 import path from 'path';
 import { performance } from 'perf_hooks';
@@ -599,6 +600,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     if (Number.isFinite(v)) lmOverrides[wireKey] = v;
     else notes.push(`Invalid ${uiKey} — using the checkpoint default`);
   }
+  clampYue2SemanticSampling(lmOverrides, notes);
   if (Object.keys(lmOverrides).length) notes.push(`LM overrides: ${Object.entries(lmOverrides).map(([k, v]) => `${k}=${v}`).join(', ')}`);
 
   const req: Yue2SynthRequest = {
