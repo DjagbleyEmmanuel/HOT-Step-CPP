@@ -2915,6 +2915,10 @@
     "settings.dataFolder.size": "Managed transfer size: {{size}}",
     "settings.dataFolder.space": "Across drives: {{needed}} needed; {{free}} free.",
     "settings.dataFolder.unknown": "unknown",
-    "settings.dataFolder.confirm": "Confirm and restart"
+    "settings.dataFolder.confirm": "Confirm and restart",
+    "library.addToPlaylistCount": "Add {{count}} to playlist",
+    "library.exportZipCount": "Zip {{count}}",
+    "library.exportZipBusy": "Zipping…",
+    "library.exportZipFailed": "Zip export failed: {{error}}"
   }
 }

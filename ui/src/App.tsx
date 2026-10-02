@@ -1069,6 +1069,24 @@ const AppContent: React.FC = () => {
               onPlay={playSong}
               onDelete={handleDelete}
               onBulkDelete={handleBulkDelete}
+              onExportZip={async (ids) => {
+                try {
+                  const res = await fetch('/api/songs/export-zip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                    body: JSON.stringify({ ids }),
+                  });
+                  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `HTTP ${res.status}`);
+                  const blob = await res.blob();
+                  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'hotstep-library.zip';
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+                } catch (e) {
+                  showToast(t('library.exportZipFailed', 'Zip export failed: {{error}}', { error: (e as Error).message }), 'error');
+                }
+              }}
               onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
               onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}

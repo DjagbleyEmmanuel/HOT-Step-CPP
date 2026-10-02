@@ -7,6 +7,7 @@ import {
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Loader2,
   Check, Columns3, ChevronLeft, ChevronRight, Radio, Upload,
+  FileArchive,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -126,6 +127,8 @@ interface SongListProps {
   onDownload?: (song: Song) => void;
   onRename?: (song: Song, newTitle: string) => void;
   onAddToPlaylist?: (song: Song) => void;
+  /** Download the selected songs' audio as one zip (Library only). */
+  onExportZip?: (ids: string[]) => Promise<void>;
   /** Load this track's source audio + title/lyrics/style into Cover Studio. */
   onSendToCover?: (song: Song) => void;
   /** Open the metadata editor for this track. */
@@ -143,7 +146,7 @@ interface SongListProps {
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
+  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist, onExportZip,
   onSendToCover, onEditMetadata, showFilters = true, showImport = false,
   viewMode = 'list', title = 'Library',
 }) => {
@@ -305,6 +308,23 @@ export const SongList: React.FC<SongListProps> = ({
     }
   }, [selectedIds, filteredSongs, bulkDownloading, token]);
 
+  const [zipExporting, setZipExporting] = useState(false);
+  const handleExportZip = useCallback(async () => {
+    if (!onExportZip || selectedIds.size === 0 || zipExporting) return;
+    setZipExporting(true);
+    try {
+      await onExportZip(Array.from(selectedIds));
+    } finally {
+      setZipExporting(false);
+    }
+  }, [onExportZip, selectedIds, zipExporting]);
+
+  const handleBulkAddToPlaylist = useCallback(() => {
+    if (!onAddToPlaylist || selectedIds.size === 0) return;
+    for (const s of filteredSongs) if (selectedIds.has(s.id)) onAddToPlaylist(s);
+    exitSelectionMode();
+  }, [onAddToPlaylist, selectedIds, filteredSongs, exitSelectionMode]);
+
   if (songs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-zinc-500">
@@ -462,6 +482,25 @@ export const SongList: React.FC<SongListProps> = ({
 
           {selectedIds.size > 0 && (
             <>
+              {onAddToPlaylist && (
+                <button
+                  onClick={handleBulkAddToPlaylist}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/20 text-pink-400 hover:bg-pink-500/20 hover:text-pink-300 text-xs font-semibold transition-all"
+                >
+                  <ListPlus size={13} /> {t('library.addToPlaylistCount', 'Add {{count}} to playlist', { count: selectedIds.size })}
+                </button>
+              )}
+              {onExportZip && (
+                <button
+                  onClick={handleExportZip}
+                  disabled={zipExporting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 text-xs font-semibold transition-all disabled:opacity-40"
+                >
+                  {zipExporting
+                    ? <><Loader2 size={13} className="animate-spin" /> {t('library.exportZipBusy', 'Zipping…')}</>
+                    : <><FileArchive size={13} /> {t('library.exportZipCount', 'Zip {{count}}', { count: selectedIds.size })}</>}
+                </button>
+              )}
               <button
                 onClick={handleBulkDownload}
                 disabled={bulkDownloading}
