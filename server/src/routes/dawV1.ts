@@ -10,10 +10,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import {
-  cancelJob, dawKey, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
+  cancelJob, dawKey, getDitInfo, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
   startSweeper, startUnderstand, submitGenerate, takeWavPath,
 } from '../services/daw/dawFacade.js';
-import { DawError, errorBody, modeNeedsSource, parseDawRequest, toGenerateParams } from '../services/daw/dawSchema.js';
+import { DawError, errorBody, modeNeedsSource, parseDawRequest, resolveDitModel, toGenerateParams } from '../services/daw/dawSchema.js';
 
 const router = Router();
 startSweeper();
@@ -83,6 +83,10 @@ router.post('/generate', assignId, withUpload([{ name: 'src_audio', maxCount: 1 
   const dawReq = parseDawRequest(raw);
   const src = fileOf(req, 'src_audio');
   if (modeNeedsSource(dawReq.mode) && !src) throw new DawError(400, 'bad_request', `mode ${dawReq.mode} needs src_audio`);
+  if (dawReq.mode === 'lego') {
+    const { dit, loaded } = await getDitInfo();
+    dawReq.dit_model = resolveDitModel(dawReq, dit, loaded);
+  }
   const params = toGenerateParams(dawReq, src?.path);
   const ref = fileOf(req, 'ref_audio');
   if (ref) params.timbreReference = ref.path;

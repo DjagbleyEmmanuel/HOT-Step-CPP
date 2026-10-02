@@ -15,7 +15,7 @@ const SOURCE_MODES: ReadonlySet<DawMode> = new Set(['lego', 'repaint', 'complete
 
 export type DawErrorCode =
   | 'engine_not_ready' | 'engine_suspended' | 'bad_request' | 'not_found'
-  | 'unsupported_mode' | 'backend_mismatch' | 'upstream_error' | 'unauthorized';
+  | 'unsupported_mode' | 'backend_mismatch' | 'upstream_error' | 'unauthorized' | 'base_model_required';
 
 export class DawError extends Error {
   constructor(public status: number, public code: DawErrorCode, message: string) { super(message); }
@@ -78,6 +78,11 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
   const mode = r.mode as DawMode;
   if (!DAW_MODES.includes(mode)) {
     throw new DawError(400, 'unsupported_mode', `mode must be one of ${DAW_MODES.join(', ')}`);
+  }
+  if (mode === 'complete') {
+    // The server's ACE path only loads sourceAudioUrl for cover/repaint/lego/extract,
+    // and the app UI never submits 'complete', so the source would be dropped.
+    throw new DawError(400, 'unsupported_mode', "mode 'complete' is not supported yet (the server does not pass the source clip for it)");
   }
   const out: DawGenerateRequest = { ...(r as object), mode, caption: typeof r.caption === 'string' ? r.caption : '' } as DawGenerateRequest;
   for (const k of ['duration_s', 'bars', 'bpm', 'seed', 'seed_b', 'seed_blend', 'seed_blend_end', 'takes', 'cover_strength', 'steps', 'guidance'] as const) {
@@ -178,10 +183,39 @@ export function mapJobStatus(id: string, up: any, seeds: number[] = []) {
   };
 }
 
+/** Pure base model, same rule as the UI's StemBuilder getBaseModels (SFT and merges excluded). */
+export function isBaseModel(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.startsWith('acestep-v15-base-') || n.startsWith('acestep-v15-xl-base-');
+}
+
 /** Classify a DiT model file name. */
-export function ditKind(name: string): 'turbo' | 'sft' | 'base' {
+export function ditKind(name: string): 'turbo' | 'sft' | 'base' | 'other' {
+  if (isBaseModel(name)) return 'base';
   const n = name.toLowerCase();
   if (n.includes('turbo')) return 'turbo';
   if (n.includes('sft')) return 'sft';
-  return 'base';
+  return 'other';
+}
+
+/** Modes the engine runs only on a pure base model (lego warns "turbo output incoherent").
+ *  Repaint is not gated: the engine has no base check for it and the UI's Repaint Studio
+ *  submits it with whatever model is selected. */
+const BASE_ONLY_MODES: ReadonlySet<DawMode> = new Set(['lego']);
+
+const BASE_HINT = 'install acestep-v15-base or acestep-v15-xl-base from Model Manager';
+
+/** The ditModel to send, or undefined to leave the request as is. Throws 422 base_model_required. */
+export function resolveDitModel(req: DawGenerateRequest, ditModels: string[], loaded: string | null): string | undefined {
+  if (!BASE_ONLY_MODES.has(req.mode)) return req.dit_model;
+  if (req.dit_model !== undefined) {
+    if (!isBaseModel(req.dit_model)) {
+      throw new DawError(422, 'base_model_required', `${req.mode} needs a base DiT model, ${req.dit_model} is not one; ${BASE_HINT}`);
+    }
+    return req.dit_model;
+  }
+  if (loaded && isBaseModel(loaded) && ditModels.includes(loaded)) return loaded;
+  const bases = ditModels.filter(isBaseModel);
+  if (bases.length === 0) throw new DawError(422, 'base_model_required', `${req.mode} needs a base DiT model and none is installed; ${BASE_HINT}`);
+  return bases[0];
 }

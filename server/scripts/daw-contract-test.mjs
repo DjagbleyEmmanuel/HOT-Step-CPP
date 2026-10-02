@@ -101,7 +101,7 @@ async function main() {
   if (!status.json) console.log('note: /status did not return JSON; the server may predate the /api/v1/daw facade (restart it)');
   check('status http 200', status.status === 200, `http ${status.status}`);
   check('status api == 1', s.api === 1, `api=${JSON.stringify(s.api)}`);
-  const want = { ace_server_alive: 'boolean', ready: 'boolean', non_turbo_available: 'boolean', dit_models: 'array' };
+  const want = { ace_server_alive: 'boolean', ready: 'boolean', non_turbo_available: 'boolean', base_available: 'boolean', dit_models: 'array' };
   for (const [k, t] of Object.entries(want)) {
     const got = Array.isArray(s[k]) ? 'array' : typeof s[k];
     check(`status.${k} is ${t}`, got === t, `got ${got}`);
@@ -110,6 +110,8 @@ async function main() {
 
   const bad = await req('POST', '/generate', { mode: 'not_a_mode', caption: 'x' });
   check('bad mode -> 400', bad.status === 400 && bad.json?.api === 1 && !!bad.json?.error?.code, `http ${bad.status} code=${bad.json?.error?.code}`);
+  const cm = await req('POST', '/generate', { mode: 'complete', caption: 'x' });
+  check('complete -> 400 unsupported_mode', cm.status === 400 && cm.json?.error?.code === 'unsupported_mode', `http ${cm.status} code=${cm.json?.error?.code}`);
   const nj = await req('GET', '/jobs/00000000-0000-0000-0000-000000000000');
   check('unknown job -> 404', nj.status === 404 && nj.json?.error?.code === 'not_found', `http ${nj.status} code=${nj.json?.error?.code}`);
   const nu = await req('GET', '/understand/00000000-0000-0000-0000-000000000000');
@@ -156,6 +158,23 @@ async function main() {
       check('repaint done within 300 s', job?.state === 'done', `state=${job?.state} t=${elapsed.toFixed(1)}s err=${job?.error ?? ''}`);
     }
   } else check('repaint (needs text2music audio)', false, 'skipped: no source audio');
+
+  // lego (needs a pure base DiT model)
+  if (!wav) check('lego (needs text2music audio)', false, 'skipped: no source audio');
+  else if (s.base_available !== true) {
+    console.log('SKIP  lego: base_available is false (install acestep-v15-base from Model Manager); not counted as PASS');
+    const lb = await req('POST', '/generate', genForm({ mode: 'lego', caption: 'bass line', track: 'bass', seed: 99 }, wav));
+    check('lego without base -> 422 base_model_required', lb.status === 422 && lb.json?.error?.code === 'base_model_required', `http ${lb.status} code=${lb.json?.error?.code}`);
+  } else {
+    const lg = await req('POST', '/generate', genForm({ mode: 'lego', caption: 'bass line', track: 'bass', seed: 99 }, wav));
+    check('lego accepted 202', lg.status === 202 && !!lg.json?.id, `http ${lg.status} ${lg.json?.error?.message ?? ''}`);
+    if (lg.json?.id) {
+      const { job, elapsed } = await pollJob(lg.json.id);
+      check('lego done within 300 s', job?.state === 'done', `state=${job?.state} t=${elapsed.toFixed(1)}s err=${job?.error ?? ''}`);
+    }
+    const ln = await req('POST', '/generate', genForm({ mode: 'lego', caption: 'bass', dit_model: 'acestep-v15-turbo-Q8_0.gguf' }, wav));
+    check('lego with non-base dit_model -> 422', ln.status === 422 && ln.json?.error?.code === 'base_model_required', `http ${ln.status} code=${ln.json?.error?.code}`);
+  }
 
   // cancel
   const c = await req('POST', '/generate', genForm({ mode: 'text2music', caption: 'slow ambient pad', duration_s: 60, seed: 4242, skip_lm: true }));

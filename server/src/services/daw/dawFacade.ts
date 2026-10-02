@@ -9,7 +9,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import { config, getFFmpegPath } from '../../config.js';
-import { DawError, DAW_API_VERSION, ditKind, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
+import { DawError, DAW_API_VERSION, ditKind, isBaseModel, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 export const isLoopback = (addr: string | undefined) => LOOPBACK.has(addr ?? '');
@@ -75,8 +75,17 @@ export async function getStatus() {
     loaded_model: models?.data?.defaults?.synth_model ?? models?.data?.config?.synth_model ?? null,
     dit_models: ditModels,
     non_turbo_available: ditModels.some((m) => m.kind !== 'turbo'),
+    base_available: dit.some(isBaseModel),
     capabilities: caps?.data ?? null,
   };
+}
+
+/** Installed DiT names and the loaded one, for base-model gating. */
+export async function getDitInfo(): Promise<{ dit: string[]; loaded: string | null }> {
+  const { status, data } = await call('GET', '/api/models');
+  if (status !== 200) throw upstreamError(status, data);
+  const dit: string[] = (data?.models?.dit ?? []).map((m: any) => typeof m === 'string' ? m : (m?.name ?? String(m)));
+  return { dit, loaded: data?.defaults?.synth_model ?? data?.config?.synth_model ?? null };
 }
 
 // ── Temp dirs ──────────────────────────────────────────────────────────────

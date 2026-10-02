@@ -32,7 +32,6 @@ test('every DAW field maps to the /api/generate name translateParams reads', () 
 
 test('skip_lm defaults true for source modes, false for text2music, and is overridable', () => {
   assert.equal(toGenerateParams(parseDawRequest({ mode: 'lego', caption: '' })).skipLm, true);
-  assert.equal(toGenerateParams(parseDawRequest({ mode: 'complete', caption: '' })).skipLm, true);
   assert.equal(toGenerateParams(parseDawRequest({ mode: 'text2music', caption: '' })).skipLm, false);
   assert.equal(toGenerateParams(parseDawRequest({ mode: 'lego', caption: '', skip_lm: false })).skipLm, false);
   assert.equal(toGenerateParams(parseDawRequest({ mode: 'text2music', caption: '' })).instrumental, true);
@@ -59,4 +58,41 @@ test('upstream status maps to DAW job shape with progress 0..1', () => {
   assert.equal(done.progress, 1);
   assert.deepEqual(done.takes, [{ n: 0, seed: 5, duration_s: 10, ready: true }, { n: 1, seed: 5, duration_s: 11, ready: true }]);
   assert.equal(done.api, 1);
+});
+
+test('only acestep-v15-base-* and acestep-v15-xl-base-* count as base (SFT and merges do not)', async () => {
+  const s: any = await import('./dawSchema.js');
+  const names = ['acestep-v15-base-Q8_0.gguf', 'acestep-v15-xl-base-BF16.gguf', 'acestep-v15-sft-Q8_0.gguf',
+    'acestep-v15-merge-base-turbo-Q8_0.gguf', 'my-custom-merge.gguf', 'acestep-v15-turbo-Q8_0.gguf'];
+  const kinds = names.map((n) => s.ditKind(n));
+  console.log('ditKind:', JSON.stringify(kinds));
+  assert.deepEqual(kinds, ['base', 'base', 'sft', 'turbo', 'other', 'turbo']);
+});
+
+test('lego with no base model installed -> 422 base_model_required', async () => {
+  const s: any = await import('./dawSchema.js');
+  const req = s.parseDawRequest({ mode: 'lego', caption: 'bass' });
+  const run = (r: any, list: string[]) => { try { return s.resolveDitModel(r, list, null); } catch (e: any) { return `${e.status} ${e.code}`; } };
+  const none = run(req, ['acestep-v15-turbo-Q8_0.gguf', 'acestep-v15-sft-Q8_0.gguf', 'my-merge.gguf']);
+  const nonBase = run({ ...req, dit_model: 'acestep-v15-sft-Q8_0.gguf' }, ['acestep-v15-sft-Q8_0.gguf', 'acestep-v15-base-Q8_0.gguf']);
+  console.log('lego no base:', none, '| lego sft passed:', nonBase);
+  assert.equal(none, '422 base_model_required');
+  assert.equal(nonBase, '422 base_model_required');
+});
+
+test('lego auto-picks a base model (loaded one first); repaint and complete gating', async () => {
+  const s: any = await import('./dawSchema.js');
+  const lego = s.parseDawRequest({ mode: 'lego', caption: 'bass' });
+  const list = ['acestep-v15-turbo-Q8_0.gguf', 'acestep-v15-xl-base-Q8_0.gguf', 'acestep-v15-base-Q8_0.gguf'];
+  const auto = s.resolveDitModel(lego, list, null);
+  const loaded = s.resolveDitModel(lego, list, 'acestep-v15-turbo-Q8_0.gguf');
+  const rep = s.resolveDitModel(s.parseDawRequest({ mode: 'repaint', caption: '', region: { start_s: 0, end_s: 1 } }), ['acestep-v15-turbo-Q8_0.gguf'], null);
+  let complete = '';
+  try { s.parseDawRequest({ mode: 'complete', caption: '' }); } catch (e: any) { complete = `${e.status} ${e.code}`; }
+  console.log('auto:', auto, '| loaded:', loaded, '| repaint:', rep, '| complete:', complete);
+  assert.equal(auto, 'acestep-v15-xl-base-Q8_0.gguf'); // first installed base
+  assert.equal(s.resolveDitModel(lego, list, 'acestep-v15-base-Q8_0.gguf'), 'acestep-v15-base-Q8_0.gguf');
+  assert.equal(loaded, 'acestep-v15-xl-base-Q8_0.gguf'); // loaded turbo is ignored
+  assert.equal(rep, undefined);
+  assert.equal(complete, '400 unsupported_mode');
 });
