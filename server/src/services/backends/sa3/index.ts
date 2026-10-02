@@ -73,25 +73,26 @@ const SA3_EXTENSIONS: BackendExtensionParam[] = [
     key: 'sa3Steps',
     label: 'Steps',
     type: 'slider',
-    default: 24,
+    default: 8,
     min: 1,
     max: 64,
     step: 1,
-    hint: 'Denoise steps from pure noise. StableStep refines with 8 because it '
-        + 'only touches the top of the schedule; a full render from noise wants '
-        + 'more. 24 is the default here, 32-48 for detail-heavy material.',
+    hint: 'Denoise steps from pure noise. 8 is the default and ear-tested best '
+        + 'with MD Pingpong Blend (it beat 12 and 24); more steps tend to sound worse.',
     group: 'generation',
   },
   {
     key: 'sa3Sampler',
     label: 'Sampler',
     type: 'select',
-    default: 'pingpong',
+    default: 'md_pingpong_blend',
     options: [
+      { value: 'md_pingpong_blend', label: 'MD Pingpong Blend (default)' },
       { value: 'pingpong', label: 'PingPong (native)' },
       { value: 'euler',    label: 'Euler' },
     ],
-    hint: 'Native SA3 sampler. Ignored when a Lua solver plugin is selected — '
+    hint: 'SA3 sampler. MD Pingpong Blend runs the Lua plugin of that name and '
+        + 'needs no Sampler Plugins toggle. Ignored when a Lua solver plugin is selected — '
         + 'a solver REPLACES the native step, they are alternatives not a stack.',
     group: 'generation',
   },
