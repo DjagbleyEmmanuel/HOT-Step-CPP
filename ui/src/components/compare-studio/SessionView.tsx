@@ -1,7 +1,7 @@
 // SessionView.tsx - one Compare session: sticky transport, take rows, diff trace.
 // Keys: Space play/pause, 1-9 switch active take, B (or Tab) A/B quick switch.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
@@ -14,7 +14,7 @@ import { TakeRow } from './TakeRow';
 import { DiffTrace } from './DiffTrace';
 import { LoopOverlay, Playhead } from './Waveform';
 import { Toggle } from '../shared/Toggle';
-import { choosePair, initialPair, prunePair, toggleTarget, type AbPair } from './abPair';
+import { initialPair, normalizePair, setSlot, tapTake, toggleTarget, type AbPair } from './abPair';
 
 const mmss = (s: number) => {
   const v = Math.max(0, s || 0);
@@ -70,15 +70,15 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
     if (activeId && baselineId && activeId !== baselineId) void loadDiff(activeId, baselineId);
   }, [activeId, baselineId]);
 
-  // A/B quick switch: pair of take ids, updated whenever the active take changes.
+  // A/B quick switch: explicit {a, b} slots, normalized so a !== b with 2+ takes.
   const takeIds = useMemo(() => takes.map(tk => tk.songId), [takes]);
-  const [pair, setPair] = useState<AbPair>(() => initialPair(takeIds, baselineId));
-  const prevActive = useRef<string | null>(activeId);
-  useEffect(() => { setPair(p => prunePair(p, takeIds, baselineId)); }, [takeIds, baselineId]);
-  useEffect(() => {
-    if (activeId && activeId !== prevActive.current) setPair(p => choosePair(p, prevActive.current, activeId));
-    prevActive.current = activeId;
-  }, [activeId]);
+  const [rawPair, setPair] = useState<AbPair>(() => initialPair(takeIds, baselineId));
+  const pair = useMemo(() => normalizePair(rawPair, takeIds, baselineId), [rawPair, takeIds, baselineId]);
+  const activateTake = (id: string) => {
+    setPair(p => tapTake(normalizePair(p, takeIds, baselineId), activeId, id));
+    void engine.unlock(); engine.setActive(id);
+  };
+  const setAbSlot = (slot: 'a' | 'b', id: string) => setPair(p => setSlot(normalizePair(p, takeIds, baselineId), slot, id));
   const abSwitch = () => {
     const target = toggleTarget(pair, activeId);
     if (target) { void engine.unlock(); engine.setActive(target); }
@@ -94,7 +94,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
         e.preventDefault(); abSwitch(); return;
       }
       const n = parseInt(e.key, 10);
-      if (n >= 1 && n <= 9 && takes[n - 1]) { e.preventDefault(); engine.setActive(takes[n - 1].songId); }
+      if (n >= 1 && n <= 9 && takes[n - 1]) { e.preventDefault(); activateTake(takes[n - 1].songId); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -156,7 +156,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             <button
               onClick={abSwitch}
               className="h-12 min-w-[48px] px-3 shrink-0 rounded-xl border-2 border-pink-500 text-pink-500 hover:bg-pink-500/10 flex flex-col items-center justify-center leading-tight"
-              title={t('compare.abSwitchInfo', 'Switch between the current take and the previous one at the same playhead (B or Tab)')}
+              title={t('compare.abSwitchInfo', 'Switch between the takes in slot A and slot B at the same playhead (B or Tab). Use Set A / Set B on a take to choose them.')}
               aria-label={t('compare.abSwitch', 'A/B switch')}
             >
               <span className="text-sm font-black">A/B</span>
@@ -205,6 +205,9 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             duration={duration}
             isBaseline={tk.songId === baselineId}
             abSlot={takes.length > 1 ? (tk.songId === pair.a ? 'A' : tk.songId === pair.b ? 'B' : null) : null}
+            showAbButtons={takes.length > 1}
+            onActivate={() => activateTake(tk.songId)}
+            onSetSlot={slot => setAbSlot(slot, tk.songId)}
           />
         ))}
         {takes.length > 1 && (

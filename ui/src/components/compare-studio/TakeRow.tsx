@@ -14,6 +14,12 @@ interface Props {
   index: number;
   /** 'A' or 'B' when this take is in the A/B quick-switch pair. */
   abSlot?: 'A' | 'B' | null;
+  /** Show the Set A / Set B buttons (2+ takes). */
+  showAbButtons?: boolean;
+  /** Make this the playing take (may update the A/B pair). */
+  onActivate?: () => void;
+  /** Put this take into slot A or B. */
+  onSetSlot?: (slot: 'a' | 'b') => void;
   take: CompareTake;
   criteria: CompareCriterion[];
   analysis: CompareAnalysis | null;
@@ -34,7 +40,7 @@ const Chip: React.FC<{ label: string; value: string; warn?: boolean; title?: str
   </span>
 );
 
-export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, analysisLoading, engine, duration, isBaseline, abSlot }) => {
+export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, analysisLoading, engine, duration, isBaseline, abSlot, showAbButtons, onActivate, onSetSlot }) => {
   const { t } = useTranslation();
   const active = engine.activeId === take.songId;
   const scoreOf = (c: string) => take.scores.find(s => s.criterion === c);
@@ -45,7 +51,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
   const [confirmRemove, setConfirmRemove] = useState(false);
   useEffect(() => { setNote(savedNote); }, [savedNote]);
 
-  const activate = () => { void engine.unlock(); engine.setActive(take.songId); };
+  const activate = () => { if (onActivate) { onActivate(); return; } void engine.unlock(); engine.setActive(take.songId); };
   const tp = analysis?.truePeakDbtp;
   const gain = engine.levelMatch ? engine.gainsDb[take.songId] : undefined;
 
@@ -69,11 +75,22 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
         <span className={`flex items-center justify-center w-9 h-9 shrink-0 rounded-lg text-sm font-bold ${active ? 'bg-pink-500 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'}`}>
           {index + 1}
         </span>
-        {abSlot && (
-          <span className="px-1.5 py-0.5 rounded text-[11px] font-bold border border-pink-400/60 text-pink-500" title={t('compare.abSlotInfo', 'Slot in the A/B quick switch')}>
-            {abSlot}
-          </span>
-        )}
+        {showAbButtons && onSetSlot && (['a', 'b'] as const).map(slot => {
+          const on = abSlot === slot.toUpperCase();
+          return (
+            <button
+              key={slot}
+              onClick={e => { e.stopPropagation(); onSetSlot(slot); }}
+              className={`min-w-[48px] h-12 sm:h-8 sm:min-w-[40px] px-2 shrink-0 rounded-lg text-xs font-bold border-2 ${on
+                ? 'bg-pink-500 border-pink-500 text-white'
+                : 'border-zinc-300 dark:border-white/15 text-zinc-500 hover:border-pink-400 hover:text-pink-500'}`}
+              aria-pressed={on}
+              title={t('compare.setSlotInfo', 'Put this take in the A/B quick switch slot')}
+            >
+              {slot === 'a' ? t('compare.setA', 'Set A') : t('compare.setB', 'Set B')}
+            </button>
+          );
+        })}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold truncate text-zinc-900 dark:text-zinc-100">{take.title || take.songId}</div>
           <div className="text-[11px] text-zinc-500 flex flex-wrap gap-x-3">
