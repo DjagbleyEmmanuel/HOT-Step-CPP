@@ -3008,6 +3008,8 @@
     "player.fullScreen.play": "Play",
     "player.fullScreen.pause": "Pause",
     "player.fullScreen.previous": "Previous",
-    "player.fullScreen.next": "Next"
+    "player.fullScreen.next": "Next",
+    "player.mediaSession.unknownArtist": "HOT-Step",
+    "player.mediaSession.defaultTitle": "Untitled"
   }
 }
