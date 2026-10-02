@@ -2999,6 +2999,17 @@
     "library.addToPlaylistCount": "Add {{count}} to playlist",
     "library.exportZipCount": "Zip {{count}}",
     "library.exportZipBusy": "Zipping…",
-    "library.exportZipFailed": "Zip export failed: {{error}}"
+    "library.exportZipFailed": "Zip export failed: {{error}}",
+    "hotkeys.title": "Keyboard shortcuts",
+    "hotkeys.note": "Shortcuts are off while typing in a field, while a dialog is open, and in Compare studio.",
+    "hotkeys.actions.togglePlay": "Play / pause",
+    "hotkeys.actions.seekBack": "Seek back 10 s",
+    "hotkeys.actions.seekForward": "Seek forward 10 s",
+    "hotkeys.actions.focusPrev": "Move the focused library row up / down",
+    "hotkeys.actions.focusNext": "Move the focused library row down",
+    "hotkeys.actions.playFocused": "Play the focused row",
+    "hotkeys.actions.deleteSelection": "Delete the selection (undo available)",
+    "hotkeys.actions.clearSelection": "Clear the selection",
+    "hotkeys.actions.showHelp": "Show this cheat sheet"
   }
 }

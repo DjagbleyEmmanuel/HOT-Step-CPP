@@ -11,6 +11,8 @@ import {
   FileArchive,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { moveFocus } from '../../utils/hotkeys';
+import { HOTKEY_EVENT } from '../../hooks/useGlobalHotkeys';
 import type { Song } from '../../types';
 import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
 import { useMm3StreamAudio, mm3StreamTakeState } from '../../stores/mm3StreamStore';
@@ -292,6 +294,53 @@ export const SongList: React.FC<SongListProps> = ({
     onBulkDelete?.(Array.from(selectedIds));
     exitSelectionMode();
   }, [selectedIds, onBulkDelete, exitSelectionMode]);
+
+  // Global hotkeys (Up/Down/Enter/Delete/Esc): keyboard-focused row, drawn as an outline.
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const pagedOrder = useMemo(() => pagedSongs.map(s => s.id), [pagedSongs]);
+  useEffect(() => {
+    const root = rowsRef.current;
+    if (!root || !focusedId) return;
+    const el = Array.from(root.querySelectorAll<HTMLElement>('[data-sel-id]')).find(n => n.dataset.selId === focusedId);
+    if (!el) return;
+    el.style.outline = '2px solid #ec4899';
+    el.style.outlineOffset = '-2px';
+    el.scrollIntoView({ block: 'nearest' });
+    return () => { el.style.outline = ''; el.style.outlineOffset = ''; };
+  }, [focusedId, pagedOrder, activeViewMode]);
+  useEffect(() => {
+    const onHotkey = (ev: Event) => {
+      const root = rowsRef.current;
+      // Only the visible list handles keys (several SongLists can be mounted).
+      if (!root || root.offsetParent === null) return;
+      const action = (ev as CustomEvent<{ action: string }>).detail?.action;
+      if (action === 'focusPrev' || action === 'focusNext') {
+        const next = moveFocus(pagedOrder, focusedId, action === 'focusNext' ? 1 : -1);
+        if (!next) return;
+        setFocusedId(next);
+      } else if (action === 'playFocused') {
+        const song = pagedSongs.find(s => s.id === focusedId);
+        if (!song) return;
+        onPlay(song);
+      } else if (action === 'deleteSelection') {
+        const ids = selectedIds.size > 0 ? Array.from(selectedIds) : (focusedId ? [focusedId] : []);
+        if (ids.length === 0 || !onBulkDelete) return;
+        onBulkDelete(ids);
+        exitSelectionMode();
+        if (focusedId && ids.includes(focusedId)) setFocusedId(null);
+      } else if (action === 'clearSelection') {
+        if (selectionMode || selectedIds.size > 0) exitSelectionMode();
+        else if (focusedId) setFocusedId(null);
+        else return;
+      } else {
+        return;
+      }
+      ev.preventDefault();
+    };
+    window.addEventListener(HOTKEY_EVENT, onHotkey);
+    return () => window.removeEventListener(HOTKEY_EVENT, onHotkey);
+  }, [pagedOrder, pagedSongs, focusedId, selectedIds, selectionMode, onPlay, onBulkDelete, exitSelectionMode]);
 
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const { token } = useAuth();
@@ -602,6 +651,7 @@ export const SongList: React.FC<SongListProps> = ({
       )}
 
       <div
+        ref={rowsRef}
         onPointerDown={onRowsPointerDown}
         onPointerMove={onRowsPointerMove}
         onPointerUp={cancelPress}

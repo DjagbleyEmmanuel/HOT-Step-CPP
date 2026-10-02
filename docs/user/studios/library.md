@@ -66,6 +66,23 @@ Above the transport, a collapsible area (only expands while something is
 playing, or trim mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
+## Keyboard shortcuts
+
+On desktop these work anywhere in the app. Press `?` to see them in a small cheat sheet.
+
+| Key | Action |
+|---|---|
+| Space or K | Play / pause |
+| J / L | Seek back / forward 10 s |
+| Up / Down | Move the focused row in the Library list (outlined in pink) |
+| Enter | Play the focused row |
+| Delete | Delete the selection, or the focused row if nothing is selected. The usual 6 s Undo toast applies. |
+| Esc | Clear the selection, then the focused row |
+| ? | Open the cheat sheet |
+
+Shortcuts are off while you type in a field, while a dialog is open, and in Compare studio,
+which has its own keys (B, Tab).
+
 ## Playlists
 
 The playlist is a play queue, not a saved collection. There is one queue, not

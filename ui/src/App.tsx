@@ -42,6 +42,8 @@ import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
 import { Toast, type ToastType } from './components/shared/Toast';
+import { HotkeyHelpModal } from './components/shared/HotkeyHelpModal';
+import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
@@ -719,6 +721,12 @@ const AppContent: React.FC = () => {
     if (selectedSong?.id === song.id) setSelectedSong(null);
     showToast(`Deleted "${song.title}"`, 'success');
   }, [token, selectedSong, queryClient]);
+
+  // Global desktop hotkeys (see utils/hotkeys.ts); "?" opens the cheat sheet.
+  const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
+  const openHotkeyHelp = useCallback(() => setShowHotkeyHelp(true), []);
+  const closeHotkeyHelp = useCallback(() => setShowHotkeyHelp(false), []);
+  useGlobalHotkeys(openHotkeyHelp);
 
   // Handle bulk delete
   const handleBulkDelete = useCallback((ids: string[]) => {
@@ -1593,6 +1601,7 @@ const AppContent: React.FC = () => {
       </div>
 
       {/* Modals */}
+      {showHotkeyHelp && <HotkeyHelpModal onClose={closeHotkeyHelp} />}
       <Toast
         message={toast.message}
         type={toast.type}
