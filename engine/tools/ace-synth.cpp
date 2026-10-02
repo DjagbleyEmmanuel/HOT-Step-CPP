@@ -575,6 +575,7 @@ int main(int argc, char ** argv) {
         for (int i = 0; i < sbs; i++) {
             AceRequest r = reqs[ri];
             r.seed       = base_seed + i;
+            if (r.seed_b >= 0) r.seed_b += i;
             groups[0].push_back(r);
             all_basenames[off + i]     = basenames[ri];
             all_synth_indices[off + i] = i;
