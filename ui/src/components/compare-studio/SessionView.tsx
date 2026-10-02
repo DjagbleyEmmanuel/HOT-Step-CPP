@@ -1,0 +1,177 @@
+// SessionView.tsx - one Compare session: sticky transport, take rows, diff trace.
+// Keys: Space play/pause, 1-9 switch active take.
+
+import React, { useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
+import {
+  useCompareStore, loadAnalysis, loadDiff, toggleArchive, deleteSession,
+} from '../../stores/compareStore';
+import type { CompareSession } from '../../services/compareApi';
+import { useAbEngine, type AbEngine } from './useAbEngine';
+import { TakeRow } from './TakeRow';
+import { DiffTrace } from './DiffTrace';
+import { LoopOverlay, Playhead } from './Waveform';
+import { Toggle } from '../shared/Toggle';
+
+const mmss = (s: number) => {
+  const v = Math.max(0, s || 0);
+  return `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
+};
+
+const TimeLabel: React.FC<{ engine: AbEngine; duration: number }> = ({ engine, duration }) => {
+  const t = engine.useCurrentTime();
+  return <span className="font-mono text-xs text-zinc-500 tabular-nums">{mmss(t)} / {mmss(duration)}</span>;
+};
+
+const SeekBar: React.FC<{ engine: AbEngine; duration: number }> = ({ engine, duration }) => {
+  const seekAt = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (!duration) return;
+    engine.seek(Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * duration);
+  };
+  return (
+    <div
+      role="slider"
+      aria-valuemin={0}
+      aria-valuemax={duration}
+      className="relative flex-1 h-8 rounded-md bg-zinc-200 dark:bg-zinc-800 cursor-pointer touch-none overflow-hidden"
+      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); seekAt(e); }}
+      onPointerMove={e => { if (e.buttons) seekAt(e); }}
+    >
+      <LoopOverlay loop={engine.loop} duration={duration} />
+      <Playhead engine={engine} duration={duration} />
+    </div>
+  );
+};
+
+interface Props { session: CompareSession; onBack: () => void; }
+
+export const SessionView: React.FC<Props> = ({ session, onBack }) => {
+  const { t } = useTranslation();
+  const { analysis, analysisLoading, diff } = useCompareStore();
+  const takes = session.takes;
+
+  useEffect(() => { takes.forEach(tk => { void loadAnalysis(tk.songId); }); }, [takes]);
+
+  const abTakes = useMemo(() => takes.filter(tk => tk.audioUrl).map(tk => ({
+    id: tk.songId, url: tk.audioUrl as string, integratedLufs: analysis[tk.songId]?.integratedLufs ?? null,
+  })), [takes, analysis]);
+  const engine = useAbEngine(abTakes);
+
+  const duration = engine.duration || Math.max(0, ...takes.map(tk => analysis[tk.songId]?.durationSec ?? tk.duration ?? 0));
+  const baselineId = session.baselineSongId ?? takes[0]?.songId ?? null;
+  const activeId = engine.activeId;
+
+  useEffect(() => {
+    if (activeId && baselineId && activeId !== baselineId) void loadDiff(activeId, baselineId);
+  }, [activeId, baselineId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (e.code === 'Space') { e.preventDefault(); void engine.unlock().then(() => engine.toggle()); return; }
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 9 && takes[n - 1]) { e.preventDefault(); engine.setActive(takes[n - 1].songId); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [engine, takes]);
+
+  const setIn = () => {
+    const now = engine.getCurrentTime();
+    const end = engine.loop && engine.loop.end > now + 0.1 ? engine.loop.end : duration;
+    if (end - now > 0.1) engine.setLoop({ start: now, end });
+  };
+  const setOut = () => {
+    const now = engine.getCurrentTime();
+    const start = engine.loop && engine.loop.start < now - 0.1 ? engine.loop.start : 0;
+    if (now - start > 0.1) engine.setLoop({ start, end: now });
+  };
+
+  const titleOf = (id: string | null) => takes.find(tk => tk.songId === id)?.title || id || '';
+  const btn = 'h-10 px-3 rounded-lg text-xs font-semibold border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:border-pink-400';
+
+  return (
+    <div className="flex flex-col min-h-0 h-full">
+      <div className="sticky top-0 z-10 px-3 sm:px-4 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur border-b border-zinc-200 dark:border-white/5">
+        <div className="flex items-center gap-2 mb-2">
+          <button onClick={onBack} className="p-2 rounded-lg text-zinc-500 hover:text-pink-400" aria-label={t('compare.back', 'Back to sessions')}>
+            <ArrowLeft size={18} />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{session.name}</div>
+            <div className="text-[11px] text-zinc-500">{session.group || t('compare.ungrouped', 'Ungrouped')} · {session.scored}/{session.total} {t('compare.scored', 'scored')}</div>
+          </div>
+          <button onClick={() => void toggleArchive(session.id)} className="p-2 rounded-lg text-zinc-500 hover:text-pink-400"
+            title={session.archived ? t('compare.unarchive', 'Unarchive') : t('compare.archive', 'Archive')}
+            aria-label={session.archived ? t('compare.unarchive', 'Unarchive') : t('compare.archive', 'Archive')}>
+            {session.archived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+          </button>
+          <button onClick={() => { if (window.confirm(t('compare.deleteConfirm', 'Delete this comparison and its scores? Songs stay in the library.'))) { void deleteSession(session.id); onBack(); } }}
+            className="p-2 rounded-lg text-zinc-500 hover:text-red-400" title={t('compare.delete', 'Delete')} aria-label={t('compare.delete', 'Delete')}>
+            <Trash2 size={18} />
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void engine.unlock().then(() => engine.toggle())}
+            className="w-12 h-12 shrink-0 rounded-full bg-pink-500 hover:bg-pink-400 text-white flex items-center justify-center"
+            aria-label={engine.isPlaying ? t('compare.pause', 'Pause') : t('compare.play', 'Play')}
+          >
+            {engine.isPlaying ? <Pause size={22} /> : <Play size={22} />}
+          </button>
+          <SeekBar engine={engine} duration={duration} />
+          <span className="hidden sm:inline"><TimeLabel engine={engine} duration={duration} /></span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <button className={btn} onClick={setIn}>{t('compare.loopIn', 'In')}</button>
+          <button className={btn} onClick={setOut}>{t('compare.loopOut', 'Out')}</button>
+          {engine.loop && (
+            <button className={`${btn} flex items-center gap-1`} onClick={() => engine.setLoop(null)}>
+              <X size={12} /> {t('compare.loopClear', 'Clear loop')} {mmss(engine.loop.start)}-{mmss(engine.loop.end)}
+            </button>
+          )}
+          <span className="sm:hidden"><TimeLabel engine={engine} duration={duration} /></span>
+          <div className="ml-auto">
+            <Toggle
+              size="sm"
+              accent="pink"
+              checked={engine.levelMatch}
+              onChange={engine.setLevelMatch}
+              label={t('compare.levelMatch', 'Level match')}
+              info={t('compare.levelMatchInfo', 'Turns every take down to the loudness of the quietest one, so you judge tone and character instead of volume. Louder nearly always sounds better at first, so leave this on for fair scoring.')}
+            />
+          </div>
+        </div>
+        <div className="text-[10px] text-zinc-500 mt-1 hidden sm:block">{t('compare.keysHint', 'Space play/pause, 1-9 switch take, drag a waveform to set a loop')}</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 flex flex-col gap-3">
+        {takes.length === 0 && <div className="text-sm text-zinc-500">{t('compare.noTakes', 'No takes in this comparison.')}</div>}
+        {takes.map((tk, i) => (
+          <TakeRow
+            key={tk.songId}
+            index={i}
+            take={tk}
+            criteria={session.criteria}
+            analysis={analysis[tk.songId] ?? null}
+            analysisLoading={!!analysisLoading[tk.songId]}
+            engine={engine}
+            duration={duration}
+            isBaseline={tk.songId === baselineId}
+          />
+        ))}
+        {takes.length > 1 && (
+          <DiffTrace
+            diff={diff && diff.a === activeId && diff.b === baselineId ? diff : null}
+            activeTitle={titleOf(activeId)}
+            baselineTitle={titleOf(baselineId)}
+            same={!activeId || activeId === baselineId}
+          />
+        )}
+      </div>
+    </div>
+  );
+};

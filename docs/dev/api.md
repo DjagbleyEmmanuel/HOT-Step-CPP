@@ -712,6 +712,7 @@ Total: <!-- generated:start route-count -->
 
 | Method | Path | Defined in |
 |---|---|---|
+| `GET` | `/api/compare/songs` | `server/src/routes/compare.ts` |
 | `GET` | `/api/compare/sessions` | `server/src/routes/compare.ts` |
 | `POST` | `/api/compare/sessions` | `server/src/routes/compare.ts` |
 | `GET` | `/api/compare/sessions/:id` | `server/src/routes/compare.ts` |

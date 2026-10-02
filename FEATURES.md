@@ -227,6 +227,10 @@ Regenerate one region of a track in place. Requires the ACE-Step backend, carrie
 
 Split a track into stems, or have the DiT regenerate parts. Details: [Stem Separator](docs/user/studios/stem-studio.md)
 
+### Compare
+
+A/B listening sessions: shared playhead, instant take switching, loop regions, level match, loudness and spectral metrics, a difference trace and 1 to 5 scoring. Details: [Compare](docs/user/studios/compare-studio.md)
+
 | Feature | What it does |
 |---|---|
 | SuperSep | BS-RoFormer, Mel-Band RoFormer and MDX23C in native GGML. |

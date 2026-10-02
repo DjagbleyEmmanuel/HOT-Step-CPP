@@ -11,6 +11,7 @@
 //   POST   /api/compare/sessions/:id/archive       {archived: bool}
 //   GET    /api/compare/analysis/:songId           loudness/spectral metrics + peaks (cached)
 //   GET    /api/compare/diff?a=&b=                 per-segment difference trace between two songs
+//   GET    /api/compare/songs?q=&limit=&offset=    paginated library search for the session picker
 
 import { Router, type Response } from 'express';
 import { diffTrace } from '../services/compare/analyzer.js';
@@ -24,6 +25,15 @@ function fail(res: Response, err: any, what: string) {
   console.error(`[Compare] ${what} failed:`, err?.message);
   return res.status(500).json({ error: err?.message || String(err) });
 }
+
+router.get('/songs', (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const limit = parseInt(String(req.query.limit ?? ''), 10) || 25;
+    const offset = parseInt(String(req.query.offset ?? ''), 10) || 0;
+    res.json(store.searchSongs({ q, limit, offset }));
+  } catch (err) { fail(res, err, 'song search'); }
+});
 
 router.get('/sessions', (req, res) => {
   try {

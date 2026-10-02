@@ -89,3 +89,17 @@ export const compareApi = {
   getAnalysis: (songId: string) => req<CompareAnalysis>('GET', `/analysis/${enc(songId)}`),
   getDiff: (a: string, b: string) => req<CompareDiff>('GET', `/diff?a=${enc(a)}&b=${enc(b)}`),
 };
+
+export interface CompareSongHit {
+  id: string; title: string; style: string; duration: number; backend: string; createdAt: string;
+}
+
+export function searchCompareSongs(q: string, limit = 25, offset = 0) {
+  const p = new URLSearchParams({ q, limit: String(limit), offset: String(offset) });
+  return req<{ total: number; limit: number; offset: number; songs: CompareSongHit[] }>('GET', `/songs?${p.toString()}`);
+}
+
+// Library -> Compare hand-off: song ids picked in the library, consumed once by the studio.
+let _pendingSongIds: string[] = [];
+export function setPendingCompareSongs(ids: string[]): void { _pendingSongIds = [...ids]; }
+export function takePendingCompareSongs(): string[] { const ids = _pendingSongIds; _pendingSongIds = []; return ids; }

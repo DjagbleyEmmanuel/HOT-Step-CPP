@@ -313,3 +313,23 @@ export async function getAnalysis(songId: string): Promise<{ cached: boolean; re
 export function runQueued<T>(fn: () => Promise<T>): Promise<T> {
   return enqueue(fn);
 }
+
+/** Paginated library search for the New comparison picker. Matches title,
+ *  style and caption; newest first. Never returns the whole library. */
+export function searchSongs(opts: { q?: string; limit?: number; offset?: number }) {
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? 25), 1), 100);
+  const offset = Math.max(Math.floor(opts.offset ?? 0), 0);
+  const q = (opts.q ?? '').trim();
+  const like = `%${q.replace(/[!%_]/g, m => '!' + m)}%`;
+  const args = q ? [like, like, like] : [];
+  const whereSql = q ? "WHERE title LIKE ? ESCAPE '!' OR style LIKE ? ESCAPE '!' OR caption LIKE ? ESCAPE '!'" : '';
+  const db = getDb();
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM songs ${whereSql}`).get(...args) as { n: number }).n;
+  const rows = db.prepare(
+    `SELECT id, title, style, duration, backend, created_at FROM songs ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  ).all(...args, limit, offset) as Array<{ id: string; title: string; style: string; duration: number; backend: string; created_at: string }>;
+  return {
+    total, limit, offset,
+    songs: rows.map(r => ({ id: r.id, title: r.title, style: r.style, duration: r.duration, backend: r.backend, createdAt: r.created_at })),
+  };
+}
