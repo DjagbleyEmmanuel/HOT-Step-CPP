@@ -394,17 +394,33 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     std::vector<float> x;
     std::mt19937_64 rng(seed);
     std::normal_distribution<float> gauss(0.0f, 1.0f);
+    // Seed breeding (noise_only): seed B gets its own stream, advanced in
+    // lockstep with seed A. The initial latent is slerped below, and every
+    // pingpong re-noise draw is mixed too (renoise_draw), otherwise the
+    // re-noise from seed A dominates and the render stays at A.
+    const float breed_t = sp ? sp->seed_blend : 0.0f;
+    const bool  breeding = noise_only && !zero_noise && sp && sp->seed_b >= 0 && breed_t > 0.0f;
+    std::mt19937_64 rng_b((uint64_t) (sp && sp->seed_b >= 0 ? sp->seed_b : 0));
+    std::normal_distribution<float> gauss_b(0.0f, 1.0f);
+    // Independent gaussians are ~orthogonal, so slerp reduces to cos/sin weights.
+    const float rn_wa = breed_t >= 1.0f ? 0.0f : cosf(breed_t * 1.5707963f);
+    const float rn_wb = breed_t >= 1.0f ? 1.0f : sinf(breed_t * 1.5707963f);
+    auto renoise_draw = [&]() -> float {
+        if (zero_noise) return 0.0f;
+        if (!breeding) return gauss(rng);
+        const float a = gauss(rng);
+        const float b = gauss_b(rng_b);
+        return breed_t >= 1.0f ? b : rn_wa * a + rn_wb * b;
+    };
     if (noise_only) {
         // Pure noise init. Latent is SA3 channel-major [Oc][L] -- same layout
         // sa3_encode_tiled produces, so the loop below is oblivious to which
         // path filled it.
         x.resize((size_t) SA3_LAT_CH * L);
         for (auto & xi : x) xi = zero_noise ? 0.0f : gauss(rng);
-        const float bt = sp ? sp->seed_blend : 0.0f;
-        if (!zero_noise && sp && sp->seed_b >= 0 && bt > 0.0f) {
+        const float bt = breed_t;
+        if (breeding) {
             // Same RNG, seed B; whole latent treated as one vector.
-            std::mt19937_64 rng_b((uint64_t) sp->seed_b);
-            std::normal_distribution<float> gauss_b(0.0f, 1.0f);
             const size_t n = x.size();
             std::vector<float> nb(n);
             for (auto & v : nb) v = gauss_b(rng_b);
@@ -866,7 +882,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                     for (size_t k = 0; k < x.size(); k++) {
                         float v_eff    = (x_prev[k] - x[k]) * inv_dt;
                         float denoised = x_prev[k] - t_curr * v_eff;
-                        float n = zero_noise ? 0.0f : gauss(rng);
+                        float n = renoise_draw();
                         x[k] = (t_next > 0.0f) ? ((1.0f - t_next) * denoised + t_next * n) : denoised;
                     }
                 }
@@ -875,7 +891,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                 // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
                 for (size_t k = 0; k < x.size(); k++) {
                     float denoised = x[k] - t_curr * v[k];
-                    float n = zero_noise ? 0.0f : gauss(rng);
+                    float n = renoise_draw();
                     x[k] = (1.0f - t_next) * denoised + t_next * n;
                 }
                 sa3_call_post_step(i, t_curr, t_next);
