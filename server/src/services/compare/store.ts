@@ -89,9 +89,11 @@ export function listSessions(opts: { archived?: boolean; group?: string }) {
 function validateCriteria(raw: unknown): Criterion[] {
   if (raw === undefined || raw === null) return DEFAULT_CRITERIA;
   if (!Array.isArray(raw) || raw.length === 0) throw new BadRequestError('criteria must be a non-empty array');
+  if (raw.length > MAX_CRITERIA) throw new BadRequestError(`criteria: at most ${MAX_CRITERIA} allowed`);
   const seen = new Set<string>();
   return raw.map((c: any) => {
     if (!c || typeof c.id !== 'string' || !c.id) throw new BadRequestError('each criterion needs an id');
+    if (c.id.length > MAX_NAME_LEN || (typeof c.label === 'string' && c.label.length > MAX_NAME_LEN)) throw new BadRequestError('criterion id/label too long');
     if (!['scale', 'keep', 'note'].includes(c.type)) throw new BadRequestError(`criterion ${c.id}: bad type`);
     if (seen.has(c.id)) throw new BadRequestError(`duplicate criterion ${c.id}`);
     seen.add(c.id);
@@ -118,11 +120,35 @@ function validateSongIds(raw: unknown, allowEmpty = false): string[] {
   if (!Array.isArray(raw) || (!allowEmpty && raw.length === 0) || !raw.every(s => typeof s === 'string' && s)) {
     throw new BadRequestError('songIds must be a non-empty array of strings');
   }
+  if (raw.length > MAX_SONG_IDS) throw new BadRequestError(`songIds: at most ${MAX_SONG_IDS} per request`);
   return [...new Set(raw as string[])];
+}
+
+export const MAX_SONG_IDS = 200;
+export const MAX_NAME_LEN = 200;
+export const MAX_NOTE_LEN = 4000;
+export const MAX_CRITERIA = 20;
+
+/** Remove compare takes, scores and cached metrics for deleted songs. Call after deleting songs. */
+export function cleanupDeletedSongs(songIds: string[]) {
+  if (!songIds.length) return;
+  const db = getDb();
+  const tx = db.transaction((ids: string[]) => {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const ph = chunk.map(() => '?').join(',');
+      db.prepare(`DELETE FROM compare_scores WHERE song_id IN (${ph})`).run(...chunk);
+      db.prepare(`DELETE FROM compare_takes WHERE song_id IN (${ph})`).run(...chunk);
+      db.prepare(`DELETE FROM audio_metrics WHERE song_id IN (${ph})`).run(...chunk);
+    }
+  });
+  tx(songIds);
 }
 
 export function createSession(body: any) {
   if (!body || typeof body.name !== 'string' || !body.name.trim()) throw new BadRequestError('name is required');
+  if (body.name.length > MAX_NAME_LEN) throw new BadRequestError(`name: at most ${MAX_NAME_LEN} chars`);
+  if (typeof body.group === 'string' && body.group.length > MAX_NAME_LEN) throw new BadRequestError(`group: at most ${MAX_NAME_LEN} chars`);
   const songIds = validateSongIds(body.songIds);
   const criteria = validateCriteria(body.criteria);
   const baseline = body.baselineSongId ?? null;
@@ -231,6 +257,7 @@ export function putScores(id: string, items: unknown) {
     }
     if ('keep' in it && it.keep !== null && typeof it.keep !== 'boolean') throw new BadRequestError('keep must be boolean or null');
     if ('note' in it && typeof it.note !== 'string') throw new BadRequestError('note must be a string');
+    if ('note' in it && it.note.length > MAX_NOTE_LEN) throw new BadRequestError(`note: at most ${MAX_NOTE_LEN} chars`);
   }
   let archived = !!row.archived;
   db.transaction(() => {
@@ -247,6 +274,7 @@ export function putScores(id: string, items: unknown) {
         .run(...args, id, it.songId, it.criterion);
     }
     const { scored, total } = scoreCounts(id);
+    // Lenient by design (Alex's choice): any criterion value, keep flag or non-empty note counts a take as scored.
     if (!archived && statusOf(scored, total) === 'scored') archived = true;
     db.prepare("UPDATE compare_sessions SET archived = ?, updated_at = datetime('now') WHERE id = ?").run(archived ? 1 : 0, id);
   })();

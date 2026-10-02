@@ -56,6 +56,19 @@ function loudnessSuite(opts: AnalyzeOptions, sink: Row[]) {
     const g = concat(sine(20, 1000, -36), sine(20, 1000, -23));
     near('-36 then -23 (relative gate) LUFS', analyzeSamples(g, g, opts).integratedLufs, -23, 0.2, sink);
 }
+// Short files: under 400 ms no gating block exists, so integrated must be null;
+// under 3 s no full short-term window exists, so short-term max must be null.
+function shortSuite(sink: Row[]) {
+    const isNull = (name: string, v: number | null) => { sink.push({ name, expected: 'null', actual: v, pass: v === null }); };
+    const s200 = sine(0.2, 1000, -23);
+    const r200 = analyzeSamples(s200, s200);
+    isNull('200 ms sine integrated LUFS', r200.integratedLufs);
+    isNull('200 ms sine short-term max', r200.shortTermMaxLufs);
+    const s2 = sine(2, 1000, -23);
+    const r2 = analyzeSamples(s2, s2);
+    near('2 s sine integrated LUFS', r2.integratedLufs, -23, 0.2, sink);
+    isNull('2 s sine short-term max', r2.shortTermMaxLufs);
+}
 function truePeakSuite(opts: AnalyzeOptions, sink: Row[]) {
     const s = sine(5, FS / 4, 0, Math.PI / 4);
     const r = analyzeSamples(s, s, opts);
@@ -115,6 +128,7 @@ async function main() {
     analyzeSamples(long, noise(180));
     console.log(`3-min analyzeSamples time: ${Date.now() - t0} ms`);
 
+    shortSuite(rows);
     print('Main tests', rows);
 
     const teethK: Row[] = [], teethO: Row[] = [];

@@ -10,6 +10,7 @@ import { getDb } from '../db/database.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
+import { cleanupDeletedSongs } from '../services/compare/store.js';
 import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
 import { analyzeAndSaveDiscoData } from '../services/disco-analyzer.js';
 import {
@@ -341,6 +342,7 @@ router.delete('/:id', (req, res) => {
   }
 
   getDb().prepare('DELETE FROM songs WHERE id = ?').run(req.params.id);
+  cleanupDeletedSongs([req.params.id]);
 
   // Cascade to Lireek DB — remove matching audio_generation records
   try { deleteAudioGenerationsByJobIds([req.params.id]); } catch { /* lireek DB may not be initialized */ }
@@ -371,6 +373,7 @@ router.delete('/', (req, res) => {
   const allIds = allSongs.map((s: any) => s.id);
 
   const result = getDb().prepare('DELETE FROM songs WHERE user_id = ?').run(userId);
+  cleanupDeletedSongs(allIds);
 
   // Cascade to Lireek DB
   try { deleteAudioGenerationsByJobIds(allIds); } catch { /* lireek DB may not be initialized */ }
@@ -415,6 +418,7 @@ router.post('/bulk-delete', (req, res) => {
   const result = getDb()
     .prepare(`DELETE FROM songs WHERE id IN (${placeholders}) AND user_id = ?`)
     .run(...ids, userId);
+  cleanupDeletedSongs(ids.filter((id: string) => !getDb().prepare('SELECT 1 FROM songs WHERE id = ?').get(id)));
 
   console.log(`[Songs] Bulk deleted ${result.changes}/${ids.length} songs`);
 
@@ -469,6 +473,7 @@ router.post('/nuke-generations', (req, res) => {
   // 3. Delete all songs from main DB
   const songIds = songs.map((s: any) => s.id);
   const songResult = getDb().prepare('DELETE FROM songs WHERE user_id = ?').run(userId);
+  cleanupDeletedSongs(songIds);
 
   // 4. Delete all audio_generations (same DB now)
   let lireekDeleted = 0;

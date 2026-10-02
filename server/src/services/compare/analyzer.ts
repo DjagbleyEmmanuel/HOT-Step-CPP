@@ -265,9 +265,11 @@ function monoMix(left: Float32Array, right: Float32Array): Float32Array {
 export function analyzeSamples(left: Float32Array, right: Float32Array, opts: AnalyzeOptions = {}): AnalysisResult {
     const n = left.length;
     const sub = subBlockPower(left, right, opts);
-    const integratedLufs = integratedLoudness(sub);
+    // Files shorter than one full window report null instead of a partial-window value:
+    // integrated needs >= 400 ms (one gating block), short-term max needs >= 3 s.
+    const integratedLufs = n >= FS * 0.4 ? integratedLoudness(sub) : null;
     let stMax = 0;
-    for (const p of windowPowers(sub, 30)) if (p > stMax) stMax = p;
+    if (n >= FS * 3) for (const p of windowPowers(sub, 30)) if (p > stMax) stMax = p;
     const shortTermMaxLufs = stMax > 0 ? powerToLufs(stMax) : null;
 
     let peak = 0, sumSq = 0, sl = 0, sr = 0, sll = 0, srr = 0, slr = 0;
@@ -332,7 +334,9 @@ export async function analyze(filePath: string, opts: AnalyzeOptions = {}): Prom
     return analyzeSamples(left, right, opts);
 }
 
-/** Per-500 ms comparison of two signals (b relative to a). */
+/** Per-500 ms comparison of two signals (b relative to a).
+ *  Assumes both takes start together at sample 0: no alignment or offset search is done,
+ *  and the trace covers only the shorter of the two. */
 export function diffTraceSamples(a: StereoSamples, b: StereoSamples): DiffTrace {
     const hop = FS / 2;
     const n = Math.min(a.left.length, b.left.length);
