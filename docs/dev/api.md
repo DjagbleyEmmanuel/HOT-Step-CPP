@@ -708,6 +708,20 @@ Total: <!-- generated:start route-count -->
 | `POST` | `/api/export-import/exports/resolve` | `server/src/routes/exportImport.ts` |
 | `POST` | `/api/export-import/imports` | `server/src/routes/exportImport.ts` |
 | `POST` | `/api/export-import/profiles/validate` | `server/src/routes/exportImport.ts` |
+### `/api/compare`
+
+| Method | Path | Defined in |
+|---|---|---|
+| `GET` | `/api/compare/sessions` | `server/src/routes/compare.ts` |
+| `POST` | `/api/compare/sessions` | `server/src/routes/compare.ts` |
+| `GET` | `/api/compare/sessions/:id` | `server/src/routes/compare.ts` |
+| `DELETE` | `/api/compare/sessions/:id` | `server/src/routes/compare.ts` |
+| `POST` | `/api/compare/sessions/:id/takes` | `server/src/routes/compare.ts` |
+| `DELETE` | `/api/compare/sessions/:id/takes/:songId` | `server/src/routes/compare.ts` |
+| `PUT` | `/api/compare/sessions/:id/scores` | `server/src/routes/compare.ts` |
+| `POST` | `/api/compare/sessions/:id/archive` | `server/src/routes/compare.ts` |
+| `GET` | `/api/compare/analysis/:songId` | `server/src/routes/compare.ts` |
+| `GET` | `/api/compare/diff` | `server/src/routes/compare.ts` |
 
 ### `/api`
 
