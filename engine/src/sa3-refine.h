@@ -298,7 +298,8 @@ struct Sa3PluginParams {
 
     bool any() const {
         return !solver.empty() || !scheduler.empty() || !guidance_mode.empty()
-            || !postprocess_plugin.empty();
+            || !postprocess_plugin.empty()
+            || (seed_b >= 0 && seed_blend > 0.0f);  // breeding needs sp on the native path too
     }
 };
 
