@@ -5,6 +5,7 @@ import React from 'react';
 import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useJobBadge } from '../../hooks/useJobProgress';
 
 interface SidebarProps {
   activeView: string;
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleAssistant,
 }) => {
   const { t } = useTranslation();
+  const jobBadge = useJobBadge();
   const [isOpen, setIsOpen] = usePersistedState('hs-sidebar-open', true);
 
   return (
@@ -69,6 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           active={activeView === 'create'}
           onClick={() => onViewChange('create')}
           isExpanded={isOpen}
+          badge={jobBadge}
         />
         {isOpen && <div className="h-[3px] bg-purple-500/40 mx-1" />}
         {!isOpen && <div className="h-px bg-white/5 mx-2" />}
@@ -240,9 +243,11 @@ interface NavItemProps {
   active?: boolean;
   onClick: () => void;
   isExpanded?: boolean;
+  /** Live job badge, e.g. "2 · 43%". */
+  badge?: string | null;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpanded }) => (
+const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpanded, badge }) => (
   <button
     onClick={onClick}
     className={`
@@ -257,6 +262,9 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpan
     {isExpanded && (
       <span className="text-sm font-medium whitespace-nowrap">{label}</span>
     )}
+    {badge && (isExpanded
+      ? <span className="ml-auto px-1.5 py-0.5 rounded-full bg-pink-500 text-white text-[10px] font-semibold tabular-nums whitespace-nowrap">{badge}</span>
+      : <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" aria-hidden="true" />)}
   </button>
 );
 
