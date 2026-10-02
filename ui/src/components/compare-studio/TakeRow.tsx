@@ -1,6 +1,7 @@
 // TakeRow.tsx - one take in a Compare session: waveform, metrics, seeds, scores.
 
 import React, { useEffect, useState } from 'react';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import type { CompareAnalysis, CompareCriterion, CompareTake } from '../../services/compareApi';
@@ -39,6 +40,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
   const noteCrit = criteria.find(c => c.type === 'note');
   const savedNote = noteCrit ? scoreOf(noteCrit.id)?.note ?? '' : '';
   const [note, setNote] = useState(savedNote);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   useEffect(() => { setNote(savedNote); }, [savedNote]);
 
   const activate = () => { void engine.unlock(); engine.setActive(take.songId); };
@@ -46,6 +48,15 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
   const gain = engine.levelMatch ? engine.gainsDb[take.songId] : undefined;
 
   return (
+    <>
+      <ConfirmDialog
+        isOpen={confirmRemove}
+        title={t('compare.removeTakeTitle', 'Remove take')}
+        message={t('compare.removeTakeConfirm', 'Remove this take from the comparison?')}
+        danger
+        onConfirm={() => { setConfirmRemove(false); void removeTake(take.songId); }}
+        onCancel={() => setConfirmRemove(false)}
+      />
     <div
       onClick={activate}
       className={`rounded-xl border p-3 transition-colors cursor-pointer ${active
@@ -72,7 +83,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
           {scored ? t('compare.scored', 'scored') : t('compare.unscored', 'unscored')}
         </span>
         <button
-          onClick={e => { e.stopPropagation(); if (window.confirm(t('compare.removeTakeConfirm', 'Remove this take from the comparison?'))) void removeTake(take.songId); }}
+          onClick={e => { e.stopPropagation(); setConfirmRemove(true); }}
           className="p-2 rounded-lg text-zinc-500 hover:text-red-400"
           title={t('compare.removeTake', 'Remove take')}
           aria-label={t('compare.removeTake', 'Remove take')}
@@ -146,5 +157,6 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
         )}
       </div>
     </div>
+    </>
   );
 };

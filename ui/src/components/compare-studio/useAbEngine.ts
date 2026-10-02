@@ -52,6 +52,23 @@ const START_LEAD_SEC = 0.03;
 
 interface Voice { src: AudioBufferSourceNode; gain: GainNode; }
 
+/**
+ * Loop plan for one take. Every take must loop on the same cycle
+ * (loop.end - loop.start), so loopEnd is never clamped to the take length.
+ * A take shorter than loop.end is padded with silence up to padTo, so it
+ * goes quiet until the shared loop restarts instead of running its own cycle.
+ */
+export function voiceLoopPlan(loop: LoopRegion, bufDuration: number): { loopStart: number; loopEnd: number; padTo: number } {
+  return { loopStart: loop.start, loopEnd: loop.end, padTo: Math.max(bufDuration, loop.end) };
+}
+
+/** Position of a native looping source after `elapsed` seconds from `offset`. */
+export function loopedSourcePosition(offset: number, elapsed: number, loopStart: number, loopEnd: number): number {
+  const pos = offset + elapsed;
+  if (loopEnd <= loopStart || pos < loopEnd) return pos;
+  return loopStart + ((pos - loopStart) % (loopEnd - loopStart));
+}
+
 /** Map an elapsed play time to a position, wrapping inside the loop region. */
 export function wrapPosition(pos: number, loop: LoopRegion | null): number {
   if (!loop || loop.end <= loop.start) return pos;
@@ -223,16 +240,24 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
     if (!ctx || !buf) return;
     stopVoice(id);
     const src = ctx.createBufferSource();
-    src.buffer = buf;
+    let playBuf = buf;
     const lp = loopRef.current;
     if (lp && lp.end > lp.start) {
+      const plan = voiceLoopPlan(lp, buf.duration);
+      if (plan.padTo > buf.duration) {
+        // Pad with silence so this take shares the master loop cycle.
+        const len = Math.ceil(plan.padTo * buf.sampleRate) + 1;
+        playBuf = ctx.createBuffer(buf.numberOfChannels, len, buf.sampleRate);
+        for (let c = 0; c < buf.numberOfChannels; c++) playBuf.copyToChannel(buf.getChannelData(c), c);
+      }
       src.loop = true;
-      src.loopStart = Math.min(lp.start, buf.duration);
-      src.loopEnd = Math.min(lp.end, buf.duration);
+      src.loopStart = plan.loopStart;
+      src.loopEnd = plan.loopEnd;
     }
+    src.buffer = playBuf;
     const gain = takeGain(id);
     src.connect(gain);
-    if (offset < buf.duration) src.start(when, offset);
+    if (offset < playBuf.duration) src.start(when, offset);
     voices.current.set(id, { src, gain });
   }, [takeGain]);
 
@@ -420,13 +445,16 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
     if (ctx) void ctx.close().catch(() => { /* already closed */ });
   }, []);
 
+  // Stable store subscribe/snapshot so useSyncExternalStore never resubscribes per render.
+  const storeSubscribe = useCallback(
+    (cb: () => void) => subscribeTime(() => cb()),
+    [subscribeTime],
+  );
+  const storeSnapshot = useCallback(() => lastTimeRef.current, []);
   const useCurrentTime = useCallback(
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    () => useSyncExternalStore(
-      (cb: () => void) => subscribeTime(() => cb()),
-      () => lastTimeRef.current,
-    ),
-    [subscribeTime],
+    () => useSyncExternalStore(storeSubscribe, storeSnapshot),
+    [storeSubscribe, storeSnapshot],
   );
 
   return {

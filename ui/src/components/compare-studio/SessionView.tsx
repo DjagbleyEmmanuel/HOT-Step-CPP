@@ -1,7 +1,8 @@
 // SessionView.tsx - one Compare session: sticky transport, take rows, diff trace.
 // Keys: Space play/pause, 1-9 switch active take.
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import {
@@ -51,6 +52,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
   const { t } = useTranslation();
   const { analysis, analysisLoading, diff } = useCompareStore();
   const takes = session.takes;
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => { takes.forEach(tk => { void loadAnalysis(tk.songId); }); }, [takes]);
 
@@ -95,6 +97,14 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
 
   return (
     <div className="flex flex-col min-h-0 h-full">
+      <ConfirmDialog
+        isOpen={confirmDelete}
+        title={t('compare.deleteTitle', 'Delete comparison')}
+        message={t('compare.deleteConfirm', 'Delete this comparison and its scores? Songs stay in the library.')}
+        danger
+        onConfirm={() => { setConfirmDelete(false); void deleteSession(session.id); onBack(); }}
+        onCancel={() => setConfirmDelete(false)}
+      />
       <div className="sticky top-0 z-10 px-3 sm:px-4 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur border-b border-zinc-200 dark:border-white/5">
         <div className="flex items-center gap-2 mb-2">
           <button onClick={onBack} className="p-2 rounded-lg text-zinc-500 hover:text-pink-400" aria-label={t('compare.back', 'Back to sessions')}>
@@ -109,7 +119,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             aria-label={session.archived ? t('compare.unarchive', 'Unarchive') : t('compare.archive', 'Archive')}>
             {session.archived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
           </button>
-          <button onClick={() => { if (window.confirm(t('compare.deleteConfirm', 'Delete this comparison and its scores? Songs stay in the library.'))) { void deleteSession(session.id); onBack(); } }}
+          <button onClick={() => { setConfirmDelete(true); }}
             className="p-2 rounded-lg text-zinc-500 hover:text-red-400" title={t('compare.delete', 'Delete')} aria-label={t('compare.delete', 'Delete')}>
             <Trash2 size={18} />
           </button>
