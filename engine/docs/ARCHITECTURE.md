@@ -139,6 +139,7 @@ on `/api/generate`: `seedB`, `seedBlend`.
 time-major; frame `f` is slerped on its own (per-frame vector across channels) at
 `w(f) = seed_blend + (seed_blend_end - seed_blend) * smoothstep(f / (T-1))`, so a
 song can start as one seed and end as the other. API field: `seedBlendEnd`.
+Per-frame morph is not the same as whole-item breeding even at a constant blend (each frame is slerped on its own), so when `seed_blend_end` equals `seed_blend` the engine uses the whole-item breeding path.
 
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch

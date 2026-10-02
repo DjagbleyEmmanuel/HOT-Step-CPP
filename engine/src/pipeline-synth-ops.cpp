@@ -972,13 +972,13 @@ void ops_init_noise(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
         // Seed morph: blend weight varies along the latent time axis. Noise layout
         // is [T, Oc] time-major, so frame f is the Oc-float vector at dst + f*Oc and
         // each frame is slerped on its own at w(f) = start + (end-start)*smoothstep.
-        if (reqs[b].seed_b >= 0 && reqs[b].seed_blend_end >= 0.0f) {
+        if (reqs[b].seed_b >= 0 && reqs[b].seed_blend_end >= 0.0f &&
+            fabsf(reqs[b].seed_blend_end - t) > 1e-6f) {
             const size_t       n  = (size_t) s.Oc * s.T;
             const float        te = reqs[b].seed_blend_end;
             std::vector<float> nb(n);
             philox_randn(reqs[b].seed_b, nb.data(), (int) n, /*bf16_round=*/true);
-            fprintf(stderr, "[Init-Noise Batch%d] seed morph: A=%lld B=%lld blend start=%.3f end=%.3f
-", b,
+            fprintf(stderr, "[Init-Noise Batch%d] seed morph: A=%lld B=%lld blend start=%.3f end=%.3f\n", b,
                     (long long) reqs[b].seed, (long long) reqs[b].seed_b, t, te);
             for (int f = 0; f < s.T; f++) {
                 const double u  = s.T > 1 ? (double) f / (double) (s.T - 1) : 0.0;
