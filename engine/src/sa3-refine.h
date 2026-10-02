@@ -523,9 +523,10 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                              n_lat, /*N=*/1, T, Oc, loop_model_fn, loop_on_step,
                              sp->plugin_params, sa3_lua_ctx);
     } else {
+        int64_t seed64 = (int64_t) seed;  // lives across the whole sampling loop below
         SolverState solver_state;
         if (use_lua_solver) {
-            solver_state.seeds   = nullptr;   // single-sample refine, no Philox batch
+            solver_state.seeds   = &seed64;   // request seed so Lua stochastic solvers honour it (was nullptr -> seed 0)
             solver_state.batch_n = 1;
             solver_state.n_per   = n_lat;
             solver_state.xt_scratch.assign((size_t)n_lat, 0.0f);  // multi-eval solvers expect this pre-sized
