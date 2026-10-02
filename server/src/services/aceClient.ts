@@ -63,6 +63,8 @@ export interface AceRequest {
   seed_b?: number;
   /** Seed breeding blend, 0 = seed only, 1 = seed_b only (slerp). */
   seed_blend?: number;
+  /** Seed morph: blend at the end of the song (-1/omitted = off; blend ramps seed_blend -> this over time). */
+  seed_blend_end?: number;
   lm_batch_size?: number;
   synth_batch_size?: number;
   lm_temperature?: number;

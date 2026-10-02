@@ -111,6 +111,11 @@ export function translateParams(params: any): AceRequest {
     if (params.seedBlend !== undefined) {
       req.seed_blend = Math.min(1, Math.max(0, Number(params.seedBlend) || 0));
     }
+    // Seed morph: time-varying blend, seedBlend at the start -> seedBlendEnd at the end.
+    if (params.seedBlendEnd !== undefined && params.seedBlendEnd !== null && params.seedBlendEnd !== ''
+        && Number(params.seedBlendEnd) >= 0) {
+      req.seed_blend_end = Math.min(1, Number(params.seedBlendEnd));
+    }
   }
 
   // Batch

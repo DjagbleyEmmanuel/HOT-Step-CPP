@@ -134,6 +134,12 @@ noise (each batch item treated as one vector, normalized lerp when nearly parall
 `seed_b` by the same `+i` as `seed`. Ignored by the streaming path. API field names
 on `/api/generate`: `seedB`, `seedBlend`.
 
+**`seed_blend_end`** (float 0 to 1, default `-1` = off). Seed morph: when set with
+`seed_b`, the blend varies along the latent time axis. The noise is `[T, C]`
+time-major; frame `f` is slerped on its own (per-frame vector across channels) at
+`w(f) = seed_blend + (seed_blend_end - seed_blend) * smoothstep(f / (T-1))`, so a
+song can start as one seed and end as the other. API field: `seedBlendEnd`.
+
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
 item `b` of `/lm` gets `lm_seed + b`.

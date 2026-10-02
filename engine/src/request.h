@@ -55,6 +55,7 @@ struct AceRequest {
                                // Python ACE-Step reference (random.randint(0, 2**32 - 1)).
     int64_t seed_b;            // -1 = off. Seed breeding: second DiT noise seed.
     float   seed_blend;        // 0 = seed A only, 1 = seed B only (slerp of initial noise)
+    float   seed_blend_end;    // -1 = off; else seed morph: blend goes seed_blend -> this along time
 
     // LM control
     float       lm_temperature;      // 0.85
