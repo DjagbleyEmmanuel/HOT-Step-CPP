@@ -1,7 +1,7 @@
 // SongList.tsx — Song library display with bulk selection + source filtering
 // Ported from hot-step-9000 visual design with Tailwind.
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Play, Pause, Trash2, RotateCcw, Music,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
@@ -21,6 +21,7 @@ import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { openImportTracks } from './ImportTracksModal';
 import { CoverImage } from '../shared/CoverImage';
 import { displayTitle, displaySubtext } from '../../utils/songDisplay';
+import { applySelectClick } from '../../utils/rangeSelect';
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
@@ -207,14 +208,63 @@ export const SongList: React.FC<SongListProps> = ({
 
   const paginationProps = { pageSize, page, totalPages, onChangePageSize: changePageSize, onPage: setPage };
 
-  const toggleSelection = useCallback((id: string) => {
+  // Range select: anchor = last plainly clicked / long-pressed row. Order is the
+  // current visible (sorted + filtered) list, so shift ranges follow what is on screen.
+  const anchorRef = useRef<string | null>(null);
+  const visibleOrder = useMemo(() => filteredSongs.map(s => s.id), [filteredSongs]);
+  const selectClick = useCallback((id: string, range: boolean) => {
     setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+      const r = applySelectClick(visibleOrder, { selected: prev, anchor: anchorRef.current }, id, range);
+      anchorRef.current = r.anchor;
+      return r.selected;
     });
+  }, [visibleOrder]);
+  /** Click in selection mode: shift = range from anchor, ctrl/cmd or plain = toggle. */
+  const toggleSelection = useCallback((id: string, e?: { shiftKey?: boolean }) => {
+    selectClick(id, !!e?.shiftKey);
+  }, [selectClick]);
+
+  // Mobile long-press: enter select mode (anchor), or select the range to the anchor.
+  const LONG_PRESS_MS = 450;
+  const MOVE_TOLERANCE_PX = 10;
+  const pressRef = useRef<{ id: string; x: number; y: number; timer: number } | null>(null);
+  const suppressClickRef = useRef(false);
+  const cancelPress = useCallback(() => {
+    if (pressRef.current) { window.clearTimeout(pressRef.current.timer); pressRef.current = null; }
   }, []);
+  useEffect(() => cancelPress, [cancelPress]);
+  const onRowsPointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') return;
+    const el = (e.target as HTMLElement).closest('[data-sel-id]') as HTMLElement | null;
+    if (!el || (e.target as HTMLElement).closest('button, a, input')) return;
+    const id = el.dataset.selId!;
+    cancelPress();
+    const timer = window.setTimeout(() => {
+      pressRef.current = null;
+      suppressClickRef.current = true;
+      if (!selectionMode) {
+        setSelectionMode(true);
+        setSelectedIds(new Set([id]));
+        anchorRef.current = id;
+      } else {
+        selectClick(id, true);
+      }
+      try { navigator.vibrate?.(15); } catch {}
+    }, LONG_PRESS_MS);
+    pressRef.current = { id, x: e.clientX, y: e.clientY, timer };
+  }, [selectionMode, selectClick, cancelPress]);
+  const onRowsPointerMove = useCallback((e: React.PointerEvent) => {
+    const p = pressRef.current;
+    if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > MOVE_TOLERANCE_PX) cancelPress();
+  }, [cancelPress]);
+  const onRowsClickCapture = useCallback((e: React.MouseEvent) => {
+    // Swallow the click that follows a long-press so it does not toggle or open the song.
+    if (suppressClickRef.current) { suppressClickRef.current = false; e.stopPropagation(); e.preventDefault(); }
+  }, []);
+  const onRowsMouseDown = useCallback((e: React.MouseEvent) => {
+    // Shift-click would otherwise select text across the rows.
+    if (selectionMode && e.shiftKey) e.preventDefault();
+  }, [selectionMode]);
 
   const selectAll = useCallback(() => {
     setSelectedIds(new Set(filteredSongs.map(s => s.id)));
@@ -222,11 +272,13 @@ export const SongList: React.FC<SongListProps> = ({
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set());
+    anchorRef.current = null;
   }, []);
 
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false);
     setSelectedIds(new Set());
+    anchorRef.current = null;
   }, []);
 
   const handleBulkDelete = useCallback(() => {
@@ -391,6 +443,23 @@ export const SongList: React.FC<SongListProps> = ({
             }
           </span>
 
+          {!allSelected && filteredSongs.length > 0 && (
+            <button
+              onClick={selectAll}
+              className="px-2 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-300 hover:bg-white/10 transition-colors"
+            >
+              {t('library.selectAllVisible', 'Select all visible')}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <button
+              onClick={deselectAll}
+              className="px-2 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-300 hover:bg-white/10 transition-colors"
+            >
+              {t('library.clearSelection', 'Clear')}
+            </button>
+          )}
+
           {selectedIds.size > 0 && (
             <>
               <button
@@ -459,6 +528,12 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       )}
 
+      {selectionMode && (
+        <div className="-mt-2 mb-3 px-3 text-[11px] text-zinc-500">
+          {t('library.rangeHint', 'Long-press another song to select the range (Shift+click on desktop)')}
+        </div>
+      )}
+
       {/* Empty state */}
       {filteredSongs.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
@@ -476,6 +551,15 @@ export const SongList: React.FC<SongListProps> = ({
         </div>
       )}
 
+      <div
+        onPointerDown={onRowsPointerDown}
+        onPointerMove={onRowsPointerMove}
+        onPointerUp={cancelPress}
+        onPointerCancel={cancelPress}
+        onClickCapture={onRowsClickCapture}
+        onMouseDown={onRowsMouseDown}
+        onContextMenu={e => { if (suppressClickRef.current || pressRef.current) e.preventDefault(); }}
+      >
       {/* Grid View */}
       {activeViewMode === 'grid' && filteredSongs.length > 0 && (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
@@ -487,7 +571,7 @@ export const SongList: React.FC<SongListProps> = ({
               isPlaying={currentSongId === song.id && isPlaying}
               selectionMode={selectionMode}
               isSelected={selectedIds.has(song.id)}
-              onToggleSelect={() => toggleSelection(song.id)}
+              onToggleSelect={(e) => toggleSelection(song.id, e)}
               onPlay={() => onPlay(song)}
               onSelect={() => onSelect?.(song)}
               onDelete={() => onDelete(song)}
@@ -515,7 +599,7 @@ export const SongList: React.FC<SongListProps> = ({
               isPlaying={currentSongId === song.id && isPlaying}
               selectionMode={selectionMode}
               isSelected={selectedIds.has(song.id)}
-              onToggleSelect={() => toggleSelection(song.id)}
+              onToggleSelect={(e) => toggleSelection(song.id, e)}
               onPlay={() => onPlay(song)}
               onSelect={() => onSelect?.(song)}
               onDelete={() => onDelete(song)}
@@ -555,6 +639,7 @@ export const SongList: React.FC<SongListProps> = ({
           topRight={<PaginationControls {...paginationProps} />}
         />
       )}
+      </div>
 
       {/* Bottom pagination bar */}
       {filteredSongs.length > 0 && (
@@ -656,7 +741,7 @@ interface SongItemProps {
   isPlaying: boolean;
   selectionMode: boolean;
   isSelected: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (e?: React.MouseEvent) => void;
   onPlay: () => void;
   onSelect?: () => void;
   onDelete: () => void;
@@ -739,9 +824,9 @@ const SongItem: React.FC<SongItemProps> = ({
 
   const gp = song.generationParams;
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
     if (selectionMode) {
-      onToggleSelect();
+      onToggleSelect(e);
     } else {
       onSelect?.();
     }
@@ -761,6 +846,7 @@ const SongItem: React.FC<SongItemProps> = ({
         }
         ${song.id === abTrackAId ? 'border-l-2 !border-l-blue-500' : song.id === abTrackBId ? 'border-l-2 !border-l-orange-500' : ''}
       `}
+      data-sel-id={song.id}
       onClick={handleClick}
     >
       {/* Selection Checkbox */}
@@ -916,7 +1002,7 @@ interface SongCardProps {
   isPlaying: boolean;
   selectionMode: boolean;
   isSelected: boolean;
-  onToggleSelect: () => void;
+  onToggleSelect: (e?: React.MouseEvent) => void;
   onPlay: () => void;
   onSelect?: () => void;
   onDelete: () => void;
@@ -983,8 +1069,8 @@ const SongCard: React.FC<SongCardProps> = ({
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
-  const handleClick = () => {
-    if (selectionMode) onToggleSelect();
+  const handleClick = (e: React.MouseEvent) => {
+    if (selectionMode) onToggleSelect(e);
     else onSelect?.();
   };
 
@@ -1002,6 +1088,7 @@ const SongCard: React.FC<SongCardProps> = ({
             : 'border-zinc-200 dark:border-white/[0.06] bg-zinc-50/80 dark:bg-zinc-900/60 hover:border-zinc-300 dark:hover:border-white/10 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
         }
       `}
+      data-sel-id={song.id}
       onClick={handleClick}
     >
       {/* ── Artwork ── inset with its own radius, so the card reads as a card
@@ -1234,7 +1321,7 @@ interface SongTableProps {
   isPlaying: boolean;
   selectionMode: boolean;
   selectedIds: Set<string>;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect: (id: string, e?: React.MouseEvent) => void;
   onPlay: (song: Song) => void;
   onSelect?: (song: Song) => void;
   onDelete: (song: Song) => void;
@@ -1620,7 +1707,8 @@ const SongTable: React.FC<SongTableProps> = ({
                       ? 'bg-pink-500/5'
                       : 'hover:bg-white/5'
                 }`}
-                onClick={() => selectionMode ? onToggleSelect(song.id) : onSelect?.(song)}
+                data-sel-id={song.id}
+                onClick={(e) => selectionMode ? onToggleSelect(song.id, e) : onSelect?.(song)}
               >
                 {columns.map(c => (
                   <td
