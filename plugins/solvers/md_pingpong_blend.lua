@@ -13,15 +13,14 @@
 -- GNU General Public License for more details: https://www.gnu.org/licenses/
 -- ============================================================================
 
--- Pingpong with a renoise amount knob, for rectified flow
--- (x_t = (1-t) x0 + t eps). Mirrors the native SA3 pingpong step:
+-- Pingpong sampler for rectified flow (x_t = (1-t) x0 + t eps).
+-- Mirrors the native SA3 pingpong step:
 --   denoised = x - t v
---   x_next   = (1 - t_next) denoised + t_next noise_mix
--- where noise_mix blends fresh Gaussian noise with the trajectory's own
--- implied noise eps_cur = (x - (1-t) denoised) / t, variance-preserving:
---   noise_mix = a z + sqrt(1 - a^2) eps_cur,  a = renoise
--- renoise 1.0 = exact pingpong (all fresh noise), 0.0 = deterministic Euler.
+--   x_next   = (1 - t_next) denoised + t_next z,  z fresh Gaussian noise
 -- The last step (t_next = 0) returns denoised.
+-- v1.1: renoise knob removed and fixed at 1.0. Ear tests on SA3 scored any
+-- renoise below 1.0 at quality 1, and values above 1.0 have no meaning in the
+-- variance-preserving mix. Best at 8 steps on SA3.
 -- Marked stochastic so the SA3 engine's own renoise wrapper stays out of the
 -- way; works on any rectified-flow backend (ACE, SA3).
 -- z comes from math.random via Box-Muller; the engine seeds the Lua RNG from
@@ -29,17 +28,14 @@
 
 solver = {
     name = "md_pingpong_blend",
-    version = "1.0",
+    version = "1.1",
     display = "MD Pingpong Blend",
-    description = "Pingpong sampler with a renoise amount knob. 1.0 = exact pingpong, lower keeps more of the trajectory's own noise.",
+    description = "Pingpong sampler (full fresh renoise each step). Recommended default for SA3 at 8 steps.",
     nfe = 1,
     order = 1,
     needs_model = false,
     stateful = false,
     stochastic = true,
-    params = {
-        { key = "renoise", type = "slider", label = "Renoise", default = 1.0, min = 0.0, max = 1.0, step = 0.01 },
-    },
 }
 
 local spare = nil
@@ -69,28 +65,16 @@ end
 
 function step(xt, vt, t_curr, t_next, n)
     if n <= 0 then return end
-    local a = 1.0
-    if params and params.renoise ~= nil then a = tonumber(params.renoise) or 1.0 end
-    if a < 0 then a = 0 elseif a > 1 then a = 1 end
-    local keep = math.sqrt(1.0 - a * a)
 
     if t_next <= 0.0 then
         for i = 0, n - 1 do xt[i] = xt[i] - t_curr * vt[i] end
         return
     end
 
-    local inv_t = (t_curr > 1e-6) and (1.0 / t_curr) or 0.0
     for i = 0, n - 1 do
         local x, v = xt[i], vt[i]
         local den = x - t_curr * v
-        local mix
-        if a >= 1.0 then
-            mix = gauss()
-        else
-            local eps = (t_curr > 1e-6) and ((x - (1.0 - t_curr) * den) * inv_t) or 0.0
-            if a > 0.0 then mix = a * gauss() + keep * eps else mix = eps end
-        end
-        local y = (1.0 - t_next) * den + t_next * mix
+        local y = (1.0 - t_next) * den + t_next * gauss()
         if y ~= y or y == math.huge or y == -math.huge then y = x + (t_next - t_curr) * v end
         xt[i] = y
     end
