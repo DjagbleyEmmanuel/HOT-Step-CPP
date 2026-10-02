@@ -152,6 +152,19 @@ repoint action. See [Data folder and upgrades](data-folder.md) for imports and r
 Development checkouts keep their existing paths; see [Configuration](../dev/config.md).
 
 
+## Install on your phone
+
+The production UI (`LAUNCH.bat` or a release launcher, not `dev.bat`) is an installable web app.
+Open it from your phone over your LAN or Tailscale address, then:
+
+- **Android (Chrome):** menu, then **Install app** or **Add to Home screen**.
+- **iPhone / iPad (Safari):** Share, then **Add to Home Screen**.
+
+It opens full screen with its own icon. Only the app shell (page, scripts, icons) is cached;
+songs, audio and every `/api` call always come from your server, so the server must be running.
+Browsers only allow installing from `localhost` or an HTTPS address; on a plain `http://` LAN
+address you still get a home-screen shortcut, but not the offline shell.
+
 ## Running from source
 
 `HOT-Step.bat` and `HOT-Step.sh` are the release launchers; a git checkout uses `LAUNCH.bat`,

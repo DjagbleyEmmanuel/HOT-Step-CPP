@@ -147,6 +147,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Source filters | Tabs per studio plus Imported, with counts. |
 | Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
 | Multi-select | Bulk download or delete. |
+| Installable web app | Web app manifest, icons and an app-shell service worker (production builds only, never caches /api or audio), so the UI can be added to a phone home screen and run standalone. |
 | Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
 | Metadata editor | Title, artist, album, year, genre, BPM, key, comment, lyrics and cover image; some fields are embed-only. |
