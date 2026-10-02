@@ -291,6 +291,10 @@ struct Sa3PluginParams {
     // renoise) for A/B. No effect when no solver is selected, or on the
     // owns_loop path (see sa3-refine.h NOTE at the owns_loop branch).
     bool sa3_lua_renoise = true;
+    // Seed breeding (/sa3-synth only): slerp the initial noise of `seed`
+    // toward the noise of seed_b. seed_b < 0 or seed_blend == 0 = off.
+    int64_t seed_b     = -1;
+    float   seed_blend = 0.0f;
 
     bool any() const {
         return !solver.empty() || !scheduler.empty() || !guidance_mode.empty()
@@ -395,6 +399,43 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         // path filled it.
         x.resize((size_t) SA3_LAT_CH * L);
         for (auto & xi : x) xi = zero_noise ? 0.0f : gauss(rng);
+        const float bt = sp ? sp->seed_blend : 0.0f;
+        if (!zero_noise && sp && sp->seed_b >= 0 && bt > 0.0f) {
+            // Same RNG, seed B; whole latent treated as one vector.
+            std::mt19937_64 rng_b((uint64_t) sp->seed_b);
+            std::normal_distribution<float> gauss_b(0.0f, 1.0f);
+            const size_t n = x.size();
+            std::vector<float> nb(n);
+            for (auto & v : nb) v = gauss_b(rng_b);
+            fprintf(stderr, "[SA3] seed breeding: A=%llu B=%lld blend=%.3f\n",
+                    (unsigned long long) seed, (long long) sp->seed_b, bt);
+            if (bt >= 1.0f) {
+                x = nb;
+            } else {
+                double dot = 0.0, na = 0.0, nbb = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    dot += (double) x[i] * nb[i];
+                    na  += (double) x[i] * x[i];
+                    nbb += (double) nb[i] * nb[i];
+                }
+                const double la = sqrt(na), lb = sqrt(nbb);
+                double c = (la > 0.0 && lb > 0.0) ? dot / (la * lb) : 1.0;
+                c = c > 1.0 ? 1.0 : (c < -1.0 ? -1.0 : c);
+                const double om     = acos(c);
+                const bool   nearly = sin(om) < 1e-4;
+                const double wa = nearly ? 1.0 - bt : sin((1.0 - bt) * om) / sin(om);
+                const double wb = nearly ? (double) bt : sin(bt * om) / sin(om);
+                double nl = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    x[i] = (float) (wa * x[i] + wb * nb[i]);
+                    nl += (double) x[i] * x[i];
+                }
+                if (nearly && nl > 0.0) {
+                    const float k = (float) (((1.0 - bt) * la + bt * lb) / sqrt(nl));
+                    for (auto & v : x) v *= k;
+                }
+            }
+        }
     } else {
         // Pad audio to S, encode
         std::vector<float> padded((size_t)2 * S, 0.0f);

@@ -213,6 +213,12 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       steps,
       sampler,
       seed,
+      // Seed breeding: slerp the initial noise toward seedB (engine /sa3-synth).
+      ...(job.params.seedB !== undefined && job.params.seedB !== null && job.params.seedB !== ''
+          && Number(job.params.seedB) >= 0
+        ? { seedB: Math.floor(Number(job.params.seedB)),
+            seedBlend: Math.min(1, Math.max(0, Number(job.params.seedBlend) || 0)) }
+        : {}),
       adapters,
       outFmt: 'f32',   // keep peaks; the post chain owns the ceiling
       // Diagnostic. Set params.sa3DumpLatent to a bare filename to get the
