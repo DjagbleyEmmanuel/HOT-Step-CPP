@@ -7,12 +7,44 @@
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { config, getFFmpegPath } from '../../config.js';
 import { DawError, DAW_API_VERSION, ditKind, isBaseModel, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-export const isLoopback = (addr: string | undefined) => LOOPBACK.has(addr ?? '');
+/** 127.0.0.0/8, ::1, and IPv4-mapped ::ffff:127.0.0.0/8. */
+export function isLoopback(addr: string | undefined): boolean {
+  if (!addr) return false;
+  const a = addr.toLowerCase();
+  if (a === '::1') return true;
+  const v4 = a.startsWith('::ffff:') ? a.slice(7) : a;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
+}
+
+/** Detect audio container from magic bytes: wav, flac, aiff, or null. */
+export function sniffAudio(head: Buffer): 'wav' | 'flac' | 'aiff' | null {
+  if (head.length >= 12 && head.toString('latin1', 0, 4) === 'RIFF' && head.toString('latin1', 8, 12) === 'WAVE') return 'wav';
+  if (head.length >= 4 && head.toString('latin1', 0, 4) === 'fLaC') return 'flac';
+  if (head.length >= 12 && head.toString('latin1', 0, 4) === 'FORM') {
+    const t = head.toString('latin1', 8, 12);
+    if (t === 'AIFF' || t === 'AIFC') return 'aiff';
+  }
+  return null;
+}
+
+/** Read the first bytes of an uploaded file and check them against its extension. */
+export function checkUploadMagic(filePath: string): void {
+  const fd = fs.openSync(filePath, 'r');
+  const head = Buffer.alloc(12);
+  let n = 0;
+  try { n = fs.readSync(fd, head, 0, 12, 0); } finally { fs.closeSync(fd); }
+  const kind = sniffAudio(head.subarray(0, n));
+  const ext = path.extname(filePath).toLowerCase();
+  const want = ext === '.wav' ? 'wav' : ext === '.flac' ? 'flac' : (ext === '.aiff' || ext === '.aif') ? 'aiff' : null;
+  if (!kind || kind !== want) {
+    throw new DawError(400, 'bad_request', `uploaded file is not a valid ${want ?? 'audio'} file (content does not match)`);
+  }
+}
 
 /** Shared secret for non-loopback callers; unset = loopback only. */
 export const dawKey = () => process.env.HOTSTEP_DAW_KEY || '';
@@ -107,19 +139,27 @@ function removeTmp(id: string): void {
 const TTL_MS = 6 * 3600_000;
 const FAILED_TTL_MS = 10 * 60_000;
 
+type Aged = { createdAt: number; finishedAt?: number; finalState?: string };
+function expired(j: Aged, now: number): boolean {
+  if (now - j.createdAt > TTL_MS) return true;
+  const bad = j.finalState === 'failed' || j.finalState === 'cancelled';
+  return bad && now - (j.finishedAt ?? j.createdAt) > FAILED_TTL_MS;
+}
+
+/** Sweep the job maps directly, then orphaned daw_tmp dirs older than the TTL. */
 export function sweepTmp(now = Date.now()): void {
+  for (const map of [jobs, understands] as Map<string, Aged>[]) {
+    for (const [id, j] of map) {
+      if (expired(j, now)) { map.delete(id); try { removeTmp(id); } catch { /* next round */ } }
+    }
+  }
   const root = dawTmpRoot();
   if (!fs.existsSync(root)) return;
   for (const name of fs.readdirSync(root)) {
-    const job = jobs.get(name) ?? understands.get(name);
+    if (jobs.has(name) || understands.has(name)) continue;
     let age: number;
     try { age = now - fs.statSync(path.join(root, name)).mtimeMs; } catch { continue; }
-    const finishedBad = job && 'finalState' in job && (job.finalState === 'failed' || job.finalState === 'cancelled');
-    if (age > TTL_MS || (finishedBad && age > FAILED_TTL_MS)) {
-      removeTmp(name);
-      jobs.delete(name);
-      understands.delete(name);
-    }
+    if (age > TTL_MS) removeTmp(name);
   }
 }
 
@@ -133,14 +173,14 @@ export function startSweeper(): void {
 
 // ── Generate / jobs ────────────────────────────────────────────────────────
 
-interface FacadeJob { id: string; upstreamId: string; seeds: number[]; finalState?: string }
+interface FacadeJob { id: string; upstreamId: string; seeds: number[]; finalState?: string; createdAt: number; finishedAt?: number }
 const jobs = new Map<string, FacadeJob>();
 
 export async function submitGenerate(id: string, req: DawGenerateRequest, params: Record<string, unknown>): Promise<string> {
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
   const seeds = req.seed !== undefined ? Array.from({ length: req.takes ?? 1 }, () => req.seed!) : [];
-  jobs.set(id, { id, upstreamId: data.jobId, seeds });
+  jobs.set(id, { id, upstreamId: data.jobId, seeds, createdAt: Date.now() });
   return id;
 }
 
@@ -159,22 +199,59 @@ async function upstreamStatus(j: FacadeJob): Promise<any> {
 export async function getJob(id: string) {
   const j = requireJob(id);
   const out = mapJobStatus(id, await upstreamStatus(j), j.seeds);
-  if (out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') j.finalState = out.state;
+  if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') && !j.finalState) {
+    j.finalState = out.state;
+    j.finishedAt = Date.now();
+  }
   return out;
 }
 
 export async function cancelJob(id: string) {
   const j = requireJob(id);
+  // Finished jobs keep their state; cancel is a no-op on them.
+  if (j.finalState === 'done' || j.finalState === 'failed' || j.finalState === 'cancelled') {
+    return { api: DAW_API_VERSION, id, state: j.finalState };
+  }
   const { status, data } = await call('POST', `/api/generate/cancel/${j.upstreamId}`);
   if (status !== 200) throw upstreamError(status, data);
   j.finalState = 'cancelled';
-  return { api: DAW_API_VERSION, id, state: 'cancelled' as const };
+  j.finishedAt = Date.now();
+  return { api: DAW_API_VERSION, id, state: 'cancelled' };
 }
 
 function runFfmpeg(args: string[]): Promise<void> {
   const ff = getFFmpegPath();
   if (!ff) return Promise.reject(new DawError(500, 'upstream_error', 'ffmpeg not available'));
-  return new Promise((resolve, reject) => execFile(ff, args, { timeout: 120_000 }, (err) => err ? reject(err) : resolve()));
+  // On timeout execFile kills the child with killSignal before rejecting.
+  return new Promise((resolve, reject) => execFile(ff, args, { timeout: 120_000, killSignal: 'SIGKILL' }, (err) => err ? reject(err) : resolve()));
+}
+
+type Converter = (src: string, dst: string) => Promise<void>;
+let converter: Converter = (src, dst) => runFfmpeg(['-y', '-i', src, '-ar', '48000', '-ac', '2', '-c:a', 'pcm_f32le', dst]);
+/** Test hook: swap the WAV converter. Returns the previous one. */
+export function __setConverter(c: Converter): Converter { const prev = converter; converter = c; return prev; }
+
+const inflight = new Map<string, Promise<void>>();
+
+/** Convert src to out once; concurrent callers share one conversion. Unique .part, atomic rename. */
+export function convertOnce(src: string, out: string): Promise<void> {
+  if (fs.existsSync(out)) return Promise.resolve();
+  const pending = inflight.get(out);
+  if (pending) return pending;
+  const part = `${out}.${crypto.randomBytes(6).toString('hex')}.part.wav`;
+  const p = (async () => {
+    try {
+      await converter(src, part);
+      fs.renameSync(part, out);
+    } catch (e) {
+      try { fs.rmSync(part, { force: true }); } catch { /* ignore */ }
+      throw e;
+    } finally {
+      inflight.delete(out);
+    }
+  })();
+  inflight.set(out, p);
+  return p;
 }
 
 /** Path of a cached 48 kHz float32 stereo WAV for take n, converting on first use. */
@@ -190,22 +267,18 @@ export async function takeWavPath(id: string, n: number): Promise<string> {
     throw new DawError(404, 'not_found', `take ${n} audio file is missing`);
   }
   const out = path.join(newTmpDir(id), `take_${n}.wav`);
-  if (!fs.existsSync(out)) {
-    const part = `${out}.part.wav`;
-    await runFfmpeg(['-y', '-i', src, '-ar', '48000', '-ac', '2', '-c:a', 'pcm_f32le', part]);
-    fs.renameSync(part, out);
-  }
+  await convertOnce(src, out);
   return out;
 }
 
 // ── Understand ─────────────────────────────────────────────────────────────
 
-interface UnderstandJob { id: string; finalState?: 'done' | 'failed'; result?: any; error?: string }
+interface UnderstandJob { id: string; finalState?: 'done' | 'failed'; result?: any; error?: string; createdAt: number; finishedAt?: number }
 const understands = new Map<string, UnderstandJob>();
 
 /** Start analysis; resolves with the result if it finishes within waitMs, else null (poll). */
 export async function startUnderstand(id: string, filePath: string, waitMs = 5000): Promise<{ id: string; result: any | null }> {
-  const u: UnderstandJob = { id };
+  const u: UnderstandJob = { id, createdAt: Date.now() };
   understands.set(id, u);
   const work = call('POST', '/api/analyze', { audioUrl: filePath }).then(({ status, data }) => {
     if (status !== 200) throw upstreamError(status, data);
@@ -219,7 +292,8 @@ export async function startUnderstand(id: string, filePath: string, waitMs = 500
       tags: data.tags ?? [],
     };
     u.finalState = 'done';
-  }).catch((e: any) => { u.finalState = 'failed'; u.error = e?.message ?? String(e); });
+    u.finishedAt = Date.now();
+  }).catch((e: any) => { u.finalState = 'failed'; u.finishedAt = Date.now(); u.error = e?.message ?? String(e); });
   await Promise.race([work, new Promise((r) => setTimeout(r, waitMs))]);
   return { id, result: u.finalState ? getUnderstand(id) : null };
 }
@@ -233,3 +307,9 @@ export function getUnderstand(id: string) {
 }
 
 export const newId = () => uuidv4();
+
+/** Test hooks for the job map. */
+export const __test = {
+  addJob: (j: FacadeJob) => { jobs.set(j.id, j); },
+  hasJob: (id: string) => jobs.has(id),
+};

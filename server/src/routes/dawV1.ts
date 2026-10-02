@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import {
-  cancelJob, dawKey, getDitInfo, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
+  cancelJob, checkUploadMagic, dawKey, getDitInfo, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
   startSweeper, startUnderstand, submitGenerate, takeWavPath,
 } from '../services/daw/dawFacade.js';
 import { DawError, errorBody, modeNeedsSource, parseDawRequest, resolveDitModel, toGenerateParams } from '../services/daw/dawSchema.js';
@@ -58,7 +58,15 @@ const wrap = (fn: (req: Request, res: Response) => Promise<void>) =>
 
 /** Run multer and route its errors through the envelope. */
 const withUpload = (fields: multer.Field[]) => (req: Request, res: Response, next: NextFunction) =>
-  upload.fields(fields)(req, res, (err?: unknown) => err ? fail(res, err) : next());
+  upload.fields(fields)(req, res, (err?: unknown) => {
+    if (err) { fail(res, err); return; }
+    try {
+      for (const list of Object.values((req.files as Record<string, Express.Multer.File[]> | undefined) ?? {})) {
+        for (const f of list) checkUploadMagic(f.path);
+      }
+    } catch (e) { fail(res, e); return; }
+    next();
+  });
 
 const fileOf = (req: Request, field: string): Express.Multer.File | undefined =>
   (req.files as Record<string, Express.Multer.File[]> | undefined)?.[field]?.[0];
