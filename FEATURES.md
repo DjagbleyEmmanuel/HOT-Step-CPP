@@ -79,6 +79,7 @@ The global bar holds every setting that applies to a render, whichever studio st
 | Latent post-processing | Latent shift, latent rescale and custom timestep lists. |
 | Denoiser and LSS | An in-engine spectral gate after decode and a latent spectral suppressor before it. |
 | Seed Manager | Save, star, search and reload seeds; the seed actually used is stored with each song. |
+| Seed breeding | Blend the initial noise of two seeds (`seedB`, `seedBlend`) to get children between two keeper takes. API only for now. |
 | LM seed lock | The LM seed follows the DiT seed, or runs independently with its own seed manager. |
 | LM controls | Chain-of-thought caption, temperature, CFG, top-k, top-p, negative prompt, and Presence, Frequency or DRY repetition penalties. |
 | LM codes strength | How many DiT steps the LM's codes condition. Repeat renders with the same seed can reuse cached codes. |

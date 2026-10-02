@@ -105,6 +105,14 @@ export function translateParams(params: any): AceRequest {
     req.lm_seed = params.lmSeed;
   }
 
+  // Seed breeding: slerp the DiT initial noise toward a second seed.
+  if (params.seedB !== undefined && params.seedB !== null && params.seedB !== '' && Number(params.seedB) >= 0) {
+    req.seed_b = Math.floor(Number(params.seedB));
+    if (params.seedBlend !== undefined) {
+      req.seed_blend = Math.min(1, Math.max(0, Number(params.seedBlend) || 0));
+    }
+  }
+
   // Batch
   if (params.batchSize) req.lm_batch_size = params.batchSize;
 

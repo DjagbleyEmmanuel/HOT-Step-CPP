@@ -1618,6 +1618,9 @@ static void synth_worker(std::shared_ptr<Job>    job,
         for (int i = 0; i < sbs; i++) {
             AceRequest v = r;
             v.seed       = base_seed + i;
+            if (r.seed_b >= 0) {
+                v.seed_b = r.seed_b + i;  // seed breeding follows the per-item offset
+            }
             groups[0].push_back(v);
         }
         off += sbs;

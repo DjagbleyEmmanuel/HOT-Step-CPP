@@ -965,6 +965,46 @@ void ops_init_noise(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
         philox_randn(reqs[b].seed, dst, s.Oc * s.T, /*bf16_round=*/true);
         fprintf(stderr, "[Init-Noise Batch%d] Philox noise seed=%lld, [%d, %d] solver=%s\n", b,
                 (long long) reqs[b].seed, s.T, s.Oc, s.rr.solver.c_str());
+
+        // Seed breeding: slerp this item's noise toward a second seed's noise
+        // (whole item treated as one vector). blend 0 = A exactly, 1 = B exactly.
+        const float t = reqs[b].seed_blend;
+        if (reqs[b].seed_b >= 0 && t > 0.0f) {
+            const size_t       n = (size_t) s.Oc * s.T;
+            std::vector<float> nb(n);
+            philox_randn(reqs[b].seed_b, nb.data(), (int) n, /*bf16_round=*/true);
+            fprintf(stderr, "[Init-Noise Batch%d] seed breeding: A=%lld B=%lld blend=%.3f\n", b,
+                    (long long) reqs[b].seed, (long long) reqs[b].seed_b, t);
+            if (t >= 1.0f) {
+                memcpy(dst, nb.data(), n * sizeof(float));
+            } else {
+                double dot = 0.0, na = 0.0, nbb = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    dot += (double) dst[i] * nb[i];
+                    na += (double) dst[i] * dst[i];
+                    nbb += (double) nb[i] * nb[i];
+                }
+                const double la = sqrt(na), lb = sqrt(nbb);
+                double       c  = (la > 0.0 && lb > 0.0) ? dot / (la * lb) : 1.0;
+                c               = c > 1.0 ? 1.0 : (c < -1.0 ? -1.0 : c);
+                const double om     = acos(c);
+                const bool   nearly = sin(om) < 1e-4;
+                const double wa     = nearly ? 1.0 - t : sin((1.0 - t) * om) / sin(om);
+                const double wb     = nearly ? (double) t : sin(t * om) / sin(om);
+                double       nl     = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    dst[i] = (float) (wa * dst[i] + wb * nb[i]);
+                    nl += (double) dst[i] * dst[i];
+                }
+                if (nearly && nl > 0.0) {
+                    // normalized lerp: rescale to the interpolated norm
+                    const float k = (float) (((1.0 - t) * la + t * lb) / sqrt(nl));
+                    for (size_t i = 0; i < n; i++) {
+                        dst[i] *= k;
+                    }
+                }
+            }
+        }
     }
 
     // cover_noise_strength: blend initial noise with clean source latents.

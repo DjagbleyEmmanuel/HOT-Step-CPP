@@ -1838,6 +1838,7 @@ int ace_lm_generate(AceLm *            ctx,
             out[b].audio_codes = batch_codes[b];
         }
         out[b].seed          = dit_seed + b;
+        out[b].seed_b        = req->seed_b >= 0 ? req->seed_b + b : -1;
         out[b].lm_seed       = req->lm_seed + b;
         out[b].lm_batch_size = 1;  // each output is a standalone enriched request
 

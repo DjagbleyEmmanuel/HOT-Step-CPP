@@ -53,6 +53,8 @@ struct AceRequest {
                                // 32 bits. Stored in int64_t to land positive
                                // after rd(). Range [0, UINT32_MAX], matches the
                                // Python ACE-Step reference (random.randint(0, 2**32 - 1)).
+    int64_t seed_b;            // -1 = off. Seed breeding: second DiT noise seed.
+    float   seed_blend;        // 0 = seed A only, 1 = seed B only (slerp of initial noise)
 
     // LM control
     float       lm_temperature;      // 0.85

@@ -127,6 +127,13 @@ means no specific language, any other code is used as given.
 **`seed`** (int64, `-1` = random). Seed for the DiT's Philox noise; the low 32 bits
 are used. Resolved once per input request.
 
+**`seed_b`** (int64, `-1` = off) and **`seed_blend`** (float 0 to 1, default 0). Seed
+breeding: the initial DiT noise is a slerp from the `seed` noise toward the `seed_b`
+noise (each batch item treated as one vector, normalized lerp when nearly parallel).
+`0` gives `seed` exactly, `1` gives `seed_b` exactly. Synth batch items offset
+`seed_b` by the same `+i` as `seed`. Ignored by the streaming path. API field names
+on `/api/generate`: `seedB`, `seedBlend`.
+
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
 item `b` of `/lm` gets `lm_seed + b`.
