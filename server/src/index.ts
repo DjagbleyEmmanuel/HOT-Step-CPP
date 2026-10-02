@@ -62,6 +62,7 @@ import preferencesRoutes from './routes/preferences.js';
 import studioDraftsRoutes from './routes/studioDrafts.js';
 import streamSessionsRoutes from './routes/streamSessions.js';
 import exportImportRoutes from './routes/exportImport.js';
+import dawV1Routes from './routes/dawV1.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -136,6 +137,7 @@ app.use('/api/stream-sessions', streamSessionsRoutes);
 app.use('/api/export-import', exportImportRoutes);
 // Repaint and Stem Builder kinds have no route of their own to register from.
 registerRepaintLayerWorkflows();
+app.use('/api/v1/daw', dawV1Routes);
 // Mounted at '/api' (not '/api/backends') — the router spells its own full
 // sub-paths (/backends, /backends/active, /capabilities) per the plan's
 // top-level /api/capabilities path (docs/plans/multi-backend-architecture.md §4.2).

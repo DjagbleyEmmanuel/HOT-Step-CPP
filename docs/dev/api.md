@@ -709,6 +709,18 @@ Total: <!-- generated:start route-count -->
 | `POST` | `/api/export-import/imports` | `server/src/routes/exportImport.ts` |
 | `POST` | `/api/export-import/profiles/validate` | `server/src/routes/exportImport.ts` |
 
+### `/api/v1/daw`
+
+| Method | Path | Defined in |
+|---|---|---|
+| `GET` | `/api/v1/daw/status` | `server/src/routes/dawV1.ts` |
+| `POST` | `/api/v1/daw/understand` | `server/src/routes/dawV1.ts` |
+| `GET` | `/api/v1/daw/understand/:id` | `server/src/routes/dawV1.ts` |
+| `POST` | `/api/v1/daw/generate` | `server/src/routes/dawV1.ts` |
+| `GET` | `/api/v1/daw/jobs/:id` | `server/src/routes/dawV1.ts` |
+| `GET` | `/api/v1/daw/jobs/:id/audio` | `server/src/routes/dawV1.ts` |
+| `POST` | `/api/v1/daw/jobs/:id/cancel` | `server/src/routes/dawV1.ts` |
+
 ### `/api`
 
 | Method | Path | Defined in |
