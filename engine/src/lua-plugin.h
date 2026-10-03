@@ -757,6 +757,10 @@ static void lua_call_solver_step(LuaPlugin & plugin,
     lua_setglobal(L, "n_per");
     lua_pushinteger(L, (lua_Integer) job_seed);
     lua_setglobal(L, "seed");
+    lua_pushinteger(L, (lua_Integer) state.seed_b);
+    lua_setglobal(L, "seed_b");
+    lua_pushnumber(L, (double) state.seed_blend);
+    lua_setglobal(L, "seed_blend");
 
     // Push step function
     lua_getglobal(L, "step");
