@@ -242,6 +242,22 @@ test('SA3 failing the 3rd of 4 takes leaves the job partial with 2 takes', async
   } finally { __setCaller(prevC); __setPollMs(prevP); __setRetryDelays(prevR); }
 });
 
+test('SA3 cancel after the last take finished keeps the job done', async () => {
+  const up = fakeUpstream('sa3', 1);
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('sa3-late-cancel', { mode: 'text2music', caption: 'x', takes: 2, seed: 3 } as any, {});
+    await __test.getJob('sa3-late-cancel')!.seq?.done;
+    const c = await cancelJob('sa3-late-cancel');
+    const st = await getJob('sa3-late-cancel') as any;
+    console.log('late cancel: cancel state', c.state, 'job state', st.state, 'takes', st.takes.length, 'upstream cancels', up.cancels.length);
+    assert.equal(c.state, 'done');
+    assert.equal(st.state, 'done');
+    assert.equal(st.takes.length, 2);
+    assert.equal(up.cancels.length, 0);
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
+});
+
 test('SA3 job swept from the map stops submitting takes', async () => {
   const up = fakeUpstream('sa3', 2);
   const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
@@ -252,8 +268,9 @@ test('SA3 job swept from the map stops submitting takes', async () => {
     const before = up.posts.length;
     __test.removeJob('sa3-swept');
     await done;
-    console.log('swept: posts before sweep', before, 'after', up.posts.length);
+    console.log('swept: posts before sweep', before, 'after', up.posts.length, 'upstream cancels', JSON.stringify(up.cancels));
     assert.equal(up.posts.length, before);
+    assert.deepEqual(up.cancels, ['up0']);
   } finally { __setCaller(prevC); __setPollMs(prevP); }
 });
 

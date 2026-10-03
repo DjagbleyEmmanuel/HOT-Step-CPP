@@ -78,6 +78,8 @@ async function httpCall(method: string, route: string, body?: unknown, retry = t
     method,
     headers: { Authorization: `Bearer ${await getToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
+    // Metadata lookups must not hang a DAW request on a stuck server.
+    ...(method === 'GET' && (route === '/api/models' || route === '/api/backends') ? { signal: AbortSignal.timeout(10_000) } : {}),
   });
   // Tokens live in memory upstream; mint a fresh one after a server restart.
   if (r.status === 401 && retry) { token = null; return httpCall(method, route, body, false); }
@@ -306,7 +308,16 @@ async function pollStatus(upstreamId: string): Promise<any> {
  */
 async function runSequential(j: FacadeJob, params: Record<string, unknown>): Promise<void> {
   const seq = j.seq!;
-  const swept = () => jobs.get(j.id) !== j;
+  // Swept from the map: stop, and cancel the in-flight take so the GPU stops.
+  const swept = (): boolean => {
+    if (jobs.get(j.id) === j) return false;
+    const cur = seq.upstreamIds.length - 1;
+    if (cur >= 0 && !seq.results[cur] && !seq.cancelled) {
+      seq.cancelled = true;
+      void call('POST', `/api/generate/cancel/${seq.upstreamIds[cur]}`).catch(() => null);
+    }
+    return true;
+  };
   const fail = (i: number, msg: string): void => {
     if (seq.results.slice(0, i).some((r) => r?.status === 'succeeded')) { seq.partial = true; seq.failed = msg; return; }
     throw new Error(msg);
@@ -433,6 +444,12 @@ export async function cancelJob(id: string) {
   // Sequential: flag first so the runner submits no further takes.
   let target: string | null = j.upstreamId;
   if (j.seq) {
+    // Every take already rendered: nothing to stop, the job is done.
+    if (j.seq.results.length === j.seq.takes && j.seq.results.every((r) => r?.status === 'succeeded')) {
+      j.finalState = 'done';
+      j.finishedAt = Date.now();
+      return { api: DAW_API_VERSION, id, state: 'done' };
+    }
     j.seq.cancelled = true;
     // Only cancel a take whose result is not recorded yet: upstream would
     // overwrite a finished take to cancelled. If the next submit is in

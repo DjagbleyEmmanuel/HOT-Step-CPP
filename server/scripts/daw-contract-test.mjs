@@ -71,7 +71,7 @@ function parseWav(buf) {
   return out;
 }
 
-async function pollJob(id, capS = 300, until = (s) => ['done', 'failed', 'cancelled'].includes(s)) {
+async function pollJob(id, capS = 300, until = (s) => ['done', 'failed', 'cancelled', 'partial'].includes(s)) {
   const t0 = Date.now();
   let last = null;
   while ((Date.now() - t0) / 1000 < capS) {
