@@ -193,6 +193,8 @@ async function capabilities(): Promise<BackendCapabilities> {
       // back from models().
       adapters: props != null && props.adapters.length > 0,
       lmAdapters: false,
+      lmAdapterSelectable: false,
+      forcedAlignment: false,
       // VST chain + mastering read the rate from the WAV; SA3 is 44.1k native.
       postProcess: true,
       // Refining SA3 output with SA3 is legal but a no-op in spirit. Off.
