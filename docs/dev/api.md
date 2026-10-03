@@ -788,3 +788,13 @@ the same job shape on every backend:
   each take to that length with a 10 ms fade-out. Trimmed takes report the requested
   `duration_s` and the original length in `trimmed_from_s` (null when no trim was needed).
   A render shorter than requested is returned as is, never padded.
+- **Time estimates.** `GET /status` returns `eta` (the active backend, with `backend` and
+  `loaded` keys) and `eta_by_backend` for `ace_turbo`, `ace_base`, `sa3` and `yue2`. Each
+  entry is `{ base_s, per_take_s, per_audio_s, cold_load_s, source }`. Estimate =
+  `base_s + per_take_s * (takes - 1) + per_audio_s * duration_s`, plus `cold_load_s` when
+  that backend is not the one last run (SA3 and YuE2 do not both fit in 16 GB, so any
+  switch counts as cold). Defaults (`source: "default"`) come from the 2026-10-02 warm
+  bench on a 4070 Ti Super; each finished facade job pulls its backend's estimate 30%
+  toward the observed wall time (EMA, in memory only) and marks it `"measured"`.
+  `POST /generate` and `GET /jobs/:id` return `eta_s`, the remaining seconds (estimate
+  minus elapsed, floor 0, 0 once finished).

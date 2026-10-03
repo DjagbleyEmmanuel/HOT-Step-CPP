@@ -13,6 +13,8 @@ import { config, getFFmpegPath } from '../../config.js';
 import { DawError, DAW_API_VERSION, ditKind, isBaseModel, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
 
 /** 127.0.0.0/8, ::1, and IPv4-mapped ::ffff:127.0.0.0/8. */
+import { etaKey, estimate, recordRun, getFigures, getLoaded, etaByBackend, type EtaBackend } from './dawEta.js';
+
 export function isLoopback(addr: string | undefined): boolean {
   if (!addr) return false;
   const a = addr.toLowerCase();
@@ -96,6 +98,13 @@ function upstreamError(status: number, data: any): DawError {
 // ── Status ─────────────────────────────────────────────────────────────────
 
 export async function getStatus() {
+  const [st, active] = await Promise.all([getStatusBase(), activeBackend().catch(() => undefined)]);
+  const key = etaKey(active, st.loaded_model);
+  const f = getFigures(key);
+  return { ...st, eta: { backend: key, loaded: getLoaded(), ...f }, eta_by_backend: etaByBackend() };
+}
+
+async function getStatusBase() {
   const [health, models, caps] = await Promise.all([
     call('GET', '/api/health').catch(() => null),
     call('GET', '/api/models').catch(() => null),
@@ -191,6 +200,7 @@ interface FacadeJob {
   /** YuE2 only: requested length; longer takes are trimmed on export. */
   trimTo?: number;
   seq?: SeqState;
+  eta?: { key: EtaBackend; takes: number; durationS: number; estS: number; cold: boolean; recorded?: boolean };
 }
 interface SeqState {
   takes: number;
@@ -220,13 +230,17 @@ const randomSeed = () => Math.floor(Math.random() * 0x7fffffff);
 export async function submitGenerate(id: string, req: DawGenerateRequest, params: Record<string, unknown>): Promise<string> {
   const backend = await activeBackend();
   const takes = req.takes ?? 1;
+  const key = etaKey(backend, req.dit_model ?? null);
+  const durationS = req.duration_s ?? 30;
+  const cold = getLoaded() !== key;
+  const eta = { key, takes, durationS, estS: estimate(key, takes, durationS), cold };
   const trimTo = backend === 'yue2' && req.duration_s !== undefined ? req.duration_s : undefined;
   if (backend === 'sa3' && takes > 1) {
     // SA3 ignores batchSize, so run N single-take jobs with distinct seeds.
     const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
     const first = await submitOne(params, seeds[0]);
     const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
-    const j: FacadeJob = { id, upstreamId: first, seeds, backend, seq, createdAt: Date.now() };
+    const j: FacadeJob = { id, upstreamId: first, seeds, backend, seq, eta, createdAt: Date.now() };
     jobs.set(id, j);
     seq.done = runSequential(j, params).catch((e) => { seq.failed = e?.message ?? String(e); });
     return id;
@@ -234,7 +248,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
   const seeds = req.seed !== undefined ? Array.from({ length: takes }, () => req.seed!) : [];
-  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, trimTo, createdAt: Date.now() });
+  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, trimTo, eta, createdAt: Date.now() });
   return id;
 }
 
@@ -310,6 +324,14 @@ async function sequentialStatus(j: FacadeJob): Promise<any> {
   };
 }
 
+/** Remaining seconds for a job: estimate minus elapsed, floor 0. */
+export function jobEtaS(jOrId: string | FacadeJob, now = Date.now()): number | null {
+  const j = typeof jOrId === 'string' ? jobs.get(jOrId) : jOrId;
+  if (!j?.eta) return null;
+  if (j.finalState) return 0;
+  return Math.max(0, Math.round((j.eta.estS - (now - j.createdAt) / 1000) * 10) / 10);
+}
+
 export async function getJob(id: string) {
   const j = requireJob(id);
   const out: ReturnType<typeof mapJobStatus> & { take_count?: number; takes_done?: number } =
@@ -325,7 +347,12 @@ export async function getJob(id: string) {
   if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') && !j.finalState) {
     j.finalState = out.state;
     j.finishedAt = Date.now();
+    if (out.state === 'done' && j.eta && !j.eta.recorded) {
+      j.eta.recorded = true;
+      recordRun(j.eta.key, j.eta.takes, j.eta.durationS, (j.finishedAt - j.createdAt) / 1000, j.eta.cold);
+    }
   }
+  (out as Record<string, unknown>).eta_s = jobEtaS(j);
   return out;
 }
 

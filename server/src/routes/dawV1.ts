@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import {
   cancelJob, checkUploadMagic, dawKey, getDitInfo, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
   startSweeper, startUnderstand, submitGenerate, takeWavPath,
+  jobEtaS,
 } from '../services/daw/dawFacade.js';
 import { DawError, errorBody, modeNeedsSource, parseDawRequest, resolveDitModel, toGenerateParams } from '../services/daw/dawSchema.js';
 
@@ -99,7 +100,7 @@ router.post('/generate', assignId, withUpload([{ name: 'src_audio', maxCount: 1 
   const ref = fileOf(req, 'ref_audio');
   if (ref) params.timbreReference = ref.path;
   const id = await submitGenerate((req as any).dawId, dawReq, params);
-  res.status(202).json({ api: 1, id, state: 'queued' });
+  res.status(202).json({ api: 1, id, state: 'queued', eta_s: jobEtaS(id) });
 }));
 
 router.get('/jobs/:id', wrap(async (req, res) => { res.json(await getJob(String(req.params.id))); }));
