@@ -8,6 +8,7 @@
 import React, { useRef, useCallback, useEffect } from 'react';
 import { hoverCardIsOpen } from '../shared/ParamLabel';
 import { Toggle, type ToggleAccent } from '../shared/Toggle';
+import { BottomSheet, useIsMobile } from '../shared/BottomSheet';
 
 // ── Accent color lookup ────────────────────────────────────────────────────
 // Tailwind JIT can't compile dynamic class names like `bg-${color}-500/10`,
@@ -66,6 +67,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
   isOpen, onOpen, onClose, headerToggle,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const accent = ACCENT_STYLES[accentColor] || ACCENT_STYLES.pink;
@@ -231,7 +233,17 @@ export const BarSection: React.FC<BarSectionProps> = ({
           this panel rather than under the label that opened it: a card anchored
           to the label lands squarely on the knobs below it, and you have to
           dismiss it before you can reach them. */}
-      {isOpen && (
+      {/* Phones: the same panel as a bottom sheet, since a dropdown under a
+          40px header leaves little room on a small screen. */}
+      {isOpen && isMobile && (
+        <BottomSheet open onClose={() => { pinned.current = false; cancelClose(); onClose(); }} title={label} ariaLabel={label}>
+          <div data-hovercard-boundary className="px-4 pb-4 space-y-3">
+            {children}
+          </div>
+        </BottomSheet>
+      )}
+
+      {isOpen && !isMobile && (
         <div
           data-hovercard-boundary
           className="absolute top-full left-0 z-50 w-full min-w-[300px] max-h-[calc(100vh-120px)] overflow-y-auto

@@ -104,6 +104,8 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | Quality evaluator | Spectral scoring of the unprocessed or processed audio, shown as a badge in the Library. |
 | Tiled decoder | A postprocess plugin can replace the built-in VAE decode. |
 
+- **Mobile bottom sheets**: on phones the per-song actions menu and the parameter bar section panels open as bottom sheets (drag handle, swipe down or Esc to dismiss, focus trapped, safe-area padded); desktop keeps the dropdowns.
+
 ## Auto-Gen
 
 Genre-first song creation that fills in everything else. Details: [Auto-Gen](docs/user/studios/insta-gen.md)
