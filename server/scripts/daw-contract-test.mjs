@@ -176,6 +176,12 @@ async function main() {
     check('lego with non-base dit_model -> 422', ln.status === 422 && ln.json?.error?.code === 'base_model_required', `http ${ln.status} code=${ln.json?.error?.code}`);
   }
 
+  // model field: unknown name and turbo+lego are 400 (no render needed)
+  const mu = await req('POST', '/generate', genForm({ mode: 'text2music', caption: 'x', model: 'no-such-model.gguf' }));
+  check('unknown model -> 400 unknown_model', mu.status === 400 && mu.json?.error?.code === 'unknown_model', `http ${mu.status} code=${mu.json?.error?.code}`);
+  const mt = await req('POST', '/generate', genForm({ mode: 'lego', caption: 'bass', model: 'turbo' }, wav));
+  check('lego with model turbo -> 400', mt.status === 400 && mt.json?.error?.code === 'bad_request', `http ${mt.status} code=${mt.json?.error?.code}`);
+
   // cancel
   const c = await req('POST', '/generate', genForm({ mode: 'text2music', caption: 'slow ambient pad', duration_s: 60, seed: 4242, skip_lm: true }));
   if (c.json?.id) {

@@ -199,6 +199,8 @@ export function startSweeper(): void {
 interface FacadeJob {
   id: string; upstreamId: string; seeds: number[]; finalState?: string; createdAt: number; finishedAt?: number;
   backend?: string;
+  /** DiT model sent upstream (null = whatever is loaded). */
+  ditModel?: string | null;
   /** YuE2 only: requested length; longer takes are trimmed on export. */
   trimTo?: number;
   seq?: SeqState;
@@ -267,7 +269,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
     const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
     const first = await submitOne(params, seeds[0]);
     const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
-    const j: FacadeJob = { id, upstreamId: first, seeds, backend, seq, eta, createdAt: Date.now() };
+    const j: FacadeJob = { id, upstreamId: first, seeds, backend, ditModel: req.dit_model ?? null, seq, eta, createdAt: Date.now() };
     jobs.set(id, j);
     seq.done = runSequential(j, params).catch((e) => { seq.failed = e?.message ?? String(e); });
     return id;
@@ -275,7 +277,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
   const seeds = req.seed !== undefined ? Array.from({ length: takes }, () => req.seed!) : [];
-  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, trimTo, eta, createdAt: Date.now() });
+  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, ditModel: req.dit_model ?? null, trimTo, eta, createdAt: Date.now() });
   return id;
 }
 
@@ -432,6 +434,8 @@ export async function getJob(id: string) {
     j.lastPollAt = seenAt;
   }
   (out as Record<string, unknown>).eta_s = jobEtaS(j);
+  (out as Record<string, unknown>).dit_model = j.ditModel ?? null;
+  if (j.eta) (out as Record<string, unknown>).eta_backend = j.eta.key;
   return out;
 }
 

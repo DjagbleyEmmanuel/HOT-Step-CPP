@@ -775,6 +775,16 @@ Total: <!-- generated:start route-count -->
 The facade in `server/src/services/daw/` evens out two backend quirks so DAW clients see
 the same job shape on every backend:
 
+- **Model choice (ACE-Step).** `POST /generate` takes an optional `model`: `"turbo"`,
+  `"base"` or an exact installed DiT file name (the `dit_models` list in `GET /status`).
+  `turbo` and `base` pick an installed model of that kind, preferring the loaded one when
+  it matches. The choice is sent as the generate `ditModel`. An unknown name, or a kind
+  with nothing installed, is 400 `unknown_model` listing what is installed. `lego` still
+  needs a base model: `model: "turbo"` with `lego` is 400 `bad_request`, and an exact
+  non-base name is 422 `base_model_required`. `model` wins over the older `dit_model`
+  field. The `POST /generate` response and `GET /jobs/:id` report `dit_model` (null when
+  the loaded model was left as is), and `GET /jobs/:id` reports `eta_backend`
+  (`ace_turbo` or `ace_base` follows the chosen model).
 - **Stable Audio 3 takes.** SA3 renders one take per job and ignores `takes`. When the
   active backend is `sa3` and `takes` is above 1, the facade submits that many single-take
   jobs back to back under one facade job id. Each take gets its own seed: `seed + i` when a

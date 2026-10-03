@@ -96,3 +96,32 @@ test('lego auto-picks a base model (loaded one first); repaint and complete gati
   assert.equal(rep, undefined);
   assert.equal(complete, '400 unsupported_mode');
 });
+
+test('model field: turbo, base, exact name, unknown 400, turbo+lego 400', async () => {
+  const s: any = await import('./dawSchema.js');
+  const list = ['acestep-v15-base-Q8_0.gguf', 'acestep-v15-turbo-Q8_0.gguf', 'acestep-v15-turbo-shift3-Q8_0.gguf', 'acestep-v15-sft-Q8_0.gguf'];
+  const run = (raw: any, loaded: string | null = null) => {
+    try { return s.resolveDitModel(s.parseDawRequest(raw), list, loaded); } catch (e: any) { return `${e.status} ${e.code}: ${e.message}`; }
+  };
+  const t2m = { mode: 'text2music', caption: 'x' };
+  const turbo = run({ ...t2m, model: 'turbo' }, 'acestep-v15-base-Q8_0.gguf');
+  const turboLoaded = run({ ...t2m, model: 'turbo' }, 'acestep-v15-turbo-shift3-Q8_0.gguf');
+  const base = run({ ...t2m, model: 'base' }, 'acestep-v15-turbo-Q8_0.gguf');
+  const exact = run({ ...t2m, model: 'acestep-v15-sft-Q8_0.gguf' });
+  const unknown = run({ ...t2m, model: 'nope.gguf' });
+  const legoTurbo = run({ mode: 'lego', caption: 'b', model: 'turbo' });
+  const legoBase = run({ mode: 'lego', caption: 'b', model: 'base' });
+  console.log('model turbo:', turbo, '| turbo loaded:', turboLoaded, '| base:', base, '| exact:', exact);
+  console.log('model unknown:', unknown, '| lego turbo:', legoTurbo, '| lego base:', legoBase);
+  assert.equal(turbo, 'acestep-v15-turbo-Q8_0.gguf');
+  assert.equal(turboLoaded, 'acestep-v15-turbo-shift3-Q8_0.gguf');
+  assert.equal(base, 'acestep-v15-base-Q8_0.gguf');
+  assert.equal(exact, 'acestep-v15-sft-Q8_0.gguf');
+  assert.match(String(unknown), /^400 unknown_model: .*acestep-v15-sft-Q8_0\.gguf/);
+  assert.match(String(legoTurbo), /^400 bad_request: lego needs a base/);
+  assert.equal(legoBase, 'acestep-v15-base-Q8_0.gguf');
+  // model type check
+  assert.match(String(run({ ...t2m, model: 5 })), /^400 bad_request/);
+  const p = s.toGenerateParams({ ...s.parseDawRequest(t2m), dit_model: turbo });
+  assert.equal(p.ditModel, 'acestep-v15-turbo-Q8_0.gguf');
+});

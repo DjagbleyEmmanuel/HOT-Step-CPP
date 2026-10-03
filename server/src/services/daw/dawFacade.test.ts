@@ -420,3 +420,16 @@ test('recording does not mark loaded when the backend changed since', async () =
     assert.notEqual(getLoaded(), 'ace_turbo');
   } finally { __setCaller(prevC); }
 });
+
+test('job response reports the chosen dit_model and its eta backend', async () => {
+  resetEta();
+  const up = instantUpstream('ace', 'acestep-v15-base-Q8.gguf');
+  const prevC = __setCaller(up.caller);
+  try {
+    await submitGenerate('pick-turbo', { mode: 'text2music', caption: 'x', model: 'turbo', dit_model: 'acestep-v15-turbo-Q8.gguf' } as any, {});
+    const job: any = await getJob('pick-turbo');
+    console.log('pick-turbo: dit_model', job.dit_model, 'eta_backend', job.eta_backend);
+    assert.equal(job.dit_model, 'acestep-v15-turbo-Q8.gguf');
+    assert.equal(job.eta_backend, 'ace_turbo');
+  } finally { __setCaller(prevC); }
+});

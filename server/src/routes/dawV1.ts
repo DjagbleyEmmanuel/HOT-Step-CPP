@@ -92,7 +92,7 @@ router.post('/generate', assignId, withUpload([{ name: 'src_audio', maxCount: 1 
   const dawReq = parseDawRequest(raw);
   const src = fileOf(req, 'src_audio');
   if (modeNeedsSource(dawReq.mode) && !src) throw new DawError(400, 'bad_request', `mode ${dawReq.mode} needs src_audio`);
-  if (dawReq.mode === 'lego') {
+  if (dawReq.mode === 'lego' || dawReq.model !== undefined) {
     const { dit, loaded } = await getDitInfo();
     dawReq.dit_model = resolveDitModel(dawReq, dit, loaded);
   }
@@ -100,7 +100,7 @@ router.post('/generate', assignId, withUpload([{ name: 'src_audio', maxCount: 1 
   const ref = fileOf(req, 'ref_audio');
   if (ref) params.timbreReference = ref.path;
   const id = await submitGenerate((req as any).dawId, dawReq, params);
-  res.status(202).json({ api: 1, id, state: 'queued', eta_s: jobEtaS(id) });
+  res.status(202).json({ api: 1, id, state: 'queued', eta_s: jobEtaS(id), dit_model: dawReq.dit_model ?? null });
 }));
 
 router.get('/jobs/:id', wrap(async (req, res) => { res.json(await getJob(String(req.params.id))); }));

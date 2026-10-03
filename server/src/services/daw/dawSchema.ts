@@ -15,7 +15,7 @@ const SOURCE_MODES: ReadonlySet<DawMode> = new Set(['lego', 'repaint', 'complete
 
 export type DawErrorCode =
   | 'engine_not_ready' | 'engine_suspended' | 'bad_request' | 'not_found'
-  | 'unsupported_mode' | 'backend_mismatch' | 'upstream_error' | 'unauthorized' | 'base_model_required';
+  | 'unsupported_mode' | 'backend_mismatch' | 'upstream_error' | 'unauthorized' | 'base_model_required' | 'unknown_model';
 
 export class DawError extends Error {
   constructor(public status: number, public code: DawErrorCode, message: string) { super(message); }
@@ -49,6 +49,8 @@ export interface DawGenerateRequest {
   scheduler?: string;
   guidance_mode?: string;
   dit_model?: string;
+  /** "turbo" | "base" | an exact installed DiT name; resolved against installed models. */
+  model?: string;
   skip_lm?: boolean;
   expected_backend?: string;
 }
@@ -104,6 +106,9 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
       throw new DawError(400, 'bad_request', 'region needs 0 <= start_s < end_s');
     }
     out.region = { start_s: s, end_s: e };
+  }
+  if (out.model !== undefined && (typeof out.model !== 'string' || !out.model.trim())) {
+    throw new DawError(400, 'bad_request', 'model must be "turbo", "base" or an installed DiT model name');
   }
   if (mode === 'repaint' && !out.region) throw new DawError(400, 'bad_request', 'repaint needs a region');
   return out;
@@ -208,6 +213,7 @@ const BASE_HINT = 'install acestep-v15-base or acestep-v15-xl-base from Model Ma
 
 /** The ditModel to send, or undefined to leave the request as is. Throws 422 base_model_required. */
 export function resolveDitModel(req: DawGenerateRequest, ditModels: string[], loaded: string | null): string | undefined {
+  if (req.model !== undefined) return resolveModelField(req, ditModels, loaded);
   if (!BASE_ONLY_MODES.has(req.mode)) return req.dit_model;
   if (req.dit_model !== undefined) {
     if (!isBaseModel(req.dit_model)) {
@@ -219,4 +225,28 @@ export function resolveDitModel(req: DawGenerateRequest, ditModels: string[], lo
   const bases = ditModels.filter(isBaseModel);
   if (bases.length === 0) throw new DawError(422, 'base_model_required', `${req.mode} needs a base DiT model and none is installed; ${BASE_HINT}`);
   return bases[0];
+}
+
+/** Resolve the request's `model` field ("turbo" | "base" | exact name). Throws 400 on a bad choice. */
+function resolveModelField(req: DawGenerateRequest, ditModels: string[], loaded: string | null): string {
+  const want = req.model!.trim();
+  const avail = ditModels.length ? ditModels.join(', ') : '(none installed)';
+  const lw = want.toLowerCase();
+  if (lw === 'turbo' || lw === 'base') {
+    if (lw === 'turbo' && BASE_ONLY_MODES.has(req.mode)) {
+      throw new DawError(400, 'bad_request', `${req.mode} needs a base DiT model; model "turbo" is not allowed, use "base"`);
+    }
+    const match = (n: string) => (lw === 'base' ? isBaseModel(n) : ditKind(n) === 'turbo');
+    if (loaded && match(loaded) && ditModels.includes(loaded)) return loaded;
+    const hit = ditModels.find(match);
+    if (!hit) throw new DawError(400, 'unknown_model', `no ${lw} DiT model is installed; available: ${avail}`);
+    return hit;
+  }
+  if (!ditModels.includes(want)) {
+    throw new DawError(400, 'unknown_model', `model "${want}" is not installed; use "turbo", "base" or one of: ${avail}`);
+  }
+  if (BASE_ONLY_MODES.has(req.mode) && !isBaseModel(want)) {
+    throw new DawError(422, 'base_model_required', `${req.mode} needs a base DiT model, ${want} is not one; ${BASE_HINT}`);
+  }
+  return want;
 }
