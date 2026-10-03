@@ -216,6 +216,8 @@ interface SeqState {
   current: number;
   cancelled: boolean;
   failed?: string;
+  /** A later take failed after at least one succeeded: done with fewer takes plus an error. */
+  partial?: boolean;
   done?: Promise<void>;
 }
 const jobs = new Map<string, FacadeJob>();
@@ -223,6 +225,9 @@ const jobs = new Map<string, FacadeJob>();
 let pollMs = 1000;
 /** Test hook: poll interval of the sequential runner. Returns the previous one. */
 export function __setPollMs(ms: number): number { const prev = pollMs; pollMs = ms; return prev; }
+let retryDelaysMs = [500, 1000, 2000];
+/** Test hook: backoff between status-poll retries. Returns the previous one. */
+export function __setRetryDelays(ms: number[]): number[] { const prev = retryDelaysMs; retryDelaysMs = ms; return prev; }
 
 async function activeBackend(): Promise<string | undefined> {
   try {
@@ -280,26 +285,54 @@ async function submitOne(params: Record<string, unknown>, seed: number): Promise
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 
-/** Wait for each take in turn, then submit the next. Stops on cancel or failure. */
+/** One status poll, retrying a non-200 (or a thrown call) with backoff before giving up. */
+async function pollStatus(upstreamId: string): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    let err: unknown;
+    try {
+      const { status, data } = await call('GET', `/api/generate/status/${upstreamId}`);
+      if (status === 200) return data;
+      err = upstreamError(status, data);
+    } catch (e) { err = e; }
+    if (attempt >= retryDelaysMs.length) throw err;
+    await new Promise((r) => setTimeout(r, retryDelaysMs[attempt]));
+  }
+}
+
+/**
+ * Wait for each take in turn, then submit the next. Stops on cancel, on
+ * failure, or when the job was swept from the map. A take that fails after
+ * at least one succeeded leaves the job partial instead of failed.
+ */
 async function runSequential(j: FacadeJob, params: Record<string, unknown>): Promise<void> {
   const seq = j.seq!;
+  const swept = () => jobs.get(j.id) !== j;
+  const fail = (i: number, msg: string): void => {
+    if (seq.results.slice(0, i).some((r) => r?.status === 'succeeded')) { seq.partial = true; seq.failed = msg; return; }
+    throw new Error(msg);
+  };
   for (let i = 0; i < seq.takes; i++) {
+    if (swept()) return;
     if (i > 0) {
       if (seq.cancelled) return;
-      const next = await submitOne(params, j.seeds[i]);
+      let next: string;
+      try { next = await submitOne(params, j.seeds[i]); } catch (e: any) { return fail(i, e?.message ?? String(e)); }
       seq.upstreamIds.push(next);
       seq.current = i;
       j.upstreamId = next;
-      // Cancel may have landed while this submit was in flight.
+      // Cancel landed while this submit was in flight: cancelJob skipped the
+      // finished take, so cancel the new one now.
       if (seq.cancelled) { await call('POST', `/api/generate/cancel/${next}`).catch(() => null); return; }
     }
     for (;;) {
-      const { status, data } = await call('GET', `/api/generate/status/${seq.upstreamIds[i]}`);
-      if (status !== 200) throw upstreamError(status, data);
+      if (swept()) return;
+      let data: any;
+      try { data = await pollStatus(seq.upstreamIds[i]); } catch (e: any) { return fail(i, e?.message ?? String(e)); }
       const t = Date.now(), prev = j.lastPollAt ?? j.createdAt;
       j.lastPollAt = t;
       if (TERMINAL.has(data?.status)) {
         seq.results[i] = data;
+        if (data.status === 'failed' && !seq.cancelled) return fail(i, data.error ?? `take ${i} failed`);
         if (data.status !== 'succeeded') return;
         if (i === seq.takes - 1 && t - prev < MAX_DONE_GAP_MS) j.doneAt = t;
         break;
@@ -326,10 +359,11 @@ async function upstreamStatus(j: FacadeJob, upstreamId = j.upstreamId): Promise<
 async function sequentialStatus(j: FacadeJob): Promise<any> {
   const seq = j.seq!;
   const done = seq.results.filter((r) => r?.status === 'succeeded');
-  const bad = seq.results.find((r) => r && r.status !== 'succeeded');
-  const cur = seq.results[seq.current] ? null : await upstreamStatus(j, seq.upstreamIds[seq.current]).catch(() => null);
+  const bad = seq.partial ? undefined : seq.results.find((r) => r && r.status !== 'succeeded');
+  const cur = seq.results[seq.current] || seq.partial ? null : await upstreamStatus(j, seq.upstreamIds[seq.current]).catch(() => null);
   let status: string;
   if (seq.cancelled || bad?.status === 'cancelled') status = 'cancelled';
+  else if (seq.partial) status = 'partial';
   else if (seq.failed || bad) status = 'failed';
   else if (done.length === seq.takes) status = 'succeeded';
   else status = cur?.status === 'pending' && seq.current === 0 ? 'pending' : 'running';
@@ -343,7 +377,7 @@ async function sequentialStatus(j: FacadeJob): Promise<any> {
       audioUrls: done.map((r) => r.result?.audioUrls?.[0]),
       durations: done.map((r) => r.result?.durations?.[0] ?? r.result?.duration ?? null),
     },
-    error: seq.failed ?? bad?.error ?? null,
+    error: seq.failed ?? bad?.error ?? (seq.partial ? seq.results.find((r) => r && r.status !== 'succeeded')?.error : null) ?? null,
   };
 }
 
@@ -368,7 +402,7 @@ export async function getJob(id: string) {
     }
   }
   const seenAt = Date.now();
-  if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') && !j.finalState) {
+  if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done' || out.state === 'partial') && !j.finalState) {
     j.finalState = out.state;
     j.finishedAt = seenAt;
     // Learn only from successful runs whose real end time is known: the
@@ -393,13 +427,23 @@ export async function getJob(id: string) {
 export async function cancelJob(id: string) {
   const j = requireJob(id);
   // Finished jobs keep their state; cancel is a no-op on them.
-  if (j.finalState === 'done' || j.finalState === 'failed' || j.finalState === 'cancelled') {
+  if (j.finalState === 'done' || j.finalState === 'partial' || j.finalState === 'failed' || j.finalState === 'cancelled') {
     return { api: DAW_API_VERSION, id, state: j.finalState };
   }
   // Sequential: flag first so the runner submits no further takes.
-  if (j.seq) j.seq.cancelled = true;
-  const { status, data } = await call('POST', `/api/generate/cancel/${j.upstreamId}`);
-  if (status !== 200) throw upstreamError(status, data);
+  let target: string | null = j.upstreamId;
+  if (j.seq) {
+    j.seq.cancelled = true;
+    // Only cancel a take whose result is not recorded yet: upstream would
+    // overwrite a finished take to cancelled. If the next submit is in
+    // flight, the runner cancels its id as soon as it returns.
+    const cur = j.seq.upstreamIds.length - 1;
+    target = j.seq.results[cur] ? null : j.seq.upstreamIds[cur];
+  }
+  if (target) {
+    const { status, data } = await call('POST', `/api/generate/cancel/${target}`);
+    if (status !== 200) throw upstreamError(status, data);
+  }
   j.finalState = 'cancelled';
   j.finishedAt = Date.now();
   return { api: DAW_API_VERSION, id, state: 'cancelled' };
@@ -527,5 +571,6 @@ export const newId = () => uuidv4();
 export const __test = {
   addJob: (j: FacadeJob) => { jobs.set(j.id, j); },
   hasJob: (id: string) => jobs.has(id),
+  removeJob: (id: string) => { jobs.delete(id); },
   getJob: (id: string) => jobs.get(id),
 };

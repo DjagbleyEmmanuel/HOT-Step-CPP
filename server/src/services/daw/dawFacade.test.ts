@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
-import { __setCaller, __setConverter, __setPollMs, __test, cancelJob, convertOnce, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
+import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
@@ -94,22 +94,38 @@ test('magic-byte sniff rejects a .wav that is really text', () => {
 
 // ── SA3 sequential takes / YuE2 trim ──────────────────────────────────────
 
-/** Fake loopback server: each POST /api/generate is a job that succeeds after `ticks` status polls. */
-function fakeUpstream(backend: string, ticks = 2) {
+/**
+ * Fake loopback server: each POST /api/generate is a job that succeeds after
+ * `ticks` status polls. `waitFor` resolves once a predicate over the call log
+ * holds, so tests sync on events instead of sleeping. `statusFail(id)` returns
+ * a status code to fail that poll with, `gatePost(n)` holds the n-th POST open.
+ */
+function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: string, n: number) => number | null; gatePost?: (n: number) => Promise<void> | null } = {}) {
   const posts: any[] = [];
   const cancels: string[] = [];
+  const statusCalls: string[] = [];
   const polls = new Map<string, number>();
-  const caller = async (method: string, route: string, body?: any) => {
+  const waiters: Array<{ pred: () => boolean; resolve: () => void }> = [];
+  const notify = () => { for (const w of [...waiters]) if (w.pred()) { waiters.splice(waiters.indexOf(w), 1); w.resolve(); } };
+  const waitFor = (pred: () => boolean) => new Promise<void>((resolve) => { if (pred()) resolve(); else waiters.push({ pred, resolve }); });
+  const handle = async (method: string, route: string, body?: any) => {
     if (route === '/api/backends') return { status: 200, data: { activeId: backend } };
     if (method === 'POST' && route === '/api/generate') {
+      const n = posts.length;
       posts.push(body);
-      return { status: 200, data: { jobId: `up${posts.length - 1}` } };
+      notify();
+      const gate = opts.gatePost?.(n);
+      if (gate) await gate;
+      return { status: 200, data: { jobId: `up${n}` } };
     }
     const c = /^\/api\/generate\/cancel\/(.+)$/.exec(route);
     if (c) { cancels.push(c[1]); polls.set(c[1], -1); return { status: 200, data: {} }; }
     const s = /^\/api\/generate\/status\/(up\d+)$/.exec(route);
     if (s) {
       const k = s[1];
+      statusCalls.push(k);
+      const fail = opts.statusFail?.(k, statusCalls.filter((x) => x === k).length);
+      if (fail) return { status: fail, data: { error: 'boom' } };
       const n = polls.get(k) ?? 0;
       if (n < 0) return { status: 200, data: { status: 'cancelled' } };
       polls.set(k, n + 1);
@@ -118,7 +134,12 @@ function fakeUpstream(backend: string, ticks = 2) {
     }
     return { status: 404, data: { error: route } };
   };
-  return { caller, posts, cancels };
+  const caller = async (method: string, route: string, body?: any) => {
+    const r = await handle(method, route, body);
+    notify();
+    return r;
+  };
+  return { caller, posts, cancels, statusCalls, polls, waitFor };
 }
 
 test('SA3 takes=4 runs 4 single-take jobs with distinct seeds under one facade id', async () => {
@@ -160,7 +181,7 @@ test('SA3 cancel mid-run stops the current take and skips the rest', async () =>
   const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
   try {
     await submitGenerate('sa3-cancel', { mode: 'text2music', caption: 'x', takes: 4, seed: 7 } as any, {});
-    await new Promise((r) => setTimeout(r, 20));
+    await up.waitFor(() => (up.polls.get('up0') ?? 0) >= 1);
     const mid = await getJob('sa3-cancel') as any;
     const c = await cancelJob('sa3-cancel');
     await __test.getJob('sa3-cancel')!.seq?.done;
@@ -169,6 +190,70 @@ test('SA3 cancel mid-run stops the current take and skips the rest', async () =>
     assert.equal(up.posts.length, 1);
     assert.deepEqual(up.cancels, ['up0']);
     assert.ok(mid.progress > 0.1 && mid.progress < 0.25, `progress ${mid.progress}`);
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
+});
+
+test('SA3 cancel during an in-flight submit cancels only the new take, never the finished one', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const up = fakeUpstream('sa3', 0, { gatePost: (n) => n === 1 ? gate : null });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('sa3-inflight', { mode: 'text2music', caption: 'x', takes: 4, seed: 7 } as any, {});
+    await up.waitFor(() => up.posts.length === 2);
+    const c = await cancelJob('sa3-inflight');
+    release();
+    await __test.getJob('sa3-inflight')!.seq?.done;
+    const toFinished = up.cancels.filter((x) => x === 'up0').length, toNew = up.cancels.filter((x) => x === 'up1').length;
+    console.log('inflight cancel: state', c.state, 'cancels', JSON.stringify(up.cancels), 'to finished up0', toFinished, 'to new up1', toNew, 'posts', up.posts.length);
+    assert.equal(c.state, 'cancelled');
+    assert.equal(toFinished, 0);
+    assert.equal(toNew, 1);
+    assert.equal(up.posts.length, 2);
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
+});
+
+test('SA3 status poll retries 2 transient 500s and still gives 4 takes', async () => {
+  const up = fakeUpstream('sa3', 1, { statusFail: (id, n) => id === 'up1' && n <= 2 ? 500 : null });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1); const prevR = __setRetryDelays([1, 1, 1]);
+  try {
+    await submitGenerate('sa3-retry', { mode: 'text2music', caption: 'x', takes: 4, seed: 1 } as any, {});
+    await __test.getJob('sa3-retry')!.seq?.done;
+    const r = await getJob('sa3-retry') as any;
+    console.log('retry: state', r.state, 'takes', r.takes.length, 'up1 status calls', up.statusCalls.filter((x) => x === 'up1').length, 'error', r.error);
+    assert.equal(r.state, 'done');
+    assert.equal(r.takes.length, 4);
+  } finally { __setCaller(prevC); __setPollMs(prevP); __setRetryDelays(prevR); }
+});
+
+test('SA3 failing the 3rd of 4 takes leaves the job partial with 2 takes', async () => {
+  const up = fakeUpstream('sa3', 0, { statusFail: (id) => id === 'up2' ? 500 : null });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1); const prevR = __setRetryDelays([1, 1, 1]);
+  try {
+    await submitGenerate('sa3-partial', { mode: 'text2music', caption: 'x', takes: 4, seed: 1 } as any, {});
+    await __test.getJob('sa3-partial')!.seq?.done;
+    const r = await getJob('sa3-partial') as any;
+    console.log('partial: state', r.state, 'takes', r.takes.length, 'ready', JSON.stringify(r.takes.map((t: any) => t.ready)), 'up2 status calls', up.statusCalls.filter((x) => x === 'up2').length, 'posts', up.posts.length, 'error', r.error);
+    assert.equal(r.state, 'partial');
+    assert.equal(r.takes.length, 2);
+    assert.ok(r.takes.every((t: any) => t.ready));
+    assert.ok(r.error);
+    assert.equal(up.posts.length, 3);
+  } finally { __setCaller(prevC); __setPollMs(prevP); __setRetryDelays(prevR); }
+});
+
+test('SA3 job swept from the map stops submitting takes', async () => {
+  const up = fakeUpstream('sa3', 2);
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('sa3-swept', { mode: 'text2music', caption: 'x', takes: 4, seed: 1 } as any, {});
+    const done = __test.getJob('sa3-swept')!.seq!.done;
+    await up.waitFor(() => (up.polls.get('up0') ?? 0) >= 1);
+    const before = up.posts.length;
+    __test.removeJob('sa3-swept');
+    await done;
+    console.log('swept: posts before sweep', before, 'after', up.posts.length);
+    assert.equal(up.posts.length, before);
   } finally { __setCaller(prevC); __setPollMs(prevP); }
 });
 

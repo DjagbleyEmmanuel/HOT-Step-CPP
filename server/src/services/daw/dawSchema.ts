@@ -146,7 +146,7 @@ export function toGenerateParams(req: DawGenerateRequest, sourceAudioPath?: stri
   return p;
 }
 
-export type DawJobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type DawJobState = 'queued' | 'running' | 'done' | 'partial' | 'failed' | 'cancelled';
 
 export function mapState(status: string | undefined): DawJobState {
   switch (status) {
@@ -154,6 +154,7 @@ export function mapState(status: string | undefined): DawJobState {
     case 'succeeded': return 'done';
     case 'failed': return 'failed';
     case 'cancelled': return 'cancelled';
+    case 'partial': return 'partial';
     default: return 'running';
   }
 }
@@ -177,7 +178,7 @@ export function mapJobStatus(id: string, up: any, seeds: number[] = []) {
       n,
       seed: seeds[n] ?? null,
       duration_s: durations[n] ?? up?.result?.duration ?? null,
-      ready: state === 'done',
+      ready: state === 'done' || state === 'partial',
     })),
     error: up?.error ?? null,
   };

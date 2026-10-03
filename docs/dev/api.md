@@ -782,7 +782,10 @@ the same job shape on every backend:
   progress across all takes plus `take_count` and `takes_done`, and lists each finished
   take with its seed. `GET /jobs/:id/audio?take=n` works for every finished take (409 while
   it is still rendering). `POST /jobs/:id/cancel` cancels the take in progress and skips
-  the rest.
+  the rest; a take that already finished is never cancelled. A status poll that fails is
+  retried 3 times (0.5, 1, 2 s). If a take fails after at least one take succeeded, the
+  job ends in state `partial`: it lists the finished takes (all `ready`, audio
+  downloadable) and sets `error` to the failure. If no take succeeded, the job is `failed`.
 - **YuE2 length.** YuE2 ignores `duration_s` and renders roughly 51 to 68 s. When the
   active backend is `yue2` and `duration_s` (or `bars`) is set, the float32 WAV export cuts
   each take to that length with a 10 ms fade-out. Trimmed takes report the requested
