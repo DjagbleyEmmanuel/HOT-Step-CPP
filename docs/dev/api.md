@@ -801,6 +801,10 @@ the same job shape on every backend:
   each take to that length with a 10 ms fade-out. Trimmed takes report the requested
   `duration_s` and the original length in `trimmed_from_s` (null when no trim was needed).
   A render shorter than requested is returned as is, never padded.
+- **ACE length.** ACE sizes its output from the LM's audio codes, so a text2music render
+  can land a little off `duration_s` (for example 9.44 s for 10 s). For `ace` text2music
+  takes the WAV export fits the audio to exactly `duration_s`: short renders are padded
+  with silence, long ones are cut, with a 10 ms fade at the original end in both cases.
 - **Time estimates.** `GET /status` returns `eta` (the active backend, with `backend` and
   `loaded` keys) and `eta_by_backend` for `ace_turbo`, `ace_base`, `sa3` and `yue2`. Each
   entry is `{ base_s, per_take_s, per_audio_s, cold_load_s, source }`. Estimate =

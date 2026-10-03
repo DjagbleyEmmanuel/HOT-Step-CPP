@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
-import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
+import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
@@ -432,4 +432,39 @@ test('job response reports the chosen dit_model and its eta backend', async () =
     assert.equal(job.dit_model, 'acestep-v15-turbo-Q8.gguf');
     assert.equal(job.eta_backend, 'ace_turbo');
   } finally { __setCaller(prevC); }
+});
+
+test('ACE fit pads 9.44 s to exactly 480000 frames and cuts 11 s to 480000, with a fade', { skip: !getFFmpegPath() && 'ffmpeg not available' }, async () => {
+  const short = fitPlan(Math.round(48000 * 9.44), 10);
+  const long = fitPlan(48000 * 11, 10);
+  console.log('fitPlan 9.44->10:', JSON.stringify(short), '| 11->10:', JSON.stringify(long));
+  assert.deepEqual(short, { frames: 480000, pad: 26880, cut: 0, fadeEndFrame: 453120 });
+  assert.deepEqual(long, { frames: 480000, pad: 0, cut: 48000, fadeEndFrame: 480000 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dawfit-'));
+  try {
+    const res: Record<string, number> = {};
+    for (const [name, dur] of [['s944', 9.44], ['s11', 11]] as const) {
+      const src = path.join(dir, `${name}.wav`);
+      await new Promise<void>((r, j) => execFile(getFFmpegPath()!, ['-y', '-f', 'lavfi', '-i', `sine=frequency=440:sample_rate=48000:duration=${dur}`, '-ac', '2', '-c:a', 'pcm_s16le', src], (e) => e ? j(e) : r()));
+      const out = path.join(dir, `${name}_out.wav`);
+      await convertOnce(src, out, { fitS: 10, srcS: dur });
+      const w = wavFrames(out);
+      const b = fs.readFileSync(out);
+      // Sample just before the original end (pad case) must be faded.
+      const dataStart = b.length - w.frames * 8;
+      const preEnd = Math.min(Math.round(dur * 48000), 480000) - 1;
+      res[`${name}_frames`] = w.frames;
+      res[`${name}_rate`] = w.rate;
+      res[`${name}_preEndAbs`] = Math.abs(b.readFloatLE(dataStart + preEnd * 8));
+      res[`${name}_lastAbs`] = Math.abs(b.readFloatLE(b.length - 8));
+    }
+    console.log('fit export:', JSON.stringify(res));
+    assert.equal(res.s944_frames, 480000);
+    assert.equal(res.s11_frames, 480000);
+    assert.equal(res.s944_rate, 48000);
+    assert.ok(res.s944_preEndAbs < 0.01 && res.s944_lastAbs === 0, 'pad tail faded and silent');
+    assert.ok(res.s11_lastAbs < 0.01, 'cut end faded');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

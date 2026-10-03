@@ -201,6 +201,8 @@ interface FacadeJob {
   backend?: string;
   /** DiT model sent upstream (null = whatever is loaded). */
   ditModel?: string | null;
+  /** ACE text2music only: requested length; takes are padded or cut to it exactly on export. */
+  fitTo?: number;
   /** YuE2 only: requested length; longer takes are trimmed on export. */
   trimTo?: number;
   seq?: SeqState;
@@ -264,6 +266,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const cold = resident !== key;
   const eta = { key, takes, durationS, estS: estimate(key, takes, durationS, resident), cold };
   const trimTo = backend === 'yue2' && req.duration_s !== undefined ? req.duration_s : undefined;
+  const fitTo = backend === 'ace' && req.mode === 'text2music' && req.duration_s !== undefined ? req.duration_s : undefined;
   if (backend === 'sa3' && takes > 1) {
     // SA3 ignores batchSize, so run N single-take jobs with distinct seeds.
     const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
@@ -277,7 +280,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
   const seeds = req.seed !== undefined ? Array.from({ length: takes }, () => req.seed!) : [];
-  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, ditModel: req.dit_model ?? null, trimTo, eta, createdAt: Date.now() });
+  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, ditModel: req.dit_model ?? null, trimTo, fitTo, eta, createdAt: Date.now() });
   return id;
 }
 
@@ -407,6 +410,9 @@ export async function getJob(id: string) {
   const out: ReturnType<typeof mapJobStatus> & { take_count?: number; takes_done?: number } =
     mapJobStatus(id, j.seq ? await sequentialStatus(j) : await upstreamStatus(j), j.seeds);
   if (j.seq) { out.take_count = j.seq.takes; out.takes_done = out.takes.length; }
+  if (j.fitTo !== undefined) {
+    for (const t of out.takes as Array<Record<string, unknown>>) t.duration_s = j.fitTo;
+  }
   if (j.trimTo !== undefined) {
     for (const t of out.takes as Array<Record<string, unknown>>) {
       const from = typeof t.duration_s === 'number' && t.duration_s > j.trimTo ? t.duration_s : null;
@@ -480,13 +486,28 @@ function runFfmpeg(args: string[]): Promise<void> {
 export interface ConvertOpts {
   /** Cut to this many seconds with a 10 ms fade-out at the end. Never pads. */
   trimS?: number;
+  /** ACE only: pad with silence or cut to exactly this many seconds (48 kHz frames). */
+  fitS?: number;
+  /** Source length in seconds, if known; the fade-out goes at min(srcS, fitS). */
+  srcS?: number;
+}
+
+/** Exact 48 kHz frame plan for fitting a take to the requested length. */
+export function fitPlan(srcFrames: number, targetS: number, rate = 48000) {
+  const frames = Math.round(targetS * rate);
+  return { frames, pad: Math.max(0, frames - srcFrames), cut: Math.max(0, srcFrames - frames), fadeEndFrame: Math.min(srcFrames, frames) };
 }
 export const TRIM_FADE_S = 0.01;
 
 /** ffmpeg arguments for the float32 48 kHz stereo export, with an optional trim. */
 export function ffmpegArgs(src: string, dst: string, opts: ConvertOpts = {}): string[] {
   const args = ['-y', '-i', src];
-  if (opts.trimS !== undefined) {
+  if (opts.fitS !== undefined) {
+    const srcS = opts.srcS !== undefined && Number.isFinite(opts.srcS) ? opts.srcS : opts.fitS;
+    const p = fitPlan(Math.round(srcS * 48000), opts.fitS);
+    const st = Math.max(0, p.fadeEndFrame / 48000 - TRIM_FADE_S).toFixed(6);
+    args.push('-af', `aresample=48000,afade=t=out:st=${st}:d=${TRIM_FADE_S},apad=whole_len=${p.frames},atrim=end_sample=${p.frames}`);
+  } else if (opts.trimS !== undefined) {
     const st = Math.max(0, opts.trimS - TRIM_FADE_S).toFixed(6);
     args.push('-af', `afade=t=out:st=${st}:d=${TRIM_FADE_S}`, '-t', opts.trimS.toFixed(6));
   }
@@ -547,7 +568,9 @@ export async function takeWavPath(id: string, n: number): Promise<string> {
   // YuE2 ignores duration_s; trim longer takes to the requested length, never pad.
   const len = Number(up.result?.durations?.[idx] ?? up.result?.duration);
   const trim = j.trimTo !== undefined && (!Number.isFinite(len) || len > j.trimTo) ? { trimS: j.trimTo } : undefined;
-  await convertOnce(src, out, trim);
+  // ACE sizes the latent from the LM code count (about 9.44 s for 10 s); fit exactly.
+  const fit = j.fitTo !== undefined ? { fitS: j.fitTo, srcS: Number.isFinite(len) ? len : undefined } : undefined;
+  await convertOnce(src, out, fit ?? trim);
   return out;
 }
 
