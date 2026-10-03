@@ -62,3 +62,12 @@ test('job eta_s is estimate minus elapsed, floor 0', () => {
   assert.equal(a, 85);
   assert.equal(b, 0);
 });
+
+test('4 SA3 takes at 30 s estimate about 4 full renders (about 25 s)', () => {
+  resetEta();
+  const one = estimate('sa3', 1, 30, 'sa3');
+  const four = estimate('sa3', 4, 30, 'sa3');
+  console.log('sa3 30 s: 1 take', one, '4 takes', four, 'ratio', four / one);
+  assert.ok(Math.abs(four - 25) <= 4, `got ${four}`);
+  assert.ok(Math.abs(four / one - 4) < 0.05);
+});

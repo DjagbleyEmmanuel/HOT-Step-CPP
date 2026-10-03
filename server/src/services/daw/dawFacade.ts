@@ -13,7 +13,7 @@ import { config, getFFmpegPath } from '../../config.js';
 import { DawError, DAW_API_VERSION, ditKind, isBaseModel, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
 
 /** 127.0.0.0/8, ::1, and IPv4-mapped ::ffff:127.0.0.0/8. */
-import { etaKey, estimate, recordRun, getFigures, getLoaded, etaByBackend, type EtaBackend } from './dawEta.js';
+import { etaKey, estimate, recordRun, getFigures, getLoaded, setLoaded, etaByBackend, type EtaBackend } from './dawEta.js';
 
 export function isLoopback(addr: string | undefined): boolean {
   if (!addr) return false;
@@ -201,7 +201,13 @@ interface FacadeJob {
   trimTo?: number;
   seq?: SeqState;
   eta?: { key: EtaBackend; takes: number; durationS: number; estS: number; cold: boolean; recorded?: boolean };
+  /** Last time a poll saw the job still running (facade getJob or sequential runner). */
+  lastPollAt?: number;
+  /** Real completion time, when known to within MAX_DONE_GAP_MS. */
+  doneAt?: number;
 }
+/** Only learn from a run whose completion time is known to within this. */
+const MAX_DONE_GAP_MS = 3000;
 interface SeqState {
   takes: number;
   upstreamIds: string[];
@@ -225,15 +231,29 @@ async function activeBackend(): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
+/** The backend whose weights are resident now: active backend id plus loaded DiT. */
+async function loadedNow(): Promise<{ activeId?: string; loadedModel: string | null; key: EtaBackend | null }> {
+  const [activeId, models] = await Promise.all([
+    activeBackend(),
+    call('GET', '/api/models').catch(() => null),
+  ]);
+  const d = models?.status === 200 ? models.data : null;
+  const loadedModel: string | null = d?.defaults?.synth_model ?? d?.config?.synth_model ?? null;
+  return { activeId, loadedModel, key: activeId ? etaKey(activeId, loadedModel) : null };
+}
+
 const randomSeed = () => Math.floor(Math.random() * 0x7fffffff);
 
 export async function submitGenerate(id: string, req: DawGenerateRequest, params: Record<string, unknown>): Promise<string> {
-  const backend = await activeBackend();
+  const now = await loadedNow();
+  const backend = now.activeId;
   const takes = req.takes ?? 1;
-  const key = etaKey(backend, req.dit_model ?? null);
+  const key = etaKey(backend, req.dit_model ?? now.loadedModel);
   const durationS = req.duration_s ?? 30;
-  const cold = getLoaded() !== key;
-  const eta = { key, takes, durationS, estS: estimate(key, takes, durationS), cold };
+  // Real resident backend wins; the last facade job is only a fallback.
+  const resident = now.key ?? getLoaded();
+  const cold = resident !== key;
+  const eta = { key, takes, durationS, estS: estimate(key, takes, durationS, resident), cold };
   const trimTo = backend === 'yue2' && req.duration_s !== undefined ? req.duration_s : undefined;
   if (backend === 'sa3' && takes > 1) {
     // SA3 ignores batchSize, so run N single-take jobs with distinct seeds.
@@ -276,9 +296,12 @@ async function runSequential(j: FacadeJob, params: Record<string, unknown>): Pro
     for (;;) {
       const { status, data } = await call('GET', `/api/generate/status/${seq.upstreamIds[i]}`);
       if (status !== 200) throw upstreamError(status, data);
+      const t = Date.now(), prev = j.lastPollAt ?? j.createdAt;
+      j.lastPollAt = t;
       if (TERMINAL.has(data?.status)) {
         seq.results[i] = data;
         if (data.status !== 'succeeded') return;
+        if (i === seq.takes - 1 && t - prev < MAX_DONE_GAP_MS) j.doneAt = t;
         break;
       }
       if (seq.cancelled) return;
@@ -344,13 +367,24 @@ export async function getJob(id: string) {
       if (from !== null) t.duration_s = j.trimTo;
     }
   }
+  const seenAt = Date.now();
   if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') && !j.finalState) {
     j.finalState = out.state;
-    j.finishedAt = Date.now();
-    if (out.state === 'done' && j.eta && !j.eta.recorded) {
+    j.finishedAt = seenAt;
+    // Learn only from successful runs whose real end time is known: the
+    // sequential runner stamps doneAt; otherwise this poll must land within
+    // MAX_DONE_GAP_MS of the previous one (or of submit), so a slow poller
+    // never teaches the EMA its poll gap.
+    if (!j.seq && j.doneAt === undefined && seenAt - (j.lastPollAt ?? j.createdAt) < MAX_DONE_GAP_MS) j.doneAt = seenAt;
+    if (out.state === 'done' && j.eta && !j.eta.recorded && j.doneAt !== undefined) {
       j.eta.recorded = true;
-      recordRun(j.eta.key, j.eta.takes, j.eta.durationS, (j.finishedAt - j.createdAt) / 1000, j.eta.cold);
+      const res = await loadedNow().catch(() => null);
+      const still = res?.key === j.eta.key;
+      recordRun(j.eta.key, j.eta.takes, j.eta.durationS, (j.doneAt - j.createdAt) / 1000, j.eta.cold, still);
+      if (!still && res?.key) setLoaded(res.key);
     }
+  } else if (!j.finalState) {
+    j.lastPollAt = seenAt;
   }
   (out as Record<string, unknown>).eta_s = jobEtaS(j);
   return out;

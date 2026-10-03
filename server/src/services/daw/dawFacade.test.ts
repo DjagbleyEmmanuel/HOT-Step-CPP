@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { __setCaller, __setConverter, __setPollMs, __test, cancelJob, convertOnce, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError } from './dawSchema.js';
+import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
 
 test('sweep removes an old upload-less job', () => {
   const now = Date.now();
@@ -217,4 +218,103 @@ test('trim export cuts a 12 s render to 10.000 s at 48 kHz with a fade, and neve
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/** Upstream whose job succeeds on the first status poll, with a chosen active backend and DiT. */
+function instantUpstream(activeId: string, loadedModel: string | null, final = 'succeeded') {
+  let n = 0;
+  const state = { activeId, loadedModel };
+  const caller = async (method: string, route: string) => {
+    if (route === '/api/backends') return { status: 200, data: { activeId: state.activeId } };
+    if (route === '/api/models') return { status: 200, data: { defaults: { synth_model: state.loadedModel } } };
+    if (method === 'POST' && route === '/api/generate') return { status: 200, data: { jobId: `iu${n++}` } };
+    if (route.startsWith('/api/generate/status/')) return { status: 200, data: { status: final, result: { audioUrls: ['/a.flac'], durations: [10] } } };
+    return { status: 404, data: {} };
+  };
+  return { caller, state };
+}
+
+test('a 3600 s poll gap does not teach the EMA', async () => {
+  resetEta();
+  const up = instantUpstream('ace', 'acestep-v15-turbo-Q8.gguf');
+  const prevC = __setCaller(up.caller);
+  try {
+    const before = getFigures('ace_turbo').base_s;
+    __test.addJob({ id: 'slow-poll', upstreamId: 'iu9', seeds: [], createdAt: Date.now() - 3600_000,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 4.2, cold: false } } as any);
+    const r = await getJob('slow-poll') as any;
+    const after = getFigures('ace_turbo').base_s;
+    console.log('poll gap 3600 s: state', r.state, 'base_s before/after', before, after);
+    assert.equal(r.state, 'done');
+    assert.equal(after, before);
+  } finally { __setCaller(prevC); }
+});
+
+test('a fast poll records the run', async () => {
+  resetEta();
+  const up = instantUpstream('ace', 'acestep-v15-turbo-Q8.gguf');
+  const prevC = __setCaller(up.caller);
+  try {
+    const before = getFigures('ace_turbo').base_s;
+    __test.addJob({ id: 'fast-poll', upstreamId: 'iu8', seeds: [], createdAt: Date.now() - 20_000, lastPollAt: Date.now() - 1000,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 4.2, cold: false } } as any);
+    await getJob('fast-poll');
+    const after = getFigures('ace_turbo').base_s;
+    console.log('fast poll 20 s run: base_s before/after', before, after);
+    assert.ok(after - before > 3, `moved ${after - before}`);
+  } finally { __setCaller(prevC); }
+});
+
+for (const final of ['failed', 'cancelled']) {
+  test(`${final} jobs are never recorded`, async () => {
+    resetEta();
+    const up = instantUpstream('ace', 'acestep-v15-turbo-Q8.gguf', final);
+    const prevC = __setCaller(up.caller);
+    try {
+      const before = getFigures('ace_turbo');
+      __test.addJob({ id: `rec-${final}`, upstreamId: 'iu7', seeds: [], createdAt: Date.now() - 20_000, lastPollAt: Date.now() - 500,
+        eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 4.2, cold: false } } as any);
+      const r = await getJob(`rec-${final}`) as any;
+      const after = getFigures('ace_turbo');
+      console.log(`${final}: state`, r.state, 'base_s', before.base_s, after.base_s, 'source', after.source);
+      assert.equal(after.base_s, before.base_s);
+      assert.equal(after.source, 'default');
+    } finally { __setCaller(prevC); }
+  });
+}
+
+test('cold/warm comes from the real resident backend, not the last facade job', async () => {
+  resetEta();
+  // The facade last ran ace_base, then the UI switched away and back, leaving turbo loaded.
+  setLoaded('ace_base');
+  const up = instantUpstream('ace', 'acestep-v15-turbo-Q8.gguf');
+  const prevC = __setCaller(up.caller);
+  try {
+    await submitGenerate('ui-switch', { mode: 'text2music', caption: 'x', dit_model: 'acestep-v15-base-Q8.gguf' } as any, {});
+    const e = __test.getJob('ui-switch')!.eta!;
+    const warm = estimate('ace_base', 1, 30, 'ace_base');
+    console.log('ui switch: key', e.key, 'cold', e.cold, 'est', e.estS, 'warm', warm, 'cold_load_s', getFigures('ace_base').cold_load_s);
+    assert.equal(e.cold, true);
+    assert.ok(Math.abs(e.estS - warm - getFigures('ace_base').cold_load_s) < 1e-9);
+    // No dit_model: the loaded DiT picks the key, and it is warm.
+    up.state.loadedModel = 'acestep-v15-base-Q8.gguf';
+    await submitGenerate('no-dit', { mode: 'text2music', caption: 'x' } as any, {});
+    const e2 = __test.getJob('no-dit')!.eta!;
+    console.log('no dit_model: key', e2.key, 'cold', e2.cold);
+    assert.equal(e2.key, 'ace_base');
+    assert.equal(e2.cold, false);
+  } finally { __setCaller(prevC); }
+});
+
+test('recording does not mark loaded when the backend changed since', async () => {
+  resetEta();
+  const up = instantUpstream('sa3', null);
+  const prevC = __setCaller(up.caller);
+  try {
+    __test.addJob({ id: 'moved-on', upstreamId: 'iu6', seeds: [], createdAt: Date.now() - 5000, lastPollAt: Date.now() - 500,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 4.2, cold: false } } as any);
+    await getJob('moved-on');
+    console.log('loaded after record with sa3 active:', getLoaded());
+    assert.notEqual(getLoaded(), 'ace_turbo');
+  } finally { __setCaller(prevC); }
 });
