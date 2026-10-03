@@ -79,9 +79,18 @@ On desktop these work anywhere in the app. Press `?` to see them in a small chea
 | Delete | Delete the selection, or the focused row if nothing is selected. The usual 6 s Undo toast applies. |
 | Esc | Clear the selection, then the focused row |
 | ? | Open the cheat sheet |
+| Ctrl+K (Cmd+K on Mac) | Open the command palette, also while typing in a field |
 
 Shortcuts are off while you type in a field, while a dialog is open, and in Compare studio,
 which has its own keys (B, Tab).
+
+### Command palette
+
+Ctrl+K (Cmd+K on Mac) opens a search box that jumps anywhere. Type a few
+letters of a studio name ("trn" finds Training Studio) or a song title or
+style; the list ranks studios first, then songs from your library. Use Up and
+Down to move, Enter to open, Esc to close. Picking a song opens Library and
+plays it. On a phone, tap the search icon in the top bar to open it.
 
 ## Playlists
 

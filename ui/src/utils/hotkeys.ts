@@ -12,7 +12,8 @@ export type HotkeyAction =
   | 'playFocused'
   | 'deleteSelection'
   | 'clearSelection'
-  | 'showHelp';
+  | 'showHelp'
+  | 'openPalette';
 
 export interface KeyLike {
   key: string;
@@ -51,10 +52,14 @@ export const HOTKEY_HELP: ReadonlyArray<{ keys: string; action: HotkeyAction }> 
   { keys: 'Delete', action: 'deleteSelection' },
   { keys: 'Esc', action: 'clearSelection' },
   { keys: '?', action: 'showHelp' },
+  { keys: 'Ctrl+K / Cmd+K', action: 'openPalette' },
 ];
 
 /** Map a key event to an action, or null. Modified chords (ctrl/meta/alt) never match. */
 export function mapKey(e: KeyLike): HotkeyAction | null {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+    return e.repeat ? null : 'openPalette';
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   switch (e.key) {
     case ' ':

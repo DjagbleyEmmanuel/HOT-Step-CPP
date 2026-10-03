@@ -3010,6 +3010,12 @@
     "hotkeys.actions.playFocused": "Play the focused row",
     "hotkeys.actions.deleteSelection": "Delete the selection (undo available)",
     "hotkeys.actions.clearSelection": "Clear the selection",
-    "hotkeys.actions.showHelp": "Show this cheat sheet"
+    "hotkeys.actions.showHelp": "Show this cheat sheet",
+    "hotkeys.actions.openPalette": "Open the command palette (jump to a studio or song)",
+    "palette.title": "Command palette",
+    "palette.open": "Search studios and songs",
+    "palette.placeholder": "Jump to a studio or song...",
+    "palette.empty": "No matches",
+    "palette.studio": "Studio"
   }
 }

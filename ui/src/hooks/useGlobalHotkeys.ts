@@ -10,12 +10,19 @@ function isModalOpen(): boolean {
 }
 
 /** Install the desktop global hotkeys. onHelp opens the cheat sheet. */
-export function useGlobalHotkeys(onHelp: () => void): void {
+export function useGlobalHotkeys(onHelp: () => void, onPalette?: () => void): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const action: HotkeyAction | null = mapKey(e);
       if (!action) return;
+      // Ctrl/Cmd+K works while typing too; only an open dialog blocks it.
+      if (action === 'openPalette') {
+        if (!onPalette || isModalOpen()) return;
+        e.preventDefault();
+        onPalette();
+        return;
+      }
       if (shouldIgnore({ target: e.target as HTMLElement | null, modalOpen: isModalOpen(), pathname: window.location.pathname })) return;
       // Let focused buttons and links keep their native Space/Enter behaviour.
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -37,5 +44,5 @@ export function useGlobalHotkeys(onHelp: () => void): void {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onHelp]);
+  }, [onHelp, onPalette]);
 }

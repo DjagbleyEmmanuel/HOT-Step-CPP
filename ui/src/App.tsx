@@ -43,6 +43,7 @@ import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { HotkeyHelpModal } from './components/shared/HotkeyHelpModal';
+import { CommandPalette, OPEN_PALETTE_EVENT } from './components/shared/CommandPalette';
 import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
@@ -726,7 +727,14 @@ const AppContent: React.FC = () => {
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
   const openHotkeyHelp = useCallback(() => setShowHotkeyHelp(true), []);
   const closeHotkeyHelp = useCallback(() => setShowHotkeyHelp(false), []);
-  useGlobalHotkeys(openHotkeyHelp);
+  const [showPalette, setShowPalette] = useState(false);
+  const openPalette = useCallback(() => setShowPalette(true), []);
+  const closePalette = useCallback(() => setShowPalette(false), []);
+  useEffect(() => {
+    window.addEventListener(OPEN_PALETTE_EVENT, openPalette);
+    return () => window.removeEventListener(OPEN_PALETTE_EVENT, openPalette);
+  }, [openPalette]);
+  useGlobalHotkeys(openHotkeyHelp, openPalette);
 
   // Handle bulk delete
   const handleBulkDelete = useCallback((ids: string[]) => {
@@ -1602,6 +1610,22 @@ const AppContent: React.FC = () => {
 
       {/* Modals */}
       {showHotkeyHelp && <HotkeyHelpModal onClose={closeHotkeyHelp} />}
+      {showPalette && (
+        <CommandPalette
+          onClose={closePalette}
+          onNavigate={navigateTo}
+          onPickSong={(id) => {
+            const song = songs.find(s => s.id === id);
+            if (song) {
+              navigateTo('library');
+              playFromList(songToTrack(song), songs.map(songToTrack), 'library');
+              setSelectedSong(song);
+            } else {
+              navigateTo('library');
+            }
+          }}
+        />
+      )}
       <Toast
         message={toast.message}
         type={toast.type}
