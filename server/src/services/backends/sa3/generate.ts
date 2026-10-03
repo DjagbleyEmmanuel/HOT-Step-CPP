@@ -103,6 +103,17 @@ export function resolveSa3Sampler(params: any, plugins: { solver?: string }):
  *  guidance pickers are SHARED global UI state, so they only reach the wire
  *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
  *  render stays on the parity-tested native pingpong path. */
+/** Seed-breeding blend used when seed B is set but no blend is given (ear test b33/b34). */
+export const SA3_DEFAULT_SEED_BLEND = 0.5;
+
+/** Blend for SA3 seed breeding. Unset or blank -> 0.5; explicit values clamp to [0, 1]. */
+export function resolveSa3SeedBlend(v: unknown): number {
+  if (v === undefined || v === null || v === '') return SA3_DEFAULT_SEED_BLEND;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return SA3_DEFAULT_SEED_BLEND;
+  return Math.min(1, Math.max(0, n));
+}
+
 function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
   'solver' | 'scheduler' | 'guidanceMode' | 'guidanceScale' | 'pluginParams' | 'postprocessPlugin'> {
   if (!params.samplerPluginsEnabled) return {};
@@ -240,7 +251,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       ...(job.params.seedB !== undefined && job.params.seedB !== null && job.params.seedB !== ''
           && Number(job.params.seedB) >= 0
         ? { seedB: Math.floor(Number(job.params.seedB)),
-            seedBlend: Math.min(1, Math.max(0, Number(job.params.seedBlend) || 0)) }
+            seedBlend: resolveSa3SeedBlend(job.params.seedBlend) }
         : {}),
       adapters,
       outFmt: 'f32',   // keep peaks; the post chain owns the ceiling

@@ -305,6 +305,12 @@ individual creators, musicians and researchers may use the model and its outputs
 freely, including commercially, and that only companies need a commercial licence
 (contact gezhang@umich.edu). Adapters trained on YuE2 carry the same terms.
 
+## Stable Audio 3
+
+Seed breeding only runs when a seed B is set. If you set seed B and leave the
+blend empty, the blend defaults to 0.5 (an even mix of the two seeds' noise).
+A blend of 0 turns breeding off.
+
 ## Capability matrix
 
 "Yes" and "No" come from each backend's capability manifest in the server and the
