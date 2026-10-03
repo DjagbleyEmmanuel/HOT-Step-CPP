@@ -65,14 +65,20 @@ async function getToken(): Promise<string> {
   return token!;
 }
 
-async function call(method: string, route: string, body?: unknown, retry = true): Promise<{ status: number; data: any }> {
+type Caller = (method: string, route: string, body?: unknown) => Promise<{ status: number; data: any }>;
+let caller: Caller = (method, route, body) => httpCall(method, route, body);
+const call: Caller = (method, route, body) => caller(method, route, body);
+/** Test hook: swap the loopback client. Returns the previous one. */
+export function __setCaller(c: Caller): Caller { const prev = caller; caller = c; return prev; }
+
+async function httpCall(method: string, route: string, body?: unknown, retry = true): Promise<{ status: number; data: any }> {
   const r = await fetch(`${base()}${route}`, {
     method,
     headers: { Authorization: `Bearer ${await getToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   // Tokens live in memory upstream; mint a fresh one after a server restart.
-  if (r.status === 401 && retry) { token = null; return call(method, route, body, false); }
+  if (r.status === 401 && retry) { token = null; return httpCall(method, route, body, false); }
   let data: any = null;
   try { data = await r.json(); } catch { /* non-JSON */ }
   return { status: r.status, data };
@@ -173,15 +179,98 @@ export function startSweeper(): void {
 
 // ── Generate / jobs ────────────────────────────────────────────────────────
 
-interface FacadeJob { id: string; upstreamId: string; seeds: number[]; finalState?: string; createdAt: number; finishedAt?: number }
+/**
+ * One facade job. A plain job maps to one upstream job (upstreamId). A
+ * sequential job (SA3 with takes > 1, since SA3 renders one take per job)
+ * maps to N single-take upstream jobs run back to back; `seq` tracks them and
+ * upstreamId always points at the current one.
+ */
+interface FacadeJob {
+  id: string; upstreamId: string; seeds: number[]; finalState?: string; createdAt: number; finishedAt?: number;
+  backend?: string;
+  /** YuE2 only: requested length; longer takes are trimmed on export. */
+  trimTo?: number;
+  seq?: SeqState;
+}
+interface SeqState {
+  takes: number;
+  upstreamIds: string[];
+  /** Terminal status body per finished take. */
+  results: any[];
+  current: number;
+  cancelled: boolean;
+  failed?: string;
+  done?: Promise<void>;
+}
 const jobs = new Map<string, FacadeJob>();
 
+let pollMs = 1000;
+/** Test hook: poll interval of the sequential runner. Returns the previous one. */
+export function __setPollMs(ms: number): number { const prev = pollMs; pollMs = ms; return prev; }
+
+async function activeBackend(): Promise<string | undefined> {
+  try {
+    const { status, data } = await call('GET', '/api/backends');
+    return status === 200 && typeof data?.activeId === 'string' ? data.activeId : undefined;
+  } catch { return undefined; }
+}
+
+const randomSeed = () => Math.floor(Math.random() * 0x7fffffff);
+
 export async function submitGenerate(id: string, req: DawGenerateRequest, params: Record<string, unknown>): Promise<string> {
+  const backend = await activeBackend();
+  const takes = req.takes ?? 1;
+  const trimTo = backend === 'yue2' && req.duration_s !== undefined ? req.duration_s : undefined;
+  if (backend === 'sa3' && takes > 1) {
+    // SA3 ignores batchSize, so run N single-take jobs with distinct seeds.
+    const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
+    const first = await submitOne(params, seeds[0]);
+    const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
+    const j: FacadeJob = { id, upstreamId: first, seeds, backend, seq, createdAt: Date.now() };
+    jobs.set(id, j);
+    seq.done = runSequential(j, params).catch((e) => { seq.failed = e?.message ?? String(e); });
+    return id;
+  }
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
-  const seeds = req.seed !== undefined ? Array.from({ length: req.takes ?? 1 }, () => req.seed!) : [];
-  jobs.set(id, { id, upstreamId: data.jobId, seeds, createdAt: Date.now() });
+  const seeds = req.seed !== undefined ? Array.from({ length: takes }, () => req.seed!) : [];
+  jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, trimTo, createdAt: Date.now() });
   return id;
+}
+
+async function submitOne(params: Record<string, unknown>, seed: number): Promise<string> {
+  const { status, data } = await call('POST', '/api/generate', { ...params, batchSize: 1, seed, randomSeed: false });
+  if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
+  return data.jobId;
+}
+
+const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
+
+/** Wait for each take in turn, then submit the next. Stops on cancel or failure. */
+async function runSequential(j: FacadeJob, params: Record<string, unknown>): Promise<void> {
+  const seq = j.seq!;
+  for (let i = 0; i < seq.takes; i++) {
+    if (i > 0) {
+      if (seq.cancelled) return;
+      const next = await submitOne(params, j.seeds[i]);
+      seq.upstreamIds.push(next);
+      seq.current = i;
+      j.upstreamId = next;
+      // Cancel may have landed while this submit was in flight.
+      if (seq.cancelled) { await call('POST', `/api/generate/cancel/${next}`).catch(() => null); return; }
+    }
+    for (;;) {
+      const { status, data } = await call('GET', `/api/generate/status/${seq.upstreamIds[i]}`);
+      if (status !== 200) throw upstreamError(status, data);
+      if (TERMINAL.has(data?.status)) {
+        seq.results[i] = data;
+        if (data.status !== 'succeeded') return;
+        break;
+      }
+      if (seq.cancelled) return;
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+  }
 }
 
 function requireJob(id: string): FacadeJob {
@@ -190,15 +279,49 @@ function requireJob(id: string): FacadeJob {
   return j;
 }
 
-async function upstreamStatus(j: FacadeJob): Promise<any> {
-  const { status, data } = await call('GET', `/api/generate/status/${j.upstreamId}`);
+async function upstreamStatus(j: FacadeJob, upstreamId = j.upstreamId): Promise<any> {
+  const { status, data } = await call('GET', `/api/generate/status/${upstreamId}`);
   if (status !== 200) throw upstreamError(status, data);
   return data;
 }
 
+/** Fold a sequential job into one upstream-shaped status body. */
+async function sequentialStatus(j: FacadeJob): Promise<any> {
+  const seq = j.seq!;
+  const done = seq.results.filter((r) => r?.status === 'succeeded');
+  const bad = seq.results.find((r) => r && r.status !== 'succeeded');
+  const cur = seq.results[seq.current] ? null : await upstreamStatus(j, seq.upstreamIds[seq.current]).catch(() => null);
+  let status: string;
+  if (seq.cancelled || bad?.status === 'cancelled') status = 'cancelled';
+  else if (seq.failed || bad) status = 'failed';
+  else if (done.length === seq.takes) status = 'succeeded';
+  else status = cur?.status === 'pending' && seq.current === 0 ? 'pending' : 'running';
+  const curPct = cur ? Math.min(100, Math.max(0, Number(cur.progress ?? 0))) : 0;
+  return {
+    status,
+    stage: cur?.stage ?? null,
+    ace_phase_progress: cur?.ace_phase_progress,
+    progress: ((done.length + curPct / 100) / seq.takes) * 100,
+    result: {
+      audioUrls: done.map((r) => r.result?.audioUrls?.[0]),
+      durations: done.map((r) => r.result?.durations?.[0] ?? r.result?.duration ?? null),
+    },
+    error: seq.failed ?? bad?.error ?? null,
+  };
+}
+
 export async function getJob(id: string) {
   const j = requireJob(id);
-  const out = mapJobStatus(id, await upstreamStatus(j), j.seeds);
+  const out: ReturnType<typeof mapJobStatus> & { take_count?: number; takes_done?: number } =
+    mapJobStatus(id, j.seq ? await sequentialStatus(j) : await upstreamStatus(j), j.seeds);
+  if (j.seq) { out.take_count = j.seq.takes; out.takes_done = out.takes.length; }
+  if (j.trimTo !== undefined) {
+    for (const t of out.takes as Array<Record<string, unknown>>) {
+      const from = typeof t.duration_s === 'number' && t.duration_s > j.trimTo ? t.duration_s : null;
+      t.trimmed_from_s = from;
+      if (from !== null) t.duration_s = j.trimTo;
+    }
+  }
   if ((out.state === 'failed' || out.state === 'cancelled' || out.state === 'done') && !j.finalState) {
     j.finalState = out.state;
     j.finishedAt = Date.now();
@@ -212,6 +335,8 @@ export async function cancelJob(id: string) {
   if (j.finalState === 'done' || j.finalState === 'failed' || j.finalState === 'cancelled') {
     return { api: DAW_API_VERSION, id, state: j.finalState };
   }
+  // Sequential: flag first so the runner submits no further takes.
+  if (j.seq) j.seq.cancelled = true;
   const { status, data } = await call('POST', `/api/generate/cancel/${j.upstreamId}`);
   if (status !== 200) throw upstreamError(status, data);
   j.finalState = 'cancelled';
@@ -226,22 +351,38 @@ function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => execFile(ff, args, { timeout: 120_000, killSignal: 'SIGKILL' }, (err) => err ? reject(err) : resolve()));
 }
 
-type Converter = (src: string, dst: string) => Promise<void>;
-let converter: Converter = (src, dst) => runFfmpeg(['-y', '-i', src, '-ar', '48000', '-ac', '2', '-c:a', 'pcm_f32le', dst]);
+export interface ConvertOpts {
+  /** Cut to this many seconds with a 10 ms fade-out at the end. Never pads. */
+  trimS?: number;
+}
+export const TRIM_FADE_S = 0.01;
+
+/** ffmpeg arguments for the float32 48 kHz stereo export, with an optional trim. */
+export function ffmpegArgs(src: string, dst: string, opts: ConvertOpts = {}): string[] {
+  const args = ['-y', '-i', src];
+  if (opts.trimS !== undefined) {
+    const st = Math.max(0, opts.trimS - TRIM_FADE_S).toFixed(6);
+    args.push('-af', `afade=t=out:st=${st}:d=${TRIM_FADE_S}`, '-t', opts.trimS.toFixed(6));
+  }
+  return [...args, '-ar', '48000', '-ac', '2', '-c:a', 'pcm_f32le', dst];
+}
+
+type Converter = (src: string, dst: string, opts?: ConvertOpts) => Promise<void>;
+let converter: Converter = (src, dst, opts) => runFfmpeg(ffmpegArgs(src, dst, opts));
 /** Test hook: swap the WAV converter. Returns the previous one. */
 export function __setConverter(c: Converter): Converter { const prev = converter; converter = c; return prev; }
 
 const inflight = new Map<string, Promise<void>>();
 
 /** Convert src to out once; concurrent callers share one conversion. Unique .part, atomic rename. */
-export function convertOnce(src: string, out: string): Promise<void> {
+export function convertOnce(src: string, out: string, opts?: ConvertOpts): Promise<void> {
   if (fs.existsSync(out)) return Promise.resolve();
   const pending = inflight.get(out);
   if (pending) return pending;
   const part = `${out}.${crypto.randomBytes(6).toString('hex')}.part.wav`;
   const p = (async () => {
     try {
-      await converter(src, part);
+      await converter(src, part, opts);
       fs.renameSync(part, out);
     } catch (e) {
       try { fs.rmSync(part, { force: true }); } catch { /* ignore */ }
@@ -257,9 +398,19 @@ export function convertOnce(src: string, out: string): Promise<void> {
 /** Path of a cached 48 kHz float32 stereo WAV for take n, converting on first use. */
 export async function takeWavPath(id: string, n: number): Promise<string> {
   const j = requireJob(id);
-  const up = await upstreamStatus(j);
+  let up: any;
+  let idx = n;
+  if (j.seq) {
+    // Take n of a sequential job is take 0 of its own upstream job.
+    if (n >= j.seq.takes) throw new DawError(404, 'not_found', `no take ${n}`);
+    up = j.seq.results[n];
+    if (!up) throw new DawError(409, 'bad_request', `take ${n} is not finished`);
+    idx = 0;
+  } else {
+    up = await upstreamStatus(j);
+  }
   if (up.status !== 'succeeded') throw new DawError(409, 'bad_request', `job is ${up.status}, audio not ready`);
-  const url: string | undefined = up.result?.audioUrls?.[n];
+  const url: string | undefined = up.result?.audioUrls?.[idx];
   if (!url) throw new DawError(404, 'not_found', `no take ${n}`);
   const rel = url.replace(/^\/audio\//, '').split('?')[0];
   const src = path.resolve(config.data.audioDir, rel);
@@ -267,7 +418,10 @@ export async function takeWavPath(id: string, n: number): Promise<string> {
     throw new DawError(404, 'not_found', `take ${n} audio file is missing`);
   }
   const out = path.join(newTmpDir(id), `take_${n}.wav`);
-  await convertOnce(src, out);
+  // YuE2 ignores duration_s; trim longer takes to the requested length, never pad.
+  const len = Number(up.result?.durations?.[idx] ?? up.result?.duration);
+  const trim = j.trimTo !== undefined && (!Number.isFinite(len) || len > j.trimTo) ? { trimS: j.trimTo } : undefined;
+  await convertOnce(src, out, trim);
   return out;
 }
 
@@ -312,4 +466,5 @@ export const newId = () => uuidv4();
 export const __test = {
   addJob: (j: FacadeJob) => { jobs.set(j.id, j); },
   hasJob: (id: string) => jobs.has(id),
+  getJob: (id: string) => jobs.get(id),
 };

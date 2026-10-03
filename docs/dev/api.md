@@ -769,3 +769,22 @@ Total: <!-- generated:start route-count -->
 | `POST` | `/api/training/ops/preparation/:id/retry` | `server/src/services/training/yue2PreparationOperations.ts` |
 | `POST` | `/api/training/ops/preparation/:id/cancel` | `server/src/services/training/yue2PreparationOperations.ts` |
 <!-- generated:end routes -->
+
+## DAW facade notes (`/api/v1/daw`)
+
+The facade in `server/src/services/daw/` evens out two backend quirks so DAW clients see
+the same job shape on every backend:
+
+- **Stable Audio 3 takes.** SA3 renders one take per job and ignores `takes`. When the
+  active backend is `sa3` and `takes` is above 1, the facade submits that many single-take
+  jobs back to back under one facade job id. Each take gets its own seed: `seed + i` when a
+  seed is given, otherwise a fresh random seed per take. `GET /jobs/:id` reports overall
+  progress across all takes plus `take_count` and `takes_done`, and lists each finished
+  take with its seed. `GET /jobs/:id/audio?take=n` works for every finished take (409 while
+  it is still rendering). `POST /jobs/:id/cancel` cancels the take in progress and skips
+  the rest.
+- **YuE2 length.** YuE2 ignores `duration_s` and renders roughly 51 to 68 s. When the
+  active backend is `yue2` and `duration_s` (or `bars`) is set, the float32 WAV export cuts
+  each take to that length with a 10 ms fade-out. Trimmed takes report the requested
+  `duration_s` and the original length in `trimmed_from_s` (null when no trim was needed).
+  A render shorter than requested is returned as is, never padded.
