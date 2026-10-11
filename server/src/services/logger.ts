@@ -32,7 +32,12 @@ function timestamp(): string {
 }
 
 function isoTimestamp(): string {
-  return new Date().toISOString();
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const offsetMinutes = -d.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const offset = Math.abs(offsetMinutes);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}${sign}${pad(Math.floor(offset / 60))}:${pad(offset % 60)}`;
 }
 
 /**

@@ -245,7 +245,8 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
 - Logs: `logs/YYYY-MM-DD_HH-MM-SS/` per session, holding `ace_engine.log`,
   `node_console.log`, `generations/gen_<uuid>_<task>.log` and `training/<kind>_<jobId>.log`
   (written live by `pushEvent` in `labelingQueue.ts` plus each runner's `trainerLine`). The newest folder is the
-  current session.
+  current session. Server-generated log timestamps use the machine's local time
+  and include its UTC offset, matching the session directory's clock.
 
 ## Related
 
