@@ -114,10 +114,10 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       }} options={[{ value: 'free', label: 'Free (style decides)' }, { value: 'source', label: 'Source tempo' }, { value: 'set', label: 'Set BPM' }]} />
       {p.tempoMode === 'set' && <EditableSlider label="Target BPM" value={p.bpm} min={20} max={300} step={1}
         onChange={p.onBpm} helpText={`Source: ${sourceBpm} BPM`} />}
-      <EditableSlider label="Pitch Shift" value={p.keyShift} min={-6} max={6} step={1}
+      <EditableSlider label="Pitch Shift" value={p.keyShift} min={-12} max={12} step={1}
         onChange={p.onKeyShift} defaultValue={0} disabled={!keyLabel}
         formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
-        helpText={keyLabel ? `Source: ${keyLabel}. Shift within six semitones.` : 'No supported score key found.'} />
+        helpText={keyLabel ? `Source: ${keyLabel}. Shift within twelve semitones.` : 'No supported score key found.'} />
       <details className="text-xs text-zinc-600 dark:text-zinc-400">
         <summary className="cursor-pointer">Advanced</summary>
         <EditableSlider label="Condition strength" value={p.cfgScale} min={0.1} max={2} step={0.05}

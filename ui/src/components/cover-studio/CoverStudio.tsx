@@ -1309,7 +1309,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       {/* Toast */}
       <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} />
       {toast && (
-        <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-16 right-6 z-50 max-w-[500px] px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2 whitespace-normal break-words">
           {toast}
         </div>
       )}

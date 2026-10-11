@@ -107,7 +107,7 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
     triggerUseFilename: z.boolean(), triggerPlacement: z.string(),
     voices: z.enum(['vocal', 'both']), keepChords: z.boolean(),
     tempoMode: z.enum(['free', 'source', 'set']), coverBpm: z.number().finite().positive(),
-    keyShift: z.number().int().min(-6).max(6), cfgScale: z.number().finite(),
+    keyShift: z.number().int().min(-12).max(12), cfgScale: z.number().finite(),
     lmAdapterAr: z.string(), lmAdapterNar: z.string(), pairMode: z.enum(['base', 'pair']),
     yue2Pick: z.record(z.string(), z.union([z.string(), z.number()])),
     captionMode: z.string(), captionTracks: z.array(z.object({

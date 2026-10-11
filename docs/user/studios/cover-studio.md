@@ -153,7 +153,7 @@ have to make.
    chord symbols, free tempo and source key. Choose vocal melody only if you
    want to omit the transcribed instrumental line; keep chords to preserve more
    of the original arrangement, retain or set tempo, or shift the key by up to
-   six semitones. Keep chords also sets Chain of Thought: on, the render uses
+   twelve semitones. Keep chords also sets Chain of Thought: on, the render uses
    Full, so the chord symbols reach the composer; off, it uses Melody only. In
    MusicXML mode, Keep chords turns on by itself when the imported score has
    chord symbols, including inferred ones, and off when it has none; you can
