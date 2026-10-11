@@ -130,15 +130,21 @@ function harmony(item: Element, warnings: Set<string>): Chord | null | undefined
 
 interface Sounding { start: number; end: number; pc: number; midi: number; weight: number }
 
-/** Every sounding note of a part per measure, in 32nd ticks, for chord inference.
- *  With `melodyVoice`, notes of the imported melody line weigh half. */
-function soundingNotes(part: Element, melodyVoice: string | null): Sounding[][] {
+/** Every sounding note and chord symbol of a part per measure, in 32nd ticks, for
+ *  chords from other parts and chord inference. With `melodyVoice`, notes of the
+ *  imported melody line weigh half. */
+function partHarmony(part: Element, melodyVoice: string | null, warnings: Set<string>): { notes: Sounding[]; chords: { at: number; chord: Chord | null }[] }[] {
   let divisions = 1;
   return children(part, 'measure').map(measure => {
     let cursor = 0, last = 0;
     const notes: Sounding[] = [];
+    const chords: { at: number; chord: Chord | null }[] = [];
     for (const item of Array.from(measure.children)) {
       if (item.localName === 'attributes') divisions = Number(value(item, 'divisions')) || divisions;
+      if (item.localName === 'harmony') {
+        const chord = harmony(item, warnings);
+        if (chord !== undefined) chords.push({ at: Math.max(0, Math.round((cursor + (Number(value(item, 'offset')) || 0)) * TICKS_PER_QUARTER / divisions)), chord });
+      }
       if (item.localName === 'backup' || item.localName === 'forward') {
         const n = Number(value(item, 'duration')) || 0;
         cursor += item.localName === 'backup' ? -n : n;
@@ -157,7 +163,7 @@ function soundingNotes(part: Element, melodyVoice: string | null): Sounding[][] 
       notes.push({ start: start * TICKS_PER_QUARTER / divisions, end: (start + n) * TICKS_PER_QUARTER / divisions,
         pc: ((midi % 12) + 12) % 12, midi, weight: melody ? 0.5 : 1 });
     }
-    return notes;
+    return { notes, chords };
   });
 }
 
@@ -279,12 +285,17 @@ function convert(part: Element, others: Element[], warnings: Set<string>): { abc
   const barTicks = 32 * beats / beatType;
   if (!Number.isInteger(barTicks)) throw new MusicXmlImportError(`Meter ${meter} cannot be written in 32nd notes`);
   // Chords: the score's own <harmony>, else inferred from the other staves and parts.
+  // A measure whose melody part has no chord symbols takes all of its chords
+  // from the first other part, in score order, that has some there; parts never mix.
+  const sounding = [partHarmony(part, selectedVoice, warnings), ...others.map(o => partHarmony(o, null, warnings))];
+  measures.forEach((m, i) => {
+    if (!m.chords.length) m.chords.push(...(sounding.slice(1).find(p => p[i]?.chords.length)?.[i].chords ?? []));
+  });
   let chordSource: 'score' | 'inferred' | null = measures.some(m => m.chords.length) ? 'score' : null;
   if (!chordSource) {
-    const sounding = [soundingNotes(part, selectedVoice), ...others.map(o => soundingNotes(o, null))];
-    if (sounding.some(p => p.some(m => m.some(n => n.weight === 1)))) {
+    if (sounding.some(p => p.some(m => m.notes.some(n => n.weight === 1)))) {
       measures.forEach((m, i) => {
-        const notes = sounding.flatMap(p => p[i] ?? []);
+        const notes = sounding.flatMap(p => p[i]?.notes ?? []);
         // A pickup bar is read whole; any other bar by halves when the meter has an even beat count.
         const whole = m.implicit ? Math.max(0, ...m.events.map(e => e.end), ...notes.map(n => n.end)) : barTicks;
         const half = !m.implicit && beats % 2 === 0 ? whole / 2 : whole;

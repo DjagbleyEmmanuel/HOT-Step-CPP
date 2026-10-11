@@ -76,6 +76,23 @@ test('chord symbols land where SheetSage2 writes them, spelled the same way', as
   assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
 });
 
+test('chord symbols in other parts are used, one part per measure, the melody part first', async () => {
+  const list = '<score-part id="P2"><part-name>Guitar</part-name></score-part><score-part id="P3"><part-name>Bass</part-name></score-part></part-list>';
+  const rests = (count: number) => Array.from({ length: count }, (_, i) => `<measure number="${i + 1}"><note><rest/><duration>16</duration></note></measure>`);
+  const withHarmony = (bars: string[], at: Record<number, string>) => bars.map((bar, i) => at[i] ? bar.replace('<note>', `${at[i]}<note>`) : bar).join('');
+  const melody = [`<measure number="1">${attrs(0)}${n('C', 16)}</measure>`, `<measure number="2">${n('D', 16)}</measure>`, `<measure number="3">${n('E', 16)}</measure>`];
+  const score = `${header}${list}`
+    + `<part id="P1">${withHarmony(melody, { 1: harm('C', 'major') })}</part>`
+    // P2 has G7 in bar 1 and F in bar 2, where the melody part's own C wins.
+    + `<part id="P2">${withHarmony(rests(3), { 0: harm('G', 'dominant'), 1: harm('F', 'major') })}</part>`
+    // P3 conflicts with P2 in bar 1 (P2 comes first) and alone supplies bar 3.
+    + `<part id="P3">${withHarmony(rests(3), { 0: harm('D', 'minor'), 2: harm('A', 'minor') })}</part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'band.musicxml', { partId: 'P1' });
+  assert.equal(result.chords, 'score');
+  assert.match(result.abc, /\nV: Vocal\n"G7"C32\|"C"D32\|"Am"E32\|\n/);
+  assert.ok(!result.warnings.some(w => w.startsWith('Chords are inferred')));
+});
+
 test('roots are respelled under the key, as correct_chord_spelling does', async () => {
   // An A# major chord in Bb is written Bb; a Gb minor chord in Eb stays Gbm (its tones sit nearer the key).
   const score = `${header}</part-list><part id="P1"><measure number="1">${attrs(-2)}`
