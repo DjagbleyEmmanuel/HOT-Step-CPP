@@ -571,8 +571,8 @@ export async function importMusicXml(file: Blob, fileName: string, opts: { partI
   const info = parts.find(p => p.id === selected.getAttribute('id'))!;
   const staff = opts.staff ?? 1;
   if (staff < 1 || staff > info.staves) throw new MusicXmlImportError('Selected staff was not found');
-  const verse = opts.verse ?? info.verses[0] ?? '';
-  if (opts.verse !== undefined && !info.verses.includes(verse)) throw new MusicXmlImportError('Selected verse was not found');
+  const verse = opts.verse !== undefined && info.verses.includes(opts.verse)
+    ? opts.verse : info.verses.includes('1') ? '1' : info.verses[0] ?? '';
   if (info.voices > 1) warnings.add('Multiple voices: the first voice on the chosen staff is imported');
   const result = convert(selected, nodes.filter(p => p !== selected), warnings, staff, verse);
   if (result.abc.length > 5120) {

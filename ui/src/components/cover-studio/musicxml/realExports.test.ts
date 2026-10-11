@@ -95,6 +95,18 @@ test('verse selection changes the imported words', async () => {
   parseable(second.abc);
 });
 
+test('a verse from another score falls back on lyric and instrumental parts', async () => {
+  const multi = 'testsuite_61b-MultipleLyrics.musicxml';
+  const instrumental = 'testsuite_72a-TransposingInstruments.musicxml';
+  const first = await importMusicXml(fixture(instrumental), instrumental);
+  const noLyrics = await importMusicXml(fixture(instrumental), instrumental, { partId: first.parts[0].id, verse: '2' });
+  assert.equal(noLyrics.lyrics, '');
+  assert.ok(noLyrics.abc);
+  const fallback = await importMusicXml(fixture(multi), multi, { verse: '' });
+  const verseOne = await importMusicXml(fixture(multi), multi, { verse: '1' });
+  assert.equal(fallback.lyrics, verseOne.lyrics);
+});
+
 test('Bb instrument is converted to sounding pitch', async () => {
   const name = 'testsuite_72a-TransposingInstruments.musicxml';
   const first = await importMusicXml(fixture(name), name);

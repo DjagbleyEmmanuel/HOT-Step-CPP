@@ -75,7 +75,9 @@ have to make.
    Vocal voice, an Ins voice, 32nd-note lengths with ties, and pickup bars
    padded with rests. Tuplets round to the nearest 32nd with a warning. A grand
    staff starts with its top staff; choose another staff in the import picker.
-   You can also choose a lyric verse. The first voice on the chosen staff supplies
+   You can also choose a lyric verse. If the chosen verse is missing from the
+   part, import uses verse 1 when present, then the first available verse; a
+   part without lyrics imports without them. The first voice on the chosen staff supplies
    the melody. Other staves and parts fold into the single Ins line, which takes
    the highest sounding accompaniment note at each point. Repeats, alternate
    endings, D.C. and D.S. instructions play out before import. Key and meter

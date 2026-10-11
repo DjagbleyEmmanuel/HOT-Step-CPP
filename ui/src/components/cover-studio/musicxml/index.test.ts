@@ -24,6 +24,18 @@ test('melody, rests and first lyric verse produce a parseable native YuE2 score'
   assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
 });
 
+test('an absent lyric verse never blocks score import', async () => {
+  const noLyrics = melody.replace(/<lyric number="1">.*?<\/lyric>/g, '');
+  const result = await importMusicXml(blob(noLyrics), 'song.musicxml', { partId: 'P1', verse: '' });
+  assert.ok(result.abc);
+  assert.equal(result.lyrics, '');
+  const afterVerseTwo = await importMusicXml(blob(noLyrics), 'song.musicxml', { partId: 'P1', verse: '2' });
+  assert.ok(afterVerseTwo.abc);
+  assert.equal(afterVerseTwo.lyrics, '');
+  const afterNoLyrics = await importMusicXml(blob(melody), 'song.musicxml', { partId: 'P1', verse: '2' });
+  assert.equal(afterNoLyrics.lyrics, '[Verse]\nHello\n');
+});
+
 test('accidentals read the same per octave or per letter, and long notes split with ties', async () => {
   const note = (step: string, octave: number, alter: number, duration: number) =>
     `<note><pitch><step>${step}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${octave}</octave></pitch><duration>${duration}</duration></note>`;
