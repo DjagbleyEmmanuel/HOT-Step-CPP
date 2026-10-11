@@ -280,9 +280,12 @@ export function instrumentalScore(abc: string): InstrumentalScore {
 }
 
 /** Upstream's instrumental style wording: lead with "Instrumental", and say
- *  no vocals, singing, choir or speech. Idempotent. */
+ *  no vocals, singing, choir or speech. Idempotent. An empty style stays
+ *  empty, so the missing-caption check still fires: the wording alone gives
+ *  YuE2 no genre or instrument, and it answers with a speaking voice. */
 export function instrumentalStyle(style: string): string {
   let s = style.trim().replace(/[.,]+$/, '');
+  if (!s) return '';
   if (!/^instrumental\b/i.test(s)) s = s ? `Instrumental, ${s}` : 'Instrumental';
   for (const condition of ['no vocals', 'no singing', 'no choir', 'no spoken words']) {
     if (!s.toLowerCase().includes(condition)) s += `, ${condition}`;

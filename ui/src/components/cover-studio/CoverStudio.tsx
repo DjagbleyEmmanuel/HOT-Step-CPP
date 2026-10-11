@@ -25,7 +25,7 @@ import {
   completeManualQueueItem, failManualQueueItem,
 } from '../../stores/audioGenQueueStore';
 import {
-  persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
+  persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey, yue2CoverContentMissing,
   type AudioMetadata, type AudioAnalysis,
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
@@ -978,6 +978,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     }
     if (yue2Mode) {
       if (!approvedSheet || approvedSheet.key !== sourceKey) { showToast('Review and approve the score first'); return; }
+      const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics, instrumental });
+      if (missing) { showToast(missing); return; }
       if (pairMode === 'pair' && (!yue2Ar || !yue2Nar)) { showToast('Choose both YuE2 adapter halves'); return; }
       // Take the whole request at click time; the serial queue may start it much later.
       const engineParams = gp.getGlobalParams() as Record<string, unknown>;
@@ -1331,6 +1333,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null);
               if (!songTitle.trim()) setSongTitle(imported?.title ?? '');
               if (imported?.lyrics && !lyrics.trim()) setLyrics(imported.lyrics);
+              // A score with lyrics is a vocal cover: Instrumental left on from an earlier
+              // score would drop the lyrics and move the melody to Ins (gate render c2efb9a5).
+              if (imported?.lyrics.trim()) setInstrumental(false);
               // A score with chord symbols renders with them (Chain of Thought full); one without, melody only.
               if (imported) setKeepChords(!!imported.chords); }}>
             <div className="rounded-lg border border-dashed border-zinc-300 dark:border-white/20 p-6 text-center text-xs text-zinc-500">

@@ -95,7 +95,8 @@ have to make.
    before approving, because the guess is a simple pitch-class match and can
    misread passing notes or name a seventh that isn't there. In MusicXML mode the
    score's title fills an empty Title field and its lyrics fill an empty lyrics
-   box; text you have already typed is kept.
+   box; text you have already typed is kept. A score with lyrics also turns
+   **Instrumental** off, since that would discard them.
    Importing over an existing score asks before replacing it. Neither path uses
    source audio as an inference conditioning signal after approval.
    A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
@@ -113,7 +114,8 @@ have to make.
    doesn't cover. Vocal keeps its chord symbols. On Base YuE2 the style also
    gains "Instrumental" and "no vocals, no singing, no choir, no spoken words";
    with an adapter pair the style is left as the adapter was trained. The
-   generation log reports how many bars moved. Write a YuE2 style caption. With an adapter pair, you can
+   generation log reports how many bars moved. Write a YuE2 style caption; Generate
+   refuses to start without one, instrumental or not. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but

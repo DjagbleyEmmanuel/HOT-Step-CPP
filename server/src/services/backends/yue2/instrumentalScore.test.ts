@@ -78,4 +78,6 @@ test('instrumental style follows upstream wording and is idempotent', () => {
   const style = instrumentalStyle('gentle solo piano, slow and minimal.');
   assert.equal(style, 'Instrumental, gentle solo piano, slow and minimal, no vocals, no singing, no choir, no spoken words.');
   assert.equal(instrumentalStyle(style), style);
+  // No caption stays no caption, so the missing-caption check still fires.
+  assert.equal(instrumentalStyle(' . '), '');
 });
