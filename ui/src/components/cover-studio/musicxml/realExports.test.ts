@@ -49,10 +49,12 @@ test('Finale tablature offers part choice and warns about transposition', async 
   parseable(chosen.abc);
 });
 
-test('Finale chord symbols warn that harmony is omitted', async () => {
+test('Finale chord symbols become native chords, extensions simplified', async () => {
   const name = 'w3c_tutorial-chord-symbols.musicxml';
   const chosen = await importMusicXml(fixture(name), name);
   assert.equal(chosen.parts.length, 1);
-  assert.ok(chosen.warnings.some(w => w.includes('Chord symbols')));
+  assert.equal(chosen.chords, 'score');
+  assert.deepEqual([...chosen.abc.matchAll(/"([^"]+)"/g)].map(m => m[1]).filter(c => !/Melody|Vocal|Inst/.test(c)), ['G6/D', 'G6/D', 'A', 'A7']);
+  assert.ok(chosen.warnings.some(w => w.includes("outside YuE2's chord set")));
   parseable(chosen.abc);
 });

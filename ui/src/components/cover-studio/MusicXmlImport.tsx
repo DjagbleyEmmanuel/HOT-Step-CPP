@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StyledSelect } from '../shared/StyledSelect';
-import { importMusicXml, type MusicXmlPart } from './musicxml';
+import { importMusicXml, type MusicXmlPart, type MusicXmlResult } from './musicxml';
 
 interface Props {
   abc: string;
   disabled: boolean;
   /** `imported` carries the score's title and any lyrics, which the native score itself leaves out. */
-  onAbcChange: (abc: string, imported?: { title: string; lyrics: string }) => void;
+  onAbcChange: (abc: string, imported?: { title: string; lyrics: string; chords: MusicXmlResult['chords'] }) => void;
   children: React.ReactNode;
 }
 
@@ -56,7 +56,7 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
         return;
       }
       if (startingAbc.trim() && !window.confirm(t('cover.musicXml.replace'))) return;
-      onAbcChange(result.abc, { title: result.title, lyrics: result.lyrics });
+      onAbcChange(result.abc, { title: result.title, lyrics: result.lyrics, chords: result.chords });
       setWarnings(result.warnings);
       setParts([]);
       setFile(null);

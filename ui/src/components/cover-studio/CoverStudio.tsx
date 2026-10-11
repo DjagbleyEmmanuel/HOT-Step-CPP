@@ -1330,7 +1330,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             onAbcChange={(value, imported) => { sheetRequestRef.current++; setSheetAbc(value); setApprovedSheet(null);
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null);
               if (!songTitle.trim()) setSongTitle(imported?.title ?? '');
-              if (imported?.lyrics && !lyrics.trim()) setLyrics(imported.lyrics); }}>
+              if (imported?.lyrics && !lyrics.trim()) setLyrics(imported.lyrics);
+              // A score with chord symbols renders with them (Chain of Thought full); one without, melody only.
+              if (imported) setKeepChords(!!imported.chords); }}>
             <div className="rounded-lg border border-dashed border-zinc-300 dark:border-white/20 p-6 text-center text-xs text-zinc-500">
               {t('cover.sourceMode.dropScore')}
             </div>

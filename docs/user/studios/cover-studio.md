@@ -74,7 +74,18 @@ have to make.
    Import writes the score in YuE2's own layout: the chosen part's melody on the
    Vocal voice, an empty Ins voice, 32nd-note lengths with ties, and pickup bars
    padded with rests. Tuplets round to the nearest 32nd with a warning. Only the
-   first staff and first voice of the part are read. In MusicXML mode the
+   first staff and first voice of the part are read for the melody.
+   Chord symbols in the file become chord symbols on the Vocal voice, written
+   the way SheetSage2 writes them: at each change, and again at the start of
+   every bar the chord carries into. A note that a change falls inside is split
+   and tied, and a bar with no melody keeps its chord rather than becoming a
+   rest. Roots are respelled for the key, as SheetSage2 does. Chord types
+   YuE2 doesn't know are simplified to the nearest one it does (a ninth becomes
+   a seventh), with a warning. When the file has no chord symbols, as most piano
+   scores don't, chords are inferred for each bar, or each half bar where they
+   change, from the other staves and parts. The warning says so; check them
+   before approving, because the guess is a simple pitch-class match and can
+   misread passing notes or name a seventh that isn't there. In MusicXML mode the
    score's title fills an empty Title field and its lyrics fill an empty lyrics
    box; text you have already typed is kept.
    Importing over an existing score asks before replacing it. Neither path uses
@@ -129,7 +140,12 @@ have to make.
    chord symbols, free tempo and source key. Choose vocal melody only if you
    want to omit the transcribed instrumental line; keep chords to preserve more
    of the original arrangement, retain or set tempo, or shift the key by up to
-   six semitones. Advanced **Condition strength** tightens style, lyrics and
+   six semitones. Keep chords also sets Chain of Thought: on, the render uses
+   Full, so the chord symbols reach the composer; off, it uses Melody only. In
+   MusicXML mode, Keep chords turns on by itself when the imported score has
+   chord symbols, including inferred ones, and off when it has none; you can
+   still change it. An Instrumental render keeps the chords on the Vocal voice
+   when it moves the melody to Ins. Advanced **Condition strength** tightens style, lyrics and
    score together. The reviewed full score stays available. Click
    **Generate YuE2 cover**; queued renders keep all five choices, selected
    pair, score and settings from that click

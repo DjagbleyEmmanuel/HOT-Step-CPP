@@ -51,7 +51,57 @@ test('grand staff reports lossy conversion', async () => {
   const result = await importMusicXml(blob(score), 'piano.musicxml');
   assert.equal(result.parts[0].staves, 2);
   assert.match(result.warnings.join(' '), /Multiple staves/);
-  assert.match(result.abc, /\nC8z24\|\n/);
+  assert.match(result.abc, /\n"C"C8z24\|\n/);
+  assert.equal(result.chords, 'inferred');
+});
+
+const harm = (step: string, kind: string, extra = '') => `<harmony><root><root-step>${step}</root-step></root><kind>${kind}</kind>${extra}</harmony>`;
+const n = (step: string, duration: number, extra = '') => `<note><pitch><step>${step}</step><octave>4</octave></pitch><duration>${duration}</duration>${extra}</note>`;
+const attrs = (fifths: number) => `<attributes><divisions>4</divisions><key><fifths>${fifths}</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>`;
+
+test('chord symbols land where SheetSage2 writes them, spelled the same way', async () => {
+  const score = `${header}</part-list><part id="P1">`
+    // A change inside a held note splits it with a tie; the chord still sounding is repeated at the next bar line.
+    + `<measure number="1">${attrs(-2)}${harm('G', 'minor-seventh')}${n('D', 8)}${harm('C', 'suspended-fourth', '<degree><degree-value>7</degree-value><degree-alter>0</degree-alter><degree-type>add</degree-type></degree>')}<offset>-4</offset>${n('C', 8)}</measure>`
+    // A melody rest bar keeps its chord rather than becoming Z; an <offset> moves the change; a slash bass is kept.
+    + `<measure number="2"><note><rest/><duration>16</duration></note></measure>`
+    + `<measure number="3">${harm('A', 'major', '<bass><bass-step>C</bass-step><bass-alter>1</bass-alter></bass>')}${n('A', 16)}</measure>`
+    // A ninth is simplified to its seventh; N.C. ends the chord.
+    + `<measure number="4">${harm('F', 'dominant-ninth')}${n('C', 8)}${harm('C', 'none')}${n('F', 8)}</measure>`
+    + `<measure number="5">${n('F', 16)}</measure></part></score-partwise>`;
+  const result = await importMusicXml(blob(score.replace('</harmony><offset>-4</offset>', '<offset>-4</offset></harmony>')), 'chords.musicxml');
+  assert.equal(result.chords, 'score');
+  assert.match(result.abc, /\nV: Vocal\n"Gm7"D8-"C7sus4"D8C16\|"C7sus4"z32\|"A\/C#"A32\|"F7"C16F16\|\nV: Ins\nZ4\|\nV: Vocal\nF32\|\n/);
+  assert.ok(result.warnings.some(w => w.includes("outside YuE2's chord set")));
+  assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
+});
+
+test('roots are respelled under the key, as correct_chord_spelling does', async () => {
+  // An A# major chord in Bb is written Bb; a Gb minor chord in Eb stays Gbm (its tones sit nearer the key).
+  const score = `${header}</part-list><part id="P1"><measure number="1">${attrs(-2)}`
+    + `<harmony><root><root-step>A</root-step><root-alter>1</root-alter></root><kind>major</kind></harmony>${n('D', 16)}</measure></part></score-partwise>`;
+  assert.match((await importMusicXml(blob(score), 'spell.musicxml')).abc, /"Bb"D32\|/);
+  const inEb = score.replace('<fifths>-2</fifths>', '<fifths>-3</fifths>').replace('<root-step>A</root-step><root-alter>1</root-alter></root><kind>major', '<root-step>F</root-step><root-alter>1</root-alter></root><kind>minor');
+  assert.match((await importMusicXml(blob(inEb), 'spell.musicxml')).abc, /"Gbm"D32\|/);
+});
+
+test('without chord symbols, chords are inferred per half bar from the other staff and flagged', async () => {
+  // F-A-C under a held E reads as Fmaj7: the melody counts at half weight.
+  const low = (step: string, octave = 3, chord = false) => `<note>${chord ? '<chord/>' : ''}<pitch><step>${step}</step><octave>${octave}</octave></pitch><duration>8</duration><staff>2</staff></note>`;
+  const score = `${header}</part-list><part id="P1"><measure number="1"><attributes><divisions>4</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><staves>2</staves></attributes>`
+    + `${n('E', 16, '<staff>1</staff>')}<backup><duration>16</duration></backup>${low('C')}${low('E', 3, true)}${low('G', 3, true)}${low('F', 2)}${low('A', 3, true)}${low('C', 4, true)}</measure>`
+    + `<measure number="2">${n('E', 16, '<staff>1</staff>')}<backup><duration>16</duration></backup>${low('C')}${low('E', 3, true)}${low('G', 3, true)}${low('C')}${low('E', 3, true)}${low('G', 3, true)}</measure></part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'piano.musicxml');
+  assert.equal(result.chords, 'inferred');
+  assert.match(result.abc, /\n"C"E16-"Fmaj7"E16\|"C"E32\|\n/);
+  assert.ok(result.warnings.some(w => w.startsWith('Chords are inferred')));
+});
+
+test('a tie is kept only into the next melody note at the same pitch', async () => {
+  const tie = '<tie type="start"/>';
+  const score = `${header}</part-list><part id="P1"><measure number="1">${attrs(0)}${n('C', 4, tie)}${n('D', 4)}${n('E', 4, tie)}<note><rest/><duration>4</duration></note></measure>`
+    + `<measure number="2">${n('F', 16, tie)}</measure><measure number="3">${n('F', 16)}</measure></part></score-partwise>`;
+  assert.match((await importMusicXml(blob(score), 'ties.musicxml')).abc, /\nC8D8E8z8\|F32-\|F32\|\n/);
 });
 
 test('MXL follows container rootfile and rejects a missing rootfile', async () => {
