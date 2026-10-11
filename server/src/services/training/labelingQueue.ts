@@ -30,7 +30,7 @@ import { mergeFields, writeSidecar } from './sidecarIO.js';
 import {
   clearTransientStatus, clearTransientStatuses, patchLabel, readLabel, setTransientStatus,
 } from './labelStore.js';
-import { analyzeWithEssentia, essentiaAvailable, essentiaKeyString } from './essentiaClient.js';
+import { analyzeWithEssentia, essentiaAvailable, essentiaKeyString, reconcileEssentiaBpm } from './essentiaClient.js';
 import { captionLimiter, essentiaLimiter, geniusLimiter } from './rateLimit.js';
 import { AbortError, runUnderstand } from './understandClient.js';
 import {
@@ -705,6 +705,7 @@ interface PassAResult {
   tagGenre: string;
   tagBpm: number | null;
   essentiaBpm: number | null;
+  bpmFromTag: boolean;
   essentiaKey: string;
 }
 
@@ -732,6 +733,7 @@ async function runPassA(
   const cached = readLabel(ds.slug, sample.sampleId);
   const cacheFresh = (() => {
     if (!cached?.durationCache) return false;
+    if (JSON.stringify(cached.essentiaTempo ?? null) !== JSON.stringify(opts.essentiaTempo ?? null)) return false;
     try {
       const st = fs.statSync(sample.audioPath);
       return cached.durationCache.sizeBytes === st.size && cached.durationCache.mtimeMs === st.mtimeMs;
@@ -742,16 +744,18 @@ async function runPassA(
   const essentia = (opts.useEssentia !== false && essentiaAvailable())
     ? (cacheFresh && cached?.essentia
         ? cached.essentia
-        : await analyzeWithEssentia(sample.audioPath, job.controller.signal))
+        : await analyzeWithEssentia(sample.audioPath, job.controller.signal, opts.essentiaTempo))
     : null;
 
   const essentiaKey = essentia ? essentiaKeyString(essentia.key, essentia.scale) : '';
+  const essentiaBpm = reconcileEssentiaBpm(essentia?.bpm ?? null, meta.bpm);
   const result: PassAResult = {
     duration: meta.duration,
     tags: { artist: meta.artist, title: meta.title, album: meta.album },
     tagGenre: meta.genre,
     tagBpm: meta.bpm,
-    essentiaBpm: essentia?.bpm ?? null,
+    essentiaBpm,
+    bpmFromTag: essentiaBpm !== null && essentiaBpm === meta.bpm && essentiaBpm !== essentia?.bpm,
     essentiaKey,
   };
   results.set(sample.sampleId, result);
@@ -768,13 +772,14 @@ async function runPassA(
     relPath: sample.relPath,
     tags: result.tags,
     essentia: essentia ?? null,
+    essentiaTempo: opts.essentiaTempo ?? null,
     durationCache: meta.duration > 0 ? { seconds: meta.duration, sizeBytes, mtimeMs } : null,
   });
 
   // Interim sidecar write — a cancelled job still leaves usable BPM/key data.
   const incoming: Record<string, string> = {};
   const sources: Record<string, FieldSource> = {};
-  if (result.essentiaBpm !== null) { incoming.bpm = String(result.essentiaBpm); sources.bpm = 'essentia'; }
+  if (result.essentiaBpm !== null) { incoming.bpm = String(result.essentiaBpm); sources.bpm = result.bpmFromTag ? 'tags' : 'essentia'; }
   else if (result.tagBpm !== null) { incoming.bpm = String(result.tagBpm); sources.bpm = 'tags'; }
   if (essentiaKey) { incoming.key = essentiaKey; sources.key = 'essentia'; }
   if (meta.genre) { incoming.genre = meta.genre; sources.genre = 'tags'; }
@@ -934,7 +939,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
         let lyricsError: string | null = null;
 
         // Local results first — Essentia wins bpm/key (§4.8), tags win genre.
-        if (a?.essentiaBpm != null) { incoming.bpm = String(a.essentiaBpm); sources.bpm = 'essentia'; }
+        if (a?.essentiaBpm != null) { incoming.bpm = String(a.essentiaBpm); sources.bpm = a.bpmFromTag ? 'tags' : 'essentia'; }
         else if (a?.tagBpm != null) { incoming.bpm = String(a.tagBpm); sources.bpm = 'tags'; }
         if (a?.essentiaKey) { incoming.key = a.essentiaKey; sources.key = 'essentia'; }
         if (a?.tagGenre) { incoming.genre = a.tagGenre; sources.genre = 'tags'; }

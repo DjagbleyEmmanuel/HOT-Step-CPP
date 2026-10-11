@@ -156,7 +156,7 @@ import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanu
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
-import { essentiaAvailable } from '../services/training/essentiaClient.js';
+import { essentiaAvailable, essentiaTempoProfile } from '../services/training/essentiaClient.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
 import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
@@ -1323,6 +1323,8 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
       return;
     }
     const body = (req.body || {}) as LabelOptions;
+    try { essentiaTempoProfile(body.essentiaTempo); }
+    catch (err) { res.status(400).json({ error: err instanceof Error ? err.message : String(err) }); return; }
     {
       const needsEngine = body.useUnderstand === true
         || (body.useCaption !== false && body.caption?.provider === 'moss');

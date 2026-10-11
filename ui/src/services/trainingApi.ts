@@ -2120,6 +2120,7 @@ export interface LabelOptions {
   sampleIds?: string[];
   scope?: 'all' | 'unlabeled';
   useEssentia?: boolean;   // default true  — local BPM/key
+  essentiaTempo?: { minTempo?: number; maxTempo?: number };
   useGenius?: boolean;     // default false — canonical lyrics (needs token)
   useCaption?: boolean;    // default false — LLM caption+genre (audio-grounded on gemini)
   useUnderstand?: boolean; // default false — LEGACY /understand path
