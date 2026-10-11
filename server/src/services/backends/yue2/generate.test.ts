@@ -56,6 +56,24 @@ test('jobCover reads all five score choices from the captured envelope', () => {
   assert.deepEqual(jobCover(job), { cover, abc: 'X:1\nK:F#m\nF|' });
 });
 
+test('MusicXML cover reaches the YuE2 request from its captured score without source audio', () => {
+  const score = 'X:1\nK:C\nC4|';
+  const job = fakeJob(
+    { yue2Cover: { sourceKind: 'musicxml' }, yue2Abc: score },
+    { caption: 'quiet strings', yue2Abc: 'stale', sourceAudioUrl: '/audio/old.wav' },
+  );
+  const captured = jobCover(job);
+  assert.deepEqual(captured, { cover: { sourceKind: 'musicxml' }, abc: score });
+  const mapped = mapYue2Params({ ...job.params, yue2Abc: captured!.abc }, {
+    lm: '', vae_variant: '', adapters: {
+      ar: { path: '', scales: { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 } },
+      nar: { path: '', scales: { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 } },
+    },
+  });
+  assert.equal(mapped.req.abc, score);
+  assert.equal('sourceAudioUrl' in mapped.req, false);
+});
+
 test('an ordinary (non-cover) job has no captured cover, regardless of job.params', () => {
   const job = fakeJob({ yue2Abc: 'X:1\n' }, { yue2Cover: { sourceId: 'ignored' } });
   assert.equal(jobCover(job), undefined);

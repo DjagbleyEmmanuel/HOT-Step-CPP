@@ -1,6 +1,10 @@
 {
   "translation": {
     "cover.musicXml.import": "Import MusicXML",
+    "cover.sourceMode.label": "Cover source",
+    "cover.sourceMode.audio": "Source Audio",
+    "cover.sourceMode.musicxml": "Import MusicXML",
+    "cover.sourceMode.dropScore": "Drop a MusicXML score here, then review it in the editor.",
     "cover.musicXml.importing": "Importing MusicXML…",
     "cover.musicXml.chooseFile": "Choose MusicXML file",
     "cover.musicXml.choosePart": "Choose the part to import:",

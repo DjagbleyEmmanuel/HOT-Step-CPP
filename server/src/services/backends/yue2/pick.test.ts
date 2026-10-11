@@ -149,6 +149,15 @@ test('yue2CoverFromSubmission requires a sourceId', () => {
   );
 });
 
+test('MusicXML cover identifies a score source with no recording', () => {
+  assert.deepEqual(yue2CoverFromSubmission({ yue2Cover: { sourceKind: 'musicxml' } }),
+    { sourceKind: 'musicxml' });
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: { sourceKind: 'musicxml', sourceId: 'song-1' } }),
+    /cannot also name a source recording/);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: { sourceKind: 'audio' } }), /sourceId/);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: { sourceKind: 'unknown' } }), /sourceKind/);
+});
+
 test('yue2CoverFromSubmission keeps a render chord choice and rejects invalid values', () => {
   assert.deepEqual(yue2CoverFromSubmission({ yue2Cover: { sourceId: 'song-1', keepChords: false } }),
     { sourceId: 'song-1', keepChords: false });
@@ -224,6 +233,10 @@ test('cover submission captures both voices by default and preserves explicit vo
       "const vocal = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's', voices: 'vocal' }, yue2Abc: 'X:1\\nV: Vocal\\nz4|C4|\\nV: Ins\\nC4|' });",
       "assert.equal(vocal.options.yue2Cover.voices, 'vocal');",
       "assert.equal(vocal.options.yue2Abc.includes('V: Ins'), false);",
+      "const score = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceKind: 'musicxml' }, yue2Abc: 'X:1\\nV: Vocal\\nC4|' });",
+      "assert.equal(score.options.yue2Cover.sourceKind, 'musicxml');",
+      "assert.equal(score.options.yue2Cover.sourceId, undefined);",
+      "assert.throws(() => yue2Backend.resolveRequest({ caption: 'c', sourceAudioUrl: '/audio/source.wav', yue2Cover: { sourceKind: 'musicxml' }, yue2Abc: 'X:1\\nV: Vocal\\nC4|' }), /cannot also supply source audio/);",
     ].join('\n');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
       cwd: fileURLToPath(new URL('../../../../', import.meta.url)),

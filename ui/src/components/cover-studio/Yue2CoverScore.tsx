@@ -7,6 +7,7 @@ import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverA
 
 interface Props {
   sourceReady: boolean;
+  sourceMode: 'audio' | 'musicxml';
   readiness: Yue2CoverReadiness | null;
   job: Yue2CoverJob | null;
   preparing: boolean;
@@ -26,6 +27,9 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   const audioRef = useRef<HTMLDivElement>(null);
   const [previewValid, setPreviewValid] = useState(false);
   const busy = p.preparing || p.job?.status === 'queued' || p.job?.status === 'running';
+  const editor = <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
+    placeholder="Paste an ABC score here to skip transcription"
+    className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />;
 
   useEffect(() => {
     if (!scoreRef.current) return;
@@ -61,14 +65,16 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">YuE2 lead sheet</h3>
-          <p className="text-xs text-zinc-500">Transcribe the source melody and chords or paste ABC, then review and approve it.</p>
+          <p className="text-xs text-zinc-500">{p.sourceMode === 'audio'
+            ? 'Transcribe the source melody and chords or paste ABC, then review and approve it.'
+            : 'Review the imported ABC score, then approve it.'}</p>
         </div>
-        <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
+        {p.sourceMode === 'audio' && <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
           className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
           {p.abc ? 'Retry transcription' : 'Transcribe full score'}
-        </button>
+        </button>}
       </div>
-      {p.readiness?.message && <p className="text-xs text-amber-600 dark:text-amber-400">{p.readiness.message}</p>}
+      {p.sourceMode === 'audio' && p.readiness?.message && <p className="text-xs text-amber-600 dark:text-amber-400">{p.readiness.message}</p>}
       {busy && (
         <div className="space-y-1 text-xs text-zinc-500">
           <p>{p.preparing ? 'Preparing source audio…' : `${p.job?.phase || 'Queued'}${p.job?.total ? ` · ${p.job.done}/${p.job.total}` : ''}`}</p>
@@ -77,11 +83,9 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
       {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
-      <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange}>
-        <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
-          placeholder="Paste an ABC score here to skip transcription"
-          className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />
-      </MusicXmlImport>
+      {p.sourceMode === 'audio'
+        ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange}>{editor}</MusicXmlImport>
+        : editor}
       {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
       <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto max-h-48`}>
         <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />

@@ -299,7 +299,9 @@ function firstText(submission: Readonly<Record<string, unknown>>, keys: string[]
 export interface Yue2CoverSubmission extends Partial<CoverScoreChoices> {
   /** Opaque identity of the source recording (a song id, an upload id —
    *  whatever the submitter has); required so provenance is never blank. */
-  sourceId: string;
+  sourceId?: string;
+  /** MusicXML scores have no source recording. Absent means the legacy audio path. */
+  sourceKind?: 'audio' | 'musicxml';
   /** Optional human-readable label for logs and metadata. */
   sourceLabel?: string;
   /** Reviewed full score, retained beside the score actually rendered. */
@@ -322,8 +324,11 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
     throw new Error('yue2Cover must be an object with a sourceId when supplied.');
   }
   const r = raw as Record<string, unknown>;
+  const sourceKind = r.sourceKind === undefined ? 'audio' : r.sourceKind;
+  if (sourceKind !== 'audio' && sourceKind !== 'musicxml') throw new Error('yue2Cover.sourceKind must be audio or musicxml.');
   const sourceId = typeof r.sourceId === 'string' ? r.sourceId.trim() : '';
-  if (!sourceId) throw new Error('A cover job needs yue2Cover.sourceId identifying the source recording.');
+  if (sourceKind === 'audio' && !sourceId) throw new Error('A cover job needs yue2Cover.sourceId identifying the source recording.');
+  if (sourceKind === 'musicxml' && sourceId) throw new Error('MusicXML covers cannot also name a source recording.');
   const sourceLabel = typeof r.sourceLabel === 'string' && r.sourceLabel.trim() ? r.sourceLabel.trim() : undefined;
   const rawChoices = Object.fromEntries(
     (['voices', 'keepChords', 'tempo', 'key', 'cfgScale'] as const)
@@ -331,7 +336,8 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
   // Validate marker fields even when this reads an older captured envelope.
   coverScoreChoices(rawChoices as Partial<CoverScoreChoices>);
   const fullScore = typeof r.fullScore === 'string' ? r.fullScore : undefined;
-  return { sourceId, ...(sourceLabel ? { sourceLabel } : {}),
+  return { ...(sourceId ? { sourceId } : {}), ...(sourceKind === 'musicxml' ? { sourceKind } : {}),
+    ...(sourceLabel ? { sourceLabel } : {}),
     ...rawChoices as Partial<CoverScoreChoices>,
     ...(fullScore !== undefined ? { fullScore } : {}) };
 }
@@ -350,6 +356,9 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   const instrumental = typeof submission.instrumental === 'boolean'
     ? submission.instrumental : undefined;
   const cover = yue2CoverFromSubmission(submission);
+  if (cover?.sourceKind === 'musicxml' && submission.sourceAudioUrl) {
+    throw new Error('MusicXML covers cannot also supply source audio.');
+  }
   let coverAbc: string | undefined;
   if (cover) {
     // A cover IS its approved score; rendering a plain text2music job instead
@@ -375,7 +384,9 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   if (cover && coverAbc) {
     const choices = coverScoreChoices(cover);
     const score = transformCoverScore(coverAbc, choices);
-    options.yue2Cover = { sourceId: cover.sourceId, ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),
+    options.yue2Cover = { ...(cover.sourceId ? { sourceId: cover.sourceId } : {}),
+      ...(cover.sourceKind ? { sourceKind: cover.sourceKind } : {}),
+      ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),
       ...choices, fullScore: score.fullScore } satisfies Yue2CoverSubmission;
     options.yue2Abc = score.renderedAbc;
     options.yue2CfgScale = choices.cfgScale;

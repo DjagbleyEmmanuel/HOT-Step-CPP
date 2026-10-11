@@ -38,6 +38,7 @@ import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yu
   type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { Yue2CoverScore } from './Yue2CoverScore';
+import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2SectionMatch } from '../../services/yue2CoverApi';
@@ -85,6 +86,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
   const yue2Mode = useBackendStore(s => s.activeBackendId === 'yue2');
   const yue2Models = useBackendStore(s => s.models.yue2);
+  const [sourceMode, setSourceMode] = useState<'audio' | 'musicxml'>('audio');
 
   // ── Source audio state ──
   const [sourceFileName, setSourceFileName] = useState(() => restore<string>('sourceFileName', ''));
@@ -193,7 +195,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sepJobId, sepStems, stemControls, showMixer, isSeparating, sepProgress, sepMessage,
     setShowMixer, setStemControls, startSeparation: startStemSeparation, clearStems,
   } = useCoverStemsStore();
-  const sourceKey = JSON.stringify([sourceAudioUrl, sourceSongId, sourceAssetId, advancedMode && sepJobId,
+  const sourceKey = JSON.stringify([sourceMode, sourceAudioUrl, sourceSongId, sourceAssetId, advancedMode && sepJobId,
     advancedMode && sepStems?.length, advancedMode && stemControls]);
   const sourceKeyRef = useRef(sourceKey);
   sourceKeyRef.current = sourceKey;
@@ -296,6 +298,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // beyond opening the source); nothing is generated.
   const applyDraft = (body: { fields: Record<string, unknown> }) => {
     const f = body.fields;
+    setSourceMode('audio');
     sourceLookupRef.current++;
     captionRequestRef.current++;
     setCoverDraftId(''); setCoverDraftRevision(0);
@@ -360,6 +363,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // ── "Send to Cover Studio" — load a library track as the cover source (#61) ──
   useEffect(() => {
     if (!coverSource || coverSource.timestamp === _lastConsumedCoverTs) return;
+    setSourceMode('audio');
     _lastConsumedCoverTs = coverSource.timestamp;
     const s = coverSource.song;
     captionRequestRef.current++;
@@ -455,6 +459,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleFileSelected = async (file: File) => {
+    setSourceMode('audio');
     if (!token) { showToast(t('cover.signInFirst')); return; }
     const lookup = ++sourceLookupRef.current;
     if (coverWorkflowJobRef.current) void workflowApi.cancel(token, coverWorkflowJobRef.current).catch(() => {});
@@ -784,7 +789,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleApproveSheet = async () => {
-    if (!token || !sheetAbc.trim() || !sourceAudioUrl) return;
+    if (!token || !sheetAbc.trim() || (sourceMode === 'audio' && !sourceAudioUrl)) return;
+    if (sourceMode === 'musicxml') {
+      setSheetError('');
+      setApprovedSheet({ abc: sheetAbc.trim(), sourceId: '', sourceLabel: '', audioUrl: '', key: sourceKey });
+      return;
+    }
     if (sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
       setSheetError('Source is still being prepared'); return;
     }
@@ -954,12 +964,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleGenerate = () => {
-    if (!token || !sourceAudioUrl) { showToast(t('cover.missingSrcOrLyrics')); return; }
-    if (sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
+    if (!token || (sourceMode === 'audio' && !sourceAudioUrl)) { showToast(t('cover.missingSrcOrLyrics')); return; }
+    if (sourceMode === 'audio' && sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
       showToast('Source is still being prepared'); return;
     }
     if (!instrumental && !lyrics.trim()) { showToast('Enter lyrics or enable Instrumental mode'); return; }
-    if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
+    if (sourceMode === 'audio' && sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
       if (yue2Mode && (!approvedSheet || approvedSheet.key !== sourceKey)) {
         showToast('Review and approve the score first'); return;
       }
@@ -1013,8 +1023,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
         ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
-        instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
-        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices },
+        instrumental, source: 'cover-studio',
+        ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
+        yue2Cover: sourceMode === 'audio'
+          ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
+          : { sourceKind: 'musicxml', ...coverChoices },
         yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
       const qId = addManualQueueItem({ title, artistName: '', caption: resolvedCaption });
       updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
@@ -1248,6 +1261,17 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     clearStems();
   };
 
+  const selectSourceMode = (mode: 'audio' | 'musicxml') => {
+    if (mode === sourceMode) return;
+    handleClearSource();
+    sheetRequestRef.current++;
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null);
+    setSectionMatch(null); setSheetAudioUrl(''); setSheetError('');
+    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
+    sheetJobRef.current = ''; setSheetJobId(''); setSheetJob(null); setSheetPreparing(false);
+    setSourceMode(mode);
+  };
+
   const handleClearArtist = () => {
     setSelectedArtistId(null);
     setSelectedPreset(null);
@@ -1256,7 +1280,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   // Always allow queuing another cover — covers stack and run one at a time (#62).
-  const canGenerate = !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision))
+  const canGenerate = (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
     && (!!lyrics.trim() || instrumental)
     && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (pairMode === 'base' || (!!yue2Ar && !!yue2Nar))));
 
@@ -1291,8 +1315,27 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       {/* Main workspace */}
       {/* Scrolls sideways when the three panels' minimum widths don't fit. */}
       <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
-        {/* Left: Source Audio */}
-        <SourcePanel
+        {/* Left: source choice */}
+        <div className="w-[320px] min-w-[240px] flex-shrink-0 flex flex-col min-h-0">
+        {yue2Mode && <div className="border-r border-zinc-200 dark:border-white/5 p-4 space-y-3 overflow-y-auto">
+          <div className="flex gap-2" role="group" aria-label={t('cover.sourceMode.label')}>
+            <button type="button" onClick={() => selectSourceMode('audio')} aria-pressed={sourceMode === 'audio'}
+              className={`rounded-lg px-3 py-1.5 text-xs ${sourceMode === 'audio' ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-600 dark:text-zinc-400'}`}>
+              {t('cover.sourceMode.audio')}</button>
+            <button type="button" onClick={() => selectSourceMode('musicxml')} aria-pressed={sourceMode === 'musicxml'}
+              className={`rounded-lg px-3 py-1.5 text-xs ${sourceMode === 'musicxml' ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-600 dark:text-zinc-400'}`}>
+              {t('cover.sourceMode.musicxml')}</button>
+          </div>
+          {sourceMode === 'musicxml' && <MusicXmlImport key={sourceKey} abc={sheetAbc} disabled={sheetPreparing}
+            onAbcChange={value => { sheetRequestRef.current++; setSheetAbc(value); setApprovedSheet(null);
+              setScoreSections([]); setSectionLint(null); setSheetScoreSource(null);
+              if (!songTitle.trim()) setSongTitle(value.match(/^T:\s*(.+)$/m)?.[1]?.trim() || ''); }}>
+            <div className="rounded-lg border border-dashed border-zinc-300 dark:border-white/20 p-6 text-center text-xs text-zinc-500">
+              {t('cover.sourceMode.dropScore')}
+            </div>
+          </MusicXmlImport>}
+        </div>}
+        {(!yue2Mode || sourceMode === 'audio') && <SourcePanel
           yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
@@ -1331,7 +1374,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           coverCaptionModel={coverCaptionModel}
           onCoverCaptionProviderChange={handleCoverProviderChange}
           onCoverCaptionModelChange={handleCoverModelChange}
-        />
+        />}
+        </div>
 
         {/* Center: Lyrics. The side panels shrink before it does. */}
         <div className="flex-1 min-w-[320px] flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5">
@@ -1361,7 +1405,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
               <button type="button" onClick={() => void handleMatchSections()}
-                disabled={!scoreSections.length || !lyrics.trim() || instrumental || sectionMatching}
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching}
                 title="Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
                 {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match sections to score'}</button>
@@ -1387,7 +1431,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
           </div>}
           {yue2Mode && <Yue2CoverScore
-            sourceReady={!!sourceAudioUrl && !isUploading}
+            sourceReady={(sourceMode === 'musicxml' ? !!sheetAbc.trim() : !!sourceAudioUrl) && !isUploading}
+            sourceMode={sourceMode}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
             abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
             onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);

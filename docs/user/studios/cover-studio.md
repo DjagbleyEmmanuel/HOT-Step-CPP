@@ -56,23 +56,26 @@ have to make.
 
 ## YuE2 workflow
 
-1. Upload a source recording of at most 100 MB and 10 minutes, or send a song
-   from Library. Detected BPM and key
-   are shown for reference; they do not change the YuE2 cover request. Advanced
-   Mode can split and mix stems before transcription.
-2. Click **Transcribe full score**. SheetSage2 writes the melody and detected
+1. Choose **Source Audio** or **Import MusicXML** in the left panel. Source Audio
+   accepts a recording of at most 100 MB and 10 minutes, or a song sent from
+   Library. Detected BPM and key are shown for reference; they do not change
+   the YuE2 cover request. Advanced Mode can split and mix stems before
+   transcription. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
+   select a part when prompted, and review conversion warnings. Switching modes
+   clears the previous source and its score approval.
+2. For Source Audio, click **Transcribe full score**. SheetSage2 writes the melody and detected
    chords into ABC. The score panel shows queue and transcription
    progress, with Cancel and Retry. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
-   You can paste ABC or import a `.musicxml`, `.xml` or `.mxl` file in the score editor
-   instead, without SheetSage2. Drop a MusicXML file onto the ABC area or use
-   **Import MusicXML**. For a score with multiple parts, choose the melody part;
-   read any conversion warnings and review the editable ABC preview. Importing
-   over an existing score asks before replacing it. Neither path
-   uses the source audio as an inference conditioning signal after approval.
+   In Source Audio mode you can also paste ABC or import MusicXML in the score
+   editor to replace the transcribed ABC while keeping the source recording.
+   In MusicXML mode the imported score already supplies ABC, without SheetSage2
+   or a source recording. The file picker and drop area are in the left panel.
+   Importing over an existing score asks before replacing it. Neither path uses
+   source audio as an inference conditioning signal after approval.
    A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
 3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
-   the score or changing the source audio or stem mix withdraws approval. The
+   the score or changing the source audio, stem mix or source mode withdraws approval. The
    Generate button stays disabled until the current source has an approved score.
    For uploaded sources, transcription and approval use the draft's revision;
    a result from an older source or a cancelled transcription cannot replace the
@@ -83,7 +86,7 @@ have to make.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but
    never blocks Generate.
-   **Match sections to score** does the arranging for you. It separates the
+   **Match sections to score** is available for Source Audio only. It separates the
    source's vocal (once per source, then cached), finds where each lyric block
    is sung, and retags each block with the score section it starts in. It
    never changes a word. Tags are written exactly as the score labels them,
@@ -124,8 +127,11 @@ YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
 latent or BPM/key correction controls. The YuE2 score tempo and pitch controls
 change ABC before composition, rather than source audio. A completed YuE2 cover
 uses the ordinary generation queue and appears in Library. Its saved job records
-the source identity, the reviewed full score, the five render choices and the ABC
-actually rendered.
+the source kind, a recording identity for Source Audio, the reviewed full score,
+the five render choices and the ABC actually rendered. MusicXML mode has no
+recording identity; its title comes from the score unless you edit the Title
+field, while lyrics and style come from the fields you set. YuE2 ends duration
+when its model finishes the song.
 
 When a source exactly matches a dataset track, Cover Studio reads that track's
 sidecar lyrics, BPM and key. It labels these values **from dataset**, skips the
