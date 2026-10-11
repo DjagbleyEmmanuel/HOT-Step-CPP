@@ -43,8 +43,8 @@ function signature(key: string): Record<string, number> {
 }
 
 /** upstream compile_score.spelling: the plainest name for a MIDI pitch, with an
- *  accidental only where the bar's running state (by letter) needs one. */
-function spell(pitch: number, key: string, active: Record<string, number>): string {
+ *  accidental only where the bar's running state needs one. */
+function spell(pitch: number, key: string, active: Record<string, number>, tied = false): string {
   const sig = signature(key);
   const sharp = Object.values(sig).reduce((a, b) => a + b, 0) >= 0;
   let best: { score: number; letter: string; alt: number; octave: number } | null = null;
@@ -57,10 +57,15 @@ function spell(pitch: number, key: string, active: Record<string, number>): stri
     }
   }
   const { letter, alt, octave } = best!;
+  // YuE2 carries an accidental by letter, abcjs by letter and octave (the
+  // MusicXML converter's spell() does the same): mark the note unless both agree.
+  // abcjs also ignores the mark on a tie target, so it sets no state there.
+  const exact = letter + octave;
   let acc = '';
-  if (alt !== (active[letter] ?? sig[letter])) {
+  if (alt !== (active[letter] ?? sig[letter]) || alt !== (active[exact] ?? sig[letter])) {
     acc = alt < 0 ? '_' : alt > 0 ? '^' : '=';
     active[letter] = alt;
+    if (!tied) active[exact] = alt;
   }
   return acc + (octave < 0 ? letter + ','.repeat(-octave) : octave === 0 ? letter : letter.toLowerCase() + "'".repeat(octave - 1));
 }
@@ -127,7 +132,7 @@ function writeBar(fields: string[], events: Event[], ticks: number, key: string)
     out += rests(e.start - cursor);
     const parts = split(e.end - e.start);
     parts.forEach((n, i) => {
-      out += spell(e.pitch, key, active) + (n === 1 ? '' : n) + (i < parts.length - 1 || e.tie ? '-' : '');
+      out += spell(e.pitch, key, active, i > 0 || (e.continued && e.start === 0)) + (n === 1 ? '' : n) + (i < parts.length - 1 || e.tie ? '-' : '');
     });
     cursor = e.end;
   }
@@ -214,6 +219,8 @@ export function instrumentalScore(abc: string): InstrumentalScore {
         lastIns = { bars: g.ins, i, insTie: !!last?.tie && last.end === ticks };
         return;
       }
+      // The tie into this bar was cut, so its first note now starts fresh.
+      if (insTieBroken && ins.events[0]) ins.events[0].continued = false;
       const pieces = ins.events.flatMap(e => subtract(e, v.events));
       if (pieces.length !== ins.events.length
         || pieces.some(p => !ins.events.some(e => e.start === p.start && e.end === p.end))) replacedInsBars++;

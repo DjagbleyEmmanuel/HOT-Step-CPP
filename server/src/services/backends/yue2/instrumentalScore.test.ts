@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import abcjs from 'abcjs';
 import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
+
+const pitches = (abc: string) => (abcjs.parseOnly(abc)[0] as any).setUpAudio().tracks
+  .flatMap((track: any[]) => track.filter(e => e.cmd === 'note').map(e => e.pitch));
 
 const HEAD = 'X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=82\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\n'
   + 'V: Ins clef=treble name="Ins Melody" snm="Inst."\nK:Bb\n';
@@ -34,6 +38,21 @@ test('Ins keeps the parts of its notes Vocal does not cover', () => {
   // Accidentals are respelled for the merged bar: Vocal's C# (spelled Db in Bb, as upstream) leaves Ins's c natural.
   const c = instrumentalScore(HEAD + 'V: Vocal\n^c8z24|\nV: Ins\nz16c16|\n');
   assert.equal(c.abc, HEAD + 'V: Vocal\nZ|\nV: Ins\n_d8z8c16|\n');
+});
+
+test('a respelled accidental reads the same per letter (YuE2) and per octave (abcjs)', () => {
+  const head = HEAD.replace('K:Bb', 'K:G');
+  const abc = head + 'V: Vocal\n=F8=f8z16|\nV: Ins\nZ|\n';
+  const result = instrumentalScore(abc);
+  assert.equal(result.abc, head + 'V: Vocal\nZ|\nV: Ins\n=F8=f8z16|\n');
+  assert.deepEqual(pitches(abc), [65, 77]);
+  assert.deepEqual(pitches(result.abc), [65, 77]);
+  // abcjs ignores the mark on a tie target, so the next G# in that bar is marked again.
+  // (Ab is respelled G# in C, as upstream prefers sharps there.)
+  const inC = HEAD.replace('K:Bb', 'K:C');
+  const tied = instrumentalScore(inC + 'V: Vocal\n_A32-|_A16A16|\nV: Ins\nZ2|\n');
+  assert.equal(tied.abc, inC + 'V: Vocal\nZ2|\nV: Ins\n^G32-|^G16^G16|\n');
+  assert.deepEqual(pitches(tied.abc), [68, 68]);
 });
 
 test('a group split over several lines keeps Vocal and Ins bar counts equal', () => {
