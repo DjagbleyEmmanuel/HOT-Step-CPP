@@ -24,7 +24,7 @@ test('MuseScore MXL follows its container and offers voice and piano parts', asy
   assert.equal(first.parts.length, 2);
   assert.ok(first.parts[0].hasLyrics);
   const chosen = await importMusicXml(fixture(name), name, { partId: first.parts[0].id });
-  assert.ok(chosen.abc.includes('w: '));
+  assert.ok(chosen.lyrics.startsWith('[Verse]\n'));
   assert.ok(chosen.warnings.some(w => w.includes('Multiple voices')));
   parseable(chosen.abc);
 });
@@ -35,7 +35,7 @@ test('Sibelius choir excerpt offers five parts and a lyric-bearing part parses',
   assert.equal(first.abc, '');
   assert.equal(first.parts.length, 5);
   const chosen = await importMusicXml(fixture(name), name, { partId: 'P2' });
-  assert.ok(chosen.abc.includes('w: '));
+  assert.ok(chosen.lyrics.startsWith('[Verse]\n'));
   parseable(chosen.abc);
 });
 

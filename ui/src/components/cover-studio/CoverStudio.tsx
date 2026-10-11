@@ -1327,9 +1327,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               {t('cover.sourceMode.musicxml')}</button>
           </div>
           {sourceMode === 'musicxml' && <MusicXmlImport key={sourceKey} abc={sheetAbc} disabled={sheetPreparing}
-            onAbcChange={value => { sheetRequestRef.current++; setSheetAbc(value); setApprovedSheet(null);
+            onAbcChange={(value, imported) => { sheetRequestRef.current++; setSheetAbc(value); setApprovedSheet(null);
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null);
-              if (!songTitle.trim()) setSongTitle(value.match(/^T:\s*(.+)$/m)?.[1]?.trim() || ''); }}>
+              if (!songTitle.trim()) setSongTitle(imported?.title ?? '');
+              if (imported?.lyrics && !lyrics.trim()) setLyrics(imported.lyrics); }}>
             <div className="rounded-lg border border-dashed border-zinc-300 dark:border-white/20 p-6 text-center text-xs text-zinc-500">
               {t('cover.sourceMode.dropScore')}
             </div>

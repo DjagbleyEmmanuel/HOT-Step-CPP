@@ -6,7 +6,8 @@ import { importMusicXml, type MusicXmlPart } from './musicxml';
 interface Props {
   abc: string;
   disabled: boolean;
-  onAbcChange: (abc: string) => void;
+  /** `imported` carries the score's title and any lyrics, which the native score itself leaves out. */
+  onAbcChange: (abc: string, imported?: { title: string; lyrics: string }) => void;
   children: React.ReactNode;
 }
 
@@ -55,7 +56,7 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
         return;
       }
       if (startingAbc.trim() && !window.confirm(t('cover.musicXml.replace'))) return;
-      onAbcChange(result.abc);
+      onAbcChange(result.abc, { title: result.title, lyrics: result.lyrics });
       setWarnings(result.warnings);
       setParts([]);
       setFile(null);

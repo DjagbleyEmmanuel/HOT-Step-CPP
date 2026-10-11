@@ -14,12 +14,27 @@ const notes = '<attributes><divisions>4</divisions><key><fifths>0</fifths></key>
 const melody = `${header}</part-list><part id="P1"><measure number="1">${notes}</measure></part></score-partwise>`;
 const blob = (s: string) => new Blob([s]);
 
-test('melody, rests and first lyric verse produce parseable ABC', async () => {
+test('melody, rests and first lyric verse produce a parseable native YuE2 score', async () => {
   const result = await importMusicXml(blob(melody), 'song.musicxml');
   assert.equal(result.partId, 'P1');
-  assert.match(result.abc, /C D z2/);
-  assert.match(result.abc, /w: Hel- lo \*/);
+  assert.equal(result.title, 'Test song');
+  assert.equal(result.abc, 'X:1\nT:\nM:4/4\nL:1/32\nQ:1/4=120\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\n'
+    + 'V: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\n% verse\nV: Vocal\nC8D8z16|\nV: Ins\nZ|\n');
+  assert.equal(result.lyrics, '[Verse]\nHello\n');
   assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
+});
+
+test('accidentals read the same per octave or per letter, and long notes split with ties', async () => {
+  const note = (step: string, octave: number, alter: number, duration: number) =>
+    `<note><pitch><step>${step}</step>${alter ? `<alter>${alter}</alter>` : ''}<octave>${octave}</octave></pitch><duration>${duration}</duration></note>`;
+  const score = `${header}</part-list><part id="P1"><measure number="1" implicit="yes"><attributes><divisions>4</divisions><key><fifths>2</fifths><mode>minor</mode></key><time><beats>4</beats><beat-type>4</beat-type></time></attributes>`
+    + `${note('F', 4, 0, 4)}</measure><measure number="2">${note('F', 5, 1, 4)}${note('C', 4, 1, 5)}${note('C', 4, 1, 7)}</measure></part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'keys.musicxml');
+  assert.match(result.abc, /^K:Bm$/m);
+  assert.match(result.abc, /\nz24=F8\|f8C8-C2C12-C2\|\n/);
+  const tune = abcjs.parseOnly(result.abc)[0] as unknown as { setUpAudio(): { tracks: { cmd: string; pitch: number }[][] } };
+  const pitches = tune.setUpAudio().tracks[0].filter(e => e.cmd === 'note').map(e => e.pitch);
+  assert.deepEqual(pitches, [65, 78, 61, 61]);
 });
 
 test('two parts require a part choice', async () => {
@@ -36,7 +51,7 @@ test('grand staff reports lossy conversion', async () => {
   const result = await importMusicXml(blob(score), 'piano.musicxml');
   assert.equal(result.parts[0].staves, 2);
   assert.match(result.warnings.join(' '), /Multiple staves/);
-  assert.match(result.abc, /C \|/);
+  assert.match(result.abc, /\nC8z24\|\n/);
 });
 
 test('MXL follows container rootfile and rejects a missing rootfile', async () => {
