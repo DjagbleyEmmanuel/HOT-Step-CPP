@@ -414,7 +414,9 @@ downloads it, and retains the original browser records after the server receipt 
 New queue items then go to `/api/audio-queue`; the browser reads its status, takes and job
 results. Reloads and other tabs read the same server list. To roll back, the browser pauses
 the server, exports and verifies its current items, reconciles submitted and terminal job ids
-into the saved browser queue, and holds pending work for an explicit resume. A submitting
+into the saved browser queue, and holds pending work for an explicit resume. Moving the queue
+back to the server clears that pause whatever the import choice: `hold` and `discard` apply to
+the imported items' own status, and new work runs as soon as it is queued. A submitting
 item cannot be exported until its submission settles. Submitted or interrupted jobs are
 never automatically replayed by the browser.
 

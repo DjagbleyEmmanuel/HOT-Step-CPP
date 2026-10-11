@@ -131,10 +131,14 @@ export class AudioIntentQueue {
   }
 
   /** Import a verified browser backup atomically. A submitted legacy job is
-   *  followed by id, never sent again; an unknown job is interrupted. */
+   *  followed by id, never sent again; an unknown job is interrupted.
+   *  An import hands the queue back to the server, so it also clears the pause
+   *  a rollback export set: 'hold' and 'discard' act on the imported items'
+   *  own status, never on new work. Left paused, every later submit would
+   *  sit pending with nothing in the UI to say why. */
   importLegacy(input: ImportAudioQueue, userId: string): { backupId: string; imported: number; existing: number; items: { legacyId: string; itemId: string; status: AudioIntentStatus }[] } {
     const prior = this.db.prepare('SELECT receipt FROM audio_queue_imports WHERE backup_id = ?').get(input.backupId) as { receipt: string } | undefined;
-    if (prior) return JSON.parse(prior.receipt);
+    if (prior) { this.setPaused(false); return JSON.parse(prior.receipt); }
     const seen = new Set<string>();
     for (const item of input.items) {
       if (seen.has(item.legacyId)) throw new AudioQueueError(400, `Duplicate legacy item id: ${item.legacyId}`);
@@ -188,6 +192,7 @@ export class AudioIntentQueue {
         receipt.items.push({ legacyId: old.legacyId, itemId: id, status });
       }
       this.db.prepare('INSERT INTO audio_queue_imports (backup_id, receipt) VALUES (?, ?)').run(input.backupId, JSON.stringify(receipt));
+      this.setPaused(false);
       return receipt;
     })();
   }

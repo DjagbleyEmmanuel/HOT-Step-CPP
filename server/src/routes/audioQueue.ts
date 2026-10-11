@@ -62,7 +62,7 @@ export function createAudioQueueRouter(queue: AudioIntentQueue, userIdOf: (req: 
       res.status(400).json({ error: 'Invalid queue import', issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })) });
       return;
     }
-    handle(() => { const receipt = queue.importLegacy(parsed.data, userIdOf(req)!); if (parsed.data.choice === 'resume') { queue.setPaused(false); void queue.tick(); } return receipt; })(req, res);
+    handle(() => { const receipt = queue.importLegacy(parsed.data, userIdOf(req)!); void queue.tick(); return receipt; })(req, res);
   });
   router.post('/migration/resume-held', (req, res) => {
     const ids = req.body?.ids;
