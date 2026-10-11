@@ -15,8 +15,11 @@ const clean = (s: string) => s.replace(/[\r\n]+/g, ' ').replace(/[:\\]/g, ' ').t
 
 function xml(text: string): Document {
   if (text.length > MAX_XML) throw new MusicXmlImportError('MusicXML is too large');
-  if (/<!DOCTYPE|<!ENTITY/i.test(text)) throw new MusicXmlImportError('DTD and entities are not supported');
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (/<!ENTITY/i.test(text)) throw new MusicXmlImportError('DTD entities are not supported');
+  const doctype = /<!DOCTYPE\s+score-partwise\s+PUBLIC\s+"-\/\/Recordare\/\/DTD MusicXML [\d.]+ Partwise\/\/EN"\s+"https?:\/\/www\.musicxml\.org\/dtds\/partwise\.dtd"\s*(?:\[\s*\])?\s*>/i;
+  const withoutKnownDtd = text.replace(doctype, '');
+  if (/<!DOCTYPE/i.test(withoutKnownDtd)) throw new MusicXmlImportError('Unsupported DTD');
+  const doc = new DOMParser().parseFromString(withoutKnownDtd, 'application/xml');
   if (doc.querySelector('parsererror')) throw new MusicXmlImportError('Invalid MusicXML');
   return doc;
 }
@@ -48,6 +51,7 @@ function pitch(note: Element): string {
 function convert(part: Element, doc: Document, warnings: Set<string>): string {
   let divisions = 1, key = 'C', meter = '4/4', tempo = '120';
   const selectedVoice = descendants(part, 'voice')[0]?.textContent?.trim() ?? '1';
+  const selectedVerse = descendants(part, 'lyric')[0]?.getAttribute('number') ?? '';
   let keySeen = false, meterSeen = false, tempoSeen = false;
   const measures: string[] = [];
   const lyricMeasures: string[] = [];
@@ -81,6 +85,7 @@ function convert(part: Element, doc: Document, warnings: Set<string>): string {
         if (q) { if (tempoSeen) warnings.add('Later tempo changes are omitted'); else { tempo = q; tempoSeen = true; } }
       }
       if (item.localName === 'barline' && (descendants(item, 'repeat').length || descendants(item, 'ending').length)) warnings.add('Repeats and endings are omitted');
+      if (item.localName === 'harmony') warnings.add('Chord symbols are omitted');
       if (item.localName === 'backup' || item.localName === 'forward') {
         const n = Number(value(item, 'duration'));
         if (!Number.isFinite(n)) throw new MusicXmlImportError('Invalid cursor duration');
@@ -96,7 +101,7 @@ function convert(part: Element, doc: Document, warnings: Set<string>): string {
       if (value(item, 'staff') && value(item, 'staff') !== '1') continue;
       if (value(item, 'voice') && value(item, 'voice') !== selectedVoice) continue;
       const token = (child(item, 'rest') ? 'z' : pitch(item)) + duration(n, divisions) + (children(item, 'tie').some(t => t.getAttribute('type') === 'start') ? '-' : '');
-      const lyric = children(item, 'lyric').find(l => !l.getAttribute('number') || l.getAttribute('number') === '1');
+      const lyric = children(item, 'lyric').find(l => (l.getAttribute('number') ?? '') === selectedVerse);
       if (children(item, 'lyric').length > (lyric ? 1 : 0)) warnings.add('Additional lyric verses are omitted');
       const syllabic = lyric ? value(lyric, 'syllabic') : '';
       const word = lyric ? value(lyric, 'text').replace(/[\s\-_*|]/g, ' ') : '';
