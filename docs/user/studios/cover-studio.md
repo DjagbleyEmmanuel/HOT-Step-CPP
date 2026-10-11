@@ -72,9 +72,17 @@ have to make.
    In MusicXML mode the imported score already supplies ABC, without SheetSage2
    or a source recording. The file picker and drop area are in the left panel.
    Import writes the score in YuE2's own layout: the chosen part's melody on the
-   Vocal voice, an empty Ins voice, 32nd-note lengths with ties, and pickup bars
-   padded with rests. Tuplets round to the nearest 32nd with a warning. Only the
-   first staff and first voice of the part are read for the melody.
+   Vocal voice, an Ins voice, 32nd-note lengths with ties, and pickup bars
+   padded with rests. Tuplets round to the nearest 32nd with a warning. A grand
+   staff starts with its top staff; choose another staff in the import picker.
+   You can also choose a lyric verse. The first voice on the chosen staff supplies
+   the melody. Other staves and parts fold into the single Ins line, which takes
+   the highest sounding accompaniment note at each point. Repeats, alternate
+   endings, D.C. and D.S. instructions play out before import. Key and meter
+   changes remain in the score, and transposing
+   instruments are written at sounding pitch. A later tempo change is ignored
+   with a warning because YuE2 uses only the opening tempo. Long scores warn
+   where YuE2's 5,120-token limit may cut them.
    Chord symbols in the file become chord symbols on the Vocal voice, written
    the way SheetSage2 writes them: at each change, and again at the start of
    every bar the chord carries into. A note that a change falls inside is split
@@ -98,8 +106,9 @@ have to make.
    a result from an older source or a cancelled transcription cannot replace the
    current score.
 4. Paste lyrics or search by artist and title; choose **Instrumental** to render
-   without lyrics. An Instrumental render moves the score's Vocal melody onto
-   the Ins voice, so an instrument plays it instead of a wordless voice. Where
+   without lyrics. An Instrumental cover moves the melody to Ins whether or not
+   re-planning is on; the score is already in hand. An instrument plays the
+   score's Vocal melody instead of a wordless voice. Where
    both voices play at once the melody wins and Ins keeps only the notes it
    doesn't cover. Vocal keeps its chord symbols. On Base YuE2 the style also
    gains "Instrumental" and "no vocals, no singing, no choir, no spoken words";

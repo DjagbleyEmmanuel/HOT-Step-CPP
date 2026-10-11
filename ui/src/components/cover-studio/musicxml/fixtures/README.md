@@ -10,3 +10,7 @@ These files exercise browser import against exports from three notation programs
 | `w3c_tutorial-chord-symbols.musicxml` | [W3C reference](https://www.w3.org/2021/06/musicxml40/musicxml-reference/examples/tutorial-chord-symbols/) and [source file](https://raw.githubusercontent.com/w3c-cg/musicxml/gh-pages/docs/src/data/examples/musicxml/tutorial-chord-symbols.musicxml), under the W3C Community Final Specification Agreement | Finale v28.0 for Mac; harmony symbols on a single staff. |
 
 The W3C source files currently identify Finale v28.0, while the rendered reference pages show an earlier v27.0 export. These fixtures come from the linked source files. Full retrieval and licence evidence is recorded in `RESEARCH/musicxml-fixtures/PROVENANCE.md` in the Buzz workspace.
+
+The six `testsuite_*.musicxml` files come from the [W3C MusicXML test suite](https://github.com/w3c-cg/musicxmlTestSuite/tree/master/xmlFiles). They cover repeat endings, key and meter changes, tempo marks, multiple lyric verses, and transposing instruments. The repository's MIT notice is in `MUSICXML_TEST_SUITE_LICENSE.txt`.
+
+`w3c_score-timewise-element.musicxml` comes from the [W3C MusicXML reference](https://github.com/w3c-cg/musicxml/blob/gh-pages/docs/src/data/examples/musicxml/score-timewise-element.md). The XML declaration and DOCTYPE were added so the embedded example parses as a file. The two `synthetic_*.musicxml` files were written for these tests: one exercises D.C. al Coda and the other combines chord symbols with lyrics. They have no external source.

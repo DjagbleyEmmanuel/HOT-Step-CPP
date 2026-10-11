@@ -46,13 +46,15 @@ test('two parts require a part choice', async () => {
   assert.equal((await importMusicXml(blob(score), 'song.xml', { partId: 'P2' })).partId, 'P2');
 });
 
-test('grand staff reports lossy conversion', async () => {
+test('grand staff defaults to top staff and allows switching', async () => {
   const score = `${header}</part-list><part id="P1"><measure number="1"><attributes><divisions>4</divisions><staves>2</staves></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><staff>1</staff></note><backup><duration>4</duration></backup><note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration><staff>2</staff></note></measure></part></score-partwise>`;
   const result = await importMusicXml(blob(score), 'piano.musicxml');
   assert.equal(result.parts[0].staves, 2);
-  assert.match(result.warnings.join(' '), /Multiple staves/);
   assert.match(result.abc, /\n"C"C8z24\|\n/);
   assert.equal(result.chords, 'inferred');
+  const lower = await importMusicXml(blob(score), 'piano.musicxml', { staff: 2 });
+  assert.match(lower.abc, /C,8z24\|/);
+  assert.match(result.abc, /V: Ins\nC,8z24\|/);
 });
 
 const harm = (step: string, kind: string, extra = '') => `<harmony><root><root-step>${step}</root-step></root><kind>${kind}</kind>${extra}</harmony>`;
@@ -127,4 +129,46 @@ test('MXL follows container rootfile and rejects a missing rootfile', async () =
   assert.equal((await importMusicXml(new Blob([new Uint8Array(good)]), 'song.mxl')).partId, 'P1');
   const bad = zipSync({ 'META-INF/container.xml': strToU8(container) });
   await assert.rejects(importMusicXml(new Blob([new Uint8Array(bad)]), 'bad.mxl'), MusicXmlImportError);
+});
+
+test('distinct notes prove first and second endings play in order', async () => {
+  const bar = (number: number, step: string, before = '', after = '') =>
+    `<measure number="${number}">${before}${number === 1 ? attrs(0) : ''}${n(step, 16)}${after}</measure>`;
+  const score = `${header}</part-list><part id="P1">`
+    + bar(1, 'C', '<barline location="left"><repeat direction="forward"/></barline>')
+    + bar(2, 'D', '<barline location="left"><ending number="1" type="start"/></barline>',
+      '<barline location="right"><ending number="1" type="stop"/><repeat direction="backward"/></barline>')
+    + bar(3, 'E', '<barline location="left"><ending number="2" type="start"/></barline>',
+      '<barline location="right"><ending number="2" type="discontinue"/></barline>')
+    + bar(4, 'F') + '</part></score-partwise>';
+  const result = await importMusicXml(blob(score), 'repeat.musicxml');
+  const vocal = [...result.abc.matchAll(/V: Vocal\n([^\n]*)/g)].map(m => m[1]).join('');
+  assert.equal(vocal, 'C32|D32|C32|E32|F32|');
+  assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
+});
+
+test('D.S. al Fine returns to segno and stops on the second pass', async () => {
+  const direction = (body: string, sound: string) => `<direction><direction-type>${body}</direction-type><sound ${sound}/></direction>`;
+  const score = `${header}</part-list><part id="P1"><measure number="1">${attrs(0)}${n('C', 16)}</measure>`
+    + `<measure number="2">${direction('<segno/>', 'segno="s1"')}${n('D', 16)}</measure>`
+    + `<measure number="3">${direction('<words>Fine</words>', 'fine="yes"')}${n('E', 16)}</measure>`
+    + `<measure number="4">${direction('<words>D.S. al Fine</words>', 'dalsegno="s1"')}${n('F', 16)}</measure></part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'segno.musicxml');
+  const vocal = [...result.abc.matchAll(/V: Vocal\n([^\n]*)/g)].map(m => m[1]).join('');
+  assert.equal(vocal, 'C32|D32|E32|F32|D32|E32|');
+  assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
+});
+
+test('tuplets snap to the 32nd grid with a warning', async () => {
+  const score = `${header}</part-list><part id="P1"><measure number="1"><attributes><divisions>3</divisions></attributes>${n('C', 1)}${n('D', 1)}${n('E', 1)}</measure></part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'triplet.musicxml');
+  assert.ok(result.warnings.some(w => w.includes('rounded')));
+  assert.equal(abcjs.parseOnly(result.abc)[0].warnings?.length ?? 0, 0);
+});
+
+test('long scores warn at an estimated played bar', async () => {
+  const bars = Array.from({ length: 600 }, (_, i) => `<measure number="${i + 1}">${i === 0 ? attrs(0) : ''}${n('C', 16)}</measure>`).join('');
+  const score = `${header}</part-list><part id="P1">${bars}</part></score-partwise>`;
+  const result = await importMusicXml(blob(score), 'long.musicxml');
+  assert.ok(result.warnings.some(w => /5,120-token limit.*played bar \d+/.test(w)));
 });

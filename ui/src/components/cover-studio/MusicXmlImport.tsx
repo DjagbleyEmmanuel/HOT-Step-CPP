@@ -27,26 +27,30 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
   const [parts, setParts] = useState<MusicXmlPart[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [selectedPart, setSelectedPart] = useState('');
+  const [selectedStaff, setSelectedStaff] = useState('1');
+  const [selectedVerse, setSelectedVerse] = useState('');
 
   useEffect(() => () => { requestRef.current++; }, []);
 
-  const convert = async (source: File, partId?: string) => {
+  const convert = async (source: File, partId?: string, staff?: number, verse?: string) => {
     const request = ++requestRef.current;
     const startingAbc = abcRef.current;
     setLoading(true);
     setError('');
     setWarnings([]);
     try {
-      const result = await importMusicXml(source, source.name, partId ? { partId } : undefined);
+      const result = await importMusicXml(source, source.name, partId ? { partId, staff, verse } : undefined);
       if (request !== requestRef.current) return;
       if (disabledRef.current) {
         setError(t('cover.musicXml.busy'));
         return;
       }
-      if (!partId && !result.abc && result.parts.length > 1) {
+      if (!partId && (result.parts.length > 1 || result.parts[0].staves > 1 || result.parts[0].verses.length > 1)) {
         setFile(source);
         setParts(result.parts);
         setSelectedPart(result.parts[0].id);
+        setSelectedStaff('1');
+        setSelectedVerse(result.parts[0].verses[0] ?? '');
         setWarnings(result.warnings);
         return;
       }
@@ -78,6 +82,8 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
     void convert(source);
   };
 
+  const choice = parts.find(part => part.id === selectedPart);
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -102,13 +108,23 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
       {parts.length > 0 && file && (
         <div className="space-y-2 rounded-lg border border-zinc-200 p-2 dark:border-white/10">
           <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('cover.musicXml.choosePart')}</p>
-          <StyledSelect value={selectedPart} onChange={setSelectedPart} accent="cyan" size="sm"
+          <StyledSelect value={selectedPart} onChange={id => { setSelectedPart(id); setSelectedStaff('1'); setSelectedVerse(parts.find(p => p.id === id)?.verses[0] ?? ''); }} accent="cyan" size="sm"
             options={parts.map(part => ({ value: part.id,
               label: t('cover.musicXml.part', { name: part.name, count: part.staves,
                 staff: t(part.staves === 1 ? 'cover.musicXml.staff' : 'cover.musicXml.staves'),
                 lyrics: t(part.hasLyrics ? 'cover.musicXml.yes' : 'cover.musicXml.no') }) }))} />
+          {choice && choice.staves > 1 && <>
+            <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('cover.musicXml.chooseStaff')}</p>
+            <StyledSelect value={selectedStaff} onChange={setSelectedStaff} accent="cyan" size="sm"
+              options={Array.from({ length: choice.staves }, (_, i) => ({ value: String(i + 1), label: `${t('cover.musicXml.staff')} ${i + 1}` }))} />
+          </>}
+          {choice && choice.verses.length > 1 && <>
+            <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('cover.musicXml.chooseVerse')}</p>
+            <StyledSelect value={selectedVerse} onChange={setSelectedVerse} accent="cyan" size="sm"
+              options={choice.verses.map((number, i) => ({ value: number, label: t('cover.musicXml.verse', { number: number || i + 1 }) }))} />
+          </>}
           <div className="flex gap-2">
-            <button type="button" disabled={disabled || loading || !selectedPart} onClick={() => void convert(file, selectedPart)}
+            <button type="button" disabled={disabled || loading || !selectedPart} onClick={() => void convert(file, selectedPart, Number(selectedStaff), selectedVerse)}
               className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{t('cover.musicXml.importPart')}</button>
             <button type="button" onClick={() => { requestRef.current++; setParts([]); setFile(null); setWarnings([]); setError(''); }}
               className="text-xs text-zinc-500">{t('cover.musicXml.cancel')}</button>
