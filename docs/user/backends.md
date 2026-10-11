@@ -189,10 +189,10 @@ What sets it apart:
   voices sound at once, the melody wins and Ins keeps the rest of its notes; chord
   symbols stay on Vocal. On the base model the style also gains "Instrumental" and
   "no vocals, no singing, no choir, no spoken words"; an adapter's style is left as
-  trained. With **Re-plan runaway scores** off, or Chain of Thought off, and no score
-  supplied, the engine writes and renders its own plan in one pass, so the melody
-  cannot be moved and may still come out as wordless vocals. Leave re-planning on for
-  instrumentals.
+  trained. With **Re-plan runaway scores** off and no score supplied, an instrumental
+  still plans its score once before rendering, so the melody can move. That one plan
+  renders whatever it is, with no redraw. With Chain of Thought off there is no score
+  to move, so the melody may still come out as wordless vocals.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
   is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. A
   single unnamed ABC voice, such as `V:1`, counts as the vocal melody; in a multi-voice

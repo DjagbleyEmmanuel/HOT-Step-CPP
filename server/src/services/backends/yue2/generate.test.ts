@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobCover, mapYue2Params } from './generate.js';
+import { jobCover, mapYue2Params, yue2PlanMode } from './generate.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
 
@@ -137,4 +137,35 @@ test('a schedule that cannot be built falls back instead of failing the render',
 test('no score or lyrics: the default never fires and never fails', () => {
   const { req } = mapYue2Params({ caption: 'folk' }, pick);
   assert.equal(req.lyric_schedule, undefined);
+});
+
+test('yue2PlanMode: every auto-replan, instrumental, cot and supplied-score combination', () => {
+  for (const autoReplan of [undefined, true, false]) {
+    for (const instrumental of [true, false]) {
+      for (const cot of ['full', 'melody', 'off'] as const) {
+        for (const supplied of [false, true]) {
+          const params = { instrumental, ...(autoReplan === undefined ? {} : { yue2AutoReplan: autoReplan }) };
+          const req = { cot, lyrics: instrumental ? '' : lyrics, ...(supplied ? { abc } : {}) };
+          const want = cot === 'off' || supplied ? null : autoReplan !== false ? 'replan' : instrumental ? 'once' : null;
+          assert.equal(yue2PlanMode(params, req), want, JSON.stringify({ autoReplan, instrumental, cot, supplied }));
+        }
+      }
+    }
+  }
+  // Empty lyrics without the Instrumental switch is an instrumental too.
+  assert.equal(yue2PlanMode({ yue2AutoReplan: false }, { cot: 'melody', lyrics: '' }), 'once');
+});
+
+test('a supplied score is moved for an instrumental whatever re-planning is, and left alone for a vocal cover', () => {
+  const native = ['X:1', 'T:', 'M:4/4', 'L:1/32', 'Q:1/4=90', 'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"',
+    'V: Ins clef=treble name="Ins Melody" snm="Inst."', 'K:C', '% verse', 'V: Vocal', '"C"c16"G"d16|', 'V: Ins', 'Z|', ''].join('\n');
+  for (const yue2AutoReplan of [true, false]) {
+    for (const cot of ['full', 'melody']) {
+      const inst = mapYue2Params({ caption: 'piano', instrumental: true, yue2Abc: native, yue2Cot: cot, yue2AutoReplan }, pick).req;
+      assert.match(inst.abc!, /\nV: Vocal\n"C"z16"G"z16\|\nV: Ins\nc16d16\|$/, `instrumental, autoReplan ${yue2AutoReplan}, cot ${cot}`);
+      assert.equal(yue2PlanMode({ instrumental: true, yue2AutoReplan }, inst), null);
+      const vocal = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: native, yue2Cot: cot, yue2AutoReplan }, pick).req;
+      assert.equal(vocal.abc, native.trim(), `vocal, autoReplan ${yue2AutoReplan}, cot ${cot}`);
+    }
+  }
 });

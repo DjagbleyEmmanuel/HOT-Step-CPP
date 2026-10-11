@@ -672,25 +672,39 @@ function activeStyleNorms(pick: Yue2PersistedSelection): Yue2StyleNorms | null {
   return readYue2StyleNorms(jointRunForAdapter(adapter)?.output);
 }
 
+/** Whether a job plans its score before rendering. 'replan': auto-replan,
+ *  redrawing bad plans. 'once': re-planning is off, but an instrumental still
+ *  needs its score in hand so the melody can move off Vocal (instrumentalScore.ts);
+ *  the one plan renders whatever it is. null: the engine plans and renders in
+ *  one call, or there is nothing to plan (a supplied score, which
+ *  mapYue2Params has already moved, or Chain of Thought off). */
+export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'abc' | 'lyrics'>): 'replan' | 'once' | null {
+  if (req.cot === 'off' || req.abc) return null;
+  if (params.yue2AutoReplan !== false) return 'replan';
+  return params.instrumental === true || !req.lyrics ? 'once' : null;
+}
+
 async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
-    sheets: string[]; done: boolean;
+    once: boolean; sheets: string[]; done: boolean;
   };
   const pending: Pending[] = [];
   for (const m of members) {
     const { job, req } = m;
-    if (job.params.yue2AutoReplan === false || req.cot === 'off' || req.abc) continue;
+    const mode = yue2PlanMode(job.params, req);
+    if (!mode) continue;
     m.autoReplan = { attempts: [], accepted: false };
     // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
     const attemptsRaw = Number(job.params.yue2ReplanAttempts);
-    const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
+    const maxAttempts = mode === 'once' ? 1
+      : Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
     // Plan flags (2026-09-27): a plan the judge passes can still be
     // illegible (one chord for the whole song, a looped riff, a melody on two
     // pitches). On by default like the runaway re-plans; the same tries.
-    const replanFlags = job.params.yue2ReplanFlags !== false;
+    const replanFlags = mode === 'replan' && job.params.yue2ReplanFlags !== false;
     const instrumental = job.params.instrumental === true || !req.lyrics;
-    pending.push({ m, maxAttempts, replanFlags, instrumental, sheets: [], done: false });
+    pending.push({ m, maxAttempts, replanFlags, instrumental, once: mode === 'once', sheets: [], done: false });
   }
   if (!pending.length) return;
 
@@ -765,6 +779,12 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     m.req.abc = m.req.lyrics ? p.sheets[picked.index] : yue2InstrumentalAbc(p.sheets[picked.index], notes);
     for (const n of notes) m.log('INFO', `[YuE2] ${n}`);
     m.req.seed = seed;
+    if (p.once) {
+      // Re-planning is off: this was a plan-first pass for the instrumental move, not a re-plan.
+      m.autoReplan = undefined;
+      m.log('INFO', `[YuE2] Re-planning is off; planned the score once (seed ${seed}, ${picked.pick.verdict}) so the melody could move to Ins`);
+      continue;
+    }
     if (!autoReplan.accepted) m.log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${seed})`);
     else if (p.replanFlags && !picked.clean) m.log('WARNING', `[YuE2] No clean plan in ${autoReplan.attempts.length} attempts: every one carried plan flags. Rendering the least-flagged (seed ${seed}: ${(picked.pick.flags ?? []).join('; ')}). This adapter/checkpoint is not writing good plans.`);
     else if (picked.index > 0) m.log('INFO', `[YuE2] Bad plan replaced: rendering attempt ${picked.index + 1} of ${autoReplan.attempts.length}`);

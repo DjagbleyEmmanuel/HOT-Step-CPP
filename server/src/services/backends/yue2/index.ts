@@ -849,7 +849,8 @@ async function capabilities(): Promise<BackendCapabilities> {
         hint: 'Plan the lead sheet first (seconds), and if it is a runaway — normal sections, then an '
             + 'outro that never ends — draw a new seed and plan again, up to the number of tries '
             + 'below, before any audio is rendered. Needs Chain of Thought melody or full. Off = '
-            + 'render whatever the planner writes.',
+            + 'render whatever the planner writes (an instrumental still plans once first, so its '
+            + 'melody can move off the vocal line).',
         default: true,
       },
       {
