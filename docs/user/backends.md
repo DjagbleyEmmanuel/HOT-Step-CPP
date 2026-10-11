@@ -184,7 +184,9 @@ What sets it apart:
   full score, all five render choices and ABC actually rendered.
   Choose the base model or an explicit AR/NAR adapter pair for that job.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
-  is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. With
+  is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. A
+  single unnamed ABC voice, such as `V:1`, counts as the vocal melody; in a multi-voice
+  score, an unnamed voice with `w:` lyric lines counts as vocal too. With
   **Re-plan flagged scores** (on by default) it also redraws a plan that passes but is
   illegible: one chord for the whole song, a riff looped for most of it, a vocal melody on
   one or two pitches, or far fewer sections than the lyric. If no attempt is clean, the

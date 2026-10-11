@@ -187,6 +187,27 @@ export function isVocalVoice(line: string): boolean {
   return /vocal/i.test(line.slice(2).split(/\s+/).filter(Boolean)[0] ?? '') || /name="Vocal/i.test(line);
 }
 
+/** Resolve unnamed ABC voices from attached lyrics, or from a sole voice. */
+export function vocalVoiceIds(abc: string): ReadonlySet<string> {
+  const voices = new Set<string>();
+  const withLyrics = new Set<string>();
+  let current = '';
+  for (const raw of abc.split('\n')) {
+    const line = raw.trim();
+    if (line.startsWith('V:')) {
+      current = line.slice(2).trim().split(/\s+/)[0] ?? '';
+      if (current) voices.add(current);
+    } else if (/^w:/i.test(line) && current && !/^ins(?:trumental)?$/i.test(current)) withLyrics.add(current);
+  }
+  if (withLyrics.size) return withLyrics;
+  const only = [...voices][0];
+  return voices.size === 1 && only && !/^ins(?:trumental)?$/i.test(only) ? voices : new Set();
+}
+
+export function isScoreVocalVoice(line: string, vocalIds: ReadonlySet<string>): boolean {
+  return isVocalVoice(line) || vocalIds.has(line.slice(2).trim().split(/\s+/)[0] ?? '');
+}
+
 export function scoreBarSegments(line: string): string[] {
   return line.split('|').filter(segment => segment.trim());
 }
@@ -195,10 +216,11 @@ export function scoreBarSegments(line: string): string[] {
  * melody voice; an explicit Ins voice never counts toward this check. */
 export function hasSoundingVocalBar(abc: string): boolean {
   let inVocal = true;
+  const vocalIds = vocalVoiceIds(abc);
   for (const raw of abc.split('\n')) {
     const line = raw.trim();
     if (!line || line.startsWith('%')) continue;
-    if (/^V:/.test(line)) { inVocal = isVocalVoice(line); continue; }
+    if (/^V:/.test(line)) { inVocal = isScoreVocalVoice(line, vocalIds); continue; }
     if (/^[A-Za-z]:/.test(line) || !inVocal) continue;
     if (scoreBarSegments(line).some(hasNote)) return true;
   }
@@ -208,6 +230,7 @@ export function hasSoundingVocalBar(abc: string): boolean {
 export const EMPTY_COVER_SCORE_ERROR = 'The transcriber heard no melody in this source';
 
 export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string, norms?: Yue2StyleNorms | null): Yue2ScoreHealth {
+  const vocalIds = vocalVoiceIds(abc);
   const exempt = new Set<Yue2Check>(norms?.exempt ?? []);
   const sections: string[] = [];
   let tempo: number | undefined;
@@ -232,7 +255,7 @@ export function classifyYue2Score(abc: string, endReason?: string, lyrics?: stri
     }
     if (/^M:/.test(line)) { meter = line.slice(2).trim(); continue; }
     if (/^V:/.test(line)) {
-      inVocal = isVocalVoice(line);
+      inVocal = isScoreVocalVoice(line, vocalIds);
       continue;
     }
     if (/^[A-Za-z]:/.test(line)) continue;  // any other header field (X:, T:, L:, K:...)
