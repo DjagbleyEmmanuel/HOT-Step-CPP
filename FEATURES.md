@@ -49,7 +49,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 | Model-ended songs | The composer decides the length, up to six minutes. |
 | Chain of Thought | Full lead sheet (default), Melody only, or Off. Off skips the lead sheet but runs guidance, so it is the slowest mode. |
 | Lead sheet preview | Plans the score only and shows it as staff notation with playback and a health verdict; continue, re-plan or cancel. You can also paste your own ABC lead sheet. |
-| Cover Studio | Transcribes a source into a reviewed ABC lead sheet, or accepts pasted ABC, then composes from that score. SheetSage2 is optional when you provide the score. |
+| Cover Studio | Transcribes a source into a reviewed ABC lead sheet, or accepts pasted ABC or imported MusicXML, then composes from that score. SheetSage2 is optional when you provide the score. |
 | Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
 | Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
 | Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |

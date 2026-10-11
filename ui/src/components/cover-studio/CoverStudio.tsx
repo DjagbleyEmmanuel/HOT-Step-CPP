@@ -1389,7 +1389,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           {yue2Mode && <Yue2CoverScore
             sourceReady={!!sourceAudioUrl && !isUploading}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
-            abc={sheetAbc} approved={!!approvedSheet && approvedSheet.key === sourceKey}
+            abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
             onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null); }}
             scoreSource={sheetScoreSource}

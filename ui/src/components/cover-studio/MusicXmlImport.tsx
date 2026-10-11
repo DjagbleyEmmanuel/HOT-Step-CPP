@@ -1,0 +1,124 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { StyledSelect } from '../shared/StyledSelect';
+import { importMusicXml, type MusicXmlPart } from './musicxml';
+
+interface Props {
+  abc: string;
+  disabled: boolean;
+  onAbcChange: (abc: string) => void;
+  children: React.ReactNode;
+}
+
+const isMusicXml = (name: string) => /\.(musicxml|xml|mxl)$/i.test(name);
+
+export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, children }) => {
+  const { t } = useTranslation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const abcRef = useRef(abc);
+  const disabledRef = useRef(disabled);
+  useEffect(() => { abcRef.current = abc; disabledRef.current = disabled; }, [abc, disabled]);
+  const requestRef = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [parts, setParts] = useState<MusicXmlPart[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [selectedPart, setSelectedPart] = useState('');
+
+  useEffect(() => () => { requestRef.current++; }, []);
+
+  const convert = async (source: File, partId?: string) => {
+    const request = ++requestRef.current;
+    const startingAbc = abcRef.current;
+    setLoading(true);
+    setError('');
+    setWarnings([]);
+    try {
+      const result = await importMusicXml(source, source.name, partId ? { partId } : undefined);
+      if (request !== requestRef.current) return;
+      if (disabledRef.current) {
+        setError(t('cover.musicXml.busy'));
+        return;
+      }
+      if (!partId && !result.abc && result.parts.length > 1) {
+        setFile(source);
+        setParts(result.parts);
+        setSelectedPart(result.parts[0].id);
+        setWarnings(result.warnings);
+        return;
+      }
+      if (!result.abc) throw new Error(t('cover.musicXml.empty'));
+      if (abcRef.current !== startingAbc) {
+        setError(t('cover.musicXml.changed'));
+        return;
+      }
+      if (startingAbc.trim() && !window.confirm(t('cover.musicXml.replace'))) return;
+      onAbcChange(result.abc);
+      setWarnings(result.warnings);
+      setParts([]);
+      setFile(null);
+    } catch (cause) {
+      if (request === requestRef.current) setError(cause instanceof Error ? cause.message : t('cover.musicXml.failed'));
+    } finally {
+      if (request === requestRef.current) setLoading(false);
+    }
+  };
+
+  const openFile = (source?: File) => {
+    if (!source || disabled || loading) return;
+    if (!isMusicXml(source.name)) {
+      setError(t('cover.musicXml.fileType'));
+      return;
+    }
+    setParts([]);
+    setFile(null);
+    void convert(source);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={disabled || loading} onClick={() => inputRef.current?.click()}
+          className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
+          {loading ? t('cover.musicXml.importing') : t('cover.musicXml.import')}
+        </button>
+        <span className="text-xs text-zinc-500">.musicxml, .xml, .mxl</span>
+        <input ref={inputRef} type="file" accept=".musicxml,.xml,.mxl" className="hidden"
+          aria-label={t('cover.musicXml.chooseFile')} onChange={event => {
+            openFile(event.target.files?.[0]);
+            event.target.value = '';
+          }} />
+      </div>
+      <div onDragEnter={event => { event.preventDefault(); if (!disabled) setDragging(true); }}
+        onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = disabled || loading ? 'none' : 'copy'; }}
+        onDragLeave={event => { event.preventDefault(); if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+        onDrop={event => { event.preventDefault(); setDragging(false); openFile(event.dataTransfer.files[0]); }}
+        className={dragging ? 'rounded-lg ring-2 ring-cyan-500' : ''}>
+        {children}
+      </div>
+      {parts.length > 0 && file && (
+        <div className="space-y-2 rounded-lg border border-zinc-200 p-2 dark:border-white/10">
+          <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('cover.musicXml.choosePart')}</p>
+          <StyledSelect value={selectedPart} onChange={setSelectedPart} accent="cyan" size="sm"
+            options={parts.map(part => ({ value: part.id,
+              label: t('cover.musicXml.part', { name: part.name, count: part.staves,
+                staff: t(part.staves === 1 ? 'cover.musicXml.staff' : 'cover.musicXml.staves'),
+                lyrics: t(part.hasLyrics ? 'cover.musicXml.yes' : 'cover.musicXml.no') }) }))} />
+          <div className="flex gap-2">
+            <button type="button" disabled={disabled || loading || !selectedPart} onClick={() => void convert(file, selectedPart)}
+              className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{t('cover.musicXml.importPart')}</button>
+            <button type="button" onClick={() => { requestRef.current++; setParts([]); setFile(null); setWarnings([]); setError(''); }}
+              className="text-xs text-zinc-500">{t('cover.musicXml.cancel')}</button>
+          </div>
+        </div>
+      )}
+      {error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {warnings.length > 0 && <div role="status" className="text-xs text-amber-700 dark:text-amber-300">
+        <p>{t('cover.musicXml.checkScore')}</p>
+        <ul className="list-disc pl-5">{warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}</ul>
+      </div>}
+    </div>
+  );
+};

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
+import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
   preparing: boolean;
   error: string;
   abc: string;
+  sourceKey: string;
   scoreSource?: 'dataset' | null;
   approved: boolean;
   onAbcChange: (value: string) => void;
@@ -75,9 +77,11 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
       {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
-      <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
-        placeholder="Paste an ABC score here to skip transcription"
-        className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />
+      <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange}>
+        <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
+          placeholder="Paste an ABC score here to skip transcription"
+          className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />
+      </MusicXmlImport>
       {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
       <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto max-h-48`}>
         <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />

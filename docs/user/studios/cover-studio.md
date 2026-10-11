@@ -64,7 +64,11 @@ have to make.
    chords into ABC. The score panel shows queue and transcription
    progress, with Cancel and Retry. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
-   You can paste ABC in the editor instead, without SheetSage2. Neither path
+   You can paste ABC or import a `.musicxml`, `.xml` or `.mxl` file in the score editor
+   instead, without SheetSage2. Drop a MusicXML file onto the ABC area or use
+   **Import MusicXML**. For a score with multiple parts, choose the melody part;
+   read any conversion warnings and review the editable ABC preview. Importing
+   over an existing score asks before replacing it. Neither path
    uses the source audio as an inference conditioning signal after approval.
    A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
 3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
