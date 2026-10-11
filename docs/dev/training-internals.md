@@ -42,8 +42,9 @@ fused path does not). ConvRot needs CUDA: `CONVROT8` has no other kernel. The da
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
 directory. Each `checkpoint-stepN` contains the combined
-`adapter.safetensors` in the compatible layout, native inference exports `native-ar.safetensors` and
-`native-nar.safetensors`, and `optimizer.resume`. Use both native exports for
+`adapter.safetensors` in the compatible layout, native inference exports `<trigger>_yue2_joint_ar_stepN.safetensors` and
+`<trigger>_yue2_joint_nar_stepN.safetensors` (older runs wrote `native-ar.safetensors`
+and `native-nar.safetensors`; both are still found), and `optimizer.resume`. Use both native exports for
 generation. Resume into another new directory with `--resume` pointing
 to that record; `--steps` is the total desired step count. Use the same dataset,
 model, seed and CUDA ordinal.
@@ -252,7 +253,7 @@ The worker side is three routes in `routes/workers.ts`'s `workerRouter`, backed 
   in the worker's index with its status, options, blind labels, preview catalogue, a
   `previewsBusy` flag, and `files` (forward-slash path, size, mtime; no hashing). The
   files are the run's `train.jsonl` logs, `style-norms.json`, each complete checkpoint's
-  `native-ar.safetensors`, `native-nar.safetensors` and `meters.json`, and each done
+  AR and NAR weights (either naming) and `meters.json`, and each done
   preview's `.wav` and `.score.abc`. Never `optimizer.resume` or `adapter.safetensors`:
   nothing here reads them. ace-train writes a checkpoint into `.checkpoint-stepN.tmp` and
   renames it into place (`yue2-aitk-runtime.cpp`, `save_checkpoint`), so a checkpoint

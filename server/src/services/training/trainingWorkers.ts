@@ -222,7 +222,7 @@ function mirrorFiles(run: Yue2AitkRunRecord, previews: Yue2JointPreviewRecord[])
   add(path.join(run.output, 'style-norms.json'));
   for (const c of run.checkpoints) {
     if (!c.arPath || !c.narPath) continue;
-    for (const name of ['native-ar.safetensors', 'native-nar.safetensors', 'meters.json']) add(path.join(c.dir, name));
+    for (const file of [c.arPath, c.narPath, path.join(c.dir, 'meters.json')]) add(file);
   }
   for (const p of previews) {
     const wav = p.status === 'done' && p.file ? resolveYue2JointPreview(run.output, p.file) : null;

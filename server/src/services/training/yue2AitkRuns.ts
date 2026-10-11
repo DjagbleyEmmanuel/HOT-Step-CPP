@@ -17,6 +17,19 @@ export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, 
   return path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${runStamp(when)}`);
 }
 
+/** A joint checkpoint's AR or NAR weights: `<trigger>_yue2_joint_<half>_step<N>.safetensors`
+ *  (yue2-aitk-runtime.cpp, joint_weight_name), or the fixed `native-<half>.safetensors`
+ *  runs trained before it wrote. */
+export function yue2JointWeight(dir: string, half: 'ar' | 'nar'): string | undefined {
+  const legacy = path.join(dir, `native-${half}.safetensors`);
+  if (fs.existsSync(legacy)) return legacy;
+  const named = new RegExp(`(?:^|_)yue2_joint_${half}_step\\d+\\.safetensors$`);
+  try {
+    const hit = fs.readdirSync(dir, { withFileTypes: true }).find(e => e.isFile() && named.test(e.name));
+    return hit ? path.join(dir, hit.name) : undefined;
+  } catch { return undefined; }
+}
+
 /** One chain of work per run, so a mirror pass, a cleanup and a folder move
  *  of the same run never interleave: a move mid-pass would let the pass
  *  recreate the old folder and point the index back at it. In-process only.
@@ -225,7 +238,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
       ...(meters.planner_frozen === true ? { frozen: true } : {}),
       ...(meters.kl_rung === true ? { rung: true } : {}),
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
-      arPath: file('native-ar.safetensors'), narPath: file('native-nar.safetensors'),
+      arPath: yue2JointWeight(dir, 'ar'), narPath: yue2JointWeight(dir, 'nar'),
     });
    }
   }
@@ -442,7 +455,7 @@ export function findYue2JointAdaptersFor(rows: Array<{ id: string; slug: string 
     const ls = (dir: string) => { try { return fs.readdirSync(dir).map(n => path.join(dir, n)); } catch { return []; } };
     const bases = [r.output, ...ls(path.join(r.output, 'segments'))];
     const dir = bases.flatMap(ls).filter(d => /[\\/]checkpoint-step\d+$/.test(d)).find(d =>
-      fs.existsSync(path.join(d, 'native-ar.safetensors')) && fs.existsSync(path.join(d, 'native-nar.safetensors')));
+      yue2JointWeight(d, 'ar') && yue2JointWeight(d, 'nar'));
     if (dir) out.set(id, { dir, trainedAt: new Date(r.updatedAt).toISOString() });
   }
   return out;

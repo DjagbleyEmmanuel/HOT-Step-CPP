@@ -8,7 +8,7 @@ import { buildGpuEnv, selectedGpuMemoryMB } from '../gpuDevices.js';
 
 const PARALLEL_PREVIEW_MIN_VRAM_MB = 28 * 1024;
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
-import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
+import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun, yue2JointWeight } from './yue2AitkRuns.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
@@ -798,8 +798,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           const expect = wanted();
           const checkpoint = path.join(segmentOut, `checkpoint-step${expect}`);
           if (!fs.existsSync(checkpoint)) return `Joint-training checkpoint-step${expect} is missing`;
-          if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
-            .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
+          if (['adapter.safetensors', 'optimizer.resume'].some(name => !fs.existsSync(path.join(checkpoint, name)))
+            || !yue2JointWeight(checkpoint, 'ar') || !yue2JointWeight(checkpoint, 'nar')) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
         }, (line, current) => relayJsonLine(job, line, current, clock, thinning), state, o.spawnEnv, o.stopEngine !== false);
       if (intoOutDir) yue2StyleNormsForRun(o.outDir, o.dataset);

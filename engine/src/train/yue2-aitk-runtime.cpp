@@ -50,6 +50,21 @@ std::string lower_hash(std::string value) {
     return value;
 }
 
+// Checkpoint weight file name, <trigger>_yue2_joint_<half>_step<N>.safetensors,
+// so a file copied out of its run folder still says what it is. The trigger is
+// cleaned the way the server names the run folder (yue2AitkRuns.ts).
+std::string joint_weight_name(const std::string & trigger, const char * half, int step) {
+    std::string name;
+    for (char c : trigger) {
+        const bool keep = std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-';
+        if (keep) name += c; else if (name.empty() || name.back() != '_') name += '_';
+    }
+    while (!name.empty() && (name.front() == '.' || name.front() == '_')) name.erase(0, 1);
+    if (name.size() > 48) name.resize(48);
+    while (!name.empty() && (name.back() == '.' || name.back() == '_')) name.pop_back();
+    return (name.empty() ? "" : name + "_") + "yue2_joint_" + half + "_step" + std::to_string(step) + ".safetensors";
+}
+
 struct ResumePlan { yue2_aitk::ResumeRecord record; std::vector<size_t> order; size_t cursor = 0; int completed = 0; std::string sampler; };
 bool str_field(yyjson_val * v, std::string * out) { if (!yyjson_is_str(v) || yyjson_get_len(v) != std::strlen(yyjson_get_str(v))) return false; out->assign(yyjson_get_str(v), yyjson_get_len(v)); return true; }
 // LmOptim scalars that travel in the metadata JSON rather than the binary
@@ -889,7 +904,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
                 config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from);
             if (metadata.empty()) return false;
-            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
+            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", step))).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
                 const auto named = state.named_tensors();

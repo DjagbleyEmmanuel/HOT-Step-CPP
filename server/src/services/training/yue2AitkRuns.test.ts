@@ -55,6 +55,24 @@ test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () 
   }
 });
 
+test('AITK checkpoint discovery finds trigger-named AR/NAR weights (#220)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-runs-'));
+  try {
+    const step37 = path.join(root, 'checkpoint-step37');
+    const step5 = path.join(root, 'checkpoint-step5');
+    fs.mkdirSync(step37); fs.mkdirSync(step5);
+    for (const name of ['my-band_yue2_joint_ar_step37.safetensors', 'my-band_yue2_joint_nar_step37.safetensors']) fs.writeFileSync(path.join(step37, name), 'x');
+    fs.writeFileSync(path.join(step5, 'yue2_joint_nar_step5.safetensors'), 'x');
+    const rows = checkpointRecords(root);
+    assert.equal(rows[0].arPath, path.join(step37, 'my-band_yue2_joint_ar_step37.safetensors'));
+    assert.equal(rows[0].narPath, path.join(step37, 'my-band_yue2_joint_nar_step37.safetensors'));
+    assert.equal(rows[1].arPath, undefined, 'a NAR file is never taken for the AR half');
+    assert.equal(rows[1].narPath, path.join(step5, 'yue2_joint_nar_step5.safetensors'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('AITK checkpoints show the trailing 20-step mean from their own segment', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-loss-'));
   try {
