@@ -75,6 +75,7 @@ export function jobCover(job: GenerationJob): { cover: Yue2CoverSubmission; abc:
   return { cover, abc };
 }
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
+import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { GenerationAttempt } from '../types.js';
 
@@ -255,6 +256,17 @@ function yue2StyleForAdapter(
   return { style, notes, halves, trainedCot };
 }
 
+/** An instrumental render's score: the Vocal melody moved onto Ins
+ *  (instrumentalScore.ts), with what happened written to `notes`. */
+function yue2InstrumentalAbc(abc: string, notes: string[]): string {
+  const moved = instrumentalScore(abc);
+  notes.push(moved.movedBars
+    ? `Instrumental: moved ${moved.movedBars} sung bar(s) from Vocal to Ins`
+      + (moved.replacedInsBars ? `, replacing Ins in ${moved.replacedInsBars} of them` : '')
+    : 'Instrumental: the score has no sung Vocal bars to move to Ins');
+  return moved.abc;
+}
+
 /**
  * UI params -> /yue2/synth request.
  *
@@ -274,11 +286,14 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // (docs/plans/yue2/06-engine-port-plan.md §2 — NFC before pre-tokenization).
   const caption = rawCaption.normalize('NFC');
   const styled = yue2StyleForAdapter(caption, params, pick.adapters);
-  const style = styled.style;
   notes.push(...styled.notes);
 
   const lyricsRaw: string = params.instrumental ? '' : (params.lyrics || '');
   const lyrics = lyricsRaw.normalize('NFC');
+  // Instrumental: upstream's wording on the base model. An adapter's style is
+  // the template it trained on, so it is left as composed.
+  const adapted = !!(styled.halves.ar.path || styled.halves.nar.path);
+  const style = !lyrics && !adapted ? instrumentalStyle(styled.style) : styled.style;
 
   const cotRaw = typeof params.yue2Cot === 'string' ? params.yue2Cot : 'full';
   const cot: Yue2SynthRequest['cot'] =
@@ -394,8 +409,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // renders this score instead of planning one. Meaningless under cot=off,
   // which has no plan stage — dropped with a note rather than sent.
   const abcRaw = typeof params.yue2Abc === 'string' ? params.yue2Abc.trim() : '';
-  const abc = abcRaw && cot !== 'off' ? abcRaw : undefined;
-  if (abcRaw && !abc) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
+  const abcUsed = abcRaw && cot !== 'off' ? abcRaw : undefined;
+  if (abcRaw && !abcUsed) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
+  const abc = abcUsed && !lyrics ? yue2InstrumentalAbc(abcUsed, notes) : abcUsed;
 
   // C6 lyric schedule: ties each sung lyric block to its score section's
   // timing. Soft (bias, -4) is the default for a render with an approved
@@ -745,7 +761,9 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     const seed = picked.pick.seed;
     autoReplan.accepted = yue2PlanUsable(picked.pick.verdict, p.instrumental);
     if (p.replanFlags) autoReplan.clean = picked.clean;
-    m.req.abc = p.sheets[picked.index];
+    const notes: string[] = [];
+    m.req.abc = m.req.lyrics ? p.sheets[picked.index] : yue2InstrumentalAbc(p.sheets[picked.index], notes);
+    for (const n of notes) m.log('INFO', `[YuE2] ${n}`);
     m.req.seed = seed;
     if (!autoReplan.accepted) m.log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${seed})`);
     else if (p.replanFlags && !picked.clean) m.log('WARNING', `[YuE2] No clean plan in ${autoReplan.attempts.length} attempts: every one carried plan flags. Rendering the least-flagged (seed ${seed}: ${(picked.pick.flags ?? []).join('; ')}). This adapter/checkpoint is not writing good plans.`);
