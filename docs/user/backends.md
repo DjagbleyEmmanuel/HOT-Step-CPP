@@ -183,6 +183,16 @@ What sets it apart:
   lyrics and score together. Cover jobs store the source identity, reviewed
   full score, all five render choices and ABC actually rendered.
   Choose the base model or an explicit AR/NAR adapter pair for that job.
+- Instrumental follows the upstream YuE2 instrumental workflow. Whenever the app holds
+  the score before rendering (a cover, a previewed or pasted lead sheet, or the plan
+  picked by re-planning), it moves the Vocal melody onto the Ins voice. Where both
+  voices sound at once, the melody wins and Ins keeps the rest of its notes; chord
+  symbols stay on Vocal. On the base model the style also gains "Instrumental" and
+  "no vocals, no singing, no choir, no spoken words"; an adapter's style is left as
+  trained. With **Re-plan runaway scores** off, or Chain of Thought off, and no score
+  supplied, the engine writes and renders its own plan in one pass, so the melody
+  cannot be moved and may still come out as wordless vocals. Leave re-planning on for
+  instrumentals.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
   is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. A
   single unnamed ABC voice, such as `V:1`, counts as the vocal melody; in a multi-voice

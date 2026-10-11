@@ -262,7 +262,7 @@ function yue2InstrumentalAbc(abc: string, notes: string[]): string {
   const moved = instrumentalScore(abc);
   notes.push(moved.movedBars
     ? `Instrumental: moved ${moved.movedBars} sung bar(s) from Vocal to Ins`
-      + (moved.replacedInsBars ? `, replacing Ins in ${moved.replacedInsBars} of them` : '')
+      + (moved.replacedInsBars ? `; Vocal cut overlapping Ins notes in ${moved.replacedInsBars} bar(s)` : '')
     : 'Instrumental: the score has no sung Vocal bars to move to Ins');
   return moved.abc;
 }

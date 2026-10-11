@@ -71,6 +71,12 @@ have to make.
    editor to replace the transcribed ABC while keeping the source recording.
    In MusicXML mode the imported score already supplies ABC, without SheetSage2
    or a source recording. The file picker and drop area are in the left panel.
+   Import writes the score in YuE2's own layout: the chosen part's melody on the
+   Vocal voice, an empty Ins voice, 32nd-note lengths with ties, and pickup bars
+   padded with rests. Tuplets round to the nearest 32nd with a warning. Only the
+   first staff and first voice of the part are read. In MusicXML mode the
+   score's title fills an empty Title field and its lyrics fill an empty lyrics
+   box; text you have already typed is kept.
    Importing over an existing score asks before replacing it. Neither path uses
    source audio as an inference conditioning signal after approval.
    A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
@@ -81,7 +87,13 @@ have to make.
    a result from an older source or a cancelled transcription cannot replace the
    current score.
 4. Paste lyrics or search by artist and title; choose **Instrumental** to render
-   without lyrics. Write a YuE2 style caption. With an adapter pair, you can
+   without lyrics. An Instrumental render moves the score's Vocal melody onto
+   the Ins voice, so an instrument plays it instead of a wordless voice. Where
+   both voices play at once the melody wins and Ins keeps only the notes it
+   doesn't cover. Vocal keeps its chord symbols. On Base YuE2 the style also
+   gains "Instrumental" and "no vocals, no singing, no choir, no spoken words";
+   with an adapter pair the style is left as the adapter was trained. The
+   generation log reports how many bars moved. Write a YuE2 style caption. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but

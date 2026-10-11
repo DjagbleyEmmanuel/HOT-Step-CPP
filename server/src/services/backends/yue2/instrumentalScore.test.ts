@@ -23,6 +23,26 @@ test('Vocal wins a bar both voices play in, and an unchorded sung bar becomes Z'
   assert.equal(result.replacedInsBars, 1);
 });
 
+test('Ins keeps the parts of its notes Vocal does not cover', () => {
+  // G24 sounds after Vocal's C8; a long Ins note is cut around a Vocal note.
+  const a = instrumentalScore(HEAD + 'V: Vocal\nC8z24|z8c8z16|\nV: Ins\nz8G24|F32|\n');
+  assert.equal(a.abc, HEAD + 'V: Vocal\nZ2|\nV: Ins\nC8G24|F8c8F16|\n');
+  assert.equal(a.replacedInsBars, 1);
+  // A tied Ins note whose continuation Vocal covers loses its tie.
+  const b = instrumentalScore(HEAD + 'V: Vocal\nZ|d32|\nV: Ins\nz16G16-|G16z16|\n');
+  assert.equal(b.abc, HEAD + 'V: Vocal\nZ2|\nV: Ins\nz16G16|d32|\n');
+  // Accidentals are respelled for the merged bar: Vocal's C# (spelled Db in Bb, as upstream) leaves Ins's c natural.
+  const c = instrumentalScore(HEAD + 'V: Vocal\n^c8z24|\nV: Ins\nz16c16|\n');
+  assert.equal(c.abc, HEAD + 'V: Vocal\nZ|\nV: Ins\n_d8z8c16|\n');
+});
+
+test('a group split over several lines keeps Vocal and Ins bar counts equal', () => {
+  const result = instrumentalScore(HEAD + 'V: Vocal\nC32|\nC32|\nV: Ins\nZ|\nZ|\n');
+  assert.equal(result.abc, HEAD + 'V: Vocal\nZ2|\nV: Ins\nC32|C32|\n');
+  assert.equal(result.movedBars, 2);
+  assert.deepEqual(instrumentalScore(result.abc), { abc: result.abc, movedBars: 0, replacedInsBars: 0 });
+});
+
 test('a melody-only score gains an Ins voice to carry the melody', () => {
   const head = 'X:1\nM:4/4\nL:1/32\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\nK:D\n';
   const result = instrumentalScore(head + '% verse\nV: Vocal\nf16B16|\n');
