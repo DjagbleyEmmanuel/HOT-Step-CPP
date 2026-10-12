@@ -183,22 +183,22 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // score scales to its column (responsive: 'resize'), so the half-width one
   // zooms out. Wrapping it in MusicXmlImport or not (and a new sourceKey)
   // remounts scoreRef's div, which is why the render effect keys on those too.
-  const sheet = <div className={p.wide ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
+  // Side by side, Approve sits under the ABC box, level with the player
+  // under the score; stacked, it comes last.
+  const sheet = <div className={`grid gap-3 items-start ${p.wide ? 'grid-cols-2' : 'grid-cols-1'}`}>
     {/* Imported scores have no import row, so the toggle sits on the box. */}
     <div className="min-w-0">{p.sourceMode !== 'audio' && p.abc.trim() && <div className="mb-1 flex justify-end">{viewToggle}</div>}{editor}</div>
-    <div className="min-w-0 space-y-3">
-      <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
-        style={{ height: boxHeight }}>
-        <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
-      </div>
-      <div className="flex items-center gap-2">
-        <div ref={audioRef} className={`min-w-0 flex-1 text-xs ${previewValid ? '' : 'hidden'}`} />
-        <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
-          className="ml-auto flex-shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-          {p.approved ? 'Score approved' : 'Approve score'}
-        </button>
-      </div>
+    <div className={`${p.abc.trim() ? '' : 'hidden'} min-w-0 bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
+      style={{ height: boxHeight }}>
+      <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
     </div>
+    <div className={p.wide ? '' : 'order-last'}>
+      <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
+        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+        {p.approved ? 'Score approved' : 'Approve score'}
+      </button>
+    </div>
+    <div ref={audioRef} className={`min-w-0 text-xs ${previewValid ? '' : 'hidden'}`} />
   </div>;
 
   useEffect(() => {
