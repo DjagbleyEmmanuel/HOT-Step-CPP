@@ -163,8 +163,8 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   const busy = p.preparing || p.job?.status === 'queued' || p.job?.status === 'running';
   // Side by side, the ABC and the score share the panel's height, less its
   // heading, the import row and the approve button.
-  const boxHeight = p.wide ? Math.max(128, p.height - 170) : undefined;
-  const viewToggle = <div className="mb-1 inline-flex rounded-md border border-zinc-300 dark:border-white/10 text-[11px]">
+  const boxHeight = p.wide ? Math.max(128, p.height - 158) : undefined;
+  const viewToggle = <div className="inline-flex rounded-md border border-zinc-300 dark:border-white/10 text-[11px]">
     {(['abc', 'chart'] as const).map(mode => <button key={mode} type="button" onClick={() => setView(mode)}
       className={`px-2 py-0.5 ${view === mode ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-500'}`}>
       {mode === 'abc' ? 'ABC' : 'Chart'}</button>)}
@@ -184,13 +184,20 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // zooms out. Wrapping it in MusicXmlImport or not (and a new sourceKey)
   // remounts scoreRef's div, which is why the render effect keys on those too.
   const sheet = <div className={p.wide ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
-    <div className="min-w-0">{p.abc.trim() && viewToggle}{editor}</div>
+    {/* Imported scores have no import row, so the toggle sits on the box. */}
+    <div className="min-w-0">{p.sourceMode !== 'audio' && p.abc.trim() && <div className="mb-1 flex justify-end">{viewToggle}</div>}{editor}</div>
     <div className="min-w-0 space-y-3">
       <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
         style={{ height: boxHeight }}>
         <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
       </div>
-      <div ref={audioRef} className={`text-xs ${previewValid ? '' : 'hidden'}`} />
+      <div className="flex items-center gap-2">
+        <div ref={audioRef} className={`min-w-0 flex-1 text-xs ${previewValid ? '' : 'hidden'}`} />
+        <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
+          className="ml-auto flex-shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+          {p.approved ? 'Score approved' : 'Approve score'}
+        </button>
+      </div>
     </div>
   </div>;
 
@@ -294,12 +301,9 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       {undoMove?.after === p.abc && <button type="button" onClick={() => { p.onAbcChange(undoMove.before); setUndoMove(null); }}
         className="text-xs text-cyan-700 dark:text-cyan-300">Undo section move</button>}
       {p.sourceMode === 'audio'
-        ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange} action={transcribe}>{sheet}</MusicXmlImport>
+        ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange} action={transcribe}
+          wide={p.wide} toggle={p.abc.trim() ? viewToggle : undefined}>{sheet}</MusicXmlImport>
         : sheet}
-      <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
-        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-        {p.approved ? 'Score approved' : 'Approve score'}
-      </button>
     </div>
   );
 };

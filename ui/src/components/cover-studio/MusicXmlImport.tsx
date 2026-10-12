@@ -11,11 +11,15 @@ interface Props {
   children: React.ReactNode;
   /** Shown at the right-hand end of the import button's row. */
   action?: React.ReactNode;
+  /** Right-aligned over the left column (the ABC box) when `wide`. */
+  toggle?: React.ReactNode;
+  /** The row splits into the same two columns as the sheet below it. */
+  wide?: boolean;
 }
 
 const isMusicXml = (name: string) => /\.(musicxml|xml|mxl)$/i.test(name);
 
-export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, children, action }) => {
+export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, children, action, toggle, wide }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const abcRef = useRef(abc);
@@ -88,18 +92,21 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className={wide ? 'grid grid-cols-2 gap-3 items-center' : 'flex items-center gap-2'}>
+      <div className="flex min-w-0 items-center gap-2">
         <button type="button" disabled={disabled || loading} onClick={() => inputRef.current?.click()}
-          className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
+          className="whitespace-nowrap rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
           {loading ? t('cover.musicXml.importing') : t('cover.musicXml.import')}
         </button>
-        <span className="text-xs text-zinc-500">.musicxml, .xml, .mxl</span>
+        <span className="truncate text-xs text-zinc-500">.musicxml, .xml, .mxl</span>
         <input ref={inputRef} type="file" accept=".musicxml,.xml,.mxl" className="hidden"
           aria-label={t('cover.musicXml.chooseFile')} onChange={event => {
             openFile(event.target.files?.[0]);
             event.target.value = '';
           }} />
-        {action && <div className="ml-auto">{action}</div>}
+        {toggle && <div className="ml-auto">{toggle}</div>}
+      </div>
+        {action && <div className={wide ? 'flex justify-end' : ''}>{action}</div>}
       </div>
       <div onDragEnter={event => { event.preventDefault(); if (!disabled) setDragging(true); }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = disabled || loading ? 'none' : 'copy'; }}
