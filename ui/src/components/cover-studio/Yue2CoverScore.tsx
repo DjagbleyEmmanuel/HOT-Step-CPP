@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
+import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
 import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
@@ -23,12 +24,75 @@ interface Props {
   onTranscribe: () => void;
   onCancel: () => void;
   onApprove: () => void;
+  /** Play from this score section; a new object each click, so a repeat
+   *  click on the same section plays it again. */
+  seekSection?: { index: number } | null;
+}
+
+type Tune = ReturnType<typeof abcjs.renderAbc>[number];
+type TimingEvent = InstanceType<typeof abcjs.TimingCallbacks>['noteTimings'][number];
+
+/** Colours each rendered note and bar by its score section and draws a
+ *  labelled line where each section starts; clicking a label plays from it.
+ *  Sections come from the ABC's `%Label` lines by character offset, the same
+ *  offsets abcjs records on each element, so multi-bar rests (Z4) and the
+ *  interleaved Vocal/Ins voices need no bar counting. Returns each section's
+ *  first timed event, the seek target, or null for a section with no notes. */
+function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index: number) => void): Array<TimingEvent | null> {
+  const marks = abcSectionMarks(abc);
+  if (!marks.length) return [];
+  const colours = sectionColours(marks.map(mark => mark.label));
+  type Item = { startChar?: number; abselem?: { elemset?: Array<SVGElement | null> } };
+  for (const line of tune.lines ?? [])
+    for (const staff of line.staff ?? [])
+      for (const voice of (staff.voices ?? []) as unknown as Item[][])
+        for (const item of voice) {
+          if (typeof item.startChar !== 'number') continue;
+          const index = sectionAtChar(marks, item.startChar);
+          // An attribute, not a style: the playing note's highlight class must still win.
+          if (index >= 0) item.abselem?.elemset?.forEach(node => node?.setAttribute('fill', colours[index]));
+        }
+  // Timings are sorted by time, so the first event to touch a section is its start.
+  const starts: Array<TimingEvent | null> = marks.map(() => null);
+  for (const event of new abcjs.TimingCallbacks(tune, {}).noteTimings) {
+    if (event.type !== 'event' || event.left == null) continue;
+    for (const char of event.startCharArray ?? []) {
+      const index = sectionAtChar(marks, char);
+      if (index >= 0 && !starts[index]) starts[index] = event;
+    }
+  }
+  const svg = host.querySelector('svg');
+  const ns = 'http://www.w3.org/2000/svg';
+  starts.forEach((start, index) => {
+    if (!svg || !start || start.left == null || start.top == null || start.height == null) return;
+    const x = start.left - 3;
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('class', 'cursor-pointer');
+    g.addEventListener('click', () => onPick(index));
+    const rule = document.createElementNS(ns, 'line');
+    Object.entries({ x1: x, x2: x, y1: start.top, y2: start.top + start.height, stroke: colours[index], 'stroke-width': 2 })
+      .forEach(([key, value]) => rule.setAttribute(key, String(value)));
+    const text = document.createElementNS(ns, 'text');
+    Object.entries({ x: x + 3, y: Math.max(10, start.top - 2), fill: colours[index], 'font-size': 11, 'font-weight': 700 })
+      .forEach(([key, value]) => text.setAttribute(key, String(value)));
+    text.textContent = `▶ ${marks[index].label}`;
+    const title = document.createElementNS(ns, 'title');
+    title.textContent = `Play from ${marks[index].label}`;
+    g.append(title, rule, text);
+    svg.appendChild(g);
+  });
+  return starts;
 }
 
 export const Yue2CoverScore: React.FC<Props> = p => {
   const scoreRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLDivElement>(null);
   const [previewValid, setPreviewValid] = useState(false);
+  // Plays from score section i; replaced on every render of the ABC.
+  const playFromRef = useRef<(index: number) => Promise<void>>(async () => {});
+  useEffect(() => {
+    if (p.seekSection) void playFromRef.current(p.seekSection.index);
+  }, [p.seekSection]);
   const busy = p.preparing || p.job?.status === 'queued' || p.job?.status === 'running';
   // Side by side, the ABC and the score share the panel's height, less its
   // heading, the import row and the approve button.
@@ -66,11 +130,25 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     catch { return; }
     if (!tunes[0]) return;
     setPreviewValid(true);
-    if (!audioRef.current || !abcjs.synth.supportsAudio()) return;
-    const control = new abcjs.synth.SynthController();
     const box = scoreRef.current.parentElement;
+    let control: InstanceType<typeof abcjs.synth.SynthController> | null = null;
+    const starts = markSections(tunes[0], p.abc, scoreRef.current, index => void playFromRef.current(index));
+    playFromRef.current = async index => {
+      const start = starts[index];
+      if (!start) return;
+      followNoteInBox(start.elements?.[0]?.[0], box);
+      if (!control) return;
+      // seek() only moves a player that has started; play() toggles, so it
+      // must not run on one that is already playing. Both seek and isStarted
+      // exist at runtime (synth-controller.js) but not in abcjs's typings.
+      const player = control as unknown as { isStarted: boolean; play(): Promise<unknown>; seek(position: number, units: 'seconds'): void };
+      if (!player.isStarted) await player.play();
+      player.seek(start.milliseconds / 1000, 'seconds');
+    };
+    if (!audioRef.current || !abcjs.synth.supportsAudio()) return;
+    const synth = control = new abcjs.synth.SynthController();
     let lit: Element[] = [];
-    control.load(audioRef.current, {
+    synth.load(audioRef.current, {
       onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
       onEvent(ev: { elements?: Element[][] }) {
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
@@ -80,8 +158,8 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       },
       onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
     }, { displayLoop: false, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: false });
-    void control.setTune(tunes[0], false).catch(() => {});
-    return () => { try { control.pause(); } catch {} };
+    void synth.setTune(tunes[0], false).catch(() => {});
+    return () => { try { synth.pause(); } catch {} };
   }, [p.abc, p.sourceMode, p.sourceKey]);
 
   return (

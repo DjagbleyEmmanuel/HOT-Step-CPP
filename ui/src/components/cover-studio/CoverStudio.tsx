@@ -30,6 +30,7 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
+import { sectionColours } from '../../utils/abcSections';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
@@ -186,6 +187,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetError, setSheetError] = useState('');
   const [sheetAbc, setSheetAbc] = useState(() => restore('sheetAbc', ''));
   const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>(() => restore('scoreSections', []));
+  const sectionChipColours = sectionColours(scoreSections.map(section => section.label));
+  const [seekSection, setSeekSection] = useState<{ index: number } | null>(null);
   const [sectionLint, setSectionLint] = useState<Yue2SectionReview['lint'] | null>(null);
   // Match sections to score: the proposal and the lyrics it was made from.
   const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
@@ -1577,10 +1580,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
               onConfirm={() => { setScoreDetailsConfirm(false); void saveScoreDetails(); }} />
             {scoreSections.length > 0
+              // Coloured as the lead sheet colours each section's notes; a
+              // click plays the lead sheet from that section.
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
-                <span key={`${index}-${section.startBar}`} className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-800 dark:text-cyan-200">
-                  {section.label} · bar {section.startBar}
-                </span>)}</div>
+                <button type="button" key={`${index}-${section.startBar}`} onClick={() => setSeekSection({ index })}
+                  title={`Play the lead sheet from ${section.label}`}
+                  style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
+                  className="rounded border-l-4 px-2 py-0.5 text-[11px] text-zinc-800 dark:text-zinc-100 hover:brightness-125">
+                  ▶ {section.label} · bar {section.startBar}
+                </button>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
             {!instrumental && sectionLint && !sectionLint.ok &&
               <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
@@ -1595,7 +1603,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
             onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null); }}
-            scoreSource={sheetScoreSource}
+            scoreSource={sheetScoreSource} seekSection={seekSection}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}
           
