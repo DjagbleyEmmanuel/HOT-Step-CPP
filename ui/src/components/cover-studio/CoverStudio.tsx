@@ -37,6 +37,7 @@ import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
   type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel } from './Yue2CoverPanel';
+import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
@@ -88,6 +89,24 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const yue2Models = useBackendStore(s => s.models.yue2);
   const [sourceMode, setSourceMode] = useState<'audio' | 'musicxml'>(() => restore('sourceMode', 'audio'));
   const [draftName, setDraftName] = useState(() => restore('draftName', ''));
+  const [sourceWidth, setSourceWidth] = usePersistedState('hs-cover-source-width', 320);
+  const [scoreWidth, setScoreWidth] = usePersistedState('hs-cover-score-width', 560);
+  const [settingsWidth, setSettingsWidth] = usePersistedState('hs-cover-settings-width', 420);
+  const startResize = (event: React.MouseEvent, width: number, setWidth: (value: number) => void, min: number, max: number) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const onMove = (move: MouseEvent) => setWidth(Math.min(max, Math.max(min, width + move.clientX - startX)));
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   // ── Source audio state ──
   const [sourceFileName, setSourceFileName] = useState(() => restore<string>('sourceFileName', ''));
@@ -122,6 +141,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [artistCaption, setArtistCaption] = useState(() => restore<string>('artistCaption', ''));
   const [artistPresets, setArtistPresets] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
   const [isLoadingArtists, setIsLoadingArtists] = useState(false);
+  const [isLoadingYue2Artists, setIsLoadingYue2Artists] = useState(false);
 
   // ── Cover caption LLM ──
   const [coverCaptionProvider, setCoverCaptionProvider] = useState(() => loadSelections().coverCaption.provider);
@@ -144,11 +164,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sourceLatentUrl, setSourceLatentUrl] = useState(() => restore<string>('sourceLatentUrl', ''));
   const [vocalLanguage, setVocalLanguage] = useState(() => restore<string>('coverVocalLanguage', 'en'));
   const [timbreOverridePath, setTimbreOverridePath] = useState(() => restore<string>('coverTimbreOverride', ''));
-  const [pairMode, setPairMode] = useState<'base' | 'pair'>(() => restore('pairMode', 'base'));
+  const [renderMode, setRenderMode] = useState<Yue2RenderMode>(() => {
+    const saved = restore<string>('pairMode', 'base');
+    return saved === 'pair' ? 'custom' : saved === 'artist' || saved === 'custom' ? saved : 'base';
+  });
   const [yue2Ar, setYue2Ar] = useState(() => restore('yue2Ar', ''));
   const [yue2Nar, setYue2Nar] = useState(() => restore('yue2Nar', ''));
   const [selectedYue2ArtistId, setSelectedYue2ArtistId] = useState<number | null>(() => restore('selectedYue2ArtistId', null));
   const [selectedYue2LyricsSetId, setSelectedYue2LyricsSetId] = useState<number | null>(() => restore('selectedYue2LyricsSetId', null));
+  const [yue2Artists, setYue2Artists] = useState<Artist[]>([]);
+  const [yue2AlbumsForArtistId, setYue2AlbumsForArtistId] = useState<number | null>(null);
   const [yue2Albums, setYue2Albums] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
   const [coveringBand, setCoveringBand] = useState(() => restore<string>('coveringBand', ''));
   const yue2ArtistRequestRef = useRef(0);
@@ -226,13 +251,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   }, [yue2Mode, token]);
 
   useEffect(() => {
-    if (!yue2Mode || pairMode !== 'pair') { setCaptionTracks([]); return; }
-    const adapter = yue2Ar || yue2Nar;
+    if (!yue2Mode || renderMode === 'base') { setCaptionTracks([]); return; }
+    const album = yue2Albums.find(a => a.lsId === selectedYue2LyricsSetId) || yue2Albums[0];
+    const adapter = renderMode === 'artist' ? album?.preset?.yue2_ar_adapter_path || album?.preset?.yue2_nar_adapter_path || '' : yue2Ar || yue2Nar;
     if (!adapter) { setCaptionTracks([]); return; }
     let live = true;
     void fetchYue2CaptionSource({ adapter }).then(result => { if (live) setCaptionTracks(result.tracks); });
     return () => { live = false; };
-  }, [yue2Mode, pairMode, yue2Ar, yue2Nar]);
+  }, [yue2Mode, renderMode, yue2Ar, yue2Nar, yue2Albums, selectedYue2LyricsSetId]);
 
   useEffect(() => {
     if (!sheetJobId || !token) return;
@@ -307,7 +333,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('selectedYue2LyricsSetId', selectedYue2LyricsSetId); }, [selectedYue2LyricsSetId]);
   useEffect(() => { persist('coveringBand', coveringBand); }, [coveringBand]);
   useEffect(() => { persist('advancedMode', advancedMode); }, [advancedMode]);
-  useEffect(() => { persist('pairMode', pairMode); }, [pairMode]);
+  useEffect(() => { persist('pairMode', renderMode); }, [renderMode]);
   useEffect(() => { persist('yue2Ar', yue2Ar); }, [yue2Ar]);
   useEffect(() => { persist('yue2Nar', yue2Nar); }, [yue2Nar]);
   useEffect(() => { persist('coverVoices', coverVoices); }, [coverVoices]);
@@ -326,7 +352,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': pairMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -377,7 +403,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-coverTimbreOverride')) setTimbreOverridePath(f['cover-studio-coverTimbreOverride'] as never);
     if (Object.hasOwn(f, 'cover-studio-sepLevel')) setSepLevel(f['cover-studio-sepLevel'] as never);
     if (Object.hasOwn(f, 'cover-studio-advancedMode')) setAdvancedMode(f['cover-studio-advancedMode'] as never);
-    if (Object.hasOwn(f, 'cover-studio-pairMode')) setPairMode(f['cover-studio-pairMode'] as never);
+    if (Object.hasOwn(f, 'cover-studio-pairMode')) {
+      const mode = f['cover-studio-pairMode'];
+      setRenderMode(mode === 'pair' ? 'custom' : mode === 'artist' || mode === 'custom' ? mode : 'base');
+    }
     if (Object.hasOwn(f, 'cover-studio-yue2Ar')) setYue2Ar(f['cover-studio-yue2Ar'] as never);
     if (Object.hasOwn(f, 'cover-studio-yue2Nar')) setYue2Nar(f['cover-studio-yue2Nar'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverVoices')) setCoverVoices(f['cover-studio-coverVoices'] as never);
@@ -495,6 +524,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     lireekApi.listArtists()
       .then(res => {
         setArtists(res.artists);
+        if (yue2Mode) {
+          setIsLoadingYue2Artists(true);
+          void Promise.all(res.artists.map(async artist => {
+            const { lyrics_sets } = await lireekApi.listLyricsSets(artist.id).catch(() => ({ lyrics_sets: [] }));
+            const presets = await Promise.all(lyrics_sets.map(ls => lireekApi.getPreset(ls.id).then(r => r.preset).catch(() => null)));
+            return presets.some(p => p?.yue2_ar_adapter_path && p?.yue2_nar_adapter_path) ? artist : null;
+          })).then(eligible => setYue2Artists(eligible.filter((a): a is Artist => a !== null)))
+            .catch(() => setYue2Artists([])).finally(() => setIsLoadingYue2Artists(false));
+        }
         if (!yue2Mode && selectedArtistId && !selectedPreset) {
           const a = res.artists.find(x => x.id === selectedArtistId);
           if (a) loadArtistPresets(a);
@@ -505,7 +543,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   }, [yue2Mode]);
 
   useEffect(() => {
-    if (!yue2Mode || selectedYue2ArtistId == null) return;
+    if (!yue2Mode || renderMode !== 'artist' || selectedYue2ArtistId == null) return;
     const request = ++yue2ArtistRequestRef.current;
     void lireekApi.listLyricsSets(selectedYue2ArtistId).then(async ({ lyrics_sets }) => {
       const albums = await Promise.all(lyrics_sets.map(async ls => ({
@@ -515,15 +553,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (request !== yue2ArtistRequestRef.current) return;
       const available = albums.filter(a => a.preset?.yue2_ar_adapter_path && a.preset?.yue2_nar_adapter_path);
       setYue2Albums(available);
+      setYue2AlbumsForArtistId(selectedYue2ArtistId);
       const chosen = available.find(a => a.lsId === selectedYue2LyricsSetId) || available[0];
       if (chosen && chosen.lsId !== selectedYue2LyricsSetId) setSelectedYue2LyricsSetId(chosen.lsId);
-      if (chosen && selectedYue2LyricsSetId == null) {
-        setYue2Ar(chosen.preset!.yue2_ar_adapter_path!);
-        setYue2Nar(chosen.preset!.yue2_nar_adapter_path!);
-      }
     }).catch(() => { if (request === yue2ArtistRequestRef.current) setYue2Albums([]); });
     return () => { yue2ArtistRequestRef.current++; };
-  }, [yue2Mode, selectedYue2ArtistId]);
+  }, [yue2Mode, renderMode, selectedYue2ArtistId]);
 
   // ── File upload + analysis pipeline ──
   const openUploadedAsset = async (assetId: string, lookup: number, cached?: {
@@ -986,12 +1021,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     }
   };
   const selectYue2Album = (lyricsSetId: number) => {
-    const album = yue2Albums.find(a => a.lsId === lyricsSetId);
+    const album = availableYue2Albums.find(a => a.lsId === lyricsSetId);
     if (!album?.preset) return;
     setSelectedYue2LyricsSetId(lyricsSetId);
-    setYue2Ar(album.preset.yue2_ar_adapter_path || '');
-    setYue2Nar(album.preset.yue2_nar_adapter_path || '');
+
   };
+  const availableYue2Albums = yue2AlbumsForArtistId === selectedYue2ArtistId ? yue2Albums : [];
+  const selectedYue2Album = availableYue2Albums.find(a => a.lsId === selectedYue2LyricsSetId) || availableYue2Albums[0];
+  const renderSelection = resolveYue2Render(renderMode,
+    { ar: yue2Ar, nar: yue2Nar, artist: coveringBand },
+    { ar: selectedYue2Album?.preset?.yue2_ar_adapter_path, nar: selectedYue2Album?.preset?.yue2_nar_adapter_path,
+      artist: yue2Artists.find(a => a.id === selectedYue2ArtistId)?.name });
+  const activeYue2Ar = renderSelection.lmAdapterAr;
+  const activeYue2Nar = renderSelection.lmAdapterNar;
+  const targetYue2Artist = renderSelection.artist;
   const adapterOptions = (kind: 'ar' | 'nar') => [
     { value: '', label: `Base ${kind.toUpperCase()}` },
     ...(yue2Models?.lmAdapters || []).filter(path =>
@@ -1010,7 +1053,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       documentId: coverDraftId, revision: coverDraftRevision,
       expectedBackend: backend, engineParams,
       title: songTitle, artistName: songArtist,
-      targetArtistName: yue2Mode ? coveringBand.trim() : artists.find(a => a.id === selectedArtistId)?.name || '',
+      targetArtistName: yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
       lyrics, caption: artistCaption,
       instrumental, lyricsSource, scoreSource: sheetScoreSource, analysis,
       settings: { coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
@@ -1026,14 +1069,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         triggerPlacement: settings.triggerPlacement || 'prepend',
         voices: coverVoices, keepChords, tempoMode: coverTempoMode, coverBpm,
         keyShift: coverKeyShift, cfgScale: coverCfgScale, lyricSchedule: coverLyricSchedule,
-        lmAdapterAr: yue2Ar, lmAdapterNar: yue2Nar, pairMode,
+        lmAdapterAr: activeYue2Ar, lmAdapterNar: activeYue2Nar,
+        pairMode: renderMode === 'base' ? 'base' : 'pair',
         yue2Pick: yue2PickAtEnqueue(null),
-        captionMode: yue2Mode ? 'custom' : captionMode, captionTracks,
+        captionMode: yue2Mode ? 'custom' : captionMode, captionTracks: renderMode === 'base' ? [] : captionTracks,
       },
     };
     const qId = addManualQueueItem({ title: songArtist
       ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'),
-      artistName: yue2Mode ? coveringBand.trim() : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
+      artistName: yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
     updateManualQueueItem(qId, { stage: 'Preparing…' });
     setIsGenerating(true);
     void (async () => {
@@ -1076,6 +1120,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       showToast('Source is still being prepared'); return;
     }
     if (!instrumental && !lyrics.trim()) { showToast('Enter lyrics or enable Instrumental mode'); return; }
+    if (yue2Mode && renderMode !== 'base' && (!activeYue2Ar || !activeYue2Nar)) {
+      showToast('Choose both YuE2 adapter halves'); return;
+    }
     if (sourceMode === 'audio' && sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
       if (yue2Mode && (!approvedSheet || approvedSheet.key !== sourceKey)) {
         showToast('Review and approve the score first'); return;
@@ -1087,7 +1134,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (!approvedSheet || approvedSheet.key !== sourceKey) { showToast('Review and approve the score first'); return; }
       const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics, instrumental });
       if (missing) { showToast(missing); return; }
-      if (pairMode === 'pair' && (!yue2Ar || !yue2Nar)) { showToast('Choose both YuE2 adapter halves'); return; }
       // Take the whole request at click time; the serial queue may start it much later.
       const engineParams = gp.getGlobalParams() as Record<string, unknown>;
       const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
@@ -1119,8 +1165,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         parallelCoverArt: settings.parallelCoverArt,
       };
       const pair = { ...yue2PickAtEnqueue(null),
-        lmAdapterAr: pairMode === 'pair' ? yue2Ar : '',
-        lmAdapterNar: pairMode === 'pair' ? yue2Nar : '' };
+        lmAdapterAr: activeYue2Ar,
+        lmAdapterNar: activeYue2Nar };
       const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
       const scoreSourceKey = coverScoreKeyLabel(approvedSheet.abc);
       const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
@@ -1130,7 +1176,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
       const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
         yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
-        title, artist: coveringBand.trim(), caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
+        title, artist: targetYue2Artist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
         ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
         instrumental, source: 'cover-studio',
@@ -1139,7 +1185,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
           : { sourceKind: 'musicxml', ...coverChoices },
         yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
-      const qId = addManualQueueItem({ title, artistName: coveringBand.trim(), caption: artistCaption });
+      const qId = addManualQueueItem({ title, artistName: targetYue2Artist, caption: artistCaption });
       updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
       setIsGenerating(true);
       enqueueCoverJob(async () => {
@@ -1392,7 +1438,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // Always allow queuing another cover — covers stack and run one at a time (#62).
   const canGenerate = (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
     && (!!lyrics.trim() || instrumental)
-    && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (pairMode === 'base' || (!!yue2Ar && !!yue2Nar))));
+    && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (renderMode === 'base' || (!!activeYue2Ar && !!activeYue2Nar))));
 
   // ── SuperSep handlers ──
   // Split + poll now runs inside coverStemsStore.startSeparation, so it keeps
@@ -1426,7 +1472,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       {/* Scrolls sideways when the three panels' minimum widths don't fit. */}
       <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
         {/* Left: source choice */}
-        <div className="w-[320px] min-w-[240px] flex-shrink-0 flex flex-col min-h-0">
+        <div className="min-w-[240px] flex-shrink-0 flex flex-col min-h-0" style={{ width: sourceWidth }}>
         {yue2Mode && <div className="border-r border-zinc-200 dark:border-white/5 p-4 space-y-3 overflow-y-auto">
           <div className="flex gap-2" role="group" aria-label={t('cover.sourceMode.label')}>
             <button type="button" onClick={() => selectSourceMode('audio')} aria-pressed={sourceMode === 'audio'}
@@ -1493,8 +1539,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         />}
         </div>
 
-        {/* Center: Lyrics. The side panels shrink before it does. */}
-        <div className="flex-1 min-w-[320px] flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5">
+        <div role="separator" aria-label="Resize source column" aria-orientation="vertical" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)}
+          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />
+        {/* Center: Lyrics and score */}
+        <div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
           <div className="flex-shrink-0 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
             <div className="flex items-center justify-between gap-2">
               {/* Artist + Title inputs */}
@@ -1564,19 +1612,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           )}
         </div>
 
+        <div role="separator" aria-label="Resize lyrics and score column" aria-orientation="vertical" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)}
+          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />
         {/* Right: Artist + Settings */}
-        {yue2Mode ? <div className="w-[420px] min-w-[300px] flex flex-col min-h-0">
+        {yue2Mode ? <div className="min-w-[300px] flex-shrink-0 flex flex-col min-h-0" style={{ width: settingsWidth }}>
           <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} namedSave />
           <Yue2CoverPanel
           caption={artistCaption} onCaptionChange={value => { setArtistCaption(value); setCaptionMode('custom'); }}
           captionMode={captionMode} onCaptionMode={selectCaptionSource}
           captionTracks={captionTracks}
-          artists={artists} loadingArtists={isLoadingArtists} selectedArtistId={selectedYue2ArtistId}
-          onSelectArtist={artist => { setSelectedYue2ArtistId(artist.id); setSelectedYue2LyricsSetId(null); setYue2Ar(''); setYue2Nar(''); setCoveringBand(artist.name); }}
-          albums={yue2Albums} selectedLyricsSetId={selectedYue2LyricsSetId} onSelectAlbum={selectYue2Album}
+          artists={yue2Artists} loadingArtists={isLoadingArtists || isLoadingYue2Artists} selectedArtistId={selectedYue2ArtistId}
+          onSelectArtist={artist => { setYue2AlbumsForArtistId(null); setYue2Albums([]); setSelectedYue2ArtistId(artist.id); setSelectedYue2LyricsSetId(null); }}
+          albums={availableYue2Albums} selectedLyricsSetId={selectedYue2LyricsSetId} onSelectAlbum={selectYue2Album}
           coveringBand={coveringBand} onCoveringBand={setCoveringBand}
           instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
-          pairMode={pairMode} onPairMode={setPairMode}
+          renderMode={renderMode} onRenderMode={setRenderMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
           keepChords={keepChords} onKeepChords={setKeepChords}
@@ -1613,6 +1663,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           isGeneratingCaption={isGeneratingCaption}
           onRegenerateCaption={handleRegenerateCaption}
         />}
+        {yue2Mode && <div role="separator" aria-label="Resize generation settings column" aria-orientation="vertical"
+          onMouseDown={e => startResize(e, settingsWidth, setSettingsWidth, 300, 900)}
+          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />}
 
       </div>
     </div>

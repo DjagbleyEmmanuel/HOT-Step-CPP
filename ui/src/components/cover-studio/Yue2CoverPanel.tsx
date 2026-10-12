@@ -26,8 +26,8 @@ interface Props {
   captionTracks: Yue2SourceTrack[];
   instrumental: boolean;
   onInstrumentalChange: (value: boolean) => void;
-  pairMode: 'base' | 'pair';
-  onPairMode: (value: 'base' | 'pair') => void;
+  renderMode: 'base' | 'artist' | 'custom';
+  onRenderMode: (value: 'base' | 'artist' | 'custom') => void;
   ar: string;
   nar: string;
   onAr: (value: string) => void;
@@ -62,10 +62,10 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
-  <div className="w-[420px] min-w-[300px] overflow-y-auto scrollbar-hide p-4 space-y-5">
+  <div className="w-full min-w-0 overflow-y-auto scrollbar-hide p-4 space-y-5">
     <div className="space-y-2">
       <ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." />
-      {p.captionTracks.length > 0 && p.pairMode === 'pair' && (
+      {p.captionTracks.length > 0 && p.renderMode !== 'base' && (
         <>
           <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
           <StyledSelect accent="pink" value={p.captionMode} onChange={p.onCaptionMode}
@@ -87,30 +87,31 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
     </div>
 
     <div className="space-y-2">
-      <ParamLabel label="Covering band" info="Used in the saved filename. Selecting a Lyric Studio artist fills this in; you can edit it." />
-      <input value={p.coveringBand} onChange={e => p.onCoveringBand(e.target.value)}
-        className="w-full rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
-    </div>
-
-    <div className="space-y-2">
-      <ParamLabel label="Adapter pair" info="Pick a Lyric Studio artist and album to load its YuE2 AR and NAR adapters together. The manual selectors below can override either half." />
-      <StyledSelect accent="pink" value={p.pairMode} onChange={v => p.onPairMode(v as 'base' | 'pair')}
-        options={[{ value: 'base', label: 'Base YuE2' }, { value: 'pair', label: 'Choose AR/NAR pair' }]} />
-      {p.pairMode === 'pair' && (
-        <div className="space-y-2">
-          <CoverArtistGrid artists={p.artists} loading={p.loadingArtists} selectedArtistId={p.selectedArtistId} onSelectArtist={p.onSelectArtist} />
-          {p.albums.length > 1 && <>
-            <ParamLabel label="Album" info="Choose which Lyric Studio album's paired YuE2 adapters to load." />
-            <StyledSelect accent="pink" value={p.selectedLyricsSetId ?? ''}
-              onChange={v => p.onSelectAlbum(Number(v))}
-              options={p.albums.map(a => ({ value: a.lsId, label: a.album }))} />
-          </>}
-          <ParamLabel label="AR composer" info="The AR adapter steers the musical plan and semantic tokens." />
-          <StyledSelect accent="pink" value={p.ar} onChange={p.onAr} options={p.arOptions} />
-          <ParamLabel label="NAR renderer" info="The NAR adapter steers the audio rendering stage." />
-          <StyledSelect accent="pink" value={p.nar} onChange={p.onNar} options={p.narOptions} />
-        </div>
-      )}
+      <ParamLabel label="Render mode" info="Choose base YuE2, a trained Lyric Studio artist, or a custom adapter pair." />
+      <div role="group" aria-label="Render mode" className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
+        {([['base', 'Base YuE2'], ['artist', 'Existing Artist'], ['custom', 'Custom']] as const).map(([value, label]) =>
+          <button key={value} type="button" aria-pressed={p.renderMode === value} onClick={() => p.onRenderMode(value)}
+            className={`flex-1 px-2 py-2 text-xs ${p.renderMode === value ? 'bg-pink-500/20 text-pink-700 dark:text-pink-300' : 'text-zinc-600 dark:text-zinc-400'}`}>{label}</button>)}
+      </div>
+      {p.renderMode === 'artist' && <>
+        <CoverArtistGrid artists={p.artists} loading={p.loadingArtists} selectedArtistId={p.selectedArtistId} onSelectArtist={p.onSelectArtist} />
+        {p.albums.length > 1 && <>
+          <ParamLabel label="Album" info="Choose which Lyric Studio album's paired YuE2 adapters to load." />
+          <StyledSelect accent="pink" value={p.selectedLyricsSetId ?? ''} onChange={v => p.onSelectAlbum(Number(v))}
+            options={p.albums.map(a => ({ value: a.lsId, label: a.album }))} />
+        </>}
+      </>}
+      {p.renderMode !== 'artist' && <>
+        <ParamLabel label="Covering band" info="Used in the saved filename." />
+        <input value={p.coveringBand} onChange={e => p.onCoveringBand(e.target.value)}
+          className="w-full rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
+      </>}
+      {p.renderMode === 'custom' && <>
+        <ParamLabel label="AR composer" info="The AR adapter steers the musical plan and semantic tokens." />
+        <StyledSelect accent="pink" value={p.ar} onChange={p.onAr} options={p.arOptions} />
+        <ParamLabel label="NAR renderer" info="The NAR adapter steers the audio rendering stage." />
+        <StyledSelect accent="pink" value={p.nar} onChange={p.onNar} options={p.narOptions} />
+      </>}
     </div>
 
     {p.isGenerating && (

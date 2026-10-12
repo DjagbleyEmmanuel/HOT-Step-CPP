@@ -59,6 +59,15 @@ have to make.
 7. Set Structure Fidelity, Source Preservation, Tempo Scale and Pitch Shift, and
    optionally a Timbre Reference track, then generate.
 
+YuE2 saves the widths of the source, lyrics and score, and generation settings
+columns in this browser. Drag the dividers to make room for the panel you are using.
+
+YuE2's **Render mode** offers Base YuE2 with a free-text Covering band label but no adapters, Existing Artist with a
+trained Lyric Studio artist and album, and Custom with a covering band and hand-picked
+AR composer and NAR renderer. Existing Artist lists only artists with at least one
+album preset containing both YuE2 adapter paths. The selected mode and choices
+are saved with the draft.
+
 ## YuE2 workflow
 
 1. Choose **Source Audio** or **Import MusicXML** in the left panel. Source Audio
