@@ -14,6 +14,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
+import { TakesError, createTakesSession, generateTakes, getTakesSession, saveTakeToLibrary, useTake } from '../services/yue2Takes.js';
 
 type CoverService = typeof yue2CoverService;
 type DriftSong = { id: string; audio_url: string; lyrics: string; generation_params: string };
@@ -164,6 +165,21 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
       res.json(result);
     } catch (err) { fail(res, err); }
   });
+
+  // Section takes: rebuild a render section by section (services/yue2Takes.ts).
+  const takes = (res: Response, fn: () => unknown) => Promise.resolve().then(fn).then(
+    out => { res.json(out); },
+    err => { if (err instanceof TakesError) res.status(err.status).json({ error: err.message }); else fail(res, err); });
+  router.post('/takes', (req: Request, res: Response) =>
+    takes(res, () => createTakesSession(String(req.body?.songId ?? ''), authenticate(req)!)));
+  router.get('/takes/:id', (req: Request, res: Response) =>
+    takes(res, () => getTakesSession(String(req.params.id), authenticate(req)!)));
+  router.post('/takes/:id/generate', (req: Request, res: Response) =>
+    takes(res, () => generateTakes(String(req.params.id), authenticate(req)!, req.body?.section, req.body?.count, req.body?.toEnd === true)));
+  router.post('/takes/:id/use', (req: Request, res: Response) =>
+    takes(res, () => useTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
+  router.post('/takes/:id/save', (req: Request, res: Response) =>
+    takes(res, () => saveTakeToLibrary(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
 
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {

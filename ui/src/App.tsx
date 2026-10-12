@@ -36,6 +36,7 @@ import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
+import { Yue2TakesHost } from './components/cover-studio/Yue2TakesPanel';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
 import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
@@ -1535,6 +1536,7 @@ const AppContent: React.FC = () => {
 
       {/* Per-track cover art prompt modal (#67) — single instance, driven by window events */}
       <CoverArtPromptModal />
+      <Yue2TakesHost />
 
       {/* "Upload into Library" — single instance, opened from the Library header */}
       <ImportTracksModal />

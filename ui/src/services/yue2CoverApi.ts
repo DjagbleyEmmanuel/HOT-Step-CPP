@@ -103,6 +103,28 @@ export interface Yue2CoverDriftResult {
   inputHash?: string;
 }
 
+/** A section-takes session (server/src/services/yue2Takes.ts). Frames are
+ *  codec frames, 25 per second. */
+export interface Yue2Take {
+  id: string;
+  section: number;
+  seed: number | null;
+  audioUrl: string;
+  frames: number;
+  starts: Array<number | null>;
+  toEnd: boolean;
+}
+export interface Yue2TakesSession {
+  id: string;
+  songId: string;
+  title: string;
+  sections: Array<{ label: string; startBar: number }>;
+  takes: Yue2Take[];
+  spine: string;
+  pending: Array<{ section: number; count: number }>;
+  error: string | null;
+}
+
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -120,6 +142,15 @@ export const yue2CoverApi = {
   }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
+  takesStart: (songId: string, token: string) =>
+    request<Yue2TakesSession>('/takes', token, { method: 'POST', body: JSON.stringify({ songId }) }),
+  takesGet: (id: string, token: string) => request<Yue2TakesSession>(`/takes/${id}`, token),
+  takesGenerate: (id: string, section: number, count: number, toEnd: boolean, token: string) =>
+    request<Yue2TakesSession>(`/takes/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ section, count, toEnd }) }),
+  takesUse: (id: string, take: string, token: string) =>
+    request<Yue2TakesSession>(`/takes/${id}/use`, token, { method: 'POST', body: JSON.stringify({ take }) }),
+  takesSave: (id: string, take: string, token: string) =>
+    request<{ songId: string; audioUrl: string }>(`/takes/${id}/save`, token, { method: 'POST', body: JSON.stringify({ take }) }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
   /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */
