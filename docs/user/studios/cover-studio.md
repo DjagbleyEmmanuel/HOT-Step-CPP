@@ -61,6 +61,8 @@ have to make.
 
 YuE2 saves the widths of the source, lyrics and score, and generation settings
 columns in this browser. Drag the dividers to make room for the panel you are using.
+Drag the divider below the lyrics to change the lead sheet height; that height is
+saved too. Wide generation settings columns arrange controls side by side.
 
 YuE2's **Render mode** offers Base YuE2 with a free-text Covering band label but no adapters, Existing Artist with a
 trained Lyric Studio artist and album, and Custom with a covering band and hand-picked

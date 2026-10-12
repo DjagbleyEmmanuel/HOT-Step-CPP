@@ -6,6 +6,7 @@ import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
 interface Props {
+  height: number;
   sourceReady: boolean;
   sourceMode: 'audio' | 'musicxml';
   readiness: Yue2CoverReadiness | null;
@@ -61,7 +62,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   }, [p.abc]);
 
   return (
-    <div className="border-t border-zinc-200 dark:border-white/10 p-4 space-y-3 overflow-y-auto max-h-[55%]">
+    <div className="min-h-0 flex-shrink-0 border-t border-zinc-200 dark:border-white/10 p-4 space-y-3 overflow-y-auto max-h-[calc(100%-160px)]" style={{ height: p.height }}>
       <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">YuE2 lead sheet</h3>

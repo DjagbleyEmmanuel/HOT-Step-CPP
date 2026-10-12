@@ -39,6 +39,7 @@ import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yu
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
+import { CoverResizeHandle } from './CoverResizeHandle';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
@@ -92,6 +93,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sourceWidth, setSourceWidth] = usePersistedState('hs-cover-source-width', 320);
   const [scoreWidth, setScoreWidth] = usePersistedState('hs-cover-score-width', 560);
   const [settingsWidth, setSettingsWidth] = usePersistedState('hs-cover-settings-width', 420);
+  const [scoreHeight, setScoreHeight] = usePersistedState('hs-cover-score-height', 320);
   const startResize = (event: React.MouseEvent, width: number, setWidth: (value: number) => void, min: number, max: number) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -103,6 +105,22 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       document.body.style.userSelect = '';
     };
     document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  const startScoreResize = (event: React.MouseEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const height = scoreHeight;
+    const onMove = (move: MouseEvent) => setScoreHeight(Math.max(160, Math.min(900, height + startY - move.clientY)));
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -1539,8 +1557,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         />}
         </div>
 
-        <div role="separator" aria-label="Resize source column" aria-orientation="vertical" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)}
-          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />
+        <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />
         {/* Center: Lyrics and score */}
         <div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
           <div className="flex-shrink-0 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
@@ -1594,7 +1611,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             {!instrumental && sectionLint && !sectionLint.ok &&
               <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
           </div>}
+          {yue2Mode && <CoverResizeHandle label="Resize lyrics and lead sheet" direction="vertical" onMouseDown={startScoreResize} />}
           {yue2Mode && <Yue2CoverScore
+            height={scoreHeight}
             sourceReady={(sourceMode === 'musicxml' ? !!sheetAbc.trim() : !!sourceAudioUrl) && !isUploading}
             sourceMode={sourceMode}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
@@ -1612,10 +1631,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           )}
         </div>
 
-        <div role="separator" aria-label="Resize lyrics and score column" aria-orientation="vertical" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)}
-          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />
+        <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} />
         {/* Right: Artist + Settings */}
-        {yue2Mode ? <div className="min-w-[300px] flex-shrink-0 flex flex-col min-h-0" style={{ width: settingsWidth }}>
+        {yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
           <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} namedSave />
           <Yue2CoverPanel
           caption={artistCaption} onCaptionChange={value => { setArtistCaption(value); setCaptionMode('custom'); }}
@@ -1663,9 +1681,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           isGeneratingCaption={isGeneratingCaption}
           onRegenerateCaption={handleRegenerateCaption}
         />}
-        {yue2Mode && <div role="separator" aria-label="Resize generation settings column" aria-orientation="vertical"
-          onMouseDown={e => startResize(e, settingsWidth, setSettingsWidth, 300, 900)}
-          className="w-1.5 flex-shrink-0 cursor-col-resize bg-zinc-200/60 dark:bg-white/5 hover:bg-cyan-500/30" />}
+        {yue2Mode && <CoverResizeHandle label="Resize generation settings column" direction="horizontal"
+          onMouseDown={e => startResize(e, settingsWidth, setSettingsWidth, 300, 900)} />}
 
       </div>
     </div>

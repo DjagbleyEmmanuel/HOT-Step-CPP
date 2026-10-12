@@ -62,8 +62,8 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
-  <div className="w-full min-w-0 overflow-y-auto scrollbar-hide p-4 space-y-5">
-    <div className="space-y-2">
+  <div className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4 grid content-start gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' }}>
+    <div className="min-w-0 space-y-2">
       <ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." />
       {p.captionTracks.length > 0 && p.renderMode !== 'base' && (
         <>
@@ -79,14 +79,13 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
         placeholder="Describe the target sound"
         className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
-    </div>
-
     <div className="flex items-center justify-between">
       <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
       <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
     </div>
+    </div>
 
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <ParamLabel label="Render mode" info="Choose base YuE2, a trained Lyric Studio artist, or a custom adapter pair." />
       <div role="group" aria-label="Render mode" className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
         {([['base', 'Base YuE2'], ['artist', 'Existing Artist'], ['custom', 'Custom']] as const).map(([value, label]) =>
@@ -115,13 +114,13 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
     </div>
 
     {p.isGenerating && (
-      <div className="space-y-2 text-xs">
+      <div className="col-span-full space-y-2 text-xs">
         <p>{p.genStage || 'Generating'} · {p.genProgress}%</p>
         <div className="h-2 bg-zinc-800 rounded-full"><div className="h-full bg-pink-500 rounded-full" style={{ width: `${p.genProgress}%` }} /></div>
         <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
       </div>
     )}
-    <div className="space-y-3 border-t border-zinc-200 dark:border-white/10 pt-4">
+    <div className="min-w-0 space-y-3 border-t border-zinc-200 dark:border-white/10 pt-4">
       <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Score to render</p>
       <ParamLabel label="Voices" info="Vocal melody alone gives the new style room to choose its instruments. Both keeps the transcribed instrumental line too." />
       <StyledSelect accent="pink" value={p.voices} onChange={v => p.onVoices(v as 'vocal' | 'both')}
@@ -156,10 +155,10 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       </details>
     </div>
     <button onClick={p.onGenerate} disabled={!p.canGenerate}
-      className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
+      className="col-span-full w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
       {p.isGenerating ? <><Loader2 className="inline w-4 h-4 mr-1 animate-spin" /> Add to queue</> : 'Generate YuE2 cover'}
     </button>
-    {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
+    {!p.canGenerate && <p className="col-span-full text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
   </div>
   );
 };
