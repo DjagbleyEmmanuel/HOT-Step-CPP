@@ -1,4 +1,4 @@
-import abcjs from 'abcjs';
+import { transposeAbc } from './abcTranspose.js';
 import { coverScoreSnapshot } from './coverScore.js';
 
 export type CoverVoices = 'vocal' | 'both';
@@ -93,7 +93,7 @@ function parsedKey(value: string): { pitch: number; minor: boolean; suffix: stri
     suffix: `${match[4] ?? ''}${match[5] ?? ''}${match[6] ?? ''}`, wordMode: !!match[5] };
 }
 
-/** abcjs parses the tune and moves keys, inline keys, notes and chord roots/bass together.
+/** transposeAbc moves keys, inline keys, notes and chord roots/bass together.
  *  `targetKey` only carries a pitch class (mod 12): C and a request for +7 or
  *  -5 both name "G", so without the caller's exact signed shift this always
  *  picks the nearest route (<= 6 semitones), silently reinterpreting a wider
@@ -118,39 +118,11 @@ export function coverTranspose(abc: string, targetKey: CoverKey, keyShift?: numb
     if (steps > 6) steps -= 12;
   }
   if (steps === 0) return abc;
-  const transposed = abcjs.strTranspose(abc, abcjs.parseOnly(abc), steps);
-  const changedField = transposed.match(/^K:\s*([^\r\n]+)/m);
-  if (!changedField || parsedKey(changedField[1]).pitch !== target.pitch) {
+  const result = transposeAbc(abc, steps);
+  if (parsedKey(result.match(/^K:\s*([^\r\n]+)/m)![1]).pitch !== target.pitch) {
     throw new Error('Could not transpose the cover score to the requested key.');
   }
-  // The K: we write must be the signature the notes were spelled for: writing
-  // C# over notes spelled for Db sharpens every flat. abcjs's own header can
-  // be a nonstandard spelling (Gb minor), so try it and its enharmonic, keep
-  // standard key names only, and take the first whose every note sounds
-  // exactly `steps` away from the source. Mode spelling and modifiers carry over.
-  const abcjsTonic = changedField[1].trim().match(/^[A-G][#b]?/)![0];
-  const sourcePitches = soundingPitches(abc);
-  for (const tonic of [abcjsTonic, ENHARMONIC[abcjsTonic]]) {
-    if (!tonic || !(source.minor ? STANDARD_MINOR : STANDARD_MAJOR).includes(tonic)) continue;
-    const header = `${tonic}${source.wordMode ? '' : source.minor ? 'm' : ''}${source.suffix}`;
-    const result = transposed.replace(/^K:[^\r\n]+/m, `K:${header}`);
-    const moved = soundingPitches(result);
-    if (moved.length === sourcePitches.length && moved.every((track, i) => track.length === sourcePitches[i].length &&
-      track.every((pitch, j) => (pitch - sourcePitches[i][j] - steps) % 12 === 0))) return result;
-  }
-  throw new Error('Could not transpose the cover score to the requested key.');
-}
-
-const STANDARD_MAJOR = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'];
-const STANDARD_MINOR = ['A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#', 'D', 'G', 'C', 'F', 'Bb', 'Eb', 'Ab'];
-const ENHARMONIC: Record<string, string> = {
-  'C#': 'Db', Db: 'C#', 'D#': 'Eb', Eb: 'D#', 'F#': 'Gb', Gb: 'F#', 'G#': 'Ab', Ab: 'G#', 'A#': 'Bb', Bb: 'A#', B: 'Cb', Cb: 'B',
-};
-
-/** Sounding MIDI pitch of every note and chord tone, per track, as abcjs reads the text. */
-function soundingPitches(abc: string): number[][] {
-  const tune = abcjs.parseOnly(abc)[0] as any;
-  return tune.setUpAudio().tracks.map((track: any[]) => track.filter(e => e.cmd === 'note').map(e => e.pitch));
+  return result;
 }
 
 /** The order is part of the cover contract: voices, chords, tempo, key. */

@@ -11,7 +11,7 @@ const score = [
   'X:1', 'M:4/4', 'L:1/16', 'Q:1/4=122',
   'V: Vocal clef=treble name="Vocal Melody"',
   'V: Ins clef=treble name="Ins Melody"',
-  'K:Em', '% intro', 'V: Vocal', '"Em/B"E2 ^F2 [K:G]"G/D"G2 _B2|',
+  'K:Em', '% intro', 'V: Vocal', '"Em/B"E2 F2 [K:G]"G/D"G2 _B2|',
   'V: Ins', 'z12E,2E,2|E,2E,2E2E,2|',
   '% verse', 'V: Vocal', 'B4A2G2A4A2G2|',
   'V: Ins', 'Z4|', '',
@@ -54,7 +54,7 @@ test('transpose preserves K: modifiers and accepts a separate mode word', () => 
   const withClef = score.replace('K:Em', 'K:Em clef=treble');
   const moved = coverTranspose(withClef, 'F#m');
   assert.match(moved, /^K:F#m clef=treble$/m);
-  assert.match(moved, /^"F#m\/C#"F2 \^G2/m);
+  assert.match(moved, /^"F#m\/C#"F2 G2/m);
   assert.equal(coverTranspose(moved, 'Em'), withClef);
   const wordMode = score.replace('K:Em', 'K:E minor clef=treble');
   assert.match(coverTranspose(wordMode, 'F#m'), /^K:F# minor clef=treble$/m);
@@ -98,6 +98,14 @@ test('keyShift carries the exact signed semitone delta past the nearest-key fold
   assert.notEqual(upOctave, chordFree);
   assert.deepEqual(pitches(upOctave), base.map((p: number) => p + 12));
 
+  // The same requests downward: B -7 names E, B -12 names B again.
+  const down7 = coverTranspose(chordFree, 'E', -7);
+  assert.match(down7, /^K:E$/m);
+  assert.deepEqual(pitches(down7), base.map((p: number) => p - 7));
+  const downOctave = coverTranspose(chordFree, 'B', -12);
+  assert.match(downOctave, /^K:B$/m);
+  assert.deepEqual(pitches(downOctave), base.map((p: number) => p - 12));
+
   assert.throws(() => coverTranspose(chordFree, 'F#', 1), /does not land on the requested key/);
   assert.throws(() => coverScoreChoices({ keyShift: 13 }), /keyShift must/);
   assert.throws(() => coverScoreChoices({ keyShift: 1.5 }), /keyShift must/);
@@ -134,7 +142,7 @@ test('every combination of voices/chords/tempo/key reaches the wire together, no
   assert.ok(keepAllResult.includes('"F#m/C#"')); // chords: kept -> transposed chord root/bass, not stripped
   assert.match(keepAllResult, /^Q:1\/4=96$/m); // tempo: set
   assert.match(keepAllResult, /^K:F#m$/m); // key: changed
-  assert.match(keepAllResult, /^"F#m\/C#"F2 \^G2/m); // melody itself moved too, under the new key
+  assert.match(keepAllResult, /^"F#m\/C#"F2 G2/m); // melody itself moved too, under the new key
 
   // vocal-only + chords stripped + free tempo + a non-source key: the three
   // "off" choices must each take effect without blocking the key change.
