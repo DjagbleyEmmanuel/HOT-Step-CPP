@@ -576,11 +576,11 @@ Total: <!-- generated:start route-count -->
 | `POST` | `/api/yue2-cover/sections/plan-score` | `server/src/routes/yue2Cover.ts` |
 | `POST` | `/api/yue2-cover/sections/save-dataset` | `server/src/routes/yue2Cover.ts` |
 | `POST` | `/api/yue2-cover/drift/:songId` | `server/src/routes/yue2Cover.ts` |
-| `POST` | `/api/yue2-cover/takes` | `server/src/routes/yue2Cover.ts` |
-| `GET` | `/api/yue2-cover/takes/:id` | `server/src/routes/yue2Cover.ts` |
-| `POST` | `/api/yue2-cover/takes/:id/generate` | `server/src/routes/yue2Cover.ts` |
-| `POST` | `/api/yue2-cover/takes/:id/use` | `server/src/routes/yue2Cover.ts` |
-| `POST` | `/api/yue2-cover/takes/:id/save` | `server/src/routes/yue2Cover.ts` |
+| `POST` | `/api/yue2-cover/build` | `server/src/routes/yue2Cover.ts` |
+| `GET` | `/api/yue2-cover/build/:id` | `server/src/routes/yue2Cover.ts` |
+| `POST` | `/api/yue2-cover/build/:id/generate` | `server/src/routes/yue2Cover.ts` |
+| `POST` | `/api/yue2-cover/build/:id/keep` | `server/src/routes/yue2Cover.ts` |
+| `POST` | `/api/yue2-cover/build/:id/undo` | `server/src/routes/yue2Cover.ts` |
 | `POST` | `/api/yue2-cover/transcriptions` | `server/src/routes/yue2Cover.ts` |
 | `GET` | `/api/yue2-cover/transcriptions/:jobId` | `server/src/routes/yue2Cover.ts` |
 | `DELETE` | `/api/yue2-cover/transcriptions/:jobId` | `server/src/routes/yue2Cover.ts` |

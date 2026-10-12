@@ -275,6 +275,10 @@ export interface Yue2SynthRequest {
   noise_source?: 'native' | 'fixture';
   /** Preview-only semantic frame ceiling; 0 leaves normal generation limits. */
   preview_max_frames?: number;
+  /** The composer's codec stream, prefilled instead of sampled; with
+   *  continue_codec_ids, a prefix the composer resumes from. */
+  codec_ids?: number[];
+  continue_codec_ids?: boolean;
   /** Songs per request (seeds seed+i), 1..props.max_lm_batch. Omitted at 1. */
   lm_batch_size?: number;
   /** A coalesced batch: one entry per song with its own prompt, score and

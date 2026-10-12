@@ -78,6 +78,7 @@ import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from '.
 import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { GenerationAttempt } from '../types.js';
+import { buildSessionCodes } from '../../yue2Takes.js';
 
 /** Injected so this module never imports back into routes/generate.ts at
  *  runtime, matching MinimaxGenerationDeps' own shape exactly. */
@@ -602,6 +603,19 @@ interface Yue2PreparedJob {
   cover?: Yue2CoverSubmission;
 }
 
+/** A job's params with a cover's captured score and CFG applied, as the
+ *  render reads them. */
+function yue2JobParams(job: GenerationJob): any {
+  const captured = jobCover(job);
+  return captured ? { ...job.params, yue2Abc: captured.abc,
+    ...(captured.cover.cfgScale !== undefined ? { yue2CfgScale: captured.cover.cfgScale } : {}) } : job.params;
+}
+
+/** The /yue2/synth request a job would send, without sending it. */
+export function yue2RequestForJob(job: GenerationJob): Yue2SynthRequest {
+  return mapYue2Params(yue2JobParams(job), jobPick(job)).req;
+}
+
 async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): Promise<Yue2PreparedJob> {
   const pipelineStart = performance.now();
   const timing: StageTiming[] = [];
@@ -611,13 +625,20 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   // submit, never from job.params (the raw request body) — index.ts's
   // resolveRequest already validated it there.
   const captured = jobCover(job);
-  const params = captured ? { ...job.params, yue2Abc: captured.abc,
-    ...(captured.cover.cfgScale !== undefined ? { yue2CfgScale: captured.cover.cfgScale } : {}) } : job.params;
-  const { req, notes, caption, halves } = mapYue2Params(params, jobPick(job));
+  const { req, notes, caption, halves } = mapYue2Params(yue2JobParams(job), jobPick(job));
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
   for (const n of notes) log('WARNING', `[YuE2] ${n}`);
+  // A song built section by section: the kept codec stream is rendered as it
+  // is (prefilled, not sampled), so the job only runs the audio stages. Set
+  // after the request is logged, which would otherwise list every code.
+  const build = job.params?.yue2Build as { session?: unknown } | undefined;
+  if (build?.session !== undefined) {
+    req.codec_ids = buildSessionCodes(String(build.session), job.userId);
+    delete req.semantic_retries;
+    log('INFO', `[YuE2] Rendering ${req.codec_ids.length} kept codec frames from build session ${String(build.session)}`);
+  }
 
   console.log(`[Generate] Job ${job.id} — backend=yue2, cot=${req.cot}, seed=${req.seed ?? -1}, `
     + `caption=${req.style.length} chars, lyrics=${req.lyrics ? `${req.lyrics.length} chars` : '(instrumental)'}`);

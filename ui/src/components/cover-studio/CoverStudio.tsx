@@ -47,6 +47,8 @@ import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ScorePlanReview } from './ScorePlanReview';
+import { Yue2BuildStrip, buildNext, useYue2Build } from './Yue2Build';
+import { StyledSelect } from '../shared/StyledSelect';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
@@ -171,6 +173,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [yue2AlbumsForArtistId, setYue2AlbumsForArtistId] = useState<number | null>(null);
   const [yue2Albums, setYue2Albums] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
   const [coveringBand, setCoveringBand] = useState(() => restore<string>('coveringBand', ''));
+  // Build by section: compose a few sections at a time and keep the best take.
+  const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
+  const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
+  // The last section the next takes cover, and how many takes to make.
+  const [buildTo, setBuildTo] = useState<number | null>(null);
+  const [buildCount, setBuildCount] = useState(3);
   const yue2ArtistRequestRef = useRef(0);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
@@ -345,6 +353,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('selectedYue2ArtistId', selectedYue2ArtistId); }, [selectedYue2ArtistId]);
   useEffect(() => { persist('selectedYue2LyricsSetId', selectedYue2LyricsSetId); }, [selectedYue2LyricsSetId]);
   useEffect(() => { persist('coveringBand', coveringBand); }, [coveringBand]);
+  useEffect(() => { persist('buildMode', buildMode); }, [buildMode]);
+  useEffect(() => { persist('buildSessionId', buildSessionId); }, [buildSessionId]);
   useEffect(() => { persist('advancedMode', advancedMode); }, [advancedMode]);
   useEffect(() => { persist('pairMode', renderMode); }, [renderMode]);
   useEffect(() => { persist('yue2Ar', yue2Ar); }, [yue2Ar]);
@@ -366,7 +376,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -441,6 +451,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-selectedYue2ArtistId')) setSelectedYue2ArtistId(f['cover-studio-selectedYue2ArtistId'] as never);
     if (Object.hasOwn(f, 'cover-studio-selectedYue2LyricsSetId')) setSelectedYue2LyricsSetId(f['cover-studio-selectedYue2LyricsSetId'] as never);
     if (Object.hasOwn(f, 'cover-studio-coveringBand')) setCoveringBand(f['cover-studio-coveringBand'] as never);
+    setBuildMode((f['cover-studio-buildMode'] ?? false) as never);
+    setBuildSessionId((f['cover-studio-buildSessionId'] ?? '') as never);
     const assetId = f['cover-studio-sourceAssetId'];
     if (typeof assetId === 'string' && assetId) {
       const meta = f['cover-studio-metadata'] as AudioMetadata | null, found = f['cover-studio-analysis'] as AudioAnalysis | null;
@@ -1180,6 +1192,121 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     })();
   };
 
+  const build = useYue2Build(token, buildSessionId, setBuildSessionId);
+  const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
+  const nextBuild = buildNext(buildSession);
+  const buildRange = buildTo !== null && buildTo >= nextBuild ? buildTo : null;
+  const generateBuildTakes = () => {
+    if (buildRange === null) { showToast('Pick the last section to build on the section chips'); return; }
+    let params: Record<string, unknown> = buildSession?.params ?? {};
+    if (!buildSession) {
+      const built = yue2CoverParams();
+      if (typeof built === 'string') { showToast(built); return; }
+      params = built.params;
+    }
+    void build.generate(params, buildRange, buildCount);
+  };
+  // Save song: an ordinary render of the kept codec stream, so it gets the
+  // usual post-processing and library save.
+  const saveBuild = () => {
+    if (!token || !buildSession?.kept.length) return;
+    const params = { ...buildSession.params, yue2Build: { session: buildSession.id },
+      yue2BatchSize: 1, yue2Variations: 1, batchSize: 1, randomSeed: true };
+    const title = String(buildSession.params.title || 'Cover');
+    const qId = addManualQueueItem({ title, artistName: String(buildSession.params.artistName || ''), caption: String(buildSession.params.caption || '') });
+    updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
+    setIsGenerating(true);
+    enqueueCoverJob(async () => {
+      try {
+        const res = await generateApi.submit(params as any, token);
+        updateManualQueueItem(qId, { jobId: res.jobId });
+        await pollJobAsync(res.jobId, qId);
+      } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
+      finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
+    });
+  };
+  const renderBuildControls = () => <div className="space-y-2 text-xs">
+    {buildSession && <p className="text-zinc-500">Settings, score and lyrics are fixed to this build. Start over to change them.</p>}
+    <div className="flex items-center gap-2">
+      <div className="w-20 flex-shrink-0" title="Takes per run">
+        <StyledSelect accent="pink" value={buildCount} onChange={v => setBuildCount(Number(v))}
+          options={[1, 2, 3, 4, 5, 6].map(n => ({ value: n, label: String(n) }))} />
+      </div>
+      <button type="button" onClick={generateBuildTakes} disabled={!canGenerate || buildRange === null || build.busy}
+        className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
+        {buildRange === null ? 'Pick sections on the chips'
+          : `Generate ${buildCount} take${buildCount > 1 ? 's' : ''} of ${scoreSections[nextBuild]?.label ?? '…'}${buildRange > nextBuild ? `–${scoreSections[buildRange]?.label}` : ''}`}
+      </button>
+    </div>
+    <div className="flex gap-2">
+      <button type="button" onClick={saveBuild} disabled={!buildSession?.kept.length}
+        className="flex-1 rounded-lg bg-emerald-600 py-1.5 font-semibold text-white disabled:opacity-40">Save song</button>
+      <button type="button" onClick={() => { build.startOver(); setBuildTo(null); }} disabled={!buildSession}
+        className="rounded-lg px-3 py-1.5 text-zinc-600 dark:text-zinc-400 disabled:opacity-40">Start over</button>
+    </div>
+    {build.error && <p role="alert" className="text-red-500">{build.error}</p>}
+  </div>;
+
+  /** The /api/generate params for a YuE2 cover of the approved score, as the
+   *  one-shot render and Build by section both submit them, or why not. */
+  const yue2CoverParams = (): { params: Record<string, unknown>; title: string } | string => {
+    if (!approvedSheet || approvedSheet.key !== sourceKey) return 'Review and approve the score first';
+    const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics, instrumental });
+    if (missing) return missing;
+  // Take the whole request at click time; the serial queue may start it much later.
+  const engineParams = gp.getGlobalParams() as Record<string, unknown>;
+  const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
+  // Create sends these shared settings with its YuE2 requests too. Keep
+  // ACE model, adapter, sampler and source-audio controls out of this job.
+  const sharedParams = {
+    backend: 'yue2', seed: engineParams.seed, randomSeed: engineParams.randomSeed,
+    batchSize: engineParams.batchSize, duration: -1,
+    postProcessingEnabled: engineParams.postProcessingEnabled,
+    masteringEnabled: engineParams.masteringEnabled, masteringReference: engineParams.masteringReference,
+    lufsEnabled: engineParams.lufsEnabled, lufsTarget: engineParams.lufsTarget,
+    lufsCeilingDb: engineParams.lufsCeilingDb,
+    stableStepOn: engineParams.stableStepOn, stableStepStrength: engineParams.stableStepStrength,
+    stableStepBackend: engineParams.stableStepBackend, stableStepAdapters: engineParams.stableStepAdapters,
+    stableStepSeed: engineParams.stableStepSeed,
+    stableStepSeedFollowsDit: engineParams.stableStepSeedFollowsDit,
+    stableStepSteps: engineParams.stableStepSteps, stableStepSolver: engineParams.stableStepSolver,
+    stableStepScheduler: engineParams.stableStepScheduler,
+    stableStepGuidanceMode: engineParams.stableStepGuidanceMode,
+    stableStepGuidanceScale: engineParams.stableStepGuidanceScale,
+    stableStepPluginParams: engineParams.stableStepPluginParams,
+    whisperLyricsEnabled: engineParams.whisperLyricsEnabled, whisperModel: engineParams.whisperModel,
+    whisperLanguage: engineParams.whisperLanguage, whisperBeamSize: engineParams.whisperBeamSize,
+    whisperIsolateVocals: engineParams.whisperIsolateVocals,
+    qualityEvalEnabled: engineParams.qualityEvalEnabled, qualityEvalTarget: engineParams.qualityEvalTarget,
+    coverArtEnabled: engineParams.coverArtEnabled, coverArtSubject: engineParams.coverArtSubject,
+    coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
+    parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
+    parallelCoverArt: settings.parallelCoverArt,
+  };
+  const pair = { ...yue2PickAtEnqueue(null),
+    lmAdapterAr: activeYue2Ar,
+    lmAdapterNar: activeYue2Nar };
+  const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
+  const scoreSourceKey = coverScoreKeyLabel(approvedSheet.abc);
+  const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
+  const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
+  const coverChoices = { voices: coverVoices, keepChords,
+    tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
+    key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
+  const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
+    yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
+    title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
+    ...(lyricsSource ? { lyricsSource } : {}),
+    ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
+    instrumental, source: 'cover-studio',
+    ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
+    yue2Cover: sourceMode === 'audio'
+      ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
+      : { sourceKind: 'musicxml', ...coverChoices },
+    yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
+    return { params, title };
+  };
+
   const handleGenerate = () => {
     if (!token || (sourceMode === 'audio' && !sourceAudioUrl)) { showToast(t('cover.missingSrcOrLyrics')); return; }
     if (sourceMode === 'audio' && sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
@@ -1197,60 +1324,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       return;
     }
     if (yue2Mode) {
-      if (!approvedSheet || approvedSheet.key !== sourceKey) { showToast('Review and approve the score first'); return; }
-      const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics, instrumental });
-      if (missing) { showToast(missing); return; }
-      // Take the whole request at click time; the serial queue may start it much later.
-      const engineParams = gp.getGlobalParams() as Record<string, unknown>;
-      const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
-      // Create sends these shared settings with its YuE2 requests too. Keep
-      // ACE model, adapter, sampler and source-audio controls out of this job.
-      const sharedParams = {
-        backend: 'yue2', seed: engineParams.seed, randomSeed: engineParams.randomSeed,
-        batchSize: engineParams.batchSize, duration: -1,
-        postProcessingEnabled: engineParams.postProcessingEnabled,
-        masteringEnabled: engineParams.masteringEnabled, masteringReference: engineParams.masteringReference,
-        lufsEnabled: engineParams.lufsEnabled, lufsTarget: engineParams.lufsTarget,
-        lufsCeilingDb: engineParams.lufsCeilingDb,
-        stableStepOn: engineParams.stableStepOn, stableStepStrength: engineParams.stableStepStrength,
-        stableStepBackend: engineParams.stableStepBackend, stableStepAdapters: engineParams.stableStepAdapters,
-        stableStepSeed: engineParams.stableStepSeed,
-        stableStepSeedFollowsDit: engineParams.stableStepSeedFollowsDit,
-        stableStepSteps: engineParams.stableStepSteps, stableStepSolver: engineParams.stableStepSolver,
-        stableStepScheduler: engineParams.stableStepScheduler,
-        stableStepGuidanceMode: engineParams.stableStepGuidanceMode,
-        stableStepGuidanceScale: engineParams.stableStepGuidanceScale,
-        stableStepPluginParams: engineParams.stableStepPluginParams,
-        whisperLyricsEnabled: engineParams.whisperLyricsEnabled, whisperModel: engineParams.whisperModel,
-        whisperLanguage: engineParams.whisperLanguage, whisperBeamSize: engineParams.whisperBeamSize,
-        whisperIsolateVocals: engineParams.whisperIsolateVocals,
-        qualityEvalEnabled: engineParams.qualityEvalEnabled, qualityEvalTarget: engineParams.qualityEvalTarget,
-        coverArtEnabled: engineParams.coverArtEnabled, coverArtSubject: engineParams.coverArtSubject,
-        coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
-        parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
-        parallelCoverArt: settings.parallelCoverArt,
-      };
-      const pair = { ...yue2PickAtEnqueue(null),
-        lmAdapterAr: activeYue2Ar,
-        lmAdapterNar: activeYue2Nar };
-      const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-      const scoreSourceKey = coverScoreKeyLabel(approvedSheet.abc);
-      const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
-      const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
-      const coverChoices = { voices: coverVoices, keepChords,
-        tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
-        key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
-      const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
-        yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
-        title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
-        ...(lyricsSource ? { lyricsSource } : {}),
-        ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
-        instrumental, source: 'cover-studio',
-        ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
-        yue2Cover: sourceMode === 'audio'
-          ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
-          : { sourceKind: 'musicxml', ...coverChoices },
-        yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
+      const built = yue2CoverParams();
+      if (typeof built === 'string') { showToast(built); return; }
+      const { params, title } = built;
       const qId = addManualQueueItem({ title, artistName: targetYue2Artist, caption: artistCaption });
       updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
       setIsGenerating(true);
@@ -1664,13 +1740,22 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
                 <span key={`${index}-${section.startBar}`} style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
                   className="inline-flex rounded border-l-4 text-[11px] text-zinc-800 dark:text-zinc-100">
-                  <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
-                    className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
-                  <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
-                    title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
-                    className="px-1 text-zinc-500 hover:text-red-500">✕</button>
+                  {buildMode
+                    ? <button type="button" disabled={index < nextBuild} onClick={() => { setBuildTo(index); setActiveSectionOf({ abc: sheetAbc, index: nextBuild }); }}
+                      title={index < nextBuild ? `${section.label} is built` : `Build from ${scoreSections[nextBuild]?.label} up to ${section.label}`}
+                      className={`px-2 py-0.5 ${index < nextBuild ? 'opacity-60' : 'hover:brightness-125'} ${buildRange !== null && index >= nextBuild && index <= buildRange ? 'ring-2 ring-pink-500 rounded' : ''}`}>
+                      {index < nextBuild ? '✓' : index === nextBuild ? '→' : '·'} {section.label} · bar {section.startBar}</button>
+                    : <>
+                      <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
+                        className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
+                      <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
+                        title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
+                        className="px-1 text-zinc-500 hover:text-red-500">✕</button>
+                    </>}
                 </span>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
+            {buildMode && buildSession && <Yue2BuildStrip session={buildSession} busy={build.busy}
+              onKeep={take => { void build.keep(take).then(() => setBuildTo(null)); }} onUndo={() => { void build.undo(); setBuildTo(null); }} />}
             {scoreCuts.length > 0 && <p className="text-xs text-zinc-500">
               {scoreCuts.length} section{scoreCuts.length > 1 ? 's' : ''} cut from this cover; the dataset's score and lyrics are unchanged.
               {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
@@ -1711,6 +1796,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onSelectArtist={artist => { setYue2AlbumsForArtistId(null); setYue2Albums([]); setSelectedYue2ArtistId(artist.id); setSelectedYue2LyricsSetId(null); }}
           albums={availableYue2Albums} selectedLyricsSetId={selectedYue2LyricsSetId} onSelectAlbum={selectYue2Album}
           coveringBand={coveringBand} onCoveringBand={setCoveringBand}
+          buildMode={buildMode} onBuildMode={setBuildMode} buildControls={renderBuildControls()}
           instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
           renderMode={renderMode} onRenderMode={setRenderMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}

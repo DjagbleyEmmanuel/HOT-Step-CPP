@@ -22,7 +22,7 @@ import React, { useRef, useState, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import {
   MoreHorizontal, RotateCcw, Download, Disc3, Tags, Trash2, Upload,
-  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, Layers,
+  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song, UnifiedRecentSong } from '../../types';
@@ -32,7 +32,6 @@ import {
   startPostProcessing, canPostProcess, revertPostProcessing, dismissRun, usePostProcessRun,
 } from '../../stores/postProcessStore';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
-import { openYue2Takes } from '../cover-studio/Yue2TakesPanel';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -440,16 +439,6 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
           )}
 
           {extraItems}
-          {/* A YuE2 cover can be rebuilt section by section from its saved codec
-              stream. Recent-song rows carry no params, so they always offer it and
-              the panel says when a song cannot be used. */}
-          {(() => {
-            const gp = (song.generationParams || (song as any).generation_params) as any;
-            return !gp || (gp.backend === 'yue2' && gp.source === 'cover-studio');
-          })() && (
-            <Item icon={<Layers size={14} />} label="Section takes" title="Redo this cover one section at a time"
-              onClick={() => act(() => openYue2Takes(song.id))} tone="text-cyan-400 hover:bg-cyan-500/10" />
-          )}
 
           {!compact && (
             <>

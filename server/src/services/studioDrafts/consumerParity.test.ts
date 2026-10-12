@@ -30,7 +30,7 @@ const DEFAULTS: StudioDraftBody[] = [
     coverCfgScale: 1, coverLyricSchedule: 'bias', captionMode: 'custom', sheetAbc: 'X:1\nK:C\nC',
     scoreSections: [{ start: 0, end: 4 }], scoreCuts: [], scoreTempoScale: { abc: 'X:1', factor: 1 }, sheetAudioUrl: '',
     approvedSheet: { abc: 'X:1', sourceId: 'source', sourceLabel: 'score', audioUrl: '', key: 'C' },
-    selectedYue2ArtistId: 17, selectedYue2LyricsSetId: 23, coveringBand: 'Test band', draftName: 'Named draft',
+    selectedYue2ArtistId: 17, selectedYue2LyricsSetId: 23, coveringBand: 'Test band', buildMode: false, buildSessionId: '', draftName: 'Named draft',
   }).map(([k, v]) => [`cover-studio-${k}`, v])) },
   { studio: 'repaint', fields: Object.fromEntries(Object.entries({
     sourceSong: null, sourceAssetId: '', sourceAudioUrl: '', sourceName: '', regionStart: 0, regionEnd: 0,

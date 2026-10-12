@@ -14,7 +14,11 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, createTakesSession, generateTakes, getTakesSession, saveTakeToLibrary, useTake } from '../services/yue2Takes.js';
+import { TakesError, createBuildSession, generateBuildTakes, getBuildSession, keepBuildTake, undoBuildKeep } from '../services/yue2Takes.js';
+import { buildEnvelope } from '../services/generation/envelope.js';
+import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
+import type { GenerationJob } from '../services/generation/jobTypes.js';
+import { randomUUID } from 'node:crypto';
 
 type CoverService = typeof yue2CoverService;
 type DriftSong = { id: string; audio_url: string; lyrics: string; generation_params: string };
@@ -166,20 +170,31 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     } catch (err) { fail(res, err); }
   });
 
-  // Section takes: rebuild a render section by section (services/yue2Takes.ts).
+  // Build by section (services/yue2Takes.ts). A session starts from the same
+  // params a one-shot cover submits, resolved exactly as a render would.
   const takes = (res: Response, fn: () => unknown) => Promise.resolve().then(fn).then(
     out => { res.json(out); },
     err => { if (err instanceof TakesError) res.status(err.status).json({ error: err.message }); else fail(res, err); });
-  router.post('/takes', (req: Request, res: Response) =>
-    takes(res, () => createTakesSession(String(req.body?.songId ?? ''), authenticate(req)!)));
-  router.get('/takes/:id', (req: Request, res: Response) =>
-    takes(res, () => getTakesSession(String(req.params.id), authenticate(req)!)));
-  router.post('/takes/:id/generate', (req: Request, res: Response) =>
-    takes(res, () => generateTakes(String(req.params.id), authenticate(req)!, req.body?.section, req.body?.count, req.body?.toEnd === true)));
-  router.post('/takes/:id/use', (req: Request, res: Response) =>
-    takes(res, () => useTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
-  router.post('/takes/:id/save', (req: Request, res: Response) =>
-    takes(res, () => saveTakeToLibrary(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
+  router.post('/build', (req: Request, res: Response) => takes(res, () => {
+    const userId = authenticate(req)!;
+    const params = req.body?.params;
+    if (!params || typeof params !== 'object' || Array.isArray(params)) throw new TakesError('params are required');
+    const id = `build-${randomUUID()}`;
+    let envelope;
+    try { envelope = buildEnvelope(params, userId, id, Date.now()); }
+    catch (err) { throw new TakesError((err as Error).message); }
+    if (envelope.backendId !== 'yue2') throw new TakesError('Build by section needs the YuE2 backend.');
+    const job = { id, userId, envelope, params, attempts: [], status: 'pending' } as unknown as GenerationJob;
+    return createBuildSession(params, yue2RequestForJob(job), userId);
+  }));
+  router.get('/build/:id', (req: Request, res: Response) =>
+    takes(res, () => getBuildSession(String(req.params.id), authenticate(req)!)));
+  router.post('/build/:id/generate', (req: Request, res: Response) =>
+    takes(res, () => generateBuildTakes(String(req.params.id), authenticate(req)!, req.body?.to, req.body?.count)));
+  router.post('/build/:id/keep', (req: Request, res: Response) =>
+    takes(res, () => keepBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
+  router.post('/build/:id/undo', (req: Request, res: Response) =>
+    takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!)));
 
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {
