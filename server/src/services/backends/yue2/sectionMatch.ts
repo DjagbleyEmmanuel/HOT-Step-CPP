@@ -12,7 +12,8 @@
 // that block may be the one sung there. Verses are never copied: each has its
 // own words. Sections with no Vocal note get an empty tag, and the lyrics' own
 // empty tags are dropped in their favour. A section's first bar does not count
-// as sung: it often holds the previous section's last note.
+// as sung: it often holds the previous section's last note. Placement is an
+// in-order best fit, not "which section holds this second" (see PICKUP_BARS).
 
 import type { Yue2AlignWord } from './align.js';
 import { sectionKind } from './coverDrift.js';
@@ -22,10 +23,16 @@ import { scoreBarClock, scoreVocalNoteOnsets } from './scoreClock.js';
 const MIN_WORD_SECONDS = 0.04;
 // A first word up to a bar before a section start is a pickup into it.
 const PICKUP_BARS = 1;
-// SheetSage's section starts are approximate (a block's first word lands
-// up to 10 s in on real songs), but a block starting in the last quarter of
-// a section is more likely misplaced than late, so it stays unsure.
-const MAX_SECTION_FRACTION = 0.75;
+// SheetSage writes one tempo for the whole song and the record drifts
+// against it, so a section's start can be several bars off by the second
+// half. Blocks are therefore not placed by the section their first word falls
+// in: an in-order best fit gives each block the sung section whose start it is
+// nearest, measured in that section's lengths. A pickup into it costs nothing.
+// Costs, in section lengths: going on under the previous block's section,
+// a lyric tag whose kind differs from the section's, and leaving a block unsure.
+const MERGE_COST = 0.2;
+const KIND_COST = 0.1;
+const UNSURE_COST = 0.5;
 // Kinds whose words repeat, so a missing one can be copied from the last.
 const REPEATS = /^(chorus|refrain|hook)\b/;
 const TAG_LINE = /^\s*\[([^\]\n]+)\]\s*$/;
@@ -90,6 +97,53 @@ function firstWord(block: Block, words: Yue2AlignWord[]): number | null {
   return median(timed.slice(0, 3).map(word => word.start));
 }
 
+interface Span { label: string; start: number; sung: boolean }
+
+/** The score section each block opens or goes on under, or null when unsure:
+ *  the in-order assignment of least total cost (see the costs above). A block
+ *  under the same section as the last placed one is a merge; the caller still
+ *  flags it unsure when an unsure block sits between them. */
+function bestFit(blocks: Block[], timed: Array<number | null>, spans: Span[], songEnd: number, pickup: number) {
+  const length = (s: number) => (s + 1 < spans.length ? spans[s + 1].start : songEnd) - spans[s].start;
+  const open = (i: number, s: number) => {
+    const t = timed[i]!, start = spans[s].start, len = length(s);
+    const off = t < start - pickup ? start - pickup - t : Math.max(0, t - start);
+    const kind = blocks[i].tag ? sectionKind(blocks[i].tag!) : null;
+    return off / len + (kind && /^(verse|chorus|bridge|intro|outro|interlude|pre-chorus)$/.test(kind) &&
+      kind !== sectionKind(spans[s].label) ? KIND_COST : 0);
+  };
+  const merge = (i: number, s: number) =>
+    MERGE_COST + Math.max(0, timed[i]! - (spans[s].start + length(s) - pickup)) / length(s);
+  // cost[j]: least cost so far with section j - 1 the last placed (0: none yet).
+  let cost = spans.map(() => Infinity).concat(Infinity);
+  cost[0] = 0;
+  const choices: Array<Array<{ from: number; section: number | null }>> = [];
+  timed.forEach((t, i) => {
+    const next = cost.map(c => c + UNSURE_COST);
+    const choice = cost.map((_, j) => ({ from: j, section: null as number | null }));
+    if (t !== null) {
+      cost.forEach((c, j) => {
+        if (c === Infinity) return;
+        if (j > 0 && c + merge(i, j - 1) < next[j]) { next[j] = c + merge(i, j - 1); choice[j] = { from: j, section: j - 1 }; }
+        for (let s = j; s < spans.length; s++) {
+          if (!spans[s].sung) continue;
+          const total = c + open(i, s);
+          if (total < next[s + 1]) { next[s + 1] = total; choice[s + 1] = { from: j, section: s }; }
+        }
+      });
+    }
+    choices.push(choice);
+    cost = next;
+  });
+  const sections: Array<number | null> = [];
+  let j = cost.indexOf(Math.min(...cost));
+  for (let i = timed.length - 1; i >= 0; i--) {
+    sections[i] = choices[i][j].section;
+    j = choices[i][j].from;
+  }
+  return sections;
+}
+
 export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2AlignWord[]): SectionMatchResult {
   const sections = scoreSections(abc);
   if (!sections.length) throw new Error('The score has no section labels.');
@@ -105,7 +159,6 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
   const blocks = splitLyricBlocks(lyrics);
   const label = (i: number) => spans[i].label;
   const songEnd = bars[bars.length - 1].end;
-  const spanEnd = (i: number) => i + 1 < spans.length ? spans[i + 1].start : songEnd;
   // Index of the section a time falls in.
   const containing = (seconds: number) => {
     let found = 0;
@@ -113,24 +166,9 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
     return found;
   };
 
-  let last = -1;
-  const placed = blocks.map(block => {
-    const sung = block.body.trim() ? firstWord(block, words) : null;
-    let section: number | null = null;
-    if (sung !== null) {
-      const s = containing(sung + PICKUP_BARS * barSeconds);
-      // A block starting inside the section the previous block opened goes on
-      // under the same tag; one opening a section must start in its first half.
-      const late = (sung - spans[s].start) / (spanEnd(s) - spans[s].start) > MAX_SECTION_FRACTION;
-      section = s === last || !late ? s : null;
-      // The score hears no singing there: the score or the aligner is wrong.
-      if (section !== null && !spans[section].sung) section = null;
-    }
-    // The aligner is monotonic; a block placed before its predecessor is unsure, not moved.
-    if (section !== null && section < last) section = null;
-    if (section !== null) last = section;
-    return { block, sung, section };
-  });
+  const timed = blocks.map(block => block.body.trim() ? firstWord(block, words) : null);
+  const placed = bestFit(blocks, timed, spans, songEnd, PICKUP_BARS * barSeconds)
+    .map((section, i) => ({ block: blocks[i], sung: timed[i], section }));
 
   const out: string[] = [];
   const report: SectionMatchBlock[] = [];

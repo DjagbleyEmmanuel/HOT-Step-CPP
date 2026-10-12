@@ -80,3 +80,13 @@ test('a note held over into a section\'s first bar does not make it sung', () =>
   assert.notEqual(held, score);
   assert.equal(result.lyrics, `[intro]\n\n${lyrics}\n\n[outro]`);
 });
+
+test('a score whose clock runs late still gives each block its own section', () => {
+  // SheetSage's one tempo drifts: every block after the first is sung more
+  // than a pickup bar before the score says its section starts.
+  const lyrics = '[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[verse]\nthird line\n\n[chorus]\nfourth line';
+  const result = matchSectionsToScore(score, lyrics,
+    words(lyrics, [['first', 5.5], ['second', 8.5], ['third', 14.5], ['fourth', 20.5]]));
+  assert.equal(result.lyrics, `[intro]\n\n${lyrics}\n\n[outro]`);
+  assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'kept', 'kept']);
+});
