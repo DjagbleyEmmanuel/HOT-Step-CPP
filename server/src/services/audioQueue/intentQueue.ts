@@ -40,8 +40,17 @@ export interface AudioQueueDeps {
   /** submitGeneration from routes/generate.ts. */
   submit: (body: Record<string, unknown>, userId: string) => Promise<
     { ok: true; jobId: string } | { ok: false; status: number; body: Record<string, unknown> }>;
-  /** The live job, or undefined once it is no longer held. */
-  getJob: (jobId: string) => { status: string; error?: string; result?: unknown } | undefined;
+  /** The live job, or undefined once it is no longer held. attempts carries
+   *  the engine's own lifecycle timestamps (routes/generate.ts's
+   *  GenerationAttempt) — startedAt is set after GPU-lane queue wait, so it
+   *  excludes queueing; endedAt is set on every end path, success, failure
+   *  or cancel. This is the only trustworthy source for "how long did this
+   *  actually render", because it does not depend on this queue's own poll
+   *  cadence ever observing the job mid-run. */
+  getJob: (jobId: string) => {
+    status: string; error?: string; result?: unknown;
+    attempts?: Array<{ startedAt: number; endedAt?: number }>;
+  } | undefined;
   cancelJob: (jobId: string) => boolean;
   activeEngine: () => string;
   isEngine: (id: string) => boolean;
@@ -97,8 +106,25 @@ const JOB_QUEUED = new Set(['pending', 'queued']);
 
 function elapsedSecondsFor(r: Row, now: number): number | null {
   if (r.elapsed_seconds != null) return r.elapsed_seconds;
-  if (r.started_at != null) return Math.round((now - r.started_at) / 1000);
+  // Only an actively-running item ticks live; a terminal row must already
+  // have elapsed_seconds frozen by whoever moved it there (follow(),
+  // finishCancel, reconcileAfterRestart). Falling through to started_at for
+  // a terminal row with no frozen value is how a finished item kept
+  // counting up (2s, then 62s a minute later — the F19 round-2 regression).
+  if (r.status === 'submitted' && r.started_at != null) return Math.round((now - r.started_at) / 1000);
   return null;
+}
+
+/** The job's own running time, from its last attempt's lifecycle timestamps
+ *  — never from submission or queue-wait. null when the engine never told us
+ *  it started (still queued when the job went terminal, or never ran at
+ *  all): showing nothing beats showing queue wait as render time. */
+function attemptElapsedSeconds(
+  job: { attempts?: Array<{ startedAt: number; endedAt?: number }> } | undefined, fallbackEnd: number,
+): number | null {
+  const attempt = job?.attempts?.[job.attempts.length - 1];
+  if (attempt?.startedAt == null) return null;
+  return Math.round(((attempt.endedAt ?? fallbackEnd) - attempt.startedAt) / 1000);
 }
 
 function toItem(r: Row, now: number): AudioIntentItem {
@@ -287,9 +313,12 @@ export class AudioIntentQueue {
   }
 
   private finishCancel(r: Row): void {
-    if (r.job_id) this.deps.cancelJob(r.job_id);
+    // Read the job before cancelling it — cancelJob() may drop it from the
+    // live map once it acknowledges, taking its attempt timestamps with it.
+    const job = r.job_id ? this.deps.getJob(r.job_id) : undefined;
     const t = this.now();
-    const elapsedSeconds = Math.round((t - (r.started_at ?? r.updated_at)) / 1000);
+    const elapsedSeconds = attemptElapsedSeconds(job, t);
+    if (r.job_id) this.deps.cancelJob(r.job_id);
     this.db.prepare(`UPDATE audio_intents SET status = 'cancelled', elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status IN ('submitting','submitted')`)
       .run(elapsedSeconds, t, r.id);
   }
@@ -342,12 +371,19 @@ export class AudioIntentQueue {
    *  process. Pending items stay pending; they were never sent. */
   reconcileAfterRestart(): number {
     const t = this.now();
-    const a = this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?,
+    // The job itself died with the old process, so its attempt timestamps
+    // are gone too — started_at (our own "first observed running" mark,
+    // persisted separately) is the only timing left. Freeze it now: leaving
+    // it live would have elapsedSecondsFor recompute (restart time - started_at)
+    // forever, growing on every later read (the "2s, then 62s a minute
+    // later" bug). No started_at means it never observed running: null.
+    const freeze = `elapsed_seconds = CASE WHEN started_at IS NOT NULL THEN CAST(ROUND((? - started_at) / 1000.0) AS INTEGER) ELSE NULL END`;
+    const a = this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?, ${freeze},
       error = 'The server stopped while this item was being submitted. It may or may not have reached the engine; retry it to render it again.'
-      WHERE status = 'submitting'`).run(t);
-    const b = this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?,
+      WHERE status = 'submitting'`).run(t, t);
+    const b = this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?, ${freeze},
       error = 'The server stopped while job ' || job_id || ' was running, so its outcome is unknown here. Check the library before retrying.'
-      WHERE status = 'submitted'`).run(t);
+      WHERE status = 'submitted'`).run(t, t);
     return a.changes + b.changes;
   }
 
@@ -438,20 +474,24 @@ export class AudioIntentQueue {
       const job = r.job_id ? this.deps.getJob(r.job_id) : undefined;
       const t = this.now();
       if (!job) {
-        this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?,
+        // The job vanished from the live map (reset/pruned) without this
+        // loop ever seeing it reach a terminal status — same situation as a
+        // restart: its own attempt timestamps are gone with it, so freeze
+        // from whatever started_at we had observed ourselves, same as
+        // reconcileAfterRestart, rather than leave it to tick forever.
+        const freeze = `elapsed_seconds = CASE WHEN started_at IS NOT NULL THEN CAST(ROUND((? - started_at) / 1000.0) AS INTEGER) ELSE NULL END`;
+        this.db.prepare(`UPDATE audio_intents SET status = 'interrupted', updated_at = ?, ${freeze},
           error = 'Job ' || IFNULL(job_id,'?') || ' is no longer known to the generation queue (it was reset or pruned); its outcome is unknown.'
-          WHERE id = ? AND status = 'submitted'`).run(t, r.id);
+          WHERE id = ? AND status = 'submitted'`).run(t, t, r.id);
         continue;
       }
       // The moment the engine actually starts this job, not when it was
       // accepted — a deep queue can leave a "submitted" job sitting as
       // job.status 'pending'/'queued' for a while first (issue #64's rule,
       // applied here instead of trusting a client's poll cadence to catch
-      // it). Excludes terminal too: a job can beat this loop's own interval
-      // and go straight from queued to done, never observed running: leave
-      // started_at unset so the terminal branch below falls back to the
-      // submission timestamp instead of "now" (which would read as a false
-      // zero-second render).
+      // it). Used only for the live ticker below, while still running — the
+      // frozen value on terminal comes from the job's own attempt timestamps
+      // (attemptElapsedSeconds), not from this.
       if (r.started_at == null && !JOB_QUEUED.has(job.status) && !JOB_TERMINAL.has(job.status)) {
         this.db.prepare(`UPDATE audio_intents SET started_at = ? WHERE id = ? AND started_at IS NULL`).run(t, r.id);
         r.started_at = t;
@@ -460,8 +500,10 @@ export class AudioIntentQueue {
       if (!JOB_TERMINAL.has(job.status)) continue;
       // Freeze real generation time now, while this item is still in front of
       // us: once status leaves 'submitted' it never comes back through this
-      // loop, so this is the only chance to record it.
-      const elapsedSeconds = Math.round((t - (r.started_at ?? r.updated_at)) / 1000);
+      // loop, so this is the only chance to record it. From the job's own
+      // attempt timestamps, never from submission — a job that sat queued
+      // for 600s and ran for 1s must read 1s, not 601s.
+      const elapsedSeconds = attemptElapsedSeconds(job, t);
       this.db.prepare(`UPDATE audio_intents SET status = ?, error = ?, result = ?, elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status = 'submitted'`)
         .run(job.status, job.status === 'failed' ? (job.error ?? 'Generation failed') : null,
           job.result === undefined ? null : JSON.stringify(job.result), elapsedSeconds, t, r.id);
