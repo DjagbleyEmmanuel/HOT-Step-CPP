@@ -25,6 +25,12 @@ const DEFAULTS: StudioDraftBody[] = [
     selectedPreset: null, artistCaption: '', audioCoverStrength: 0.5, coverNoiseStrength: 0, coverNoiseMethod: '',
     tempoScale: 1, pitchShift: 0, bpmCorrection: 1, bpmOverride: null, keyOverride: null, noFsq: false,
     coverInstrumental: false, sourceLatentUrl: '', coverVocalLanguage: 'en', coverTimbreOverride: '', sepLevel: 1,
+    sourceMode: 'musicxml', advancedMode: false, pairMode: 'pair', yue2Ar: 'ar.gguf', yue2Nar: 'nar.gguf',
+    coverVoices: 'both', keepChords: true, coverTempoMode: 'set', coverBpm: 120, coverKeyShift: -7,
+    coverCfgScale: 1, coverLyricSchedule: 'bias', captionMode: 'custom', sheetAbc: 'X:1\nK:C\nC',
+    scoreSections: [{ start: 0, end: 4 }], scoreTempoScale: { abc: 'X:1', factor: 1 }, sheetAudioUrl: '',
+    approvedSheet: { abc: 'X:1', sourceId: 'source', sourceLabel: 'score', audioUrl: '', key: 'C' },
+    selectedYue2ArtistId: 17, selectedYue2LyricsSetId: 23, coveringBand: 'Test band', draftName: 'Named draft',
   }).map(([k, v]) => [`cover-studio-${k}`, v])) },
   { studio: 'repaint', fields: Object.fromEntries(Object.entries({
     sourceSong: null, sourceAssetId: '', sourceAudioUrl: '', sourceName: '', regionStart: 0, regionEnd: 0,
@@ -92,4 +98,3 @@ test('a training handoff reads back unchanged through the drafts adapter, resets
   }
   assert.throws(() => drafts.handoff('other-user', docs.list('u', 'training-audition-create')[0].id));
 });
-

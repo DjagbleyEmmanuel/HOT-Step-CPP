@@ -12,7 +12,7 @@ import type { StudioKind } from './studioDrafts.js';
 const keys = (list: string, prefix = '') => list.split(' ').map(x => `${prefix}${x}`);
 
 const CREATE = new Set(keys('caption lyrics negative-prompt instrumental lora-trigger beat-intro intro-bars title artist subject bpm keyScale timeSignature duration vocalLanguage vocalGender sourceLatentUrl', 'hs-'));
-const COVER = new Set(keys('sourceFileName sourceAudioUrl sourceAssetId sourceSongId metadata analysis songArtist songTitle lyrics lyricsSource datasetAnalysis selectedArtistId selectedPreset artistCaption audioCoverStrength coverNoiseStrength coverNoiseMethod tempoScale pitchShift bpmCorrection bpmOverride keyOverride noFsq coverInstrumental sourceLatentUrl coverVocalLanguage coverTimbreOverride sepLevel', 'cover-studio-'));
+const COVER = new Set(keys('sourceFileName sourceAudioUrl sourceAssetId sourceSongId metadata analysis songArtist songTitle lyrics lyricsSource datasetAnalysis selectedArtistId selectedPreset artistCaption audioCoverStrength coverNoiseStrength coverNoiseMethod tempoScale pitchShift bpmCorrection bpmOverride keyOverride noFsq coverInstrumental sourceLatentUrl coverVocalLanguage coverTimbreOverride sepLevel sourceMode advancedMode pairMode yue2Ar yue2Nar coverVoices keepChords coverTempoMode coverBpm coverKeyShift coverCfgScale coverLyricSchedule captionMode sheetAbc scoreSections scoreTempoScale sheetAudioUrl approvedSheet selectedYue2ArtistId selectedYue2LyricsSetId coveringBand draftName', 'cover-studio-'));
 const REPAINT = new Set(keys('sourceSong sourceAssetId sourceAudioUrl sourceName regionStart regionEnd lyrics repaintMode crossfadeFrames styleCaption', 'hs-repaint-'));
 const STORM = new Set(keys('caption lyrics neg lora instrumental beat-intro intro-bars bpm duration-v2 deck-a-caption deck-a-lyrics deck-a-bpm deck-b-caption deck-b-lyrics deck-b-bpm', 'hs-storm-'));
 const STEM = new Set(keys('hs-stem-sourceUrl hs-stem-sourceFile hs-stem-sepLevel hs-stem-extractModel'));
@@ -20,16 +20,17 @@ const BUILDER = new Set(keys('hs-sb-sourceUrl hs-sb-sourceRef hs-sb-sourceFile h
 /** Create's per-dataset caption-source keys, matched by pattern. */
 export const CREATE_CAPTION_SOURCE_KEY = /^(hs-mm3CaptionSource:[^:]+|hs-mm3CaptionSources|hs-yue2CaptionSource:ds:[^:]+|hs-yue2CaptionSource:ds:song:[^:]+:[^:]+|hs-yue2CaptionDataset|hs-yue2CaptionSources)$/;
 
-const BOOLEAN = new Set(keys('hs-instrumental hs-beat-intro cover-studio-datasetAnalysis cover-studio-noFsq cover-studio-coverInstrumental hs-storm-instrumental hs-storm-beat-intro'));
-const NUMBER = new Set(keys('hs-bpm hs-duration hs-intro-bars cover-studio-audioCoverStrength cover-studio-coverNoiseStrength cover-studio-tempoScale cover-studio-pitchShift cover-studio-bpmCorrection cover-studio-sepLevel hs-repaint-regionStart hs-repaint-regionEnd hs-repaint-crossfadeFrames hs-storm-intro-bars hs-storm-bpm hs-storm-duration-v2 hs-storm-deck-a-bpm hs-storm-deck-b-bpm'));
-const NULLABLE_NUMBER = new Set(keys('cover-studio-selectedArtistId cover-studio-bpmOverride'));
+const BOOLEAN = new Set(keys('hs-instrumental hs-beat-intro cover-studio-datasetAnalysis cover-studio-noFsq cover-studio-coverInstrumental cover-studio-advancedMode cover-studio-keepChords hs-storm-instrumental hs-storm-beat-intro'));
+const NUMBER = new Set(keys('hs-bpm hs-duration hs-intro-bars cover-studio-audioCoverStrength cover-studio-coverNoiseStrength cover-studio-tempoScale cover-studio-pitchShift cover-studio-bpmCorrection cover-studio-sepLevel cover-studio-coverBpm cover-studio-coverKeyShift cover-studio-coverCfgScale hs-repaint-regionStart hs-repaint-regionEnd hs-repaint-crossfadeFrames hs-storm-intro-bars hs-storm-bpm hs-storm-duration-v2 hs-storm-deck-a-bpm hs-storm-deck-b-bpm'));
+const NULLABLE_NUMBER = new Set(keys('cover-studio-selectedArtistId cover-studio-bpmOverride cover-studio-selectedYue2ArtistId cover-studio-selectedYue2LyricsSetId'));
 const NULLABLE_STRING = new Set(keys('cover-studio-lyricsSource cover-studio-keyOverride'));
-const OBJECT = new Set(keys('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset hs-repaint-sourceSong hs-sb-sourceRef'));
+const OBJECT = new Set(keys('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset cover-studio-scoreTempoScale cover-studio-approvedSheet hs-repaint-sourceSong hs-sb-sourceRef'));
+const ARRAY = new Set(keys('cover-studio-scoreSections'));
 
 /** Keys whose browser value is a raw string, not JSON (imports keep it as is). */
 export const RAW_STRING_DRAFT_KEYS: ReadonlySet<string> = new Set([...STEM, ...BUILDER].filter(x => x !== 'hs-sb-sourceRef'));
 
-export type DraftFieldType = 'string' | 'boolean' | 'number' | 'number|null' | 'string|null' | 'object|null';
+export type DraftFieldType = 'string' | 'boolean' | 'number' | 'number|null' | 'string|null' | 'object|null' | 'array';
 
 /** Every fixed draft key, by studio, with the value type the server accepts.
  *  Create also accepts keys matching CREATE_CAPTION_SOURCE_KEY. */
@@ -45,6 +46,7 @@ export function draftFieldType(key: string): DraftFieldType {
   if (NUMBER.has(key)) return 'number';
   if (NULLABLE_NUMBER.has(key)) return 'number|null';
   if (NULLABLE_STRING.has(key)) return 'string|null';
+  if (ARRAY.has(key)) return 'array';
   if (OBJECT.has(key) || key.startsWith('hs-mm3CaptionSource:') || key === 'hs-mm3CaptionSources' ||
     key.startsWith('hs-yue2CaptionSource:') || key === 'hs-yue2CaptionSources') return 'object|null';
   return 'string';
@@ -58,6 +60,7 @@ export function validDraftField(key: string, value: unknown): boolean {
     case 'number|null': return value === null || (typeof value === 'number' && Number.isFinite(value));
     case 'string|null': return value === null || typeof value === 'string';
     case 'object|null': return value === null || (typeof value === 'object' && !Array.isArray(value));
+    case 'array': return Array.isArray(value);
     default: return typeof value === 'string';
   }
 }

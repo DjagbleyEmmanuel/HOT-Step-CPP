@@ -52,7 +52,7 @@ A draft saves a studio's form so another client, or the same one later, can pick
 
 A draft body is `{ studio, fields, backendId?, sourceAssetId?, sourceSongId?, sourceRevision? }`, plus any extra top-level fields a client keeps. These are stored as given.
 
-**Fields.** `fields` keeps the browser storage names the bundled UI uses, so every client reads the same draft. [`STUDIO_DRAFT_FIELDS`](../../server/src/contracts/studioDraftFields.ts) lists every key by studio, with the value type the server accepts: `string`, `boolean`, finite `number`, `number|null`, `string|null` or `object|null`. Create also accepts the caption-source keys matching `CREATE_CAPTION_SOURCE_KEY`.
+**Fields.** `fields` keeps the browser storage names the bundled UI uses, so every client reads the same draft. [`STUDIO_DRAFT_FIELDS`](../../server/src/contracts/studioDraftFields.ts) lists every key by studio, with the value type the server accepts: `string`, `boolean`, finite `number`, `number|null`, `string|null`, `object|null` or `array`. Cover includes the YuE2 score, render settings, adapter and artist selections, caption controls, and optional `draftName`. Create also accepts the caption-source keys matching `CREATE_CAPTION_SOURCE_KEY`.
 
 A save answers 400 when:
 
