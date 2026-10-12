@@ -85,6 +85,14 @@ test('cover-render: ace and yue2 both validate; pitchShift/keyShift stay in rang
   bad(coverRenderSchema, { ...coverRenderBase, expectedBackend: 'suno' });
 });
 
+test('cover-render: lyricSchedule defaults to off for an older payload missing it, and rejects an invalid value', () => {
+  const { lyricSchedule, ...withoutLyricSchedule } = coverControls;
+  const parsed = coverRenderSchema.safeParse({ ...coverRenderBase, controls: withoutLyricSchedule });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal(parsed.data.controls.lyricSchedule, 'off');
+  bad(coverRenderSchema, { ...coverRenderBase, controls: { ...coverControls, lyricSchedule: 'hard' } });
+});
+
 test('repaint/layer source: asset or song, both pinned by expectedUrl', () => {
   ok(repaintLayerSourceSchema, { kind: 'asset', id: '123e4567-e89b-12d3-a456-426614174000', expectedUrl: '/audio/a.wav' });
   ok(repaintLayerSourceSchema, { kind: 'song', id: 'song-1', expectedUrl: '/audio/a.wav' });
