@@ -483,7 +483,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       )}
 
       {/* Advanced Mode */}
-      <div className="border-t border-zinc-200 dark:border-white/5 pt-4 space-y-3">
+      {!yue2Mode && <div className="border-t border-zinc-200 dark:border-white/5 pt-4 space-y-3">
         <button
           onClick={() => onAdvancedModeChange(!advancedMode)}
           className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
@@ -556,7 +556,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
             )}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Caption LLM */}
       {!yue2Mode && <div className="border-t border-zinc-200 dark:border-white/5 pt-4 space-y-2">

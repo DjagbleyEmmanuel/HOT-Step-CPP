@@ -10,6 +10,8 @@ import type { StudioDraftControl } from '../../services/studioDraftMirror';
 import { StyledSelect } from './StyledSelect';
 
 const labelOf = (doc: StudioDraftDocument, textKey: string) => {
+  const draftName = doc.body.fields['cover-studio-draftName'];
+  if (typeof draftName === 'string' && draftName.trim()) return draftName;
   const text = doc.body.fields[textKey];
   const name = typeof text === 'string' && text.trim() ? text.trim().slice(0, 40) : doc.id.slice(0, 8);
   return `${new Date(doc.updatedAt).toLocaleString()} · ${name}`;
@@ -22,11 +24,17 @@ export const StudioDraftPicker: React.FC<{
   apply: (body: StudioDraftBody) => void;
   /** A reason this studio cannot take a draft, shown instead of loading it. */
   refuse?: (body: StudioDraftBody) => string;
-}> = ({ control, textKey, apply, refuse }) => {
+  namedSave?: boolean;
+}> = ({ control, textKey, apply, refuse, namedSave }) => {
   const { t } = useTranslation();
   const [drafts, setDrafts] = useState<StudioDraftDocument[]>([]);
+  const [name, setName] = useState('');
   const { list } = control;
   const refresh = () => { void list().then(setDrafts).catch(() => setDrafts([])); };
+  const saveNamed = async () => {
+    if (!name.trim()) return;
+    if (await control.saveNamed(name)) { setName(''); refresh(); }
+  };
   useEffect(refresh, [list]);
   return (
     <div className="flex items-center gap-2 px-4 py-1 text-[11px]">
@@ -37,6 +45,13 @@ export const StudioDraftPicker: React.FC<{
           emptyLabel={t('studioDrafts.none', 'No saved drafts')}
           aria-label={t('studioDrafts.load', 'Load a saved draft')} />
       </div>
+      {namedSave && <input value={name} onChange={event => setName(event.target.value)}
+        aria-label="Draft name" placeholder="Draft name"
+        className="min-w-0 w-24 rounded-lg border border-zinc-300 dark:border-white/10 bg-transparent px-2 py-1 text-xs" />}
+      {namedSave && <button type="button" onClick={() => void saveNamed()} disabled={!name.trim()}
+        className="rounded-lg border border-zinc-300 dark:border-white/10 px-2 py-1 text-xs text-zinc-700 dark:text-zinc-200">
+        Save named draft
+      </button>}
       {control.error && <span className="text-amber-600 dark:text-amber-400">{control.error}</span>}
     </div>
   );

@@ -37,6 +37,11 @@ have to make.
    to a draft, you are asked first. A draft whose uploaded source has gone
    missing is reported as unavailable, so you can reupload it. Loading a
    draft never starts a job.
+   In YuE2 mode, the draft controls sit above the YuE2 settings. Enter a name
+   and choose **Save named draft** to keep a separate snapshot of the current
+   score and settings. **Load a saved draft** restores that snapshot. Leaving
+   Cover Studio and returning also restores the current browser's score,
+   adapter choices, caption, and other controls without a manual save.
 3. Fix the analysis if Essentia got it wrong: the ÷2 / Detected / ×2 buttons and a
    free-text BPM box correct tempo halving or doubling, and a key dropdown
    overrides the detected key.
@@ -59,8 +64,7 @@ have to make.
 1. Choose **Source Audio** or **Import MusicXML** in the left panel. Source Audio
    accepts a recording of at most 100 MB and 10 minutes, or a song sent from
    Library. Detected BPM and key are shown for reference; they do not change
-   the YuE2 cover request. Advanced Mode can split and mix stems before
-   transcription. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
+   the YuE2 cover request. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
    select a part when prompted, and review conversion warnings. Switching modes
    clears the previous source and its score approval.
 2. For Source Audio, click **Transcribe full score**. SheetSage2 writes the melody and detected
@@ -118,7 +122,8 @@ have to make.
    with an adapter pair the style is left as the adapter was trained. The
    generation log reports how many bars moved. Write a YuE2 style caption; Generate
    refuses to start without one, instrumental or not. With an adapter pair, you can
-   choose a caption from its training tracks or the nearest detected BPM.
+   choose a caption from its training tracks or the nearest detected BPM. The
+   chosen caption fills the editable textarea, so later edits go into the render.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but
    never blocks Generate.
@@ -148,7 +153,12 @@ have to make.
    to the score tempo first; the button saves the adjusted value. For uploaded
    sources, the server calculates that tempo and key from the current ABC and
    applies the confirmed dataset save.
-5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
+5. Choose **Base YuE2** or an adapter pair. In pair mode, select a Lyric Studio
+   artist and, if it has multiple albums with YuE2 adapters, an album. Cover
+   Studio fills the matching AR and NAR adapters. Either manual selector can
+   override that choice. The selected artist fills **Covering band**, which you
+   can edit. Downloads use the filename prepend from Lyric Studio settings,
+   followed by the covering band and the title with its source-band cover suffix.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you
    want to omit the transcribed instrumental line; keep chords to preserve more

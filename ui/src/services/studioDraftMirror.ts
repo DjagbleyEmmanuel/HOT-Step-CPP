@@ -135,6 +135,7 @@ export interface StudioDraftControl {
   /** The last save or load problem, '' when none. */
   error: string;
   list(): Promise<StudioDraftDocument[]>;
+  saveNamed(name: string): Promise<boolean>;
   /** Fetch a draft and hand its fields to `apply`, unless `refuse` names a
    *  reason or the user keeps unsaved edits. Resolves false when nothing was applied. */
   load(id: string, apply: (body: StudioDraftBody) => void, refuse?: (body: StudioDraftBody) => string): Promise<boolean>;
@@ -163,5 +164,17 @@ export function useStudioDraftMirror(studio: StudioDraftBody['studio'], token: s
       apply: draft => { window.clearTimeout(timer.current); apply(draft); },
     });
   }, [token, mirror]);
-  return { error, list, load };
+  const saveNamed = useCallback(async (name: string) => {
+    if (!token || !name.trim()) return false;
+    try {
+      const current = JSON.parse(bodyRef.current) as StudioDraftBody;
+      await studioDraftsApi.create(token, { ...current, fields: { ...current.fields, 'cover-studio-draftName': name.trim() } });
+      setError('');
+      return true;
+    } catch (err) {
+      setError(`Draft not saved: ${messageOf(err)}`);
+      return false;
+    }
+  }, [token]);
+  return { error, list, load, saveNamed };
 }
