@@ -22,7 +22,7 @@ import type { Generation, AlbumPreset } from '../services/lireekApi';
 import { addToPlaylist } from '../components/lyric-studio/playlistStore';
 import type { GenerationParams, GenerationJob } from '../types';
 import { resolveDuration } from '../utils/estimateDuration';
-import { createGenerationTimer, getGenerationTimeoutMinutes, type GenerationTimer } from '../utils/generationTimer';
+import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
 import {
   ensureYue2CaptionSource, yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID,
@@ -552,11 +552,6 @@ export async function retryQueueMigration(token: string): Promise<void> {
 
 let _serverProjectionTimer: ReturnType<typeof setInterval> | null = null;
 let _serverProjectionBusy = false;
-/** One real-generation-time clock per server queue entry (by server.id), same
- *  rule as the browser-owned path: ignores queue wait, freezes on the job's
- *  terminal status. Without this the server-owned queue never set `elapsed`,
- *  so completed rows lost their generation-time badge (F19). */
-const _serverTimers = new Map<string, GenerationTimer>();
 
 function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): AudioQueueItem {
   const view = server.meta?.view as AudioQueueItem | undefined;
@@ -588,6 +583,9 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
     masteredAudioUrl: result?.masteredAudioUrls?.[take] ?? previous?.masteredAudioUrl ?? base.masteredAudioUrl,
     noAdapterAudioUrl: result?.noAdapterAudioUrls?.[take] ?? previous?.noAdapterAudioUrl ?? base.noAdapterAudioUrl,
     audioDuration: result?.durations?.[take] ?? result?.duration ?? previous?.audioDuration ?? base.audioDuration,
+    // Server-computed (intentQueue's follow() loop) so it is right regardless
+    // of whether a client ever observed the job mid-run — see F19.
+    elapsed: server.elapsedSeconds ?? previous?.elapsed ?? base.elapsed,
   };
 }
 
@@ -615,14 +613,6 @@ async function refreshServerProjection(token: string): Promise<void> {
         const job = await generateApi.status(server.jobId);
         item.progress = job.progress === undefined ? item.progress : Math.min(100, (job.progress > 1 ? job.progress / 100 : job.progress) * 100);
         item.stage = job.stage || item.stage;
-        let timer = _serverTimers.get(server.id);
-        if (!timer) {
-          timer = createGenerationTimer({ resumeElapsedSec: item.elapsed });
-          _serverTimers.set(server.id, timer);
-        }
-        const t = timer.tick(job.status);
-        item.elapsed = t.elapsed;
-        if (['succeeded', 'failed'].includes(job.status)) _serverTimers.delete(server.id);
         _captureMm3Stream(item, job);
         if (job.batch?.lead) item.batchId = job.batch.lead;
         _syncTakeSiblings(item, job);
@@ -667,7 +657,6 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
   _serverProjectionTimer = null;
   _serverProjectionBusy = false;
-  _serverTimers.clear();
   if (_persistTimer) clearTimeout(_persistTimer);
   _persistTimer = null;
 }
@@ -1130,10 +1119,6 @@ export function updateManualQueueItem(id: string, update: {
  *  server-owned projection does (refreshServerProjection), until the row ends. */
 function _followWorkflowRender(id: string, workflowJobId: string, token: string): void {
   const ended = (status: AudioQueueStatus) => status === 'succeeded' || status === 'failed';
-  // Same real-generation-time clock as every other poll loop. A browser-owned
-  // workflow row (Cover) never got one, so completed rows lost their
-  // generation-time badge even outside the server-owned queue (F19).
-  const timer = createGenerationTimer();
   const tick = async (): Promise<boolean> => {
     const item = _state.items.find(i => i.id === id);
     if (!item || item.workflowJobId !== workflowJobId || ended(item.status)) return false;
@@ -1141,13 +1126,17 @@ function _followWorkflowRender(id: string, workflowJobId: string, token: string)
     try {
       const { job } = await workflowApi.get(token, workflowJobId);
       const intentId = job.audioIntentIds[job.audioIntentIds.length - 1];
-      const jobId = intentId && (await audioQueueApi.list(token)).items.find(i => i.id === intentId)?.jobId;
+      const intentItem = intentId ? (await audioQueueApi.list(token)).items.find(i => i.id === intentId) : undefined;
+      // Real generation time is the server's (intentQueue's follow() loop),
+      // same source projectServerItem reads — never this loop's own poll
+      // cadence, which can miss a fast job entirely (F19).
+      if (intentItem?.elapsedSeconds != null) item.elapsed = intentItem.elapsedSeconds;
+      const jobId = intentItem?.jobId;
       if (!jobId) return true;
       const status = await generateApi.status(jobId);
       if (ended(item.status)) return false;
       if (status.progress !== undefined) item.progress = Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100));
       if (status.stage) item.stage = status.stage;
-      item.elapsed = timer.tick(status.status).elapsed;
       _emit();
     } catch { /* the studio's own workflow poll reports failures */ }
     return true;
@@ -1163,6 +1152,9 @@ export function completeManualQueueItem(id: string, result: {
   masteredAudioUrl?: string;
   noAdapterAudioUrl?: string;
   audioDuration?: number;
+  /** The intent queue's own elapsed time for this render (finished.elapsedSeconds
+   *  from ctx.audio.wait) — authoritative, unlike this loop's own poll cadence. */
+  elapsedSeconds?: number | null;
 }): void {
   const item = _state.items.find(i => i.id === id);
   if (!item) return;
@@ -1172,6 +1164,7 @@ export function completeManualQueueItem(id: string, result: {
   if (result.masteredAudioUrl) item.masteredAudioUrl = result.masteredAudioUrl;
   if (result.noAdapterAudioUrl) item.noAdapterAudioUrl = result.noAdapterAudioUrl;
   if (result.audioDuration) item.audioDuration = result.audioDuration;
+  if (result.elapsedSeconds != null) item.elapsed = result.elapsedSeconds;
   item.progress = 100;
   item.stage = 'Complete!';
   _state.completionCounter++;

@@ -86,7 +86,7 @@ function setup(audioStatus: 'succeeded' | 'pending' = 'succeeded', duration = 42
       const item = { id: `audio-${++submitted}`, idempotencyKey, request, meta: meta || null,
         status: audioStatus, result: { audioUrls: ['/audio/output.wav'], songIds: ['song-2'] }, error: null,
         engine: 'ace', jobId: 'render', attempt: 1, previousJobIds: [], waiting: null,
-        cancelRequested: false, createdAt: 1, updatedAt: 1 } as AudioIntentItem;
+        cancelRequested: false, createdAt: 1, updatedAt: 1, elapsedSeconds: null } as AudioIntentItem;
       items.set(item.id, item);
       return { item, created: true };
     },

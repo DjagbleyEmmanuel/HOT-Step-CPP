@@ -38,7 +38,7 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
       const item = { id: `audio-${items.size + 1}`, idempotencyKey, request, meta: meta || null,
         status: opts.audioStatus || 'succeeded', result: { audioUrls: ['/audio/test.wav'], songIds: ['song-1'] },
         error: null, engine: 'ace', jobId: 'job-1', attempt: 1, previousJobIds: [],
-        waiting: null, cancelRequested: false, createdAt: 1, updatedAt: 1 } as AudioIntentItem;
+        waiting: null, cancelRequested: false, createdAt: 1, updatedAt: 1, elapsedSeconds: null } as AudioIntentItem;
       items.set(item.id, item);
       return { item, created: true };
     },

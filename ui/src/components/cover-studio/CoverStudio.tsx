@@ -952,11 +952,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         if (stage !== shown) updateManualQueueItem(qId, { stage: shown = stage });
       });
       const result = done.result as { audio?: { audioUrls?: string[]; songIds?: string[];
-        masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number } };
+        masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number };
+        elapsedSeconds?: number | null };
       const audio = result.audio || {};
       completeManualQueueItem(qId, { audioUrl: audio.audioUrls?.[0] || '', songId: audio.songIds?.[0],
         masteredAudioUrl: audio.masteredAudioUrl, noAdapterAudioUrl: audio.noAdapterAudioUrl,
-        audioDuration: audio.duration });
+        audioDuration: audio.duration, elapsedSeconds: result.elapsedSeconds });
       showToast(t('cover.coverGenerated'));
     } catch (err: any) {
       failManualQueueItem(qId, err.message || 'Generation failed');

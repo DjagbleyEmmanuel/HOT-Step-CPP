@@ -289,7 +289,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const finished = await ctx.audio.wait(item.id);
     ctx.throwIfCancelled();
     if (finished.status !== 'succeeded') throw new Error(finished.error || `Audio ${finished.status}`);
-    return { request, audioIntentId: item.id, audio: finished.result };
+    return { request, audioIntentId: item.id, audio: finished.result, elapsedSeconds: finished.elapsedSeconds };
   } }];
 }
 export function registerCoverWorkflows(deps: CoverDeps = {}) {

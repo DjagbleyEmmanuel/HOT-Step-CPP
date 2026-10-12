@@ -45,6 +45,11 @@ export interface AudioIntentItem {
   result: Record<string, unknown> | null;
   createdAt: number;
   updatedAt: number;
+  /** Real generation time in seconds, computed server-side so it never
+   *  depends on a client's poll cadence catching the right moment: null
+   *  until the job is actually running (not just queued), counts up while
+   *  running, frozen once the item reaches a terminal status. */
+  elapsedSeconds: number | null;
 }
 
 export interface AudioQueueState {

@@ -29,7 +29,7 @@ function setup(inspire: (signal: AbortSignal) => Promise<InstaResult> = async ()
       const item = { id: `audio-${++submitted}`, idempotencyKey, request, meta: meta || null,
         status: audioStatus, result: { audioUrls: ['/audio/test.wav'], songIds: ['song-1'] }, error: null,
         engine: 'ace', jobId: 'job-1', attempt: 1, previousJobIds: [], waiting: null, cancelRequested: false,
-        createdAt: 1, updatedAt: 1 } as AudioIntentItem;
+        createdAt: 1, updatedAt: 1, elapsedSeconds: null } as AudioIntentItem;
       items.set(item.id, item);
       return { item, created: true };
     },

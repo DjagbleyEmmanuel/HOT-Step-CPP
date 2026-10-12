@@ -53,6 +53,7 @@ interface Row {
   request: string; request_hash: string; meta: string | null; job_id: string | null; attempt: number;
   previous_job_ids: string; waiting: string | null; cancel_requested: number; error: string | null;
   result: string | null; created_at: number; updated_at: number;
+  started_at: number | null; elapsed_seconds: number | null;
 }
 
 export function ensureAudioQueueSchema(db: Database.Database): void {
@@ -74,21 +75,40 @@ export function ensureAudioQueueSchema(db: Database.Database): void {
       error TEXT,
       result TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      started_at INTEGER,
+      elapsed_seconds INTEGER
     );
     CREATE INDEX IF NOT EXISTS audio_intents_status ON audio_intents(status, created_at);
     CREATE TABLE IF NOT EXISTS audio_queue_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS audio_queue_imports (backup_id TEXT PRIMARY KEY, receipt TEXT NOT NULL);
   `);
+  // Migration for a database created before started_at/elapsed_seconds existed.
+  for (const name of ['started_at', 'elapsed_seconds']) {
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM pragma_table_info('audio_intents') WHERE name = ?`).get(name) as { c: number };
+    if (row.c === 0) db.exec(`ALTER TABLE audio_intents ADD COLUMN ${name} INTEGER`);
+  }
 }
 
-function toItem(r: Row): AudioIntentItem {
+/** Server-side status strings that mean "accepted, but the engine has not
+ *  actually started this job yet" — mirrors isQueued() in the UI's
+ *  generationTimer.ts. Real generation time excludes this wait. */
+const JOB_QUEUED = new Set(['pending', 'queued']);
+
+function elapsedSecondsFor(r: Row, now: number): number | null {
+  if (r.elapsed_seconds != null) return r.elapsed_seconds;
+  if (r.started_at != null) return Math.round((now - r.started_at) / 1000);
+  return null;
+}
+
+function toItem(r: Row, now: number): AudioIntentItem {
   return {
     id: r.id, idempotencyKey: r.idempotency_key, status: r.status, engine: r.engine,
     request: JSON.parse(r.request), meta: r.meta ? JSON.parse(r.meta) : null,
     jobId: r.job_id, attempt: r.attempt, previousJobIds: JSON.parse(r.previous_job_ids),
     waiting: r.waiting, cancelRequested: r.cancel_requested === 1, error: r.error,
     result: r.result ? JSON.parse(r.result) : null, createdAt: r.created_at, updatedAt: r.updated_at,
+    elapsedSeconds: elapsedSecondsFor(r, now),
   };
 }
 
@@ -113,7 +133,7 @@ export class AudioIntentQueue {
   get(id: string): AudioIntentItem {
     const r = this.row(id);
     if (!r) throw new AudioQueueError(404, `Queue item ${id} not found`);
-    return toItem(r);
+    return toItem(r, this.now());
   }
 
   dismiss(id: string): void {
@@ -127,7 +147,8 @@ export class AudioIntentQueue {
     const rows = status
       ? this.db.prepare('SELECT * FROM audio_intents WHERE status = ? ORDER BY created_at, rowid').all(status)
       : this.db.prepare('SELECT * FROM audio_intents ORDER BY created_at, rowid').all();
-    return (rows as Row[]).map(toItem);
+    const now = this.now();
+    return (rows as Row[]).map(r => toItem(r, now));
   }
 
   /** Import a verified browser backup atomically. A submitted legacy job is
@@ -244,7 +265,7 @@ export class AudioIntentQueue {
     if (existing.request_hash !== hash) {
       throw new AudioQueueError(409, `Idempotency key '${existing.idempotency_key}' is already used by a different request`);
     }
-    return { item: toItem(existing), created: false };
+    return { item: toItem(existing, this.now()), created: false };
   }
 
   /** Cancel an item. Pending stops at once; submitting is cancelled as soon as
@@ -267,7 +288,10 @@ export class AudioIntentQueue {
 
   private finishCancel(r: Row): void {
     if (r.job_id) this.deps.cancelJob(r.job_id);
-    this.db.prepare(`UPDATE audio_intents SET status = 'cancelled', updated_at = ? WHERE id = ? AND status IN ('submitting','submitted')`).run(this.now(), r.id);
+    const t = this.now();
+    const elapsedSeconds = Math.round((t - (r.started_at ?? r.updated_at)) / 1000);
+    this.db.prepare(`UPDATE audio_intents SET status = 'cancelled', elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status IN ('submitting','submitted')`)
+      .run(elapsedSeconds, t, r.id);
   }
 
   /** Put a failed, cancelled or interrupted item back in the queue as a new
@@ -284,7 +308,8 @@ export class AudioIntentQueue {
     const previous = JSON.parse(r.previous_job_ids) as string[];
     if (r.job_id) previous.push(r.job_id);
     this.db.prepare(`UPDATE audio_intents SET status = 'pending', job_id = NULL, attempt = attempt + 1, previous_job_ids = ?,
-      waiting = NULL, cancel_requested = 0, error = NULL, result = NULL, updated_at = ? WHERE id = ?`).run(JSON.stringify(previous), this.now(), id);
+      waiting = NULL, cancel_requested = 0, error = NULL, result = NULL, started_at = NULL, elapsed_seconds = NULL,
+      updated_at = ? WHERE id = ?`).run(JSON.stringify(previous), this.now(), id);
     return this.get(id);
   }
 
@@ -418,11 +443,28 @@ export class AudioIntentQueue {
           WHERE id = ? AND status = 'submitted'`).run(t, r.id);
         continue;
       }
+      // The moment the engine actually starts this job, not when it was
+      // accepted — a deep queue can leave a "submitted" job sitting as
+      // job.status 'pending'/'queued' for a while first (issue #64's rule,
+      // applied here instead of trusting a client's poll cadence to catch
+      // it). Excludes terminal too: a job can beat this loop's own interval
+      // and go straight from queued to done, never observed running: leave
+      // started_at unset so the terminal branch below falls back to the
+      // submission timestamp instead of "now" (which would read as a false
+      // zero-second render).
+      if (r.started_at == null && !JOB_QUEUED.has(job.status) && !JOB_TERMINAL.has(job.status)) {
+        this.db.prepare(`UPDATE audio_intents SET started_at = ? WHERE id = ? AND started_at IS NULL`).run(t, r.id);
+        r.started_at = t;
+      }
       if (r.cancel_requested === 1 && !JOB_TERMINAL.has(job.status)) { this.finishCancel(r); continue; }
       if (!JOB_TERMINAL.has(job.status)) continue;
-      this.db.prepare(`UPDATE audio_intents SET status = ?, error = ?, result = ?, updated_at = ? WHERE id = ? AND status = 'submitted'`)
+      // Freeze real generation time now, while this item is still in front of
+      // us: once status leaves 'submitted' it never comes back through this
+      // loop, so this is the only chance to record it.
+      const elapsedSeconds = Math.round((t - (r.started_at ?? r.updated_at)) / 1000);
+      this.db.prepare(`UPDATE audio_intents SET status = ?, error = ?, result = ?, elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status = 'submitted'`)
         .run(job.status, job.status === 'failed' ? (job.error ?? 'Generation failed') : null,
-          job.result === undefined ? null : JSON.stringify(job.result), t, r.id);
+          job.result === undefined ? null : JSON.stringify(job.result), elapsedSeconds, t, r.id);
     }
   }
 }

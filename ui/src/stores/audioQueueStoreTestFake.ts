@@ -61,7 +61,7 @@ export class AudioQueueApiFake {
   calls: Call[] = [];
   rollbackCalls = 0;
   /** Items the server holds, for rollback-export, GET /items and cancel. */
-  serverItems: Array<{ id: string; status: string; jobId?: string | null; meta?: Record<string, unknown>; request?: Record<string, unknown>; createdAt?: number; error?: string | null }> = [];
+  serverItems: Array<{ id: string; status: string; jobId?: string | null; meta?: Record<string, unknown>; request?: Record<string, unknown>; createdAt?: number; error?: string | null; elapsedSeconds?: number | null; result?: Record<string, unknown> }> = [];
   paused = false;
   private receiptsByBackupId = new Map<string, any>();
   private importedLegacyIds = new Set<string>();
