@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { NoVocalsError, separateOne, YUE2_STEMS_DEFAULT_LEVEL } from './training/yue2Stems.js';
 import { yue2Align } from './backends/yue2/client.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
-import { matchSectionsToScore } from './backends/yue2/sectionMatch.js';
+import { matchSectionsToScore, planScoreFromLyrics } from './backends/yue2/sectionMatch.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar } from './training/abcSidecar.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
@@ -204,9 +204,8 @@ export function createYue2CoverService(deps = {
     return find(jobId, userId);
   }
 
-  /** Retag the lyrics with the score's sections where the source vocal sings
-   *  each block. Nothing is saved; the client shows the diff first. */
-  async function matchSections(input: CoverInput & { lyrics?: unknown }, userId: string) {
+  /** The source vocal's word times for these lyrics, on the cached stem. */
+  async function alignSource(input: CoverInput & { lyrics?: unknown }, userId: string) {
     if (typeof input.abc !== 'string' || !input.abc.trim() || input.abc.length > MAX_ABC_LENGTH ||
         typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > MAX_ABC_LENGTH) {
       throw new CoverRequestError('ABC and lyrics must be non-empty strings of at most 64 KB each.');
@@ -221,10 +220,26 @@ export function createYue2CoverService(deps = {
     }
     const lyrics = input.lyrics.replace(/\r\n?/g, '\n');
     const aligned = await deps.align(fs.readFileSync(stem), lyrics);
+    return { abc: input.abc, lyrics, words: aligned.words, audioPath: selected.audioPath };
+  }
+
+  /** Retag the lyrics with the score's sections where the source vocal sings
+   *  each block. Nothing is saved; the client shows the diff first. */
+  async function matchSections(input: CoverInput & { lyrics?: unknown }, userId: string) {
+    const { abc, lyrics, words, audioPath } = await alignSource(input, userId);
     let result;
-    try { result = matchSectionsToScore(input.abc, lyrics, aligned.words); }
+    try { result = matchSectionsToScore(abc, lyrics, words); }
     catch (err) { throw new CoverRequestError((err as Error).message, 422); }
-    return { ...result, datasetSong: !!deps.datasetMatch(selected.audioPath) };
+    return { ...result, datasetSong: !!deps.datasetMatch(audioPath) };
+  }
+
+  /** The other direction: the score's sections set from where the source
+   *  vocal sings each lyric block, with the lyrics retagged to match. Nothing
+   *  is saved; the client rewrites its own copy of the score. */
+  async function planScoreSections(input: CoverInput & { lyrics?: unknown }, userId: string) {
+    const { abc, lyrics, words } = await alignSource(input, userId);
+    try { return planScoreFromLyrics(abc, lyrics, words); }
+    catch (err) { throw new CoverRequestError((err as Error).message, 422); }
   }
 
   /** Write lyrics, or the score's tempo and key, into the matched dataset
@@ -256,7 +271,7 @@ export function createYue2CoverService(deps = {
       file: path.basename(sidecarPathFor(matched.audioPath)) };
   }
 
-  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, saveDatasetDetails };
+  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, planScoreSections, saveDatasetDetails };
 }
 
 export const yue2CoverService = createYue2CoverService();

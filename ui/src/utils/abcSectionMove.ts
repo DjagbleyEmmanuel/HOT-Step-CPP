@@ -223,3 +223,60 @@ export function barRanges(abc: string): Array<{ start: number; end: number; bar:
     }
   return out.sort((a, b) => a.start - b.start);
 }
+
+/** A part's bars cut before each of `offsets` (ascending, from the group's
+ *  start): one list of bar texts per piece, the first empty for offset 0. */
+function splitMany(bars: Bar[], offsets: number[]): string[][] | null {
+  const pieces: string[][] = [];
+  let remaining = bars, done = 0;
+  for (const offset of offsets) {
+    const split = splitBars(remaining, offset - done);
+    if (!split) return null;
+    pieces.push(split[0]);
+    remaining = barsOf(barLine(split[1]), 0);
+    done = offset;
+  }
+  pieces.push(remaining.map(bar => bar.text));
+  return pieces;
+}
+
+/** The ABC with every `% label` marker replaced by `sections`: one marker at
+ *  the start of each given bar (1-based, Vocal numbering), splitting the
+ *  groups those bars fall inside in every voice. Groups with no new marker
+ *  inside keep their text. */
+export function resectionScore(abc: string, sections: Array<{ label: string; bar: number }>): { abc: string } | { error: string } {
+  const parsed = parseScore(abc);
+  if (typeof parsed === 'string') return { error: parsed };
+  const total = parsed.groups.reduce((sum, group) => sum + group.bars, 0);
+  const wanted = [...sections].sort((a, b) => a.bar - b.bar);
+  const bad = wanted.find((section, i) => section.bar < 1 || section.bar > total || section.bar === wanted[i - 1]?.bar);
+  if (bad) return { error: `Bar ${bad.bar} cannot start a section here (the score has ${total} bars).` };
+  const out: string[] = [];
+  let next = 0;
+  for (const item of parsed.items) {
+    if (item.kind === 'marker') continue;
+    if (item.kind === 'line') { out.push(item.text); continue; }
+    const { group } = item;
+    const cuts: typeof wanted = [];
+    while (next < wanted.length && wanted[next].bar < group.firstBar + group.bars) cuts.push(wanted[next++]);
+    if (!cuts.length) { group.parts.forEach(part => out.push(...part.pre, part.line)); continue; }
+    const offsets = cuts.map(cut => cut.bar - group.firstBar);
+    const pieces = group.parts.map(part => splitMany(part.bars, offsets));
+    const counts = group.parts.map(part => part.bars.reduce((sum, b) => sum + b.count, 0));
+    if (pieces.some(piece => !piece) || counts.some(count => count !== group.bars))
+      return { error: `The voices do not line up bar for bar around bar ${cuts[0].bar}; set the sections in the ABC text.` };
+    // A part's own lines (its V: line, field lines) go before its first
+    // piece; later pieces repeat its V: line.
+    const started = group.parts.map(() => false);
+    pieces[0]!.forEach((_, k) => {
+      if (k > 0) out.push(`% ${cuts[k - 1].label}`);
+      group.parts.forEach((part, p) => {
+        const bars = pieces[p]![k];
+        if (!bars.length) return;
+        out.push(...(started[p] ? (part.header ? [part.header] : []) : part.pre), barLine(bars));
+        started[p] = true;
+      });
+    });
+  }
+  return { abc: out.join('\n') };
+}

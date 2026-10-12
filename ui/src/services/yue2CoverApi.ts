@@ -51,6 +51,15 @@ export interface Yue2SectionMatch {
   datasetSong: boolean;
 }
 
+/** Match score to lyrics: the score's new sections (1-based bars) and the
+ *  lyrics retagged to them. */
+export interface Yue2ScorePlan {
+  sections: Array<{ label: string; bar: number; block: number | null }>;
+  lyrics: string;
+  unsure: Array<{ block: number; tag: string | null }>;
+  unchanged: boolean;
+}
+
 export interface Yue2CoverDatasetMetadata {
   matched: boolean;
   metadataAvailable?: boolean;
@@ -111,6 +120,8 @@ export const yue2CoverApi = {
   }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
+  planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
+    request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
   /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */
   saveDatasetDetails: (input: Yue2CoverSourceInput & ({ lyrics: string } | { bpm: number; key: string }), token: string) =>
     request<{ saved: true; file: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),

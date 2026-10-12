@@ -326,6 +326,11 @@ test('match sections retags from aligned times; save writes the dataset sidecar 
     const matched = await f.service.matchSections({ ...input, abc, lyrics }, 'owner');
     assert.equal(matched.lyrics, '[verse]\nfirst line\n\n[chorus]\nsecond line');
     assert.equal(matched.datasetSong, false);
+    // The other direction returns the score's new sections; nothing is written.
+    const plan = await f.service.planScoreSections({ ...input, abc, lyrics }, 'owner');
+    // The lyrics win, so the score takes the lyric's own kind ([Hook] → hook).
+    assert.deepEqual(plan.sections.map(s => `${s.label}@${s.bar}`), ['verse@1', 'hook@3']);
+    assert.equal(plan.lyrics, matched.lyrics.replace('[chorus]', '[hook]'));
     await assert.rejects(f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics }, 'owner'), /not a dataset song/);
     f.setDatasetAudio(path.join(f.referenceDir, f.upload));
     const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');

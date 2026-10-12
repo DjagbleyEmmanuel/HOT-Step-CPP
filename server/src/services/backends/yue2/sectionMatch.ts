@@ -238,3 +238,94 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
   const normalized = lyrics.replace(/\r\n?/g, '\n').trim();
   return { lyrics: result, blocks: report, filled, unchanged: result === normalized };
 }
+
+// ── Match score to lyrics: the other direction ──
+// The lyric blocks set the score's sections: each sung block opens a section
+// at the bar where it is sung, labelled with its own kind; the score's
+// sections with no lyrics (intro, interludes, outro) stay where they fall
+// between blocks. The client rewrites the ABC's markers from `sections`, and
+// the lyrics are retagged to match, so the section check passes.
+
+/** A score marker this close to a block's bar is taken as its start. */
+const KEEP_MARKER_BARS = 1;
+/** A vocal phrase start this close to a block's bar is taken as its start. */
+const PHRASE_BARS = 2;
+
+export interface ScorePlanSection {
+  label: string;
+  /** 1-based score bar the section starts at. */
+  bar: number;
+  /** 1-based lyric block that opens it, or null for an instrumental section. */
+  block: number | null;
+}
+
+export interface ScorePlanResult {
+  sections: ScorePlanSection[];
+  lyrics: string;
+  /** Blocks with no usable timing, or sung out of order, merged into the
+   *  section before them. */
+  unsure: Array<{ block: number; tag: string | null }>;
+  unchanged: boolean;
+}
+
+export function planScoreFromLyrics(abc: string, lyrics: string, words: Yue2AlignWord[]): ScorePlanResult {
+  const original = scoreSections(abc);
+  const bars = scoreBarClock(abc);
+  if (!bars.length) throw new Error('The score has no bars.');
+  const onsets = scoreVocalNoteOnsets(abc, bars);
+  const blocks = splitLyricBlocks(lyrics).filter(block => block.body.trim());
+  const barOf = (seconds: number) => {
+    let best = 0;
+    bars.forEach((bar, i) => { if (Math.abs(bar.start - seconds) < Math.abs(bars[best].start - seconds)) best = i; });
+    return best + 1;
+  };
+  // Bars where the Vocal comes in after a bar of rest.
+  const phraseStarts = onsets.flatMap((onset, i) => onset !== null && (i === 0 || onsets[i - 1] === null) ? [i + 1] : []);
+  const nearest = (bar: number, candidates: number[], within: number) => candidates
+    .filter(c => Math.abs(c - bar) <= within)
+    .sort((a, b) => Math.abs(a - bar) - Math.abs(b - bar) || a - b)[0];
+  const lastWordBar = (block: Block) => {
+    const ends = words.filter(word => word.char0 >= block.start && word.char0 < block.end && Number.isFinite(word.end))
+      .map(word => word.end);
+    return ends.length ? barOf(Math.max(...ends)) : null;
+  };
+
+  // Each block's start bar: a score marker beside it, else a phrase start
+  // beside it, else the bar nearest its first word. Must move forward.
+  const opened: Array<{ block: number; bar: number; label: string; body: string[]; lastBar: number | null }> = [];
+  const unsure: ScorePlanResult['unsure'] = [];
+  blocks.forEach((block, i) => {
+    const t = firstWord(block, words);
+    const prev = opened[opened.length - 1];
+    let bar = t === null ? null : barOf(t);
+    // Never snap back onto or before the previous block's start.
+    const after = (candidates: number[]) => candidates.filter(c => !prev || c > prev.bar);
+    if (bar !== null) bar = nearest(bar, after(original.map(s => s.startBar)), KEEP_MARKER_BARS)
+      ?? nearest(bar, after(phraseStarts), PHRASE_BARS) ?? bar;
+    if (bar === null || (prev && bar <= prev.bar)) {
+      unsure.push({ block: i + 1, tag: block.tag });
+      if (prev) { prev.body.push(block.body); prev.lastBar = lastWordBar(block) ?? prev.lastBar; }
+      else opened.push({ block: i + 1, bar: 1, label: block.tag ? sectionKind(block.tag) : 'verse', body: [block.body], lastBar: null });
+      return;
+    }
+    opened.push({ block: i + 1, bar, label: block.tag ? sectionKind(block.tag) : 'verse', body: [block.body], lastBar: lastWordBar(block) });
+  });
+
+  // Score sections that fall in a gap between sung blocks stay, as written.
+  const kept = original.filter(section => {
+    const after = opened.filter(o => o.bar <= section.startBar).at(-1);
+    const next = opened.find(o => o.bar > section.startBar);
+    if (after && after.bar === section.startBar) return false;
+    if (next && next.bar - section.startBar < 1) return false;
+    return !after || (after.lastBar !== null && section.startBar > after.lastBar);
+  });
+  const sections: Array<ScorePlanSection & { body?: string[] }> = [
+    ...kept.map(section => ({ label: section.label.trim(), bar: section.startBar, block: null })),
+    ...opened.map(o => ({ label: o.label, bar: o.bar, block: o.block, body: o.body })),
+  ].sort((a, b) => a.bar - b.bar);
+  const text = sections.map(s => `[${s.label}]${s.body ? `\n${s.body.join('\n\n')}` : ''}`).join('\n\n');
+  const same = sections.length === original.length &&
+    sections.every((s, i) => s.label === original[i].label.trim() && s.bar === original[i].startBar);
+  return { sections: sections.map(({ body: _body, ...s }) => s), lyrics: text, unsure,
+    unchanged: same && text === lyrics.replace(/\r\n?/g, '\n').trim() };
+}

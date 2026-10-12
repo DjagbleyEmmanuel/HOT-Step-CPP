@@ -113,6 +113,11 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     catch (err) { fail(res, err); }
   });
 
+  router.post('/sections/plan-score', async (req: Request, res: Response) => {
+    try { res.json(await service.planScoreSections(req.body || {}, authenticate(req)!)); }
+    catch (err) { fail(res, err); }
+  });
+
   router.post('/sections/save-dataset', async (req: Request, res: Response) => {
     try { res.json(await service.saveDatasetDetails(req.body || {}, authenticate(req)!)); }
     catch (err) { fail(res, err); }

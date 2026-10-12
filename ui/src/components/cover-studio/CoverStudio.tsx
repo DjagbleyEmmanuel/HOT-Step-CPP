@@ -31,7 +31,7 @@ import {
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
-import { cutSection } from '../../utils/abcSectionMove';
+import { cutSection, resectionScore } from '../../utils/abcSectionMove';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
@@ -46,8 +46,9 @@ import { CoverResizeHandle } from './CoverResizeHandle';
 import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
+import { ScorePlanReview } from './ScorePlanReview';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
-import type { Yue2SectionMatch } from '../../services/yue2CoverApi';
+import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
 import { workflowApi } from '../../services/workflowApi';
 
@@ -208,6 +209,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // Match sections to score: the proposal and the lyrics it was made from.
   const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
   const [sectionMatching, setSectionMatching] = useState(false);
+  // Match score to lyrics: the plan, and the score sections and lyrics it was made from.
+  const [scorePlan, setScorePlan] = useState<{ plan: Yue2ScorePlan; abc: string; lyrics: string;
+    sections: Yue2ScoreSection[]; key: string } | null>(null);
   const [sectionSaving, setSectionSaving] = useState(false);
   const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
   const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
@@ -993,12 +997,33 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const handleMatchSections = async () => {
     if (!token || !sheetAbc.trim() || !lyrics.trim() || !sourceAudioUrl) return;
     const key = sourceKey, before = lyrics;
-    setSheetError(''); setSectionMatch(null); setSectionMatching(true);
+    setSheetError(''); setSectionMatch(null); setScorePlan(null); setSectionMatching(true);
     try {
       const match = await yue2CoverApi.matchSections({ ...sectionSource(), abc: sheetAbc, lyrics: before }, token);
       if (sourceKeyRef.current === key) setSectionMatch({ match, before, key });
     } catch (err: any) { if (sourceKeyRef.current === key) setSheetError(`Match sections: ${err.message}`); }
     finally { setSectionMatching(false); }
+  };
+  const handlePlanScore = async () => {
+    if (!token || !sheetAbc.trim() || !lyrics.trim() || !sourceAudioUrl) return;
+    const key = sourceKey, abc = sheetAbc, before = lyrics, sections = scoreSections;
+    setSheetError(''); setSectionMatch(null); setScorePlan(null); setSectionMatching(true);
+    try {
+      const plan = await yue2CoverApi.planScoreSections({ ...sectionSource(), abc, lyrics: before }, token);
+      if (sourceKeyRef.current === key) setScorePlan({ plan, abc, lyrics: before, sections, key });
+    } catch (err: any) { if (sourceKeyRef.current === key) setSheetError(`Match score to lyrics: ${err.message}`); }
+    finally { setSectionMatching(false); }
+  };
+  const scorePlanStale = !!scorePlan && (scorePlan.abc !== sheetAbc || scorePlan.lyrics !== lyrics);
+  const applyScorePlan = () => {
+    if (!scorePlan || scorePlanStale) return;
+    const next = resectionScore(sheetAbc, scorePlan.plan.sections);
+    if ('error' in next) { setSheetError(next.error); return; }
+    lyricEditRef.current++;
+    setLyrics(scorePlan.plan.lyrics);
+    setLyricsSource(null);
+    changeSheetAbc(next.abc);
+    setScorePlan(null);
   };
   // The proposal is for the lyrics it was made from; edits since void it.
   const sectionMatchStale = !!sectionMatch && sectionMatch.before !== lyrics;
@@ -1607,13 +1632,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           {yue2Mode && !!sheetAbc && <div className="flex-shrink-0 px-4 pb-3 space-y-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
-              <button type="button" onClick={() => void handleMatchSections()}
+              <span className="flex gap-3"><button type="button" onClick={() => void handleMatchSections()}
                 disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || scoreCuts.length > 0}
                 title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
                   : "Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-                {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match sections to score'}</button>
+                {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match lyrics to score'}</button>
+              {!sectionMatching && <button type="button" onClick={() => void handlePlanScore()}
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || scoreCuts.length > 0}
+                title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
+                  : "Set the score's sections from where the source vocal sings each lyric block, and retag the lyrics to match. Shows the changes before applying."}
+                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button>}</span>
             </div>
+            {scorePlan && scorePlan.key === sourceKey && <ScorePlanReview beforeSections={scorePlan.sections}
+              beforeLyrics={scorePlan.lyrics} plan={scorePlan.plan} stale={scorePlanStale}
+              onApply={applyScorePlan} onDiscard={() => setScorePlan(null)} />}
             {sectionMatch && sectionMatch.key === sourceKey && <SectionMatchReview before={sectionMatch.before} match={sectionMatch.match} stale={sectionMatchStale}
               saving={sectionSaving} onApply={applySectionMatch} onSave={() => setSectionSaveConfirm(true)} onDiscard={() => setSectionMatch(null)} />}
             {/* In-page, not window.confirm: a native dialog stalls browser automation. */}

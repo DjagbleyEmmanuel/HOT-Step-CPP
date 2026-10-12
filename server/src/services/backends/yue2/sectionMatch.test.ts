@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { matchSectionsToScore } from './sectionMatch.js';
+import { matchSectionsToScore, planScoreFromLyrics } from './sectionMatch.js';
 import type { Yue2AlignWord } from './align.js';
 
 // Two 3-second bars per section: intro 0, verse 6, chorus 12, verse 18,
@@ -99,4 +99,29 @@ test('a block tagged like a section with no Vocal note is placed there, not merg
   // The chorus the lyrics wrote once is still copied into the gap.
   assert.equal(result.lyrics, '[intro]\n\n[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[chorus]\nsecond line\n\n[outro]\nna na na');
   assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'renamed']);
+});
+
+test('score to lyrics: blocks open their own sections where the score has too few', () => {
+  // One long verse (bars 3-8) holds a verse, a chorus and a verse.
+  const coarse = [
+    'X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C',
+    '% intro', 'V: Vocal', 'z6|z6|',
+    '% verse', 'V: Vocal', 'C6|D6|E6|F6|C6|D6|',
+    '% chorus', 'V: Vocal', 'E6|F6|',
+    '% outro', 'V: Vocal', 'z6|z6|', '',
+  ].join('\n');
+  const lyrics = '[Verse 1]\nfirst line\n\n[Chorus]\nhook line\n\n[Verse 2]\nthird line\n\n[Chorus]\nhook again';
+  const plan = planScoreFromLyrics(coarse, lyrics, words(lyrics,
+    [['first', 6.2], ['hook line', 12.1], ['third', 18.2], ['hook again', 24.1]]));
+  assert.deepEqual(plan.sections.map(s => `${s.label}@${s.bar}`),
+    ['intro@1', 'verse@3', 'chorus@5', 'verse@7', 'chorus@9', 'outro@11']);
+  assert.equal(plan.lyrics, '[intro]\n\n[verse]\nfirst line\n\n[chorus]\nhook line\n\n[verse]\nthird line\n\n[chorus]\nhook again\n\n[outro]');
+  assert.deepEqual(plan.unsure, []);
+});
+
+test('score to lyrics: a block with no timing joins the section before it', () => {
+  const lyrics = '[Verse]\nfirst line\n\n[Chorus]\nlost line';
+  const plan = planScoreFromLyrics(score, lyrics, words(lyrics, [['first', 6.2]]));
+  assert.deepEqual(plan.unsure, [{ block: 2, tag: 'Chorus' }]);
+  assert.match(plan.lyrics, /\[verse\]\nfirst line\n\nlost line/);
 });
