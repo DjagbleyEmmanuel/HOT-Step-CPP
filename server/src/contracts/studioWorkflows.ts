@@ -108,6 +108,7 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
     voices: z.enum(['vocal', 'both']), keepChords: z.boolean(),
     tempoMode: z.enum(['free', 'source', 'set']), coverBpm: z.number().finite().positive(),
     keyShift: z.number().int().min(-12).max(12), cfgScale: z.number().finite(),
+    lyricSchedule: z.enum(['off', 'bias', 'mask']),
     lmAdapterAr: z.string(), lmAdapterNar: z.string(), pairMode: z.enum(['base', 'pair']),
     yue2Pick: z.record(z.string(), z.union([z.string(), z.number()])),
     captionMode: z.string(), captionTracks: z.array(z.object({

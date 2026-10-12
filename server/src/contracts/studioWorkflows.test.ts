@@ -69,7 +69,7 @@ const coverControls = {
   coverNoiseMethod: '', vocalLanguage: 'en', sourceLatentUrl: '', timbreOverridePath: '',
   presetAdapterPath: '', presetReferencePath: '', triggerUseFilename: false, triggerPlacement: '',
   voices: 'vocal' as const, keepChords: false, tempoMode: 'free' as const, coverBpm: 120,
-  keyShift: 0, cfgScale: 1, lmAdapterAr: '', lmAdapterNar: '', pairMode: 'base' as const,
+  keyShift: 0, cfgScale: 1, lyricSchedule: 'off' as const, lmAdapterAr: '', lmAdapterNar: '', pairMode: 'base' as const,
   yue2Pick: {}, captionMode: 'auto', captionTracks: [],
 };
 const coverRenderBase = {

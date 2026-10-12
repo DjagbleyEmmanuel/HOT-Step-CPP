@@ -105,7 +105,7 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     coResident: s.coResident, cacheLmCodes: s.cacheLmCodes,
     parallelWhisper: s.parallelWhisper, parallelQualityEval: s.parallelQualityEval,
     parallelCoverArt: s.parallelCoverArt,
-    yue2CfgScale: c.cfgScale, customMode: true, taskType: 'text2music',
+    yue2CfgScale: c.cfgScale, yue2LyricSchedule: c.lyricSchedule, customMode: true, taskType: 'text2music',
     title: coverTitle(i), caption, style: caption, lyrics: i.instrumental ? '' : i.lyrics,
     ...(i.lyricsSource ? { lyricsSource: i.lyricsSource } : {}),
     ...(i.scoreSource === 'dataset' || d.scoreSource === 'dataset' ? { scoreSource: 'dataset-sidecar' } : {}),

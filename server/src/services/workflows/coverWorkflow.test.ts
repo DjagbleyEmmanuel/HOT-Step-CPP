@@ -18,7 +18,7 @@ const input: CoverRenderInput = {
     coverNoiseMethod: '', vocalLanguage: 'en', sourceLatentUrl: '', timbreOverridePath: '',
     presetAdapterPath: 'adapter.safetensors', presetReferencePath: '',
     triggerUseFilename: true, triggerPlacement: 'prepend', voices: 'both', keepChords: false,
-    tempoMode: 'free', coverBpm: 120, keyShift: 0, cfgScale: 1,
+    tempoMode: 'free', coverBpm: 120, keyShift: 0, cfgScale: 1, lyricSchedule: 'off',
     lmAdapterAr: '', lmAdapterNar: '', pairMode: 'base', yue2Pick: {},
     captionMode: 'custom', captionTracks: [],
   },
@@ -116,6 +116,22 @@ test('YuE2 requires score approval and preserves caption/tempo/key fallbacks', (
   assert.equal((request.yue2Pick as any).lmAdapterArScale, 0.6);
   assert.equal(request.yue2Cot, 'full');
   assert.equal(request.sourceAudioUrl, '/references/source.wav');
+});
+
+test('Cover\'s own Lyric Timing choice wins over a saved global yue2LyricSchedule', () => {
+  const asset = { assetId: 'asset', sha256: 'sha', approvedAbc: 'X:1\nK:C\nC|' };
+  const biasedGlobal = { ...input, expectedBackend: 'yue2' as const,
+    engineParams: { ...input.engineParams, yue2LyricSchedule: 'bias' },
+    controls: { ...input.controls, lyricSchedule: 'off' as const } };
+  assert.equal(effectiveCoverRequest(biasedGlobal, asset, '/references/source.wav').yue2LyricSchedule, 'off');
+  const offGlobal = { ...input, expectedBackend: 'yue2' as const,
+    engineParams: { ...input.engineParams, yue2LyricSchedule: 'off' },
+    controls: { ...input.controls, lyricSchedule: 'bias' as const } };
+  assert.equal(effectiveCoverRequest(offGlobal, asset, '/references/source.wav').yue2LyricSchedule, 'bias');
+  const maskedCover = { ...input, expectedBackend: 'yue2' as const,
+    engineParams: { ...input.engineParams, yue2LyricSchedule: 'off' },
+    controls: { ...input.controls, lyricSchedule: 'mask' as const } };
+  assert.equal(effectiveCoverRequest(maskedCover, asset, '/references/source.wav').yue2LyricSchedule, 'mask');
 });
 
 test('score tempo correction and key use the existing ABC transforms', () => {

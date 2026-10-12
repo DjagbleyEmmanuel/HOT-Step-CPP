@@ -925,7 +925,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         triggerUseFilename: settings.triggerUseFilename,
         triggerPlacement: settings.triggerPlacement || 'prepend',
         voices: coverVoices, keepChords, tempoMode: coverTempoMode, coverBpm,
-        keyShift: coverKeyShift, cfgScale: coverCfgScale,
+        keyShift: coverKeyShift, cfgScale: coverCfgScale, lyricSchedule: coverLyricSchedule,
         lmAdapterAr: yue2Ar, lmAdapterNar: yue2Nar, pairMode,
         yue2Pick: yue2PickAtEnqueue(null),
         captionMode, captionTracks,
