@@ -4,6 +4,7 @@ import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
 import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
 import { withChoirVocal } from '../../utils/abcChoirVocal';
+import { barAtChar, moveSectionStart } from '../../utils/abcSectionMove';
 import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
@@ -41,7 +42,8 @@ type TimingEvent = InstanceType<typeof abcjs.TimingCallbacks>['noteTimings'][num
  *  offsets abcjs records on each element, so multi-bar rests (Z4) and the
  *  interleaved Vocal/Ins voices need no bar counting. Returns each section's
  *  first timed event, the seek target, or null for a section with no notes. */
-function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index: number) => void): Array<TimingEvent | null> {
+function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index: number) => void,
+  onMove: (index: number, bar: number) => void): Array<TimingEvent | null> {
   const marks = abcSectionMarks(abc);
   if (!marks.length) return [];
   const colours = sectionColours(marks.map(mark => mark.label));
@@ -57,8 +59,10 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
         }
   // Timings are sorted by time, so the first event to touch a section is its start.
   const starts: Array<TimingEvent | null> = marks.map(() => null);
+  const events: TimingEvent[] = [];
   for (const event of new abcjs.TimingCallbacks(tune, {}).noteTimings) {
     if (event.type !== 'event' || event.left == null) continue;
+    events.push(event);
     for (const char of event.startCharArray ?? []) {
       const index = sectionAtChar(marks, char);
       if (index >= 0 && !starts[index]) starts[index] = event;
@@ -70,8 +74,34 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
     if (!svg || !start || start.left == null || start.top == null || start.height == null) return;
     const x = start.left - 3;
     const g = document.createElementNS(ns, 'g');
-    g.setAttribute('class', 'cursor-pointer');
-    g.addEventListener('click', () => onPick(index));
+    g.setAttribute('class', 'cursor-grab');
+    // Click plays from the section; a drag drops its start on another bar.
+    g.addEventListener('pointerdown', down => {
+      const ctm = svg.getScreenCTM()?.inverse();
+      if (!ctm || down.button !== 0) return;
+      down.preventDefault();
+      const toSvg = (e: PointerEvent) => new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm);
+      const origin = toSvg(down);
+      let dragging = false;
+      const move = (e: PointerEvent) => {
+        if (!dragging && Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 4) return;
+        dragging = true;
+        const at = toSvg(e);
+        g.setAttribute('transform', `translate(${at.x - origin.x} ${at.y - origin.y})`);
+      };
+      const up = (e: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        g.removeAttribute('transform');
+        if (!dragging) { onPick(index); return; }
+        const at = toSvg(e);
+        const char = dropChar(events, x + at.x - origin.x, start.top! + start.height! / 2 + at.y - origin.y);
+        const bar = char === null ? null : barAtChar(abc, char);
+        if (bar !== null) onMove(index, bar);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
     const rule = document.createElementNS(ns, 'line');
     Object.entries({ x1: x, x2: x, y1: start.top, y2: start.top + start.height, stroke: colours[index], 'stroke-width': 2 })
       .forEach(([key, value]) => rule.setAttribute(key, String(value)));
@@ -80,21 +110,46 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
       .forEach(([key, value]) => text.setAttribute(key, String(value)));
     text.textContent = `▶ ${marks[index].label}`;
     const title = document.createElementNS(ns, 'title');
-    title.textContent = `Play from ${marks[index].label}`;
-    g.append(title, rule, text);
+    title.textContent = `Click to play from ${marks[index].label}; drag onto a bar to move where it starts`;
+    // A wide invisible stroke so the 2px rule is easy to grab.
+    const grip = rule.cloneNode() as SVGLineElement;
+    grip.setAttribute('stroke', 'transparent');
+    grip.setAttribute('stroke-width', '10');
+    g.append(title, grip, rule, text);
     svg.appendChild(g);
   });
   return starts;
+}
+
+/** The ABC offset of the first note at or right of `x` on the system nearest
+ *  `y` (SVG units), or of the next system's first note past its end. */
+function dropChar(events: TimingEvent[], x: number, y: number): number | null {
+  const systems = [...new Set(events.map(event => event.line ?? 0))].sort((a, b) => a - b);
+  const centre = (line: number) => {
+    const first = events.find(event => (event.line ?? 0) === line)!;
+    return (first.top ?? 0) + (first.height ?? 0) / 2;
+  };
+  const nearest = systems.reduce((best, line) => Math.abs(centre(line) - y) < Math.abs(centre(best) - y) ? line : best, systems[0]);
+  const pick = (line: number, fromX: number) => events
+    .filter(event => (event.line ?? 0) === line && (event.left ?? 0) >= fromX)
+    .sort((a, b) => (a.left ?? 0) - (b.left ?? 0))[0];
+  const after = systems[systems.indexOf(nearest) + 1];
+  const hit = pick(nearest, x - 4) ?? (after === undefined ? undefined : pick(after, -Infinity));
+  return hit?.startCharArray?.find(char => typeof char === 'number') ?? null;
 }
 
 export const Yue2CoverScore: React.FC<Props> = p => {
   const scoreRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLDivElement>(null);
   const [previewValid, setPreviewValid] = useState(false);
+  const [moveError, setMoveError] = useState('');
+  // The last section drag, undoable while the ABC is still its result.
+  const [undoMove, setUndoMove] = useState<{ before: string; after: string } | null>(null);
   // Plays from score section i; replaced on every render of the ABC.
   const playFromRef = useRef<(index: number) => Promise<void>>(async () => {});
   const onSectionRef = useRef(p.onSection);
-  useEffect(() => { onSectionRef.current = p.onSection; });
+  const onAbcChangeRef = useRef(p.onAbcChange);
+  useEffect(() => { onSectionRef.current = p.onSection; onAbcChangeRef.current = p.onAbcChange; });
   useEffect(() => {
     if (p.seekSection) void playFromRef.current(p.seekSection.index);
   }, [p.seekSection]);
@@ -138,7 +193,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     setPreviewValid(true);
     const box = scoreRef.current.parentElement;
     let control: InstanceType<typeof abcjs.synth.SynthController> | null = null;
-    const starts = markSections(tunes[0], abc, scoreRef.current, index => void playFromRef.current(index));
+    const starts = markSections(tunes[0], abc, scoreRef.current, index => void playFromRef.current(index), (index, bar) => {
+      // Bars number the same in the preview copy, so the move edits the real ABC.
+      const moved = moveSectionStart(p.abc, index, bar);
+      if ('error' in moved) { setMoveError(moved.error); return; }
+      setMoveError('');
+      if (moved.abc === p.abc) return;
+      setUndoMove({ before: p.abc, after: moved.abc });
+      onAbcChangeRef.current(moved.abc);
+    });
     playFromRef.current = async index => {
       const start = starts[index];
       if (!start) return;
@@ -193,6 +256,9 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
       {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
       {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
+      {moveError && <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">{moveError}</p>}
+      {undoMove?.after === p.abc && <button type="button" onClick={() => { p.onAbcChange(undoMove.before); setUndoMove(null); }}
+        className="text-xs text-cyan-700 dark:text-cyan-300">Undo section move</button>}
       {p.sourceMode === 'audio'
         ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange} action={transcribe}>{sheet}</MusicXmlImport>
         : sheet}
