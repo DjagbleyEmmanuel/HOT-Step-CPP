@@ -493,6 +493,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           if (sourceLookupRef.current !== lookup) return;
           setSourceAudioUrl(d.audio_url || '');
           setSourceAssetId(d.asset_id || '');
+          setIsUploading(false); setIsAnalyzing(true);
           const opened = await openUploadedAsset(d.asset_id || '', lookup,
             Number.isFinite(cached.bpm) && cached.key ? {
             metadata: { artist: cached.artist || '', title: cached.title || '',
@@ -503,7 +504,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           const dataset = await lookupDatasetMetadata({ sourceAudioUrl: d.audio_url });
           if (sourceLookupRef.current === lookup && dataset) applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit);
         }
-      } catch {} finally { if (sourceLookupRef.current === lookup) setIsUploading(false); }
+      } catch {} finally { if (sourceLookupRef.current === lookup) { setIsUploading(false); setIsAnalyzing(false); } }
       return;
     }
 
@@ -521,6 +522,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const audioUrl = upData.audio_url || '';
       setSourceAudioUrl(audioUrl);
       setSourceAssetId(upData.asset_id || '');
+      setIsUploading(false); setIsAnalyzing(true);
 
       const opened = await openUploadedAsset(upData.asset_id || '', lookup);
       if (sourceLookupRef.current !== lookup) return;
@@ -539,7 +541,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (dataset && applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit)) return;
 
       // 3. Essentia analysis
-      setIsUploading(false); setIsAnalyzing(true);
       let bpm = 120, key = 'C major', scale: string | undefined;
       let analysed = false;
       if (opened?.analysis) {

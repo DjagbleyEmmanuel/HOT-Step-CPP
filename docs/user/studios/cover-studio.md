@@ -174,9 +174,11 @@ recording identity; its title comes from the score unless you edit the Title
 field, while lyrics and style come from the fields you set. YuE2 ends duration
 when its model finishes the song.
 
-When a source exactly matches a dataset track, Cover Studio reads that track's
-sidecar lyrics, BPM and key. It labels these values **from dataset**, skips the
-Genius lookup and audio analysis, and lets you edit them. An instrumental
+After the file upload finishes, Cover Studio shows **Analyzing** while it opens
+the source. When its audio exactly matches one unambiguous dataset track and
+that track's sidecar has valid BPM and key, it uses those values without running
+Essentia. Cover Studio also reads eligible dataset lyrics, labels them **from
+dataset**, skips the Genius lookup, and lets you edit them. An instrumental
 sidecar selects Instrumental. If the sidecar is absent or incomplete, the
 usual lookup and analysis path applies. Dataset lyrics are recorded as such in
 the cover's generation parameters until you edit them. A saved `<stem>.abc`

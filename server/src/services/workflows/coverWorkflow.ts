@@ -7,6 +7,7 @@ import { getActiveBackendId, getBackend } from '../backends/registry.js';
 import { resolveYue2Caption } from '../generation/resolve/captionSource.js';
 import type { Yue2SourceTrack } from '../../contracts/resolution.js';
 import { analyzeWithEssentia } from '../training/essentiaClient.js';
+import { readCoverDatasetAnalysis } from '../coverDatasetSource.js';
 import { yue2CoverService } from '../yue2Cover.js';
 import * as lireekDb from '../../db/lireekDb.js';
 import { getProvider } from '../lireek/llm/registry.js';
@@ -123,6 +124,7 @@ export interface CoverDeps {
   documents?: WorkflowDocuments;
   asset?: (id: string, user: string) => { url: string; path: string; filename: string; sha256: string };
   analyze?: (path: string, signal: AbortSignal) => Promise<{ bpm: number | null; key: string; scale: string } | null>;
+  datasetAnalysis?: (path: string) => { bpm: number; key: string; scale: string } | null;
   metadata?: (path: string) => Promise<{ artist: string; title: string; album: string; duration: number | null }>;
   transcribe?: (url: string, label: string, user: string, signal: AbortSignal, force: boolean) => Promise<{ abc: string; scoreSource?: string }>;
   capability?: (backend: string) => Promise<boolean>;
@@ -224,12 +226,13 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const { assetId } = input;
     const source = asset(assetId, ctx.userId);
     ctx.emit('stage', { stage: 'Analyzing source' });
+    const datasetAnalysis = input.cached ? null : (dep('datasetAnalysis') || readCoverDatasetAnalysis)(source.path);
     const [metadata, result] = input.cached ? [input.cached.metadata, null] : await Promise.all([
       (dep('metadata') || defaultMetadata)(source.path),
-      (dep('analyze') || analyzeWithEssentia)(source.path, ctx.signal),
+      datasetAnalysis ? Promise.resolve(null) : (dep('analyze') || analyzeWithEssentia)(source.path, ctx.signal),
     ]);
     ctx.throwIfCancelled();
-    const analysis = input.cached?.analysis || (result
+    const analysis = input.cached?.analysis || datasetAnalysis || (result
       ? { bpm: result.bpm || 120, key: `${result.key || 'C'} ${result.scale || 'major'}`, scale: result.scale }
       : null);
     const document = docs().create(ctx.userId, 'cover-draft', {

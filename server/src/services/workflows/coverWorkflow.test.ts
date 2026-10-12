@@ -25,7 +25,9 @@ const input: CoverRenderInput = {
 };
 
 function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: string }>;
-  audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean> } = {}) {
+  audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean>;
+  datasetAnalysis?: () => { bpm: number; key: string; scale: string } | null;
+  analyze?: () => Promise<{ bpm: number | null; key: string; scale: string } | null> } = {}) {
   const db = new Database(':memory:');
   const documents = new WorkflowDocuments(db);
   const items = new Map<string, AudioIntentItem>();
@@ -50,7 +52,8 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
       return { url: '/references/source.wav', path: '/fake/source.wav', filename: 'source.wav', sha256: 'sha' };
     },
     metadata: async () => ({ artist: '', title: '', album: '', duration: null }),
-    analyze: async () => ({ bpm: 100, key: 'C', scale: 'minor' }),
+    datasetAnalysis: opts.datasetAnalysis || (() => null),
+    analyze: opts.analyze || (async () => ({ bpm: 100, key: 'C', scale: 'minor' })),
     transcribe: async (_url, _label, _user, signal) => opts.transcribe?.(signal) || { abc: 'X:1\nK:C\nC|' },
     capability: opts.capability || (async backend => backend === 'ace' || backend === 'yue2'),
     caption: async () => ({ text: 'Resolved style' }),
@@ -64,6 +67,21 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
   };
   return { db, documents, jobs, items, submit, open };
 }
+
+test('dataset sidecar analysis skips Essentia; a non-match still runs it', async () => {
+  let calls = 0;
+  const analyze = async () => { calls++; return { bpm: 100, key: 'C', scale: 'minor' }; };
+  const matched = setup({ datasetAnalysis: () => ({ bpm: 132, key: 'D minor', scale: 'minor' }), analyze });
+  const found = await matched.open();
+  assert.deepEqual(matched.documents.get(found.documentId, 'owner').data.analysis,
+    { bpm: 132, key: 'D minor', scale: 'minor' });
+  assert.equal(calls, 0);
+  const unmatched = setup({ datasetAnalysis: () => null, analyze });
+  const other = await unmatched.open();
+  assert.deepEqual(unmatched.documents.get(other.documentId, 'owner').data.analysis,
+    { bpm: 100, key: 'C minor', scale: 'minor' });
+  assert.equal(calls, 1);
+});
 
 test('ACE transforms retain source tempo/key defaults and preset precedence', () => {
   const request = effectiveCoverRequest(input, { assetId: 'asset', sha256: 'sha', analysis: { bpm: 90, key: 'G major' } }, '/references/source.wav');
