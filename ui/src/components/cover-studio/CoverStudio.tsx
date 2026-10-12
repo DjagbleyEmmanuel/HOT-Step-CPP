@@ -1217,7 +1217,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
       const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
         yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
-        title, artist: targetYue2Artist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
+        title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
         ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
         instrumental, source: 'cover-studio',

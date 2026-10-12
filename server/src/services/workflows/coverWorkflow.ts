@@ -110,6 +110,8 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     ...(i.lyricsSource ? { lyricsSource: i.lyricsSource } : {}),
     ...(i.scoreSource === 'dataset' || d.scoreSource === 'dataset' ? { scoreSource: 'dataset-sidecar' } : {}),
     instrumental: i.instrumental, source: 'cover-studio', sourceAudioUrl: url,
+    // The covering band names the saved file and tags it, as on the ACE path.
+    artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
     yue2Cover: { sourceId: url, sourceLabel: d.sourceLabel || url,
       voices: c.voices, keepChords: c.keepChords,
       tempo: c.tempoMode === 'set' ? c.coverBpm : c.tempoMode,

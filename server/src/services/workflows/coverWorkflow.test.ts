@@ -116,6 +116,8 @@ test('YuE2 requires score approval and preserves caption/tempo/key fallbacks', (
   assert.equal((request.yue2Pick as any).lmAdapterArScale, 0.6);
   assert.equal(request.yue2Cot, 'full');
   assert.equal(request.sourceAudioUrl, '/references/source.wav');
+  assert.equal(request.artistName, 'Target', 'covering band names the saved file');
+  assert.equal(request.sourceArtist, 'Artist');
 });
 
 test('Cover\'s own Lyric Timing choice wins over a saved global yue2LyricSchedule', () => {

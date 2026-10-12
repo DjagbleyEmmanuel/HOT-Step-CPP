@@ -63,7 +63,9 @@ export type TrackVersion = 'original' | 'mastered' | 'noadapter';
 
 function artistFor(song: Song, options?: { artistName?: string }): string {
   return options?.artistName || song.artistName
-    || (song.generationParams as any)?.artist || (song.generation_params as any)?.artist || '';
+    || (song.generationParams as any)?.artist || (song.generation_params as any)?.artist
+    // Cover Studio records the covering band as artistName.
+    || (song.generationParams as any)?.artistName || (song.generation_params as any)?.artistName || '';
 }
 
 /**
