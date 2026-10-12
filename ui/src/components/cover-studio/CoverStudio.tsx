@@ -942,8 +942,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       coverRenderJobRef.current = job.id;
       setActiveJobId(job.id); setQueueItemId(qId);
       updateManualQueueItem(qId, { workflowJob: { id: job.id, token }, stage: 'Queued…' });
+      // Name the workflow's state only when it changes: the queue store follows
+      // the render itself and fills in the engine's stage and progress.
+      let shown = '';
       const done = await waitForCoverJob(token, job.id, () => false, current => {
-        updateManualQueueItem(qId, { stage: current.status === 'running' ? 'Generating…' : 'Queued…' });
+        const stage = current.status === 'running' ? 'Generating…' : 'Queued…';
+        if (stage !== shown) updateManualQueueItem(qId, { stage: shown = stage });
       });
       const result = done.result as { audio?: { audioUrls?: string[]; songIds?: string[];
         masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number } };

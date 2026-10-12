@@ -642,6 +642,8 @@ export function isAudioQueueRollbackPending(): boolean { return localStorage.get
  *  the resume/owner-decision call-once guards, timers) so each test in the
  *  migration test suite starts from a cold load. Never called by the app —
  *  production has exactly one page lifetime per import. */
+export function _queueItemsForTests(): AudioQueueItem[] { return _state.items; }
+
 export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _state = { items, completionCounter: 0, awaitingResume: 0 };
   _resumeCalled = false;
@@ -1095,14 +1097,44 @@ export function updateManualQueueItem(id: string, update: {
   if (update.title !== undefined) item.generation.title = update.title;
   if (update.jobId !== undefined) item.jobId = update.jobId;
   if (update.workflowJob) {
+    const following = item.workflowJobId === update.workflowJob.id;
     item.workflowJobId = update.workflowJob.id;
     _lastToken = update.workflowJob.token;
+    if (!following) _followWorkflowRender(id, update.workflowJob.id, update.workflowJob.token);
   }
   if (update.progress !== undefined) item.progress = update.progress;
   if (update.stage !== undefined) item.stage = update.stage;
   if (update.elapsed !== undefined) item.elapsed = update.elapsed;
   if (update.status !== undefined) item.status = update.status;
   _emit(true);
+}
+
+/** A studio's workflow-backed row (Cover, Auto-Gen) hears only its workflow's
+ *  own status, and in a browser-owned queue nothing else polls the render that
+ *  workflow queued, so the row showed "Generating…" with no stage or step.
+ *  Follow the workflow's newest audio item to its engine job, as the
+ *  server-owned projection does (refreshServerProjection), until the row ends. */
+function _followWorkflowRender(id: string, workflowJobId: string, token: string): void {
+  const ended = (status: AudioQueueStatus) => status === 'succeeded' || status === 'failed';
+  const tick = async (): Promise<boolean> => {
+    const item = _state.items.find(i => i.id === id);
+    if (!item || item.workflowJobId !== workflowJobId || ended(item.status)) return false;
+    if (queueOwner() === 'server') return true; // the projection fills it in
+    try {
+      const { job } = await workflowApi.get(token, workflowJobId);
+      const intentId = job.audioIntentIds[job.audioIntentIds.length - 1];
+      const jobId = intentId && (await audioQueueApi.list(token)).items.find(i => i.id === intentId)?.jobId;
+      if (!jobId) return true;
+      const status = await generateApi.status(jobId);
+      if (ended(item.status)) return false;
+      if (status.progress !== undefined) item.progress = Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100));
+      if (status.stage) item.stage = status.stage;
+      _emit();
+    } catch { /* the studio's own workflow poll reports failures */ }
+    return true;
+  };
+  const loop = async () => { if (await tick()) setTimeout(loop, 1500); };
+  void loop();
 }
 
 /** Mark a manually-added queue item as succeeded with audio results. */
