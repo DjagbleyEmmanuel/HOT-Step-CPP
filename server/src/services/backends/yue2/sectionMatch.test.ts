@@ -90,3 +90,13 @@ test('a score whose clock runs late still gives each block its own section', () 
   assert.equal(result.lyrics, `[intro]\n\n${lyrics}\n\n[outro]`);
   assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'kept', 'kept']);
 });
+
+test('a block tagged like a section with no Vocal note is placed there, not merged before it', () => {
+  // Backing ad-libs over the outro: SheetSage hears no Vocal there.
+  const lyrics = '[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[Outro]\nna na na';
+  const result = matchSectionsToScore(score, lyrics,
+    words(lyrics, [['first', 6.2], ['second', 12.1], ['na na', 29.5]]));
+  // The chorus the lyrics wrote once is still copied into the gap.
+  assert.equal(result.lyrics, '[intro]\n\n[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[chorus]\nsecond line\n\n[outro]\nna na na');
+  assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'renamed']);
+});

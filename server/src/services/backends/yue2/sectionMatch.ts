@@ -114,6 +114,10 @@ function bestFit(blocks: Block[], timed: Array<number | null>, spans: Span[], so
   };
   const merge = (i: number, s: number) =>
     MERGE_COST + Math.max(0, timed[i]! - (spans[s].start + length(s) - pickup)) / length(s);
+  // Ad-libs over an instrumental ([Interlude] na-nas) have no Vocal note, so
+  // a section with none takes only a block tagged as its own kind.
+  const fits = (i: number, s: number) =>
+    spans[s].sung || (!!blocks[i].tag && sectionKind(blocks[i].tag!) === sectionKind(spans[s].label));
   // cost[j]: least cost so far with section j - 1 the last placed (0: none yet).
   let cost = spans.map(() => Infinity).concat(Infinity);
   cost[0] = 0;
@@ -124,9 +128,9 @@ function bestFit(blocks: Block[], timed: Array<number | null>, spans: Span[], so
     if (t !== null) {
       cost.forEach((c, j) => {
         if (c === Infinity) return;
-        if (j > 0 && c + merge(i, j - 1) < next[j]) { next[j] = c + merge(i, j - 1); choice[j] = { from: j, section: j - 1 }; }
+        if (j > 0 && fits(i, j - 1) && c + merge(i, j - 1) < next[j]) { next[j] = c + merge(i, j - 1); choice[j] = { from: j, section: j - 1 }; }
         for (let s = j; s < spans.length; s++) {
-          if (!spans[s].sung) continue;
+          if (!fits(i, s)) continue;
           const total = c + open(i, s);
           if (total < next[s + 1]) { next[s + 1] = total; choice[s + 1] = { from: j, section: s }; }
         }
