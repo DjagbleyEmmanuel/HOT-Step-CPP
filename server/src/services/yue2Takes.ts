@@ -180,7 +180,6 @@ async function waitJob(jobId: string): Promise<void> {
 /** Starts a build session for a cover's request. */
 export function createBuildSession(params: Record<string, unknown>, request: Yue2SynthRequest, userId: string): Yue2BuildSession {
   if (!request.abc) throw new TakesError('Build by section needs an approved score.');
-  if ((request.cfg_scale ?? 1) !== 1) throw new TakesError('Build by section needs CFG 1 for now; set the cover CFG to 1.');
   const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
   if (!sections.length) throw new TakesError('The score has no section labels.');
   // One song per take: the composer cannot resume a prefix across a batch.

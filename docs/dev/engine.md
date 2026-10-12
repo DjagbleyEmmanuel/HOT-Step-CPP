@@ -156,9 +156,11 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
 stream is treated as a prefix: it is prefilled under the unchanged prompt and score,
 then the composer keeps sampling from frame `codec_ids.length`. Use it to keep a
 render's codecs up to a section boundary and recompose the rest. The frame clock, caps,
-`min_tokens` and the repetition window carry on from the prefix. The request needs one
-song, `cfg_scale` 1 and no `semantic_retries`, and the prefix must stay under both the
-context and the stage cap. The stage fails if the output does not begin with the exact
+`min_tokens` and the repetition window carry on from the prefix. Under guidance
+(`cfg_scale` other than 1) the negative set is prefilled with the same prefix, because the
+decode feeds both sets each sampled frame. The request needs one song and no
+`semantic_retries`, and the prefix must stay under both the context and the stage cap.
+A lyric schedule still needs `cfg_scale` 1. The stage fails if the output does not begin with the exact
 prefix. The NAR and VAE then render the whole stream again, prefix included. Prefix
 noise is the same for the same `noise_seed`, but the NAR attends both ways across its
 chunk, so the prefix audio is close to the original render without being identical.

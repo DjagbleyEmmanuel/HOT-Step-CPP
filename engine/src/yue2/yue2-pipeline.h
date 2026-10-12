@@ -625,8 +625,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     Yue2ArKvCache & cache = *cache_out;
     const int64_t supplied_n = (int64_t) req.codec_ids.size();
-    if (supplied_n > 0 && (B != 1 || use_cfg)) {
-        if (err) *err = "codec_ids needs a single song and cfg_scale 1 (the stream is not sampled)";
+    if (supplied_n > 0 && B != 1) {
+        if (err) *err = "codec_ids needs a single song (the stream is not sampled)";
         return false;
     }
     const bool resume = supplied_n > 0 && req.continue_codec_ids;
@@ -739,13 +739,23 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 }
             }
         } else {
-            Yue2ArForwardResult pre;
+            // Under guidance the negative set decodes the same sampled frames
+            // as the positive one (the decode loop feeds both the one draw),
+            // so a resumed stream prefills it too; each set's last row is the
+            // next frame's logits, in set order as the blend reads them.
             const std::vector<int64_t> keep = resume ? std::vector<int64_t>{ supplied_n - 1 } : std::vector<int64_t>{};
-            if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, sg.cond_set)) {
-                yue2_ar_kv_cache_free(&cache);
-                return false;
+            std::vector<int> sets = { (int) sg.cond_set };
+            if (resume && use_cfg) sets.push_back((int) sg.neg_set);
+            std::vector<float> next_rows(resume ? (size_t) S * (size_t) W : 0);
+            for (int set : sets) {
+                Yue2ArForwardResult pre;
+                if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, set)) {
+                    yue2_ar_kv_cache_free(&cache);
+                    return false;
+                }
+                if (resume) std::copy(pre.logits.begin(), pre.logits.begin() + W, next_rows.begin() + (size_t) set * (size_t) W);
             }
-            if (resume) logits = pre.logits;  // S == 1: the next frame's row
+            if (resume) logits = std::move(next_rows);
         }
         sg.codec_ids = req.codec_ids;
         if (resume) {
