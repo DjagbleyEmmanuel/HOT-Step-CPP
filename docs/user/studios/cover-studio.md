@@ -159,7 +159,9 @@ have to make.
    chord symbols, including inferred ones, and off when it has none; you can
    still change it. An Instrumental render keeps the chords on the Vocal voice
    when it moves the melody to Ins. Advanced **Condition strength** tightens style, lyrics and
-   score together. The reviewed full score stays available. Click
+   score together. Advanced **Lyric Timing (C6)** ties each lyric block to its score section's
+   timing; Off by default, Soft and Hard stay selectable but condition strength 1 with either on
+   ruins lyric adherence. The reviewed full score stays available. Click
    **Generate YuE2 cover**; queued renders keep all five choices, selected
    pair, score and settings from that click
    even if the picker changes later.

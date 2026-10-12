@@ -38,6 +38,8 @@ interface Props {
   onKeyShift: (value: number) => void;
   cfgScale: number;
   onCfgScale: (value: number) => void;
+  lyricSchedule: 'off' | 'bias' | 'mask';
+  onLyricSchedule: (value: 'off' | 'bias' | 'mask') => void;
   canGenerate: boolean;
   isGenerating: boolean;
   genProgress: number;
@@ -123,6 +125,13 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         <EditableSlider label="Condition strength" value={p.cfgScale} min={0.1} max={2} step={0.05}
           onChange={p.onCfgScale} defaultValue={1}
           helpText="Tightens style, lyrics and score together." />
+        <ParamLabel label="Lyric Timing (C6)" info="Ties each lyric block to its score section's timing. Off by default; condition strength 1 with it on ruins lyric adherence. Soft nudges the composer toward that timing; Hard hides a section's lyrics until its first Vocal note. Needs CFG 1." />
+        <StyledSelect accent="pink" value={p.lyricSchedule} onChange={v => p.onLyricSchedule(v as 'off' | 'bias' | 'mask')}
+          options={[
+            { value: 'off', label: 'Off' },
+            { value: 'bias', label: 'Soft (bias toward the score\'s timing)' },
+            { value: 'mask', label: 'Hard (hide lyrics until timed)' },
+          ]} />
       </details>
     </div>
     <button onClick={p.onGenerate} disabled={!p.canGenerate}

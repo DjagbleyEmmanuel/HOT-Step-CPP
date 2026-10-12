@@ -152,6 +152,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [coverBpm, setCoverBpm] = useState(120);
   const [coverKeyShift, setCoverKeyShift] = useState(0);
   const [coverCfgScale, setCoverCfgScale] = useState(1);
+  const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>('off');
   const [captionMode, setCaptionMode] = useState('custom');
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
   const [readiness, setReadiness] = useState<Yue2CoverReadiness | null>(null);
@@ -1026,7 +1027,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const coverChoices = { voices: coverVoices, keepChords,
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
         key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
-      const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale, customMode: true, taskType: 'text2music',
+      const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
+        yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
         ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
@@ -1477,6 +1479,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           bpm={coverBpm} onBpm={setCoverBpm}
           keyShift={coverKeyShift} onKeyShift={setCoverKeyShift}
           cfgScale={coverCfgScale} onCfgScale={setCoverCfgScale}
+          lyricSchedule={coverLyricSchedule} onLyricSchedule={setCoverLyricSchedule}
           canGenerate={canGenerate} isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
           onGenerate={handleGenerate} onCancel={handleCancel}
         /> : <ArtistSettingsPanel

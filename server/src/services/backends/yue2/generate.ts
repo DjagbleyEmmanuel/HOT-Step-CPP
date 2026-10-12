@@ -414,16 +414,17 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const abc = abcUsed && !lyrics ? yue2InstrumentalAbc(abcUsed, notes) : abcUsed;
 
   // C6 lyric schedule: ties each sung lyric block to its score section's
-  // timing. Soft (bias, -4) is the default for a render with an approved
-  // score — an ear test went from 2/11 on-time sections to 11/11 with it
-  // (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064). Hard (mask) stays selectable
-  // but is never the default. An explicit 'off' (current or saved) always
-  // wins. A schedule that cannot be built (no tempo, unlabelled sections, no
-  // matching timed lyric block, ...) must never fail the render — it logs
-  // why and falls back to the unscheduled baseline instead.
-  const scheduleMode = params.yue2LyricSchedule === 'off' ? undefined
-    : params.yue2LyricSchedule === 'mask' ? 'mask'
-    : params.yue2LyricSchedule === 'bias' || params.yue2LyricSchedule === undefined ? 'bias'
+  // timing. Off by default (2026-10-12: condition strength 1 with the old
+  // soft-by-default ruined lyric adherence) — soft (bias, -4) and hard (mask)
+  // both stay selectable, and an explicit choice (current or saved) always
+  // wins. An ear test went from 2/11 on-time sections to 11/11 with soft on
+  // (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064), so it is worth turning on by
+  // hand for a render where lyric timing matters more than adherence. A
+  // schedule that cannot be built (no tempo, unlabelled sections, no matching
+  // timed lyric block, ...) must never fail the render — it logs why and
+  // falls back to the unscheduled baseline instead.
+  const scheduleMode = params.yue2LyricSchedule === 'mask' ? 'mask'
+    : params.yue2LyricSchedule === 'bias' ? 'bias'
     : undefined;
   // The engine only schedules the no-guidance set (yue2-pipeline.h: "needs
   // cfg_scale 1 (no rule for the guidance set)"); cot is never 'off' here

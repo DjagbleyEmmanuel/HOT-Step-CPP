@@ -54,12 +54,14 @@ tempo, the source score's tempo is used and the response flags the fallback.
 
 A YuE2 generation with a supplied score (and lyrics) ties each sung lyric
 block to the first Vocal note of its score section, using the same score
-clock and section matching as the drift metric. `yue2LyricSchedule: "bias"` is
-the default (an ear test went from 2/11 on-time sections to 11/11 with it,
-`RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064`): while composing, the engine adds
-`yue2LyricScheduleBias` (default -4) to the attention on a section's lyric
-tokens until that note. `"mask"` stays selectable (uses -inf instead) but is
-never the default. `yue2LyricSchedule: "off"` turns it off, current or saved.
+clock and section matching as the drift metric. `yue2LyricSchedule: "off"` is
+the default — condition strength 1 with the old soft-by-default ruined lyric
+adherence. `"bias"` stays selectable (an ear test went from 2/11 on-time
+sections to 11/11 with it, `RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064`): while
+composing, the engine adds `yue2LyricScheduleBias` (default -4) to the
+attention on a section's lyric tokens until that note. `"mask"` also stays
+selectable (uses -inf instead). Neither is ever the default; an explicit
+choice (current or saved) always wins.
 `yue2LyricScheduleAbc: true` hides the section's label and music lines as
 well (off by default). Field lines such as `M:`, `Q:`, `K:` and `V:` stay
 visible. `yue2LyricScheduleLeadSec` reveals a section that many seconds early

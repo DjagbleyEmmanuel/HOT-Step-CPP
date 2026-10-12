@@ -84,10 +84,10 @@ test('a job with no envelope options for this backend has no captured cover', ()
   assert.equal(jobCover(job), undefined);
 });
 
-// Lead approved 2026-10-03: soft bias on by default for a render with a
-// supplied score and lyrics (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064). Hard
-// mask stays selectable but never the default, an explicit off always wins,
-// and a schedule that cannot be built must never fail the render.
+// Off by default (2026-10-12: condition strength 1 with the old
+// soft-by-default ruined lyric adherence). Soft (bias) and hard (mask) both
+// stay selectable, an explicit choice (current or saved) always wins, and a
+// schedule that cannot be built must never fail the render.
 
 const scales = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
 const pick: Yue2PersistedSelection = {
@@ -97,8 +97,14 @@ const pick: Yue2PersistedSelection = {
 const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse', 'V: Vocal', 'C4|', ''].join('\n');
 const lyrics = '[Verse]\nfirst line';
 
-test('yue2LyricSchedule defaults to soft bias when a score and lyrics are supplied', () => {
+test('yue2LyricSchedule defaults to off when a score and lyrics are supplied', () => {
   const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc }, pick);
+  assert.equal(req.lyric_schedule, undefined);
+  assert.ok(!notes.some(n => n.startsWith('Lyric schedule')));
+});
+
+test('an explicit "bias" is honoured with a usable score', () => {
+  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc, yue2LyricSchedule: 'bias' }, pick);
   assert.equal(req.lyric_schedule?.mode, 'bias');
   assert.equal(req.lyric_schedule?.bias, -4);
   assert.ok(notes.some(n => n.startsWith('Lyric schedule: bias')));
@@ -115,27 +121,29 @@ test('hard mask stays selectable but is never the default', () => {
   assert.equal(req.lyric_schedule?.mode, 'mask');
 });
 
-test('an explicit CFG other than 1 skips the schedule instead of the engine rejecting the job', () => {
+test('an explicit CFG other than 1 skips an explicitly requested schedule instead of the engine rejecting the job', () => {
   // yue2-pipeline.h:596 refuses lyric_schedule outright once CFG is on
   // ("needs cfg_scale 1 (no rule for the guidance set)"); the mapper must
   // never emit a schedule the engine will reject.
-  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc, yue2CfgScale: '1.2' }, pick);
+  const { req, notes } = mapYue2Params(
+    { caption: 'folk', lyrics, yue2Abc: abc, yue2LyricSchedule: 'bias', yue2CfgScale: '1.2' }, pick);
   assert.equal(req.lyric_schedule, undefined);
   assert.equal(req.cfg_scale, 1.2);
   assert.ok(notes.some(n => n.includes('skipped') && n.includes('CFG 1.2')));
 });
 
-test('a schedule that cannot be built falls back instead of failing the render', () => {
+test('an explicitly requested schedule that cannot be built falls back instead of failing the render', () => {
   // No "% section" label line: buildYue2LyricSchedule throws "needs a score
   // with labelled sections" — the render must still go ahead without C6.
   const unlabelled = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', 'C4|', ''].join('\n');
-  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: unlabelled }, pick);
+  const { req, notes } = mapYue2Params(
+    { caption: 'folk', lyrics, yue2Abc: unlabelled, yue2LyricSchedule: 'bias' }, pick);
   assert.equal(req.lyric_schedule, undefined);
   assert.ok(notes.some(n => n.includes('not built') && n.includes('rendering without it')));
 });
 
-test('no score or lyrics: the default never fires and never fails', () => {
-  const { req } = mapYue2Params({ caption: 'folk' }, pick);
+test('no score or lyrics: an explicitly requested schedule never fires and never fails', () => {
+  const { req } = mapYue2Params({ caption: 'folk', yue2LyricSchedule: 'bias' }, pick);
   assert.equal(req.lyric_schedule, undefined);
 });
 
