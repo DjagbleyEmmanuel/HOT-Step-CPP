@@ -330,6 +330,8 @@ export interface Yue2TrackDetail {
   frames?: number;
   stage_end_reasons?: Partial<Record<'plan' | 'semantic' | 'nar' | 'vae', Yue2StageEndReason>>;
   abc?: string;
+  /** The composer's codec stream (raw ids), for resuming it with codec_ids. */
+  semantic_ids?: number[];
 }
 
 export interface Yue2SynthResponse {

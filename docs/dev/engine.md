@@ -163,6 +163,10 @@ prefix. The NAR and VAE then render the whole stream again, prefix included. Pre
 noise is the same for the same `noise_seed`, but the NAR attends both ways across its
 chunk, so the prefix audio is close to the original render without being identical.
 Render the whole song; do not splice old prefix audio onto the new suffix.
+Every finished track in the `/job` status `tracks` array carries its `semantic_ids`, and
+the server saves them beside the WAV as `<song>.semantic.json`, with the request that made
+them as `<song>.yue2-request.json`, so a later request can resume the stream. Add
+`preview_max_frames` to stop the composer at a section's end.
 `yue2-probe --continue-check <request.json>` checks prefix identity, cancellation and
 the context cap on any backend.
 

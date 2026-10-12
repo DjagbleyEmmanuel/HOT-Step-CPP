@@ -1231,11 +1231,19 @@ async function finishYue2Job(
           log('WARNING', `[YuE2] Failed to save score.abc sidecar (non-fatal): ${e?.message ?? e}`);
         }
       }
-      if (parts.length === 1 && finalDetail.semantic_ids?.length) {
+      // The codec stream and the request that made it, so a later request
+      // can resume it from a section boundary (codec_ids +
+      // continue_codec_ids) with the same prompt and score.
+      const semanticIds = td?.semantic_ids ?? (parts.length === 1 ? finalDetail.semantic_ids : undefined);
+      if (semanticIds?.length) {
         try {
           fs.writeFileSync(
             path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.semantic.json')),
-            JSON.stringify(finalDetail.semantic_ids),
+            JSON.stringify(semanticIds),
+          );
+          fs.writeFileSync(
+            path.join(config.data.audioDir, filename.replace(/\.[^.]+$/, '.yue2-request.json')),
+            JSON.stringify({ request: req, seed: td?.seed, noise_seed: td?.noise_seed }),
           );
         } catch (e: any) {
           log('WARNING', `[YuE2] Failed to save semantic-ids sidecar (non-fatal): ${e?.message ?? e}`);

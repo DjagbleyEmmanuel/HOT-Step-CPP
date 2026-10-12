@@ -380,6 +380,12 @@ static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request 
                 yyjson_doc_free(srd);
             }
             if (!tr.score_abc.empty()) yyjson_mut_obj_add_strn(doc, o, "abc", tr.score_abc.c_str(), tr.score_abc.size());
+            // The composer's codec stream, so a later request can resume it
+            // with codec_ids + continue_codec_ids (section-by-section takes).
+            if (!tr.semantic_ids.empty()) {
+                yyjson_mut_obj_add_val(doc, o, "semantic_ids",
+                                       yyjson_mut_arr_with_sint32(doc, tr.semantic_ids.data(), tr.semantic_ids.size()));
+            }
             yyjson_mut_arr_add_val(arr, o);
         }
         char * json = yyjson_mut_write(doc, 0, NULL);
