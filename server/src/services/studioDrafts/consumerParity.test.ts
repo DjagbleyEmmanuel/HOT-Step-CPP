@@ -28,7 +28,7 @@ const DEFAULTS: StudioDraftBody[] = [
     sourceMode: 'musicxml', advancedMode: false, pairMode: 'pair', yue2Ar: 'ar.gguf', yue2Nar: 'nar.gguf',
     coverVoices: 'both', keepChords: true, coverTempoMode: 'set', coverBpm: 120, coverKeyShift: -7,
     coverCfgScale: 1, coverLyricSchedule: 'bias', captionMode: 'custom', sheetAbc: 'X:1\nK:C\nC',
-    scoreSections: [{ start: 0, end: 4 }], scoreTempoScale: { abc: 'X:1', factor: 1 }, sheetAudioUrl: '',
+    scoreSections: [{ start: 0, end: 4 }], scoreCuts: [], scoreTempoScale: { abc: 'X:1', factor: 1 }, sheetAudioUrl: '',
     approvedSheet: { abc: 'X:1', sourceId: 'source', sourceLabel: 'score', audioUrl: '', key: 'C' },
     selectedYue2ArtistId: 17, selectedYue2LyricsSetId: 23, coveringBand: 'Test band', draftName: 'Named draft',
   }).map(([k, v]) => [`cover-studio-${k}`, v])) },

@@ -12,7 +12,7 @@ import type { StudioKind } from './studioDrafts.js';
 const keys = (list: string, prefix = '') => list.split(' ').map(x => `${prefix}${x}`);
 
 const CREATE = new Set(keys('caption lyrics negative-prompt instrumental lora-trigger beat-intro intro-bars title artist subject bpm keyScale timeSignature duration vocalLanguage vocalGender sourceLatentUrl', 'hs-'));
-const COVER = new Set(keys('sourceFileName sourceAudioUrl sourceAssetId sourceSongId metadata analysis songArtist songTitle lyrics lyricsSource datasetAnalysis selectedArtistId selectedPreset artistCaption audioCoverStrength coverNoiseStrength coverNoiseMethod tempoScale pitchShift bpmCorrection bpmOverride keyOverride noFsq coverInstrumental sourceLatentUrl coverVocalLanguage coverTimbreOverride sepLevel sourceMode advancedMode pairMode yue2Ar yue2Nar coverVoices keepChords coverTempoMode coverBpm coverKeyShift coverCfgScale coverLyricSchedule captionMode sheetAbc scoreSections scoreTempoScale sheetAudioUrl approvedSheet selectedYue2ArtistId selectedYue2LyricsSetId coveringBand draftName', 'cover-studio-'));
+const COVER = new Set(keys('sourceFileName sourceAudioUrl sourceAssetId sourceSongId metadata analysis songArtist songTitle lyrics lyricsSource datasetAnalysis selectedArtistId selectedPreset artistCaption audioCoverStrength coverNoiseStrength coverNoiseMethod tempoScale pitchShift bpmCorrection bpmOverride keyOverride noFsq coverInstrumental sourceLatentUrl coverVocalLanguage coverTimbreOverride sepLevel sourceMode advancedMode pairMode yue2Ar yue2Nar coverVoices keepChords coverTempoMode coverBpm coverKeyShift coverCfgScale coverLyricSchedule captionMode sheetAbc scoreSections scoreCuts scoreTempoScale sheetAudioUrl approvedSheet selectedYue2ArtistId selectedYue2LyricsSetId coveringBand draftName', 'cover-studio-'));
 const REPAINT = new Set(keys('sourceSong sourceAssetId sourceAudioUrl sourceName regionStart regionEnd lyrics repaintMode crossfadeFrames styleCaption', 'hs-repaint-'));
 const STORM = new Set(keys('caption lyrics neg lora instrumental beat-intro intro-bars bpm duration-v2 deck-a-caption deck-a-lyrics deck-a-bpm deck-b-caption deck-b-lyrics deck-b-bpm', 'hs-storm-'));
 const STEM = new Set(keys('hs-stem-sourceUrl hs-stem-sourceFile hs-stem-sepLevel hs-stem-extractModel'));
@@ -25,7 +25,7 @@ const NUMBER = new Set(keys('hs-bpm hs-duration hs-intro-bars cover-studio-audio
 const NULLABLE_NUMBER = new Set(keys('cover-studio-selectedArtistId cover-studio-bpmOverride cover-studio-selectedYue2ArtistId cover-studio-selectedYue2LyricsSetId'));
 const NULLABLE_STRING = new Set(keys('cover-studio-lyricsSource cover-studio-keyOverride'));
 const OBJECT = new Set(keys('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset cover-studio-scoreTempoScale cover-studio-approvedSheet hs-repaint-sourceSong hs-sb-sourceRef'));
-const ARRAY = new Set(keys('cover-studio-scoreSections'));
+const ARRAY = new Set(keys('cover-studio-scoreSections cover-studio-scoreCuts'));
 
 /** Keys whose browser value is a raw string, not JSON (imports keep it as is). */
 export const RAW_STRING_DRAFT_KEYS: ReadonlySet<string> = new Set([...STEM, ...BUILDER].filter(x => x !== 'hs-sb-sourceRef'));

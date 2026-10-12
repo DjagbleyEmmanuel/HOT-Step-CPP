@@ -27,7 +27,7 @@ const RECORDED: Record<string, string[]> = {
     'cover-studio-selectedYue2ArtistId', 'cover-studio-selectedYue2LyricsSetId'],
   'cover|b,': ['cover-studio-coverInstrumental', 'cover-studio-datasetAnalysis', 'cover-studio-noFsq',
     'cover-studio-advancedMode', 'cover-studio-keepChords'],
-  'cover|a,': ['cover-studio-scoreSections'],
+  'cover|a,': ['cover-studio-scoreSections', 'cover-studio-scoreCuts'],
   'cover|s,null,': ['cover-studio-keyOverride', 'cover-studio-lyricsSource'],
   '-|': ['cover-studio-nope', 'hs-unknown', 'hs-yue2CaptionSource:ds:a:b', 'lireek-playQueue'],
   'create|s,': ['hs-artist', 'hs-caption', 'hs-keyScale', 'hs-lora-trigger', 'hs-lyrics', 'hs-negative-prompt', 'hs-sourceLatentUrl', 'hs-subject',

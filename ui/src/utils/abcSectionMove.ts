@@ -161,3 +161,51 @@ export function moveSectionStart(abc: string, index: number, bar: number): { abc
   }
   return { abc: out.join('\n') };
 }
+
+/** The ABC without section `index`: its `% label` marker and every group of
+ *  voice lines up to the next marker, or an error message. A tie from the
+ *  bar before the cut into it is dropped, and the first group after the cut
+ *  gets the V: and field lines it inherited from the cut section. Lines between the
+ *  cut section's last group and the next marker go with it. */
+export function cutSection(abc: string, index: number): { abc: string } | { error: string } {
+  const parsed = parse(abc);
+  if (typeof parsed === 'string') return { error: parsed };
+  const { items } = parsed;
+  const markers = items.filter(item => item.kind === 'marker');
+  if (!markers[index]) return { error: 'That section is not in the score.' };
+  if (markers.length < 2) return { error: 'The score has only this section.' };
+  const from = items.indexOf(markers[index]);
+  const nextMarker = markers[index + 1];
+  const to = nextMarker ? items.indexOf(nextMarker) : items.length;
+  const kept = [...items.slice(0, from), ...items.slice(to)];
+  const before = items.slice(0, from).reverse().find(item => item.kind === 'group');
+  const after = items.slice(to).find(item => item.kind === 'group');
+  // The last M:, L:, K: or Q: line each voice met in the cut section still
+  // governs the bars after it, unless they set their own.
+  const isField = (line: string) => /^[A-Za-z]:/.test(line.trim()) && !/^V:/.test(line.trim());
+  const fields = new Map<string, Map<string, string>>();
+  for (const item of items.slice(from, to))
+    for (const [voice, lines] of item.kind === 'group' ? item.group.parts.map(part => [part.voice, part.pre] as const)
+      : item.kind === 'line' ? [['', [item.text]] as const] : [])
+      for (const line of lines.filter(isField)) {
+        if (!fields.has(voice)) fields.set(voice, new Map());
+        fields.get(voice)!.set(line.trim()[0], line);
+      }
+  const out: string[] = [];
+  for (const item of kept) {
+    if (item.kind !== 'group') { out.push(item.text); continue; }
+    for (const part of item.group.parts) {
+      let pre = part.pre;
+      if (item === after) {
+        const own = new Set(pre.filter(isField).map(line => line.trim()[0]));
+        const carried = [...new Map([...(fields.get('') ?? []), ...(fields.get(part.voice) ?? [])])]
+          .filter(([field]) => !own.has(field)).map(([, line]) => line);
+        const v = pre.findIndex(line => /^V:/.test(line.trim()));
+        pre = v >= 0 ? [...pre.slice(0, v + 1), ...carried, ...pre.slice(v + 1)]
+          : [...(part.header ? [part.header] : []), ...carried, ...pre];
+      }
+      out.push(...pre, item === before ? part.line.replace(/-(\s*\|?\s*)$/, '$1') : part.line);
+    }
+  }
+  return { abc: out.join('\n') };
+}

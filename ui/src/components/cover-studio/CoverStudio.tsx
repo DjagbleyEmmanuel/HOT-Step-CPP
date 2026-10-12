@@ -31,6 +31,7 @@ import {
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
+import { cutSection } from '../../utils/abcSectionMove';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
@@ -188,6 +189,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetError, setSheetError] = useState('');
   const [sheetAbc, setSheetAbc] = useState(() => restore('sheetAbc', ''));
   const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>(() => restore('scoreSections', []));
+  // Sections cut from this cover's score and lyrics, newest last, each with
+  // the score and lyrics from before it and the ones it produced. Only this
+  // session and its drafts change; the source's dataset files never do. While
+  // any cut stands, the score no longer follows the source audio.
+  const [scoreCuts, setScoreCuts] = useState<Array<{ abc: string; lyrics: string; after: string; afterLyrics: string }>>(
+    () => restore('scoreCuts', []));
   const sectionChipColours = sectionColours(scoreSections.map(section => section.label));
   const [seekSection, setSeekSection] = useState<{ index: number } | null>(null);
   // The score section playing or last picked; its lyric block is highlighted.
@@ -240,7 +247,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sourceResetKeyRef.current = sourceKey;
     if (skipSourceResetRef.current) { skipSourceResetRef.current = false; return; }
     sheetRequestRef.current += 1;
-    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null); setSectionMatch(null);
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null); setSectionMatch(null); setScoreCuts([]);
     setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId('');
@@ -348,13 +355,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('captionMode', captionMode); }, [captionMode]);
   useEffect(() => { persist('sheetAbc', sheetAbc); }, [sheetAbc]);
   useEffect(() => { persist('scoreSections', scoreSections); }, [scoreSections]);
+  useEffect(() => { persist('scoreCuts', scoreCuts); }, [scoreCuts]);
   useEffect(() => { persist('scoreTempoScale', scoreTempoScale); }, [scoreTempoScale]);
   useEffect(() => { persist('sheetAudioUrl', sheetAudioUrl); }, [sheetAudioUrl]);
   useEffect(() => { persist('approvedSheet', approvedSheet); }, [approvedSheet]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -421,6 +429,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-captionMode')) setCaptionMode(f['cover-studio-captionMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAbc')) setSheetAbc(f['cover-studio-sheetAbc'] as never);
     if (Object.hasOwn(f, 'cover-studio-scoreSections')) setScoreSections(f['cover-studio-scoreSections'] as never);
+    // A draft from before cuts existed has none.
+    setScoreCuts((f['cover-studio-scoreCuts'] ?? []) as never);
     if (Object.hasOwn(f, 'cover-studio-scoreTempoScale')) setScoreTempoScale(f['cover-studio-scoreTempoScale'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAudioUrl')) setSheetAudioUrl(f['cover-studio-sheetAudioUrl'] as never);
     if (Object.hasOwn(f, 'cover-studio-approvedSheet')) setApprovedSheet(f['cover-studio-approvedSheet'] as never);
@@ -862,7 +872,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const key = sourceKey;
     const request = ++sheetRequestRef.current;
     let workflowId = '';
-    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSheetPreparing(true);
+    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setScoreCuts([]); setSheetPreparing(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
         const { job } = await coverWorkflowApi.transcribe(token, coverDraftId, coverDraftRevision, !!sheetAbc);
@@ -947,6 +957,34 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       setSheetAudioUrl(source.audioUrl);
     } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
+  };
+
+  // The score change, as the lead sheet's own edits make it.
+  const changeSheetAbc = (value: string) => {
+    sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
+    setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null);
+  };
+  // Cuts section i from the score and its paired lyric block (block i, as the
+  // section lint pairs them) together, so the blocks after it stay paired.
+  const handleCutSection = (index: number) => {
+    const cut = cutSection(sheetAbc, index);
+    if ('error' in cut) { setSheetError(cut.error); return; }
+    const block = instrumental ? undefined : lyricBlockRanges(lyrics)[index];
+    let afterLyrics = block ? lyrics.slice(0, block.start) + lyrics.slice(block.end) : lyrics;
+    if (block && block.end === lyrics.length) afterLyrics = afterLyrics.trimEnd() + '\n';
+    setSheetError('');
+    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: cut.abc, afterLyrics }]);
+    setSectionMatch(null);
+    if (afterLyrics !== lyrics) { lyricEditRef.current++; setLyrics(afterLyrics); setLyricsSource(null); }
+    changeSheetAbc(cut.abc);
+    if (!instrumental && !block) showToast(`No lyric block ${index + 1} to remove; only the score was cut`);
+  };
+  const lastCut = scoreCuts.at(-1);
+  const undoCut = () => {
+    if (!lastCut) return;
+    setScoreCuts(cuts => cuts.slice(0, -1));
+    if (lastCut.lyrics !== lyrics) { lyricEditRef.current++; setLyrics(lastCut.lyrics); setLyricsSource(null); }
+    changeSheetAbc(lastCut.abc);
   };
 
   // The original source, never a recombined mix: its vocal stem is what the
@@ -1425,7 +1463,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     handleClearSource();
     sheetRequestRef.current++;
     setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null);
-    setSectionMatch(null); setSheetAudioUrl(''); setSheetError('');
+    setSectionMatch(null); setScoreCuts([]); setSheetAudioUrl(''); setSheetError('');
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId(''); setSheetJob(null); setSheetPreparing(false);
     setSourceMode(mode);
@@ -1570,8 +1608,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
               <button type="button" onClick={() => void handleMatchSections()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching}
-                title="Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || scoreCuts.length > 0}
+                title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
+                  : "Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
                 {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match sections to score'}</button>
             </div>
@@ -1590,13 +1629,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               // Coloured as the lead sheet colours each section's notes; a
               // click plays the lead sheet from that section.
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
-                <button type="button" key={`${index}-${section.startBar}`} onClick={() => setSeekSection({ index })}
-                  title={`Play the lead sheet from ${section.label}`}
-                  style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
-                  className="rounded border-l-4 px-2 py-0.5 text-[11px] text-zinc-800 dark:text-zinc-100 hover:brightness-125">
-                  ▶ {section.label} · bar {section.startBar}
-                </button>)}</div>
+                <span key={`${index}-${section.startBar}`} style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
+                  className="inline-flex rounded border-l-4 text-[11px] text-zinc-800 dark:text-zinc-100">
+                  <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
+                    className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
+                  <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
+                    title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
+                    className="px-1 text-zinc-500 hover:text-red-500">✕</button>
+                </span>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
+            {scoreCuts.length > 0 && <p className="text-xs text-zinc-500">
+              {scoreCuts.length} section{scoreCuts.length > 1 ? 's' : ''} cut from this cover; the dataset's score and lyrics are unchanged.
+              {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
+                <button type="button" onClick={undoCut} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo cut</button>}
+            </p>}
             {!instrumental && sectionLint && !sectionLint.ok &&
               <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
           </div>}
@@ -1608,8 +1654,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             sourceMode={sourceMode}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
             abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
-            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
-              setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null); }}
+            onAbcChange={changeSheetAbc}
             scoreSource={sheetScoreSource} seekSection={seekSection} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}
