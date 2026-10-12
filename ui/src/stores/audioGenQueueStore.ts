@@ -385,6 +385,9 @@ async function _restoreFromIDB(): Promise<void> {
 // _restoreFromIDB() writes to _state and notifies _listeners.
 
 let _state: AudioGenQueueState = { items: [], completionCounter: 0, awaitingResume: 0 };
+/** Rows addManualQueueItem made on this page; refreshServerProjection keeps
+ *  them until the server queue has their render. */
+const _manualIds = new Set<string>();
 const _listeners = new Set<() => void>();
 
 /** Ready gate — resolves when IDB restore is complete.
@@ -595,10 +598,17 @@ async function refreshServerProjection(token: string): Promise<void> {
   try {
     const { items } = await audioQueueApi.list(token);
     const previous = new Map(_state.items.map(item => [item.id, item]));
+    // A studio's own row (addManualQueueItem) lives only in this tab until its
+    // render reaches the server queue: a Cover workflow queued behind another
+    // has no intent until the first finishes. Keep it until a server item
+    // carries its job or workflow, or every refresh wipes a queued row.
+    const claimed = new Set(items.flatMap(server => [server.jobId, server.meta?.workflowJobId]).filter(Boolean));
+    const local = _state.items.filter(item => _manualIds.has(item.id) && !item.serverQueueId
+      && !claimed.has(item.jobId) && !claimed.has(item.workflowJobId));
     _state.items = items.map(server => {
       const id = (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id;
       return projectServerItem(server, previous.get(id));
-    });
+    }).concat(local);
     _heldIds.clear();
     for (const server of items) if (server.status === 'held') {
       const item = _state.items.find(entry => entry.serverQueueId === server.id);
@@ -649,6 +659,7 @@ export function _queueItemsForTests(): AudioQueueItem[] { return _state.items; }
 
 export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _state = { items, completionCounter: 0, awaitingResume: 0 };
+  _manualIds.clear();
   _resumeCalled = false;
   _running = false;
   _lastToken = null;
@@ -1079,6 +1090,7 @@ export function addManualQueueItem(opts: {
     status: 'generating',
     stage: 'Submitting...',
   };
+  _manualIds.add(id);
   _state.items.push(item);
   _emit(true);
   return id;
@@ -1797,6 +1809,10 @@ async function _runQueueItem(next: AudioQueueItem, token: string): Promise<'done
 
 let _running = false;
 
+/** A pending row this queue submits itself: not held, and not a studio's own
+ *  row (addManualQueueItem), which shows as pending while its studio waits. */
+const _runnable = (i: AudioQueueItem) => i.status === 'pending' && !_heldIds.has(i.id) && !_manualIds.has(i.id);
+
 async function _processQueue(token: string): Promise<void> {
   if (queueOwner() !== 'browser') return;
   if (_running) return;
@@ -1805,7 +1821,7 @@ async function _processQueue(token: string): Promise<void> {
   try {
     while (true) {
       if (queueOwner() !== 'browser') break;
-      const pending = _state.items.filter(i => i.status === 'pending' && !_heldIds.has(i.id));
+      const pending = _state.items.filter(_runnable);
       if (pending.length === 0) break;
 
       // Artist batching: prefer items with same adapter as last completed
@@ -1865,7 +1881,7 @@ async function _processQueue(token: string): Promise<void> {
           }
           if (waited) {
             if (_heldIds.has(next.id) || next.status !== 'pending') continue;
-            wave = _submitWave(next, _state.items.filter(i => i.status === 'pending' && !_heldIds.has(i.id)));
+            wave = _submitWave(next, _state.items.filter(_runnable));
           }
         }
         if (wave.length > 1) console.log(`[AudioQueue] Submitting ${wave.length} songs together for server-side batching`);
