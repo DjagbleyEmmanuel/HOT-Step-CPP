@@ -9,11 +9,13 @@ interface Props {
   /** `imported` carries the score's title and any lyrics, which the native score itself leaves out. */
   onAbcChange: (abc: string, imported?: { title: string; lyrics: string; chords: MusicXmlResult['chords'] }) => void;
   children: React.ReactNode;
+  /** Shown at the right-hand end of the import button's row. */
+  action?: React.ReactNode;
 }
 
 const isMusicXml = (name: string) => /\.(musicxml|xml|mxl)$/i.test(name);
 
-export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, children }) => {
+export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, children, action }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const abcRef = useRef(abc);
@@ -97,6 +99,7 @@ export const MusicXmlImport: React.FC<Props> = ({ abc, disabled, onAbcChange, ch
             openFile(event.target.files?.[0]);
             event.target.value = '';
           }} />
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       <div onDragEnter={event => { event.preventDefault(); if (!disabled) setDragging(true); }}
         onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = disabled || loading ? 'none' : 'copy'; }}

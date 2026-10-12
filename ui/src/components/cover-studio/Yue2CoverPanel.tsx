@@ -100,20 +100,18 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         <StyledSelect accent="pink" value={p.nar} onChange={p.onNar} options={p.narOptions} />
       </>}
     </div>;
-  const captionEl = <div className="space-y-2">
-    {p.captionTracks.length > 0 && p.renderMode !== 'base' && <>
-      <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
-      <StyledSelect accent="pink" value={p.captionMode} onChange={p.onCaptionMode}
-        options={[
-          { value: 'custom', label: 'Custom caption' },
-          { value: 'auto', label: 'Automatic from dataset' },
-          ...p.captionTracks.map(track => ({ value: `track:${track.name}`, label: `Track: ${track.name}` })),
-        ]} />
-    </>}
-    <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
-      placeholder="Style caption: genre, instruments, mood and vocal style" aria-label="YuE2 style caption"
-      className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
+  const captionSourceEl = p.captionTracks.length > 0 && p.renderMode !== 'base' && <div className="space-y-2">
+    <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
+    <StyledSelect accent="pink" value={p.captionMode} onChange={p.onCaptionMode}
+      options={[
+        { value: 'custom', label: 'Custom caption' },
+        { value: 'auto', label: 'Automatic from dataset' },
+        ...p.captionTracks.map(track => ({ value: `track:${track.name}`, label: `Track: ${track.name}` })),
+      ]} />
   </div>;
+  const captionEl = <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
+    placeholder="Style caption: genre, instruments, mood and vocal style" aria-label="YuE2 style caption"
+    className="block w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />;
   const instrumentalEl = <div className="flex items-center justify-between">
     <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
     <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
@@ -133,9 +131,9 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       if (v === 'set' && p.tempoMode !== 'set') p.onBpm(Math.max(20, Math.min(300, sourceBpm)));
       p.onTempoMode(v as 'free' | 'source' | 'set');
     }} options={[{ value: 'free', label: 'Free (style decides)' }, { value: 'source', label: 'Source tempo' }, { value: 'set', label: 'Set BPM' }]} />
-    {p.tempoMode === 'set' && <EditableSlider label="Target BPM" value={p.bpm} min={20} max={300} step={1}
-      onChange={p.onBpm} helpText={`Source: ${sourceBpm} BPM`} />}
   </div>;
+  const bpmEl = p.tempoMode === 'set' && <EditableSlider label="Target BPM" value={p.bpm} min={20} max={300} step={1}
+    onChange={p.onBpm} helpText={`Source: ${sourceBpm} BPM`} />;
   const pitchEl = <EditableSlider label="Pitch Shift" value={p.keyShift} min={-12} max={12} step={1}
     onChange={p.onKeyShift} defaultValue={0} disabled={!keyLabel}
     formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
@@ -166,21 +164,24 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   <div ref={rootRef} className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4">
     {wide
       // Paired rows, each pair top-aligned: full-width render mode and artist
-      // grid, then source beside caption, the two toggles, voices beside
-      // tempo, pitch beside Advanced, and a full-width Generate.
+      // grid, source beside caption source over a full-width caption, the two
+      // toggles, voices beside tempo, pitch beside the target BPM, then
+      // full-width Advanced and Generate. A missing half leaves its slot to
+      // the next control, so a lone caption source sits on the left.
       ? <div className="grid grid-cols-2 items-start gap-x-6 gap-y-4">
         <div className="col-span-2">{renderModeEl}</div>
         {artistGridEl && <div className="col-span-2">{artistGridEl}</div>}
-        {sourceEl ? <>{sourceEl}{captionEl}</> : <div className="col-span-2">{captionEl}</div>}
+        {sourceEl}{captionSourceEl}
+        <div className="col-span-2">{captionEl}</div>
         {instrumentalEl}{keepChordsEl}
         {voicesEl}{tempoEl}
-        {pitchEl}{advancedEl}
+        {pitchEl}{bpmEl}
+        <div className="col-span-2">{advancedEl}</div>
         <div className="col-span-2">{generateEl}</div>
       </div>
       : <div className="space-y-3">
-        {renderModeEl}{artistGridEl}{sourceEl}{captionEl}{instrumentalEl}
-        <p className="pt-3 text-xs font-semibold text-zinc-700 dark:text-zinc-200">Score to render</p>
-        {voicesEl}{keepChordsEl}{tempoEl}{pitchEl}{advancedEl}{generateEl}
+        {renderModeEl}{artistGridEl}{sourceEl}{captionSourceEl}{captionEl}{instrumentalEl}
+        {voicesEl}{keepChordsEl}{tempoEl}{bpmEl}{pitchEl}{advancedEl}{generateEl}
       </div>}
   </div>
   );
