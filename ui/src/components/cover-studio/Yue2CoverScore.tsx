@@ -7,6 +7,8 @@ import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverA
 
 interface Props {
   height: number;
+  /** ABC beside the rendered score instead of above it. */
+  wide: boolean;
   sourceReady: boolean;
   sourceMode: 'audio' | 'musicxml';
   readiness: Yue2CoverReadiness | null;
@@ -28,9 +30,12 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   const audioRef = useRef<HTMLDivElement>(null);
   const [previewValid, setPreviewValid] = useState(false);
   const busy = p.preparing || p.job?.status === 'queued' || p.job?.status === 'running';
+  // Side by side, the ABC and the score share the panel's height, less its
+  // heading, the import row and the approve button.
+  const boxHeight = p.wide ? Math.max(128, p.height - 170) : undefined;
   const editor = <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
-    placeholder="Paste an ABC score here to skip transcription"
-    className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />;
+    placeholder="Paste an ABC score here to skip transcription" style={{ height: boxHeight }}
+    className={`w-full ${p.wide ? 'resize-none' : 'h-28 resize-y'} rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white`} />;
 
   useEffect(() => {
     if (!scoreRef.current) return;
@@ -84,14 +89,24 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
       {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
-      {p.sourceMode === 'audio'
-        ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange}>{editor}</MusicXmlImport>
-        : editor}
-      {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
-      <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto max-h-48`}>
-        <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
+      {/* One tree for both layouts, only classes change: moving scoreRef's
+          div would remount it and drop abcjs's render. The score scales to
+          its column (responsive: 'resize'), so the half-width one zooms out. */}
+      <div className={p.wide ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
+        <div className="min-w-0">
+          {p.sourceMode === 'audio'
+            ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange}>{editor}</MusicXmlImport>
+            : editor}
+        </div>
+        <div className="min-w-0 space-y-3">
+          {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
+          <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
+            style={{ height: boxHeight }}>
+            <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
+          </div>
+          <div ref={audioRef} className={`text-xs ${previewValid ? '' : 'hidden'}`} />
+        </div>
       </div>
-      <div ref={audioRef} className={`text-xs ${previewValid ? '' : 'hidden'}`} />
       <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
         className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
         {p.approved ? 'Score approved' : 'Approve score'}

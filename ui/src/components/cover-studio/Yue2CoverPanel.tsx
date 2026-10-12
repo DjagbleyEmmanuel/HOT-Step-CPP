@@ -62,42 +62,16 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
-  <div className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4 space-y-4">
-    {/* Layout rule: each section (caption, render mode, score-to-render) is one
-        unbroken unit — it renders in one column or full width, never split
-        across the column boundary. The caption and render-mode sections sit
-        side by side as two independent flex stacks (not a CSS grid row), so a
-        tall render-mode column (artist grid open) never stretches the short
-        caption column to match — each stays its own natural height, top
-        aligned, no dead space underneath. Below min-width the pair wraps to
-        one column. */}
-    <div className="flex flex-wrap items-start gap-4">
-    <div className="min-w-0 flex-[1_1_300px] space-y-2">
-      {/* ParamLabel's root is an inline-flex span — fine beside its own
-          control, but two in a row with nothing block-level between them run
-          together on one line. This wrapper div forces the line break. */}
-      <div><ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." /></div>
-      {p.captionTracks.length > 0 && p.renderMode !== 'base' && (
-        <>
-          <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
-          <StyledSelect accent="pink" value={p.captionMode} onChange={p.onCaptionMode}
-            options={[
-              { value: 'custom', label: 'Custom caption' },
-              { value: 'auto', label: 'Automatic from dataset' },
-              ...p.captionTracks.map(track => ({ value: `track:${track.name}`, label: `Track: ${track.name}` })),
-            ]} />
-        </>
-      )}
-      <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
-        placeholder="Describe the target sound"
-        className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
-    <div className="flex items-center justify-between">
-      <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
-      <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
-    </div>
-    </div>
-
-    <div className="min-w-0 flex-[1_1_300px] space-y-2">
+  <div className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4">
+    {/* Two sections in reading order: who and how it sounds (render mode,
+        artist or adapters, caption), then the score to render with Generate
+        under it. A wide column puts them side by side as a grid of two
+        top-aligned stacks, so Generate stays under the score settings and a
+        tall artist grid never stretches the other side; narrower than two
+        300px columns, they stack. */}
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] items-start gap-x-6 gap-y-6">
+    <section className="min-w-0 space-y-2">
+      <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Style</p>
       <ParamLabel label="Render mode" info="Choose base YuE2, a trained Lyric Studio artist, or a custom adapter pair." />
       <div role="group" aria-label="Render mode" className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
         {([['base', 'Base YuE2'], ['artist', 'Existing Artist'], ['custom', 'Custom']] as const).map(([value, label]) =>
@@ -123,17 +97,33 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         <ParamLabel label="NAR renderer" info="The NAR adapter steers the audio rendering stage." />
         <StyledSelect accent="pink" value={p.nar} onChange={p.onNar} options={p.narOptions} />
       </>}
-    </div>
-    </div>
-
-    {p.isGenerating && (
-      <div className="space-y-2 text-xs">
-        <p>{p.genStage || 'Generating'} · {p.genProgress}%</p>
-        <div className="h-2 bg-zinc-800 rounded-full"><div className="h-full bg-pink-500 rounded-full" style={{ width: `${p.genProgress}%` }} /></div>
-        <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
+      <div className="pt-2 space-y-2">
+        {/* ParamLabel's root is an inline-flex span — fine beside its own
+            control, but two in a row with nothing block-level between them run
+            together on one line. This wrapper div forces the line break. */}
+        <div><ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." /></div>
+        {p.captionTracks.length > 0 && p.renderMode !== 'base' && (
+          <>
+            <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
+            <StyledSelect accent="pink" value={p.captionMode} onChange={p.onCaptionMode}
+              options={[
+                { value: 'custom', label: 'Custom caption' },
+                { value: 'auto', label: 'Automatic from dataset' },
+                ...p.captionTracks.map(track => ({ value: `track:${track.name}`, label: `Track: ${track.name}` })),
+              ]} />
+          </>
+        )}
+        <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
+          placeholder="Describe the target sound"
+          className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
+        <div className="flex items-center justify-between">
+          <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
+          <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
+        </div>
       </div>
-    )}
-    <div className="min-w-0 space-y-3 border-t border-zinc-200 dark:border-white/10 pt-4">
+    </section>
+
+    <section className="min-w-0 space-y-3">
       <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Score to render</p>
       <ParamLabel label="Voices" info="Vocal melody alone gives the new style room to choose its instruments. Both keeps the transcribed instrumental line too." />
       <StyledSelect accent="pink" value={p.voices} onChange={v => p.onVoices(v as 'vocal' | 'both')}
@@ -166,12 +156,20 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
             { value: 'mask', label: 'Hard (hide lyrics until timed)' },
           ]} />
       </details>
+      {p.isGenerating && (
+        <div className="space-y-2 text-xs">
+          <p>{p.genStage || 'Generating'} · {p.genProgress}%</p>
+          <div className="h-2 bg-zinc-800 rounded-full"><div className="h-full bg-pink-500 rounded-full" style={{ width: `${p.genProgress}%` }} /></div>
+          <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
+        </div>
+      )}
+      <button onClick={p.onGenerate} disabled={!p.canGenerate}
+        className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
+        {p.isGenerating ? <><Loader2 className="inline w-4 h-4 mr-1 animate-spin" /> Add to queue</> : 'Generate YuE2 cover'}
+      </button>
+      {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
+    </section>
     </div>
-    <button onClick={p.onGenerate} disabled={!p.canGenerate}
-      className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
-      {p.isGenerating ? <><Loader2 className="inline w-4 h-4 mr-1 animate-spin" /> Add to queue</> : 'Generate YuE2 cover'}
-    </button>
-    {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
   </div>
   );
 };

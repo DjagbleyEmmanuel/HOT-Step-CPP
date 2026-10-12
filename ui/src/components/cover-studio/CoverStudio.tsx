@@ -40,6 +40,7 @@ import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { CoverResizeHandle } from './CoverResizeHandle';
+import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
@@ -94,37 +95,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [scoreWidth, setScoreWidth] = usePersistedState('hs-cover-score-width', 560);
   const [settingsWidth, setSettingsWidth] = usePersistedState('hs-cover-settings-width', 420);
   const [scoreHeight, setScoreHeight] = usePersistedState('hs-cover-score-height', 320);
-  const startResize = (event: React.MouseEvent, width: number, setWidth: (value: number) => void, min: number, max: number) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const onMove = (move: MouseEvent) => setWidth(Math.min(max, Math.max(min, width + move.clientX - startX)));
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
-  const startScoreResize = (event: React.MouseEvent) => {
-    event.preventDefault();
-    const startY = event.clientY;
-    const height = scoreHeight;
-    const onMove = (move: MouseEvent) => setScoreHeight(Math.max(160, Math.min(900, height + startY - move.clientY)));
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
+  const startResize = (event: React.MouseEvent, width: number, setWidth: (value: number) => void, min: number, max: number) =>
+    startDragResize(event, 'x', width, setWidth, min, max);
+  const startScoreResize = (event: React.MouseEvent) => startDragResize(event, 'y', scoreHeight, setScoreHeight, 160, 900, -1);
 
   // ── Source audio state ──
   const [sourceFileName, setSourceFileName] = useState(() => restore<string>('sourceFileName', ''));
@@ -1614,6 +1587,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           {yue2Mode && <CoverResizeHandle label="Resize lyrics and lead sheet" direction="vertical" onMouseDown={startScoreResize} />}
           {yue2Mode && <Yue2CoverScore
             height={scoreHeight}
+            wide={scoreWidth > 400}
             sourceReady={(sourceMode === 'musicxml' ? !!sheetAbc.trim() : !!sourceAudioUrl) && !isUploading}
             sourceMode={sourceMode}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
