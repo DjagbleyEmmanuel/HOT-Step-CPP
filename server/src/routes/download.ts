@@ -277,7 +277,12 @@ router.get('/:id', async (req, res) => {
   const songTitle = rawTitle.replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
 
   const suffix = versionSuffix(version);
-  const resolvedArtist = artistName || (song.artist || '').replace(badPrefixes, '').replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
+  // The caller's artist, else the one the song was made with (a cover's
+  // covering band is recorded as artistName).
+  let gp: { artist?: unknown; artistName?: unknown } = {};
+  try { gp = JSON.parse(song.generation_params || '{}') || {}; } catch { /* no params */ }
+  const savedArtist = [gp.artist, gp.artistName, song.artist].find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  const resolvedArtist = artistName || (savedArtist || '').replace(badPrefixes, '').replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
 
   // Strip leading "Artist - " prefix from title if it duplicates the resolved artist.
   // generate.ts stores titles as "Artist - Song Title", so without this the artist
