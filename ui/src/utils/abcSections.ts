@@ -43,3 +43,12 @@ export function sectionColours(labels: string[]): string[] {
     return byLabel.get(key)!;
   });
 }
+
+/** Each `[Tag]` lyric block as a character range, tag line included. Block i
+ *  pairs with score section i, as the server's section lint pairs them. */
+export function lyricBlockRanges(lyrics: string): Array<{ start: number; end: number }> {
+  // The server's LYRIC_SECTION_TAG; a block starts at its `[`, since `^\s*`
+  // can swallow the blank lines before it.
+  const starts = [...lyrics.matchAll(/^\s*\[([^\]\n]+)\]/gm)].map(match => match.index + match[0].indexOf('['));
+  return starts.map((start, i) => ({ start, end: starts[i + 1] ?? lyrics.length }));
+}

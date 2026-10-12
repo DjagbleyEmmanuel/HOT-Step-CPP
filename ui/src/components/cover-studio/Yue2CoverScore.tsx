@@ -28,6 +28,8 @@ interface Props {
   /** Play from this score section; a new object each click, so a repeat
    *  click on the same section plays it again. */
   seekSection?: { index: number } | null;
+  /** The score section now playing or just picked. */
+  onSection?: (index: number) => void;
 }
 
 type Tune = ReturnType<typeof abcjs.renderAbc>[number];
@@ -91,6 +93,8 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   const [previewValid, setPreviewValid] = useState(false);
   // Plays from score section i; replaced on every render of the ABC.
   const playFromRef = useRef<(index: number) => Promise<void>>(async () => {});
+  const onSectionRef = useRef(p.onSection);
+  useEffect(() => { onSectionRef.current = p.onSection; });
   useEffect(() => {
     if (p.seekSection) void playFromRef.current(p.seekSection.index);
   }, [p.seekSection]);
@@ -138,6 +142,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     playFromRef.current = async index => {
       const start = starts[index];
       if (!start) return;
+      onSectionRef.current?.(index);
       followNoteInBox(start.elements?.[0]?.[0], box);
       if (!control) return;
       // seek() only moves a player that has started; play() toggles, so it
@@ -150,9 +155,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     if (!audioRef.current || !abcjs.synth.supportsAudio()) return;
     const synth = control = new abcjs.synth.SynthController();
     let lit: Element[] = [];
+    // Report a section once, when playback crosses into it.
+    const marks = abcSectionMarks(abc);
+    let section = -1;
     synth.load(audioRef.current, {
       onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
-      onEvent(ev: { elements?: Element[][] }) {
+      onEvent(ev: { elements?: Element[][]; startCharArray?: number[] }) {
+        const char = ev.startCharArray?.find(value => typeof value === 'number');
+        const index = char === undefined ? -1 : sectionAtChar(marks, char);
+        if (index >= 0 && index !== section) onSectionRef.current?.(section = index);
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
         lit = (ev.elements ?? []).flat();
         lit.forEach(el => el.classList.add('abcjs-highlight'));

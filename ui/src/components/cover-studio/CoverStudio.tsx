@@ -30,7 +30,8 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { sectionColours } from '../../utils/abcSections';
+import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
+import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
@@ -189,6 +190,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>(() => restore('scoreSections', []));
   const sectionChipColours = sectionColours(scoreSections.map(section => section.label));
   const [seekSection, setSeekSection] = useState<{ index: number } | null>(null);
+  // The score section playing or last picked; its lyric block is highlighted.
+  // Kept with the score it indexes, so a new score drops it.
+  const [activeSectionOf, setActiveSectionOf] = useState<{ abc: string; index: number } | null>(null);
+  const activeSection = activeSectionOf?.abc === sheetAbc ? activeSectionOf.index : null;
+  const activeBlock = yue2Mode && activeSection !== null ? lyricBlockRanges(lyrics)[activeSection] : undefined;
+  const lyricHighlight = activeBlock && activeSection !== null
+    ? { ...activeBlock, colour: sectionChipColours[activeSection] ?? '#06b6d4' } : null;
   const [sectionLint, setSectionLint] = useState<Yue2SectionReview['lint'] | null>(null);
   // Match sections to score: the proposal and the lyrics it was made from.
   const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
@@ -1555,9 +1563,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           </div>
           <div className="flex-1 min-h-0 p-4 flex flex-col gap-1">
             {lyricsSource && <span className="text-[10px] text-cyan-600 dark:text-cyan-300">Lyrics from dataset · editable</span>}
-            <textarea value={lyrics} onChange={e => { lyricEditRef.current++; setLyrics(e.target.value); setLyricsSource(null); }}
-              placeholder={t('cover.lyricsPlaceholder')}
-              className="w-full min-h-0 flex-1 resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
+            <LyricsSectionHighlight value={lyrics} onChange={value => { lyricEditRef.current++; setLyrics(value); setLyricsSource(null); }}
+              placeholder={t('cover.lyricsPlaceholder')} highlight={lyricHighlight} />
           </div>
           {yue2Mode && !!sheetAbc && <div className="flex-shrink-0 px-4 pb-3 space-y-1">
             <div className="flex items-center justify-between gap-2">
@@ -1603,7 +1610,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
             onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
               setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null); }}
-            scoreSource={sheetScoreSource} seekSection={seekSection}
+            scoreSource={sheetScoreSource} seekSection={seekSection} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}
           
