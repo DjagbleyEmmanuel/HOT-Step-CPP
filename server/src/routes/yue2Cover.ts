@@ -14,7 +14,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, createBuildSession, generateBuildTakes, getBuildSession, keepBuildTake, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, createBuildSession, deleteBuildTake, generateBuildTakes, getBuildSession, keepBuildTake, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -194,7 +194,9 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   router.post('/build/:id/keep', (req: Request, res: Response) =>
     takes(res, () => keepBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
   router.post('/build/:id/undo', (req: Request, res: Response) =>
-    takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!)));
+    takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!, req.body?.section)));
+  router.delete('/build/:id/takes/:take', (req: Request, res: Response) =>
+    takes(res, () => deleteBuildTake(String(req.params.id), authenticate(req)!, String(req.params.take))));
 
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {

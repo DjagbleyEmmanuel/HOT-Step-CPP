@@ -113,6 +113,8 @@ export interface Yue2BuildTake {
   audioUrl: string;
   frames: number;
   starts: Array<number | null>;
+  /** Loudness 0..1 of its new part, from 4 s before its first section. */
+  peaks?: number[];
 }
 export interface Yue2BuildSession {
   id: string;
@@ -148,8 +150,11 @@ export const yue2CoverApi = {
     request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ to, count }) }),
   buildKeep: (id: string, take: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/keep`, token, { method: 'POST', body: JSON.stringify({ take }) }),
-  buildUndo: (id: string, token: string) =>
-    request<Yue2BuildSession>(`/build/${id}/undo`, token, { method: 'POST' }),
+  /** Drops the last kept take, or every kept take from `section` on. */
+  buildUndo: (id: string, token: string, section?: number) =>
+    request<Yue2BuildSession>(`/build/${id}/undo`, token, { method: 'POST', body: JSON.stringify(section === undefined ? {} : { section }) }),
+  buildDelete: (id: string, take: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/takes/${take}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
   /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */

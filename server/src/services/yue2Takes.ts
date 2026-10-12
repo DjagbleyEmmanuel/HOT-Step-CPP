@@ -31,7 +31,10 @@ export const YUE2_FPS = 25;
 /** A take runs this much past its sections' score length before stopping. */
 const TAKE_SLACK = 1.3;
 const TAKE_SLACK_FRAMES = 4 * YUE2_FPS;
-const MAX_TAKES = 6;
+const MAX_TAKES = 10;
+/** Bars in a take's waveform, over its new part (from its lead-in). */
+const PEAKS = 120;
+const LEAD_IN_S = 4;
 
 export class TakesError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -49,6 +52,8 @@ export interface Yue2Take {
   /** The frame each section starts at in this take's audio, or null where
    *  the take does not reach it or no start was found. */
   starts: Array<number | null>;
+  /** Loudness of its new part, 0..1, from LEAD_IN_S before `from` to its end. */
+  peaks?: number[];
 }
 
 export interface Yue2BuildSession {
@@ -177,6 +182,30 @@ async function waitJob(jobId: string): Promise<void> {
   }
 }
 
+/** A waveform of a 16-bit PCM WAV between two times: PEAKS peak levels. */
+export function wavPeaks(wav: Buffer, fromSec: number, toSec: number): number[] {
+  // Walk the chunks to fmt and data; the engine writes plain 16-bit PCM.
+  let off = 12, channels = 2, rate = 48000, dataOff = -1, dataLen = 0;
+  while (off + 8 <= wav.length) {
+    const id = wav.toString('ascii', off, off + 4), len = wav.readUInt32LE(off + 4);
+    if (id === 'fmt ') { channels = wav.readUInt16LE(off + 10); rate = wav.readUInt32LE(off + 12); }
+    if (id === 'data') { dataOff = off + 8; dataLen = Math.min(len, wav.length - dataOff); break; }
+    off += 8 + len + (len % 2);
+  }
+  if (dataOff < 0) return [];
+  const frameBytes = 2 * channels, frames = Math.floor(dataLen / frameBytes);
+  const a = Math.max(0, Math.floor(fromSec * rate)), b = Math.min(frames, Math.floor(toSec * rate));
+  if (b <= a) return [];
+  const peaks: number[] = [];
+  for (let k = 0; k < PEAKS; k++) {
+    const lo = a + Math.floor(((b - a) * k) / PEAKS), hi = a + Math.floor(((b - a) * (k + 1)) / PEAKS);
+    let peak = 0;
+    for (let f = lo; f < hi; f += 16) peak = Math.max(peak, Math.abs(wav.readInt16LE(dataOff + f * frameBytes)));
+    peaks.push(Math.round((peak / 32768) * 100) / 100);
+  }
+  return peaks;
+}
+
 /** Starts a build session for a cover's request. */
 export function createBuildSession(params: Record<string, unknown>, request: Yue2SynthRequest, userId: string): Yue2BuildSession {
   if (!request.abc) throw new TakesError('Build by section needs an approved score.');
@@ -257,7 +286,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
           }
           const fresh = load(id, userId);
-          fresh.takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts });
+          const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (from ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
+          fresh.takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks });
           save(fresh);
         }, { label: `yue2 build: ${stored.sections[from].label}–${stored.sections[to].label}`, family: 'yue2' });
       } catch (err) {
@@ -286,10 +316,29 @@ export function keepBuildTake(id: string, userId: string, takeId: string): Yue2B
 }
 
 /** Drops the last kept take, so its sections can be built again. */
-export function undoBuildKeep(id: string, userId: string): Yue2BuildSession {
+/** Drops kept takes from the end: one, or until `section` is the next to
+ *  build again. */
+export function undoBuildKeep(id: string, userId: string, section?: number): Yue2BuildSession {
   const stored = load(id, userId);
-  stored.kept.pop();
+  if (section === undefined) stored.kept.pop();
+  else {
+    if (!Number.isInteger(section) || section < 0) throw new TakesError('No such section.');
+    while (stored.kept.length && nextSection(stored) > section) stored.kept.pop();
+  }
   save(stored);
+  return view(stored);
+}
+
+/** Deletes a take that is not part of the build, with its audio and codes. */
+export function deleteBuildTake(id: string, userId: string, takeId: string): Yue2BuildSession {
+  const stored = load(id, userId);
+  if (!stored.takes.some(t => t.id === takeId)) throw new TakesError('No such take.');
+  if (stored.kept.includes(takeId)) throw new TakesError('That take is part of the build; undo back past it first.');
+  stored.takes = stored.takes.filter(t => t.id !== takeId);
+  save(stored);
+  for (const file of [`${takeId}.wav`, `${takeId}.codes.json`]) {
+    try { fs.unlinkSync(path.join(sessionDir(id), file)); } catch { /* already gone */ }
+  }
   return view(stored);
 }
 

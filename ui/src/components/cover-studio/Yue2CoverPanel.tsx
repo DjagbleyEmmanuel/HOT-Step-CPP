@@ -26,10 +26,11 @@ interface Props {
   instrumental: boolean;
   onInstrumentalChange: (value: boolean) => void;
   renderMode: 'base' | 'artist' | 'custom';
-  /** Build by section instead of one-shot; `buildControls` replaces Generate. */
-  buildMode: boolean;
-  onBuildMode: (on: boolean) => void;
-  buildControls?: React.ReactNode;
+  /** Opens the Build-by-section page. */
+  onOpenBuild: () => void;
+  /** A build in progress, as one line, or ''. */
+  buildStatus: string;
+  onStartOverBuild?: () => void;
   onRenderMode: (value: 'base' | 'artist' | 'custom') => void;
   ar: string;
   nar: string;
@@ -156,17 +157,19 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       ]} />
   </details>;
   // Render progress and cancel live in the queue; this only adds to it.
-  const modeEl = <div className="flex rounded-lg border border-zinc-300 dark:border-white/10 overflow-hidden">
-    {([[false, 'One-shot'], [true, 'Build by section']] as const).map(([on, label]) =>
-      <button key={label} type="button" aria-pressed={p.buildMode === on} onClick={() => p.onBuildMode(on)}
-        className={`flex-1 px-2 py-1.5 text-xs ${p.buildMode === on ? 'bg-pink-500/20 text-pink-700 dark:text-pink-300' : 'text-zinc-600 dark:text-zinc-400'}`}>{label}</button>)}
-  </div>;
-  const generateEl = p.buildMode ? <div className="space-y-2">{modeEl}{p.buildControls}</div> : <div className="space-y-2">
-    {modeEl}
-    <button onClick={p.onGenerate} disabled={!p.canGenerate}
-      className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
-      {p.isGenerating ? 'Add to queue' : 'Generate YuE2 cover'}
-    </button>
+  const generateEl = <div className="space-y-2">
+    <div className="flex gap-2">
+      <button onClick={p.onGenerate} disabled={!p.canGenerate}
+        className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
+        {p.isGenerating ? 'Add to queue' : 'Generate cover'}
+      </button>
+      <button type="button" onClick={p.onOpenBuild} title="Compose the cover a few sections at a time and keep the best takes"
+        className="rounded-xl border border-pink-500/60 px-4 py-3 text-sm font-semibold text-pink-700 dark:text-pink-300 hover:bg-pink-500/10">
+        Build by section →</button>
+    </div>
+    {p.buildStatus && <p className="text-xs text-zinc-500">{p.buildStatus} ·{' '}
+      <button type="button" onClick={p.onOpenBuild} className="text-cyan-700 dark:text-cyan-300">Open</button>
+      {p.onStartOverBuild && <> · <button type="button" onClick={p.onStartOverBuild} className="text-red-500">Start over</button></>}</p>}
     {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
   </div>;
 

@@ -47,8 +47,8 @@ import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ScorePlanReview } from './ScorePlanReview';
-import { Yue2BuildStrip, buildNext, useYue2Build } from './Yue2Build';
-import { StyledSelect } from '../shared/StyledSelect';
+import { Yue2BuildPage, buildNext, useYue2Build } from './Yue2Build';
+import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
@@ -174,11 +174,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [yue2Albums, setYue2Albums] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
   const [coveringBand, setCoveringBand] = useState(() => restore<string>('coveringBand', ''));
   // Build by section: compose a few sections at a time and keep the best take.
+  // The Build page (true) or the Prepare page (false).
   const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
   const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
-  // The last section the next takes cover, and how many takes to make.
-  const [buildTo, setBuildTo] = useState<number | null>(null);
-  const [buildCount, setBuildCount] = useState(3);
   const yue2ArtistRequestRef = useRef(0);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
@@ -1195,16 +1193,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const build = useYue2Build(token, buildSessionId, setBuildSessionId);
   const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
   const nextBuild = buildNext(buildSession);
-  const buildRange = buildTo !== null && buildTo >= nextBuild ? buildTo : null;
-  const generateBuildTakes = () => {
-    if (buildRange === null) { showToast('Pick the last section to build on the section chips'); return; }
+  const generateBuildTakes = (to: number, count: number) => {
     let params: Record<string, unknown> = buildSession?.params ?? {};
     if (!buildSession) {
       const built = yue2CoverParams();
       if (typeof built === 'string') { showToast(built); return; }
       params = built.params;
     }
-    void build.generate(params, buildRange, buildCount);
+    void build.generate(params, to, count);
   };
   // Save song: an ordinary render of the kept codec stream, so it gets the
   // usual post-processing and library save.
@@ -1224,28 +1220,33 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
       finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
     });
+    showToast('Saving the build as a song: it is in the queue');
   };
-  const renderBuildControls = () => <div className="space-y-2 text-xs">
-    {buildSession && <p className="text-zinc-500">Settings, score and lyrics are fixed to this build. Start over to change them.</p>}
-    <div className="flex items-center gap-2">
-      <div className="w-20 flex-shrink-0" title="Takes per run">
-        <StyledSelect accent="pink" value={buildCount} onChange={v => setBuildCount(Number(v))}
-          options={[1, 2, 3, 4, 5, 6].map(n => ({ value: n, label: String(n) }))} />
-      </div>
-      <button type="button" onClick={generateBuildTakes} disabled={!canGenerate || buildRange === null || build.busy}
-        className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
-        {buildRange === null ? 'Pick sections on the chips'
-          : `Generate ${buildCount} take${buildCount > 1 ? 's' : ''} of ${scoreSections[nextBuild]?.label ?? '…'}${buildRange > nextBuild ? `–${scoreSections[buildRange]?.label}` : ''}`}
-      </button>
-    </div>
-    <div className="flex gap-2">
-      <button type="button" onClick={saveBuild} disabled={!buildSession?.kept.length}
-        className="flex-1 rounded-lg bg-emerald-600 py-1.5 font-semibold text-white disabled:opacity-40">Save song</button>
-      <button type="button" onClick={() => { build.startOver(); setBuildTo(null); }} disabled={!buildSession}
-        className="rounded-lg px-3 py-1.5 text-zinc-600 dark:text-zinc-400 disabled:opacity-40">Start over</button>
-    </div>
-    {build.error && <p role="alert" className="text-red-500">{build.error}</p>}
-  </div>;
+  // The Build page's view of what is being built: the session's own settings
+  // once it exists, the Prepare page's until then.
+  const renderBuildPage = () => {
+    const draftParams = buildSession ? null : yue2CoverParams();
+    const params = buildSession?.params ?? (typeof draftParams === 'string' || !draftParams ? null : draftParams.params);
+    const cover = (params?.yue2Cover ?? {}) as Record<string, unknown>;
+    const abc = String(params?.yue2Abc ?? sheetAbc);
+    const summary = params ? [
+      String(params.artist || params.artistName || 'Base YuE2'),
+      `CFG ${params.yue2CfgScale ?? 1}`,
+      typeof cover.tempo === 'number' ? `${cover.tempo} BPM` : `tempo ${cover.tempo ?? 'source'}`,
+      cover.keyShift ? `${Number(cover.keyShift) > 0 ? '+' : ''}${cover.keyShift} st` : 'source key',
+      cover.voices === 'vocal' ? 'vocal only' : 'vocal + instrumental',
+    ].join(' · ') : 'Settings come from the Prepare page.';
+    const sections = buildSession?.sections ?? scoreSections.map(x => ({ label: x.label, startBar: x.startBar }));
+    return <Yue2BuildPage session={buildSession} sections={sections}
+      totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
+      lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : lyrics}
+      title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}
+      blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
+      busy={build.busy} error={build.error}
+      onGenerate={generateBuildTakes} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
+      onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
+      onBack={() => setBuildMode(false)} />;
+  };
 
   /** The /api/generate params for a YuE2 cover of the approved score, as the
    *  one-shot render and Build by section both submit them, or why not. */
@@ -1610,9 +1611,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         </div>
       )}
 
+      {yue2Mode && <div className="flex items-center gap-1 border-b border-zinc-200 dark:border-white/10 px-4 pt-2">
+        {([[false, 'Prepare'], [true, 'Build']] as const).map(([on, label]) =>
+          <button key={label} type="button" aria-pressed={buildMode === on} onClick={() => setBuildMode(on)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-semibold ${buildMode === on
+              ? 'border-pink-500 text-pink-700 dark:text-pink-300' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}>{label}</button>)}
+      </div>}
+      {yue2Mode && buildMode && renderBuildPage()}
+
       {/* Main workspace */}
-      {/* Scrolls sideways when the three panels' minimum widths don't fit. */}
-      <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
+      {/* Scrolls sideways when the three panels' minimum widths don't fit.
+          Hidden, not unmounted, on the Build page, so the lead sheet keeps its state. */}
+      <div className={`flex-1 flex overflow-x-auto overflow-y-hidden ${yue2Mode && buildMode ? 'hidden' : ''}`}>
         {/* Left: source choice */}
         <div className="min-w-[240px] flex-shrink-0 flex flex-col min-h-0" style={{ width: sourceWidth }}>
         {yue2Mode && <div className="border-r border-zinc-200 dark:border-white/5 p-4 space-y-3 overflow-y-auto">
@@ -1740,22 +1750,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
                 <span key={`${index}-${section.startBar}`} style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
                   className="inline-flex rounded border-l-4 text-[11px] text-zinc-800 dark:text-zinc-100">
-                  {buildMode
-                    ? <button type="button" disabled={index < nextBuild} onClick={() => { setBuildTo(index); setActiveSectionOf({ abc: sheetAbc, index: nextBuild }); }}
-                      title={index < nextBuild ? `${section.label} is built` : `Build from ${scoreSections[nextBuild]?.label} up to ${section.label}`}
-                      className={`px-2 py-0.5 ${index < nextBuild ? 'opacity-60' : 'hover:brightness-125'} ${buildRange !== null && index >= nextBuild && index <= buildRange ? 'ring-2 ring-pink-500 rounded' : ''}`}>
-                      {index < nextBuild ? '✓' : index === nextBuild ? '→' : '·'} {section.label} · bar {section.startBar}</button>
-                    : <>
-                      <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
-                        className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
-                      <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
-                        title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
-                        className="px-1 text-zinc-500 hover:text-red-500">✕</button>
-                    </>}
+                  <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
+                    className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
+                  <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
+                    title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
+                    className="px-1 text-zinc-500 hover:text-red-500">✕</button>
                 </span>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
-            {buildMode && buildSession && <Yue2BuildStrip session={buildSession} busy={build.busy}
-              onKeep={take => { void build.keep(take).then(() => setBuildTo(null)); }} onUndo={() => { void build.undo(); setBuildTo(null); }} />}
             {scoreCuts.length > 0 && <p className="text-xs text-zinc-500">
               {scoreCuts.length} section{scoreCuts.length > 1 ? 's' : ''} cut from this cover; the dataset's score and lyrics are unchanged.
               {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
@@ -1796,7 +1797,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onSelectArtist={artist => { setYue2AlbumsForArtistId(null); setYue2Albums([]); setSelectedYue2ArtistId(artist.id); setSelectedYue2LyricsSetId(null); }}
           albums={availableYue2Albums} selectedLyricsSetId={selectedYue2LyricsSetId} onSelectAlbum={selectYue2Album}
           coveringBand={coveringBand} onCoveringBand={setCoveringBand}
-          buildMode={buildMode} onBuildMode={setBuildMode} buildControls={renderBuildControls()}
+          onOpenBuild={() => setBuildMode(true)}
+          buildStatus={buildSession ? `Build in progress: ${Math.min(nextBuild, buildSession.sections.length)} of ${buildSession.sections.length} sections` : ''}
+          onStartOverBuild={buildSession ? build.startOver : undefined}
           instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
           renderMode={renderMode} onRenderMode={setRenderMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
