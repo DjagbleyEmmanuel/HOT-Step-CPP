@@ -1,6 +1,8 @@
 // Score sections as the ABC marks them: a whole-line `%Label` comment opens a
 // section. The server's scoreSections.ts reads the same lines in the same
-// order, so mark i here is score section i there.
+// order, so mark i here is score section i there. One known difference: the
+// server would also count a `%%` directive line, which nothing in this repo
+// writes into a score (a hand-pasted ABC could carry one).
 
 export interface AbcSectionMark { label: string; offset: number }
 
@@ -11,7 +13,8 @@ export function abcSectionMarks(abc: string): AbcSectionMark[] {
   let offset = 0;
   for (const raw of abc.replace(/\r\n?/g, '\n').split('\n')) {
     const line = raw.trim();
-    if (line.startsWith('%')) {
+    // %% lines are directives (the preview's own %%MIDI included), not labels.
+    if (line.startsWith('%') && !line.startsWith('%%')) {
       const label = line.slice(1).trim();
       if (label) marks.push({ label, offset });
     }

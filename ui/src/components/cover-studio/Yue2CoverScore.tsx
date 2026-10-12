@@ -3,6 +3,7 @@ import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
 import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
+import { withChoirVocal } from '../../utils/abcChoirVocal';
 import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
@@ -126,13 +127,14 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     setPreviewValid(false);
     if (!p.abc.trim()) return;
     let tunes: ReturnType<typeof abcjs.renderAbc>;
-    try { tunes = abcjs.renderAbc(scoreRef.current, p.abc, { responsive: 'resize', add_classes: true }); }
+    const abc = withChoirVocal(p.abc);
+    try { tunes = abcjs.renderAbc(scoreRef.current, abc, { responsive: 'resize', add_classes: true }); }
     catch { return; }
     if (!tunes[0]) return;
     setPreviewValid(true);
     const box = scoreRef.current.parentElement;
     let control: InstanceType<typeof abcjs.synth.SynthController> | null = null;
-    const starts = markSections(tunes[0], p.abc, scoreRef.current, index => void playFromRef.current(index));
+    const starts = markSections(tunes[0], abc, scoreRef.current, index => void playFromRef.current(index));
     playFromRef.current = async index => {
       const start = starts[index];
       if (!start) return;
