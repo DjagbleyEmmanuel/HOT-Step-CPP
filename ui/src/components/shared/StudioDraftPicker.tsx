@@ -37,8 +37,9 @@ export const StudioDraftPicker: React.FC<{
   };
   useEffect(refresh, [list]);
   return (
-    <div className="flex items-center gap-2 px-4 py-1 text-[11px]">
-      <div className="max-w-[18rem]" onPointerDownCapture={refresh}>
+    // With a named save, the picker, name and button share the row in thirds.
+    <div className={`${namedSave ? 'grid grid-cols-3' : 'flex'} items-center gap-2 px-4 py-1 text-[11px]`}>
+      <div className={namedSave ? 'min-w-0' : 'max-w-[18rem]'} onPointerDownCapture={refresh}>
         <StyledSelect<string> value="" size="sm" options={drafts.map(doc => ({ value: doc.id, label: labelOf(doc, textKey) }))}
           onChange={id => { void control.load(id, apply, refuse); }}
           placeholder={`${t('studioDrafts.load', 'Load a saved draft')}…`}
@@ -47,12 +48,12 @@ export const StudioDraftPicker: React.FC<{
       </div>
       {namedSave && <input value={name} onChange={event => setName(event.target.value)}
         aria-label="Draft name" placeholder="Draft name"
-        className="min-w-0 w-24 rounded-lg border border-zinc-300 dark:border-white/10 bg-transparent px-2 py-1 text-xs" />}
+        className="min-w-0 w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-transparent px-2 py-1 text-xs" />}
       {namedSave && <button type="button" onClick={() => void saveNamed()} disabled={!name.trim()}
-        className="rounded-lg border border-zinc-300 dark:border-white/10 px-2 py-1 text-xs text-zinc-700 dark:text-zinc-200">
+        className="min-w-0 truncate rounded-lg border border-zinc-300 dark:border-white/10 px-2 py-1 text-xs text-zinc-700 dark:text-zinc-200">
         Save named draft
       </button>}
-      {control.error && <span className="text-amber-600 dark:text-amber-400">{control.error}</span>}
+      {control.error && <span className={`${namedSave ? 'col-span-3 ' : ''}text-amber-600 dark:text-amber-400`}>{control.error}</span>}
     </div>
   );
 };

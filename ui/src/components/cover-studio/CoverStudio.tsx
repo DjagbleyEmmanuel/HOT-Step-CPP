@@ -1630,8 +1630,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           keyShift={coverKeyShift} onKeyShift={setCoverKeyShift}
           cfgScale={coverCfgScale} onCfgScale={setCoverCfgScale}
           lyricSchedule={coverLyricSchedule} onLyricSchedule={setCoverLyricSchedule}
-          canGenerate={canGenerate} isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
-          onGenerate={handleGenerate} onCancel={handleCancel}
+          canGenerate={canGenerate} isGenerating={isGenerating} onGenerate={handleGenerate}
         />
         </div> : <ArtistSettingsPanel
           artists={artists} isLoadingArtists={isLoadingArtists}
