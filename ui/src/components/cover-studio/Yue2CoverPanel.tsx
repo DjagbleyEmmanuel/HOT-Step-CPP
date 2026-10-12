@@ -62,9 +62,21 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
-  <div className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4 grid content-start gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' }}>
-    <div className="min-w-0 space-y-2">
-      <ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." />
+  <div className="w-full min-w-0 flex-1 overflow-y-auto scrollbar-hide p-4 space-y-4">
+    {/* Layout rule: each section (caption, render mode, score-to-render) is one
+        unbroken unit — it renders in one column or full width, never split
+        across the column boundary. The caption and render-mode sections sit
+        side by side as two independent flex stacks (not a CSS grid row), so a
+        tall render-mode column (artist grid open) never stretches the short
+        caption column to match — each stays its own natural height, top
+        aligned, no dead space underneath. Below min-width the pair wraps to
+        one column. */}
+    <div className="flex flex-wrap items-start gap-4">
+    <div className="min-w-0 flex-[1_1_300px] space-y-2">
+      {/* ParamLabel's root is an inline-flex span — fine beside its own
+          control, but two in a row with nothing block-level between them run
+          together on one line. This wrapper div forces the line break. */}
+      <div><ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." /></div>
       {p.captionTracks.length > 0 && p.renderMode !== 'base' && (
         <>
           <ParamLabel label="Caption source" info="Use your own caption, the training track nearest the detected BPM, or a named training track." />
@@ -85,7 +97,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
     </div>
     </div>
 
-    <div className="min-w-0 space-y-2">
+    <div className="min-w-0 flex-[1_1_300px] space-y-2">
       <ParamLabel label="Render mode" info="Choose base YuE2, a trained Lyric Studio artist, or a custom adapter pair." />
       <div role="group" aria-label="Render mode" className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
         {([['base', 'Base YuE2'], ['artist', 'Existing Artist'], ['custom', 'Custom']] as const).map(([value, label]) =>
@@ -112,9 +124,10 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         <StyledSelect accent="pink" value={p.nar} onChange={p.onNar} options={p.narOptions} />
       </>}
     </div>
+    </div>
 
     {p.isGenerating && (
-      <div className="col-span-full space-y-2 text-xs">
+      <div className="space-y-2 text-xs">
         <p>{p.genStage || 'Generating'} · {p.genProgress}%</p>
         <div className="h-2 bg-zinc-800 rounded-full"><div className="h-full bg-pink-500 rounded-full" style={{ width: `${p.genProgress}%` }} /></div>
         <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
@@ -155,10 +168,10 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       </details>
     </div>
     <button onClick={p.onGenerate} disabled={!p.canGenerate}
-      className="col-span-full w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
+      className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
       {p.isGenerating ? <><Loader2 className="inline w-4 h-4 mr-1 animate-spin" /> Add to queue</> : 'Generate YuE2 cover'}
     </button>
-    {!p.canGenerate && <p className="col-span-full text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
+    {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
   </div>
   );
 };

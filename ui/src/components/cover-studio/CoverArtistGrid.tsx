@@ -11,7 +11,7 @@ interface Props {
 export function CoverArtistGrid({ artists, loading, selectedArtistId, onSelectArtist }: Props) {
   if (loading) return <div className="flex items-center justify-center py-8"><Loader2 className="w-5 h-5 text-zinc-500 animate-spin" /></div>;
   if (artists.length === 0) return <p className="text-xs text-zinc-500 py-4">Add an artist in Lyric Studio to use an album adapter pair.</p>;
-  return <div className="grid grid-cols-5 gap-2 max-h-[240px] overflow-y-auto scrollbar-hide">
+  return <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
     {artists.map(artist => <button key={artist.id} type="button" onClick={() => onSelectArtist(artist)}
       className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all duration-200 ${selectedArtistId === artist.id
         ? 'bg-cyan-500/20 ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/10'
