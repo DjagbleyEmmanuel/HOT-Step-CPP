@@ -331,7 +331,7 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
   if (sourceKind === 'musicxml' && sourceId) throw new Error('MusicXML covers cannot also name a source recording.');
   const sourceLabel = typeof r.sourceLabel === 'string' && r.sourceLabel.trim() ? r.sourceLabel.trim() : undefined;
   const rawChoices = Object.fromEntries(
-    (['voices', 'keepChords', 'tempo', 'key', 'cfgScale'] as const)
+    (['voices', 'keepChords', 'tempo', 'key', 'keyShift', 'cfgScale'] as const)
       .filter(key => r[key] !== undefined).map(key => [key, r[key]]));
   // Validate marker fields even when this reads an older captured envelope.
   coverScoreChoices(rawChoices as Partial<CoverScoreChoices>);

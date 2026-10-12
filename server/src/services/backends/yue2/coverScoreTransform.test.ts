@@ -71,6 +71,41 @@ test('transpose keeps the signature abcjs spelled the notes for, so every pitch 
   }
 });
 
+test('keyShift carries the exact signed semitone delta past the nearest-key fold', () => {
+  // Chord-symbol text has no register of its own: abcjs re-derives a chord
+  // track's playback octave from scratch rather than offsetting it by the
+  // literal shift, so a chord-bearing score cannot assert exact MIDI deltas.
+  // A plain, chord-free score isolates the note transposition this fix touches.
+  const pitches = (abc: string) => (abcjs.parseOnly(abc)[0] as any).setUpAudio().tracks
+    .flatMap((track: any[]) => track.filter(e => e.cmd === 'note').map(e => e.pitch));
+  const chordFree = 'X:1\nL:1/8\nK:B\nB c d e f g a b|E F G A B c d e|\n';
+  const base = pitches(chordFree);
+
+  // B +7 and B -5 both name "F#". Without keyShift, coverTranspose always
+  // takes the <=6-semitone route (-5), not the requested direction.
+  assert.deepEqual(pitches(coverTranspose(chordFree, 'F#')), base.map((p: number) => p - 5));
+  // abcjs may spell the result as F# or its enharmonic Gb depending on the
+  // literal shift used internally; either is the same requested pitch class.
+  const up7 = coverTranspose(chordFree, 'F#', 7);
+  assert.match(up7, /^K:(F#|Gb)$/m);
+  assert.deepEqual(pitches(up7), base.map((p: number) => p + 7));
+
+  // +12 names the same key as no shift at all ("B"); the fold path is a
+  // no-op here, silently dropping a whole-octave request.
+  assert.equal(coverTranspose(chordFree, 'B'), chordFree);
+  const upOctave = coverTranspose(chordFree, 'B', 12);
+  assert.match(upOctave, /^K:B$/m);
+  assert.notEqual(upOctave, chordFree);
+  assert.deepEqual(pitches(upOctave), base.map((p: number) => p + 12));
+
+  assert.throws(() => coverTranspose(chordFree, 'F#', 1), /does not land on the requested key/);
+  assert.throws(() => coverScoreChoices({ keyShift: 13 }), /keyShift must/);
+  assert.throws(() => coverScoreChoices({ keyShift: 1.5 }), /keyShift must/);
+
+  const choices = coverScoreChoices({ key: 'F#', keyShift: 7 });
+  assert.deepEqual(pitches(transformCoverScore(chordFree, choices).renderedAbc), base.map((p: number) => p + 7));
+});
+
 test('submit-time defaults retain both score voices, then apply chords, tempo, key in order', () => {
   const choices = coverScoreChoices({});
   assert.deepEqual(choices, { voices: 'both', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1 });

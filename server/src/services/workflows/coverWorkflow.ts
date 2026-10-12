@@ -112,7 +112,8 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     yue2Cover: { sourceId: url, sourceLabel: d.sourceLabel || url,
       voices: c.voices, keepChords: c.keepChords,
       tempo: c.tempoMode === 'set' ? c.coverBpm : c.tempoMode,
-      key: moved ? moved.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source', cfgScale: c.cfgScale },
+      key: moved ? moved.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source',
+      ...(moved ? { keyShift: c.keyShift } : {}), cfgScale: c.cfgScale },
     yue2Abc: d.approvedAbc, yue2Cot: c.keepChords ? 'full' : 'melody',
     yue2Pick: { ...c.yue2Pick, lmAdapterAr: c.pairMode === 'pair' ? c.lmAdapterAr : '',
       lmAdapterNar: c.pairMode === 'pair' ? c.lmAdapterNar : '' } };

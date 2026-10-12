@@ -1020,7 +1020,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
       const coverChoices = { voices: coverVoices, keepChords,
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
-        key: renderKey, cfgScale: coverCfgScale };
+        key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
       const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
