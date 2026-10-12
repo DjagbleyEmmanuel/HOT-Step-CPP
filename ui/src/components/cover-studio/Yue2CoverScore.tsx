@@ -4,7 +4,8 @@ import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
 import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
 import { withChoirVocal } from '../../utils/abcChoirVocal';
-import { barAtChar, moveSectionStart } from '../../utils/abcSectionMove';
+import { barAtChar, barRanges, moveSectionStart } from '../../utils/abcSectionMove';
+import { AbcChart } from './AbcChart';
 import { MusicXmlImport } from './MusicXmlImport';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
@@ -145,8 +146,14 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   const [moveError, setMoveError] = useState('');
   // The last section drag, undoable while the ABC is still its result.
   const [undoMove, setUndoMove] = useState<{ before: string; after: string } | null>(null);
-  // Plays from score section i; replaced on every render of the ABC.
+  // Plays from score section i, or from score bar n; replaced on every render of the ABC.
   const playFromRef = useRef<(index: number) => Promise<void>>(async () => {});
+  const playBarRef = useRef<(bar: number) => Promise<void>>(async () => {});
+  // The left pane shows the raw ABC or the same score as a song chart.
+  const [view, setView] = useState<'abc' | 'chart'>(() =>
+    localStorage.getItem('cover-studio-abcView') === 'chart' ? 'chart' : 'abc');
+  useEffect(() => { localStorage.setItem('cover-studio-abcView', view); }, [view]);
+  const [playingBar, setPlayingBar] = useState<number | null>(null);
   const onSectionRef = useRef(p.onSection);
   const onAbcChangeRef = useRef(p.onAbcChange);
   useEffect(() => { onSectionRef.current = p.onSection; onAbcChangeRef.current = p.onAbcChange; });
@@ -157,7 +164,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // Side by side, the ABC and the score share the panel's height, less its
   // heading, the import row and the approve button.
   const boxHeight = p.wide ? Math.max(128, p.height - 170) : undefined;
-  const editor = <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
+  const viewToggle = <div className="mb-1 inline-flex rounded-md border border-zinc-300 dark:border-white/10 text-[11px]">
+    {(['abc', 'chart'] as const).map(mode => <button key={mode} type="button" onClick={() => setView(mode)}
+      className={`px-2 py-0.5 ${view === mode ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-500'}`}>
+      {mode === 'abc' ? 'ABC' : 'Chart'}</button>)}
+  </div>;
+  const editor = view === 'chart' && p.abc.trim()
+    ? <AbcChart abc={p.abc} disabled={busy} height={boxHeight ?? 320} playingBar={playingBar}
+      onAbcChange={p.onAbcChange} onPlayBar={bar => void playBarRef.current(bar)} />
+    : <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
     placeholder="Paste an ABC score here to skip transcription" style={{ height: boxHeight }}
     className={`w-full ${p.wide ? 'resize-none' : 'h-28 resize-y'} rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white`} />;
   const transcribe = <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
@@ -169,7 +184,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // zooms out. Wrapping it in MusicXmlImport or not (and a new sourceKey)
   // remounts scoreRef's div, which is why the render effect keys on those too.
   const sheet = <div className={p.wide ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
-    <div className="min-w-0">{editor}</div>
+    <div className="min-w-0">{p.abc.trim() && viewToggle}{editor}</div>
     <div className="min-w-0 space-y-3">
       <div className={`${p.abc.trim() ? '' : 'hidden'} bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
         style={{ height: boxHeight }}>
@@ -202,10 +217,27 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       setUndoMove({ before: p.abc, after: moved.abc });
       onAbcChangeRef.current(moved.abc);
     });
+    // Bars by character offset in the preview copy, which abcjs's events index.
+    const ranges = barRanges(abc);
+    const barOf = (char: number | undefined) => char === undefined ? null
+      : ranges.find(range => char >= range.start && char <= range.end)?.bar ?? null;
+    const charOf = (event: { startCharArray?: number[] }) => event.startCharArray?.find(value => typeof value === 'number');
+    const events = new abcjs.TimingCallbacks(tunes[0], {}).noteTimings.filter(event => event.type === 'event');
+    playBarRef.current = async bar => {
+      // The first event, in time, in this bar or the nearest one after it.
+      const start = events.find(event => barOf(charOf(event)) === bar)
+        ?? events.find(event => (barOf(charOf(event)) ?? 0) > bar);
+      if (!start) return;
+      setPlayingBar(bar);
+      const index = sectionAtChar(abcSectionMarks(abc), charOf(start) ?? -1);
+      await seekTo(start, index);
+    };
     playFromRef.current = async index => {
       const start = starts[index];
-      if (!start) return;
-      onSectionRef.current?.(index);
+      if (start) await seekTo(start, index);
+    };
+    const seekTo = async (start: TimingEvent, index: number) => {
+      if (index >= 0) onSectionRef.current?.(index);
       followNoteInBox(start.elements?.[0]?.[0], box);
       if (!control) return;
       // seek() only moves a player that has started; play() toggles, so it
@@ -220,13 +252,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     let lit: Element[] = [];
     // Report a section once, when playback crosses into it.
     const marks = abcSectionMarks(abc);
-    let section = -1;
+    let section = -1, playingNow: number | null = null;
     synth.load(audioRef.current, {
       onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
       onEvent(ev: { elements?: Element[][]; startCharArray?: number[] }) {
         const char = ev.startCharArray?.find(value => typeof value === 'number');
         const index = char === undefined ? -1 : sectionAtChar(marks, char);
         if (index >= 0 && index !== section) onSectionRef.current?.(section = index);
+        const bar = barOf(char);
+        if (bar !== null && bar !== playingNow) setPlayingBar(playingNow = bar);
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
         lit = (ev.elements ?? []).flat();
         lit.forEach(el => el.classList.add('abcjs-highlight'));

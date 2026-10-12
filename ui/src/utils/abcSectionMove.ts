@@ -7,16 +7,16 @@
 // marker in the gap. Bars are numbered as the server's scoreSections.ts does:
 // Vocal bars from 1, with `Z4` counting as four.
 
-interface Bar { text: string; start: number; count: number }
+export interface Bar { text: string; start: number; count: number }
 // pre: the lines before this part's music since the last part (its V: line,
 // if it has one); header: the V: line governing it, own or inherited.
-interface Part { pre: string[]; line: string; header: string | null; voice: string; bars: Bar[] }
-interface Group { parts: Part[]; firstBar: number; bars: number }
-type Item = { kind: 'line'; text: string } | { kind: 'marker'; text: string } | { kind: 'group'; group: Group };
+export interface Part { pre: string[]; line: string; header: string | null; voice: string; bars: Bar[] }
+export interface Group { parts: Part[]; firstBar: number; bars: number }
+export type Item = { kind: 'line'; text: string } | { kind: 'marker'; text: string } | { kind: 'group'; group: Group };
 
 const isMarker = (line: string) => line.trim().startsWith('%') && !line.trim().startsWith('%%') && !!line.trim().slice(1).trim();
 const voiceOf = (line: string) => line.trim().slice(2).trim().split(/\s+/)[0] ?? '';
-const isVocal = (line: string) => /vocal/i.test(voiceOf(line)) || /name="Vocal/i.test(line);
+export const isVocal = (line: string) => /vocal/i.test(voiceOf(line)) || /name="Vocal/i.test(line);
 
 /** A music line's bars, splitting on `|` outside chord quotes. */
 function barsOf(line: string, offset: number): Bar[] {
@@ -36,7 +36,7 @@ function barsOf(line: string, offset: number): Bar[] {
   return bars;
 }
 
-function parse(abc: string): { items: Item[]; groups: Group[] } | string {
+export function parseScore(abc: string): { items: Item[]; groups: Group[] } | string {
   const lines = abc.replace(/\r\n?/g, '\n').split('\n');
   const keyLine = lines.findIndex(line => /^K:/.test(line.trim()));
   if (keyLine < 0) return 'The score has no K: line.';
@@ -81,7 +81,7 @@ function parse(abc: string): { items: Item[]; groups: Group[] } | string {
  *  belongs to, or null when it is not in a bar. A multi-bar rest gives its
  *  first bar. */
 export function barAtChar(abc: string, char: number): number | null {
-  const parsed = parse(abc);
+  const parsed = parseScore(abc);
   if (typeof parsed === 'string') return null;
   for (const group of parsed.groups)
     for (const part of group.parts) {
@@ -119,7 +119,7 @@ const barLine = (bars: string[]) => bars.map(bar => `${bar}|`).join('');
  *  score bar `bar`, or an error message. The bar must lie after the previous
  *  section's start and before the next one's. */
 export function moveSectionStart(abc: string, index: number, bar: number): { abc: string } | { error: string } {
-  const parsed = parse(abc);
+  const parsed = parseScore(abc);
   if (typeof parsed === 'string') return { error: parsed };
   const { items, groups } = parsed;
   const markers = items.filter(item => item.kind === 'marker');
@@ -168,7 +168,7 @@ export function moveSectionStart(abc: string, index: number, bar: number): { abc
  *  gets the V: and field lines it inherited from the cut section. Lines between the
  *  cut section's last group and the next marker go with it. */
 export function cutSection(abc: string, index: number): { abc: string } | { error: string } {
-  const parsed = parse(abc);
+  const parsed = parseScore(abc);
   if (typeof parsed === 'string') return { error: parsed };
   const { items } = parsed;
   const markers = items.filter(item => item.kind === 'marker');
@@ -208,4 +208,18 @@ export function cutSection(abc: string, index: number): { abc: string } | { erro
     }
   }
   return { abc: out.join('\n') };
+}
+
+/** Every bar's character range in every voice, with its score bar number (a
+ *  multi-bar rest gives its first bar), in text order. */
+export function barRanges(abc: string): Array<{ start: number; end: number; bar: number }> {
+  const parsed = parseScore(abc);
+  if (typeof parsed === 'string') return [];
+  const out: Array<{ start: number; end: number; bar: number }> = [];
+  for (const group of parsed.groups)
+    for (const part of group.parts) {
+      let bar = group.firstBar;
+      for (const b of part.bars) { out.push({ start: b.start, end: b.start + b.text.length, bar }); bar += b.count; }
+    }
+  return out.sort((a, b) => a.start - b.start);
 }
