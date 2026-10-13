@@ -377,7 +377,7 @@ The C++17 engine behind every backend. Details: [Plugins](docs/user/plugins.md),
 | Feature | What it does |
 |---|---|
 | Portable builds | Windows CUDA, Vulkan and CPU, Linux, and macOS Metal releases. |
-| Google Colab notebook | Installs a release on a Colab GPU, with model packs, Drive persistence and a public URL. See [Colab](docs/user/colab.md). |
+| Google Colab notebook | Installs a release on a Colab GPU, with model packs, Drive persistence and a link to the UI. See [Colab](docs/user/colab.md). |
 | Engine binaries | `ace-server`, `ace-lm`, `ace-synth`, `ace-understand`, `ace-train`, `ace-caption`, `ace-midi`, `neural-codec`, `mp3-codec` and `quantize`. |
 | Lua plugins | Solvers, schedulers, guidance modes and postprocess plugins load from `engine/plugins/` at launch with no rebuild. |
 | Plugin UI | Each plugin declares its own sliders, toggles and dropdowns, rendered by the UI. |
