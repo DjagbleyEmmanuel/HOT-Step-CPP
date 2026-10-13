@@ -159,6 +159,7 @@ The models and adapters folders can be moved elsewhere with **Models directory**
 
 ## Related
 
+- [Running on Google Colab](colab.md), if you have no suitable GPU
 - [Model Manager](studios/model-manager.md)
 - [Backends](backends.md)
 - [Generation](generation.md)

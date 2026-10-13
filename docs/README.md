@@ -9,6 +9,7 @@ link to the page that explains it.
 | Page | What it covers |
 |---|---|
 | [Getting started](user/getting-started.md) | Download, first launch, first model pack, first song, where files live |
+| [Running on Google Colab](user/colab.md) | The Colab notebook: install, models, Drive persistence, public URL |
 | [Backends](user/backends.md) | ACE-Step 1.5, MiniMax-Music3 and YuE2: what each is for, how to switch, capability matrix |
 | [Generation](user/generation.md) | The global parameter bar: models, steps, seeds, guidance, post-processing chain, queue, task modes |
 | [Getting higher quality output](user/quality.md) | Model precision, prompts, steps and solvers, post-processing, per-backend cheat sheet |
