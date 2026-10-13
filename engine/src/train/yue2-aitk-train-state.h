@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <string>
 #include <vector>
@@ -173,30 +174,22 @@ public:
         for (const auto & f : frozen_) ggml_backend_tensor_set(slots_[f.first].parameter, f.second.data(), 0, ggml_nbytes(slots_[f.first].parameter));
     }
 
-    // Default recipe uses one joint parameter group. The host reduction uses
-    // double accumulation; its rounding must be measured against Torch's norm.
-    // pre_scale (--grad-accum: 1/N) multiplies every gradient before the norm
-    // is taken, so the clip sees the mean over the accumulated songs. 1.0
-    // leaves the path byte-identical.
+    // Default recipe uses one joint parameter group. pre_scale (--grad-accum:
+    // 1/N) multiplies every gradient before the norm is taken, so the clip
+    // sees the mean over the accumulated songs. 1.0 leaves the path a no-op
+    // when the clip scale is also 1.0.
+    //
+    // S2d-1: the device path (default) computes the sum of squares on the
+    // GPU and reads back one scalar, instead of every gradient slot; the
+    // combined pre_scale*clip scale is then applied and written back by a
+    // second small graph, in place. That is not bit-identical to the old
+    // host reduction (F32 device accumulation vs. the host's F64), so
+    // YUE2_AITK_CLIP_HOST=1 keeps today's exact host path for anyone who
+    // needs the old numbers. See RESEARCH/YUE2_S2D_TOLERANCES.md.
     bool clip_gradients(float max_norm, double * norm, std::string * error=nullptr, float pre_scale=1.0f) {
         if (!initialized_ || !(max_norm>0) || !std::isfinite(max_norm) || !(pre_scale>0) || !std::isfinite(pre_scale)) return fail(error,"invalid clipping request");
-        double squared=0;
-        for (auto & slot : slots_) {
-            ggml_backend_tensor_get(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
-            for (float & value : slot.host) {
-                if (pre_scale!=1.0f) value*=pre_scale;
-                if (!std::isfinite(value)) return fail(error,"non-finite gradient before clipping");
-                squared+=double(value)*double(value);
-            }
-        }
-        const double length=std::sqrt(squared);
-        if (norm) *norm=length;
-        const float scale=(std::min)(1.0f,max_norm/(float(length)+1e-6f));
-        if (scale<1.0f || pre_scale!=1.0f) for (auto & slot : slots_) {
-            if (scale<1.0f) for (float & value : slot.host) value*=scale;
-            ggml_backend_tensor_set(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
-        }
-        return true;
+        static const bool host_path = std::getenv("YUE2_AITK_CLIP_HOST") != nullptr;
+        return host_path ? clip_gradients_host(max_norm, norm, error, pre_scale) : clip_gradients_device(max_norm, norm, error, pre_scale);
     }
 
     // Copy every slot's gradient into F32 tensors of matching shape, device to
@@ -267,6 +260,90 @@ private:
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }
+
+    // Today's path: every slot's gradient round-trips through the host so
+    // the norm can be accumulated in double. Kept for YUE2_AITK_CLIP_HOST=1.
+    bool clip_gradients_host(float max_norm, double * norm, std::string * error, float pre_scale) {
+        double squared=0;
+        for (auto & slot : slots_) {
+            ggml_backend_tensor_get(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
+            for (float & value : slot.host) {
+                if (pre_scale!=1.0f) value*=pre_scale;
+                if (!std::isfinite(value)) return fail(error,"non-finite gradient before clipping");
+                squared+=double(value)*double(value);
+            }
+        }
+        const double length=std::sqrt(squared);
+        if (norm) *norm=length;
+        const float scale=(std::min)(1.0f,max_norm/(float(length)+1e-6f));
+        if (scale<1.0f || pre_scale!=1.0f) for (auto & slot : slots_) {
+            if (scale<1.0f) for (float & value : slot.host) value*=scale;
+            ggml_backend_tensor_set(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
+        }
+        return true;
+    }
+
+    // S2d-1: no gradient ever leaves the device. Pass 1 sums ||pre_scale*g||^2
+    // slot by slot on the GPU and reads back the one resulting scalar. Pass 2
+    // (skipped when the combined scale is exactly 1) writes pre_scale*scale
+    // back into each slot in place via ggml_cpy, which ggml_cpy returns as a
+    // view of its destination, so no extra device buffer is allocated for it.
+    bool clip_gradients_device(float max_norm, double * norm, std::string * error, float pre_scale) {
+        const size_t n = slots_.size();
+        const size_t graph_size = 8*n + 64;
+        ggml_init_params sum_params{};
+        // Up to 5 new tensor objects per slot (scale, square, per-slot sum,
+        // the running add) plus the view from the reshape; padded well past
+        // that since the pool is cheap and a miscount here is a hard abort.
+        sum_params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(8*n+64) + 16384;
+        sum_params.no_alloc = true;
+        ggml_context * sum_ctx = ggml_init(sum_params);
+        if (!sum_ctx) return fail(error, "failed to create clip sum-of-squares context");
+        ggml_cgraph * sum_graph = ggml_new_graph_custom(sum_ctx, graph_size, false);
+        ggml_tensor * total = nullptr;
+        for (auto & slot : slots_) {
+            ggml_tensor * flat = ggml_reshape_1d(sum_ctx, slot.gradient, ggml_nelements(slot.gradient));
+            ggml_tensor * scaled = pre_scale != 1.0f ? ggml_scale(sum_ctx, flat, pre_scale) : flat;
+            ggml_tensor * sq = ggml_sqr(sum_ctx, scaled);
+            ggml_tensor * s = ggml_sum(sum_ctx, sq);
+            total = total ? ggml_add(sum_ctx, total, s) : s;
+        }
+        ggml_build_forward_expand(sum_graph, total);
+        ggml_backend_buffer_t sum_buffer = ggml_backend_alloc_ctx_tensors(sum_ctx, backend_);
+        if (!sum_buffer) { ggml_free(sum_ctx); return fail(error, "failed to allocate clip sum-of-squares buffer"); }
+        if (ggml_backend_graph_compute(backend_, sum_graph) != GGML_STATUS_SUCCESS) {
+            ggml_backend_buffer_free(sum_buffer); ggml_free(sum_ctx);
+            return fail(error, "clip sum-of-squares graph failed");
+        }
+        float squared = 0.0f;
+        ggml_backend_tensor_get(total, &squared, 0, sizeof(float));
+        ggml_backend_buffer_free(sum_buffer);
+        ggml_free(sum_ctx);
+        if (!std::isfinite(squared)) return fail(error, "non-finite gradient before clipping");
+        const double length = std::sqrt(double(squared));
+        if (norm) *norm = length;
+        const float scale = (std::min)(1.0f, max_norm/(float(length)+1e-6f));
+        const float combined = pre_scale * scale;
+        if (combined == 1.0f) return true;
+        ggml_init_params apply_params{};
+        apply_params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(4*n+64) + 16384;
+        apply_params.no_alloc = true;
+        ggml_context * apply_ctx = ggml_init(apply_params);
+        if (!apply_ctx) return fail(error, "failed to create clip apply context");
+        ggml_cgraph * apply_graph = ggml_new_graph_custom(apply_ctx, graph_size, false);
+        for (auto & slot : slots_) {
+            ggml_tensor * scaled = ggml_scale(apply_ctx, slot.gradient, combined);
+            ggml_build_forward_expand(apply_graph, ggml_cpy(apply_ctx, scaled, slot.gradient));
+        }
+        ggml_backend_buffer_t apply_buffer = ggml_backend_alloc_ctx_tensors(apply_ctx, backend_);
+        if (!apply_buffer) { ggml_free(apply_ctx); return fail(error, "failed to allocate clip apply buffer"); }
+        const bool ok = ggml_backend_graph_compute(backend_, apply_graph) == GGML_STATUS_SUCCESS;
+        ggml_backend_buffer_free(apply_buffer);
+        ggml_free(apply_ctx);
+        if (!ok) return fail(error, "clip apply graph failed");
+        return true;
+    }
+
     bool build_slots(const Yue2AitkExpertAdapters & expert, const char * prefix, int expert_index, std::string * error) {
         static const char * names[kSites] = {"self_attn.qkv_proj", "self_attn.o_proj", "mlp.gate_up_proj", "mlp.down_proj"};
         if (expert.layers.size() != static_cast<size_t>(kLayers)) return fail(error, "adapter layer count mismatch");

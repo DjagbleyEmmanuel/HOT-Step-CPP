@@ -20,6 +20,7 @@
 
 #include "train/lm-common.h"
 #include "train/lm-graph.h"
+#include "yue2-aitk-host-profile.h"
 
 #include <cmath>
 #include <cstdio>
@@ -630,12 +631,15 @@ static ggml_tensor * lm_cautious(ggml_context * ctx, ggml_tensor * upd, ggml_ten
     return ggml_div(ctx, ggml_mul(ctx, upd, mask), mean);
 }
 
-// Which backend the scheduler put each optimizer graph's nodes on, logged
-// once per run per graph kind. The scheduler keeps a CPU backend as its
-// fallback, so an op the GPU refuses would otherwise run on the CPU silently.
+// Which backend the scheduler put each optimizer graph's nodes on. Logged
+// once per run per graph kind by default; under YUE2_AITK_HOST_PROFILE=1,
+// every call logs, so a CPU fallback that only shows up after the scheduler
+// settles (not on the first graph) is still caught. The scheduler keeps a
+// CPU backend as its fallback, so an op the GPU refuses would otherwise run
+// on the CPU silently.
 static void lm_optim_report_placement(ggml_backend_sched_t sched, ggml_cgraph * g, const char * what) {
     static std::unordered_map<std::string, bool> seen;
-    if (seen[what]) return;
+    if (seen[what] && !yue2_aitk_prof::on()) return;
     seen[what] = true;
     std::unordered_map<std::string, int> per_backend;
     std::unordered_map<std::string, int> cpu_ops;

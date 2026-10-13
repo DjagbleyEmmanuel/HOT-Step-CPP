@@ -691,6 +691,16 @@ link_ggml_backends(yue2-linear-lora-round-test)
 add_executable(yue2-train-gemm-precision-test tools/yue2-train-gemm-precision-test.cpp)
 link_ggml_backends(yue2-train-gemm-precision-test)
 
+# yue2-clip-non-finite-test: S2d-1 gate 3 (RESEARCH/YUE2_S2D_TOLERANCES.md) --
+# a gradient with one non-finite value must still fail
+# Yue2AitkTrainState::clip_gradients() on both the device sum-of-squares path
+# (default) and the host rollback (YUE2_AITK_CLIP_HOST=1). CPU backend only,
+# no checkpoint needed. See engine/tools/yue2-clip-non-finite-test.cpp.
+add_executable(yue2-clip-non-finite-test tools/yue2-clip-non-finite-test.cpp)
+target_include_directories(yue2-clip-non-finite-test PRIVATE src)
+target_link_libraries(yue2-clip-non-finite-test PRIVATE yyjson)
+link_ggml_backends(yue2-clip-non-finite-test)
+
 # yue2-mul-bf16-dispatch-profile: diagnostic tool (no PASS/FAIL) that
 # measures the real wall-clock cost of mul_bf16()'s 3-dispatch pattern
 # (round(a), round(b), mul+round-epilogue) vs a proxy for a fully fused
