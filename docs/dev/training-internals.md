@@ -49,6 +49,12 @@ step went from 4.24 to 3.31 s on an RTX 5090 (4.30 to 3.38 s with the companion)
 (`gemm_bf16`, `gemm_f32`). The casts need the HOT-ggml `bf16-mul-mat-grad` change.
 `yue2-train-gemm-precision-test` checks both paths against each other at YuE2 shapes.
 
+`YUE2_AITK_HOST_PROFILE=1` adds one `{"stage":"host_profile","step":N,"ms":{...}}` line per
+step on stderr: host wall time per trainer phase (block executor phases, constants, gradient
+transfer, clip, optimizer, head loss). A phase that ends in a blocking read includes the
+wait for the GPU. LmOptim logs once per run where its scheduler placed each optimizer
+graph (`[lm-optim] ... graph placement: CUDA0=N`, plus any ops that fell back to the CPU).
+
 `--device` takes any ggml device (`CUDA0`, `Vulkan0`, `MTL0`, `CPU`). Off CUDA the
 same trainer runs from ggml ops: `--optimizer adamw` (the CUDA 8-bit kernel) maps
 to LmOptim's AdamW, the head's CE + KL gradient is built from `soft_max`/`log`/

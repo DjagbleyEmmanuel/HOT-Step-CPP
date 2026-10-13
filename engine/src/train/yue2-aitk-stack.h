@@ -195,7 +195,7 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         }
     }
     std::vector<float> cosine,sine;
-    trig(c,length,prefix?prefix->length:0,cosine,sine);
+    { YUE2_PROF("stack: RoPE tables (host)"); trig(c,length,prefix?prefix->length:0,cosine,sine); }
     Yue2AitkBlockConstants constants;
     Yue2AitkBlockWorkspace workspace;
     const bool fast = fast_execution();
@@ -208,7 +208,7 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
     for (size_t layer=0;layer<expert.layers.size();++layer) {
         if (!device && save_tape) tape->layer_inputs.push_back(pack(hidden));
         PrefixCanvas canvas;
-        if (!canvas.make(backend,c,prefix,layer,length,error)) return false;
+        { YUE2_PROF("stack: prefix canvas"); if (!canvas.make(backend,c,prefix,layer,length,error)) return false; }
         const Yue2AitkBlockNorms layer_norms = norms(model,nar,layer);
         if (!valid_norms(layer_norms)) return fail(error,"expert layer norm weights are missing");
         Yue2AitkBlockForwardHost out;
@@ -226,6 +226,7 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         if (capture_prefix && !device_capture) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
     }
     if (device) {
+        YUE2_PROF("stack: final hidden readback");
         const ggml_tensor * final_tensor = tape->device_layers[save_tape ? expert.layers.size() : (expert.layers.size() & 1)];
         tape->final_hidden.resize(static_cast<size_t>(c.hidden * length));
         ggml_backend_tensor_get(final_tensor, tape->final_hidden.data(), 0, ggml_nbytes(final_tensor));
@@ -249,7 +250,7 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         adapters.layers.size()!=expert.layers.size() ||
         gradient.size()!=size_t(tape.length*c.hidden)) return fail(error,"invalid expert backward tape");
     std::vector<float> cosine,sine;
-    trig(c,tape.length,prefix?prefix->length:0,cosine,sine);
+    { YUE2_PROF("stack: RoPE tables (host)"); trig(c,tape.length,prefix?prefix->length:0,cosine,sine); }
     Yue2AitkBlockConstants constants;
     Yue2AitkBlockWorkspace workspace;
     if (fast && !constants.make(backend,c,tape.length,prefix?prefix->length:0,
@@ -271,7 +272,7 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
                     tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
                     prefix?prefix->length:0,error,fast?&constants:nullptr,fast?&workspace:nullptr,
                     tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next])) return false;
-            if (!store(layer,out,error)) return false;
+            { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
             ping = next;
         }
         return true;

@@ -131,7 +131,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     // w = 1 both are exact identities.
     head.hidden=H;head.kl_weight=input.kl_weight/input.ar_loss_weight;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
     notify("AR CE and KL backward");
-    if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false;
+    { YUE2_PROF("head: CE/KL compute"); if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false; }
     result.ar_ce=double(ce)/N;result.ar_kl=teacher?double(kl)/N:0.0;
     notify("AR transformer backward");
     const float ar_w=input.ar_loss_weight;
@@ -197,7 +197,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     notify("Joint clipping and optimizer update");
     if(planner_frozen) state.zero_planner_gradients();
-    if(!state.clip_gradients(1.0f,&result.gradient_norm,error,input.accum_scale)) return false;
+    { YUE2_PROF("opt: clip (D2H + host norm + H2D)"); if(!state.clip_gradients(1.0f,&result.gradient_norm,error,input.accum_scale)) return false; }
     ggml_backend_synchronize(backend);
     if (input.skip_above>0 && result.gradient_norm>input.skip_above) {
         // A spike: no parameter or optimizer-moment changes. Clipping alone is
@@ -213,15 +213,15 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     if (lm) {
         // The state's host gradients are the clipped, authoritative values;
         // fill LmOptim's accumulators (own buffer) and step on its scheduler.
-        if (!state.fill_host_gradients(lm->acc, error)) return false;
+        { YUE2_PROF("opt: fill LmOptim accumulators (H2D)"); if (!state.fill_host_gradients(lm->acc, error)) return false; }
         LmStepStats step_stats{};
-        if (!lm_optim_step(lm, osched, &step_stats)) return fail(error, "optimizer step failed");
+        { YUE2_PROF("opt: lm_optim_step"); if (!lm_optim_step(lm, osched, &step_stats)) return fail(error, "optimizer step failed"); }
         result.step = lm->opt_step;
     } else {
         yue2_aitk::StepConfig cfg;
         cfg.learning_rate=input.adamw_lr; cfg.weight_decay=input.adamw_weight_decay;
         cfg.beta1=input.beta1; cfg.beta2=input.beta2;
-        try { optimizer->step_once(cfg); }
+        try { YUE2_PROF("opt: step_once (Prodigy/8-bit AdamW)"); optimizer->step_once(cfg); }
         catch(const std::exception & e){return fail(error,e.what());}
         result.step=optimizer->step();
     }

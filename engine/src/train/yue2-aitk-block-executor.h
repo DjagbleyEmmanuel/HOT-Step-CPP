@@ -5,6 +5,7 @@
 // temporary no-alloc graph context and backend buffer, and performs no update.
 
 #include "yue2-aitk-graph.h"
+#include "yue2-aitk-host-profile.h"
 
 #include <cmath>
 #include <cstdint>
@@ -145,6 +146,7 @@ struct Yue2AitkBlockConstants {
               int64_t count, int64_t prefix, Yue2AitkMaskMode mode,
               const float * cos_data, const float * sin_data, std::string * error) {
         using namespace yue2_aitk_executor_detail;
+        YUE2_PROF("constants: mask build + upload");
         if (!make_runtime(backend, 4*ggml_tensor_overhead()+1024, &runtime, error)) return false;
         cosine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
         sine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
@@ -175,8 +177,11 @@ public:
         if (!result) return fail(error, "forward result is null");
         if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
+        yue2_aitk_prof::Lap lap;
         if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr)) return false;
+        lap.mark("fwd: validate inputs (host finite checks)");
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
+        lap.mark("fwd: ggml_init 64 MiB context");
         auto valid_device = [&](ggml_tensor * t) {
             return !t || (t->type == GGML_TYPE_F32 && ggml_is_contiguous(t) &&
                           t->ne[0] == config.hidden && t->ne[1] == sequence &&
@@ -208,22 +213,28 @@ public:
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.key, rows(capture_k)));
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.value, rows(capture_v)));
         }
+        lap.mark("fwd: graph build");
         if (!supports_all(backend, graph, error)) return false;
+        lap.mark("fwd: supports_op scan");
         if (workspace) {
             ggml_set_input(h); ggml_set_output(hidden_copy ? hidden_copy : out.hidden);
             if (key_cont) ggml_set_output(key_cont);
             if (value_cont) ggml_set_output(value_cont);
             if (!workspace->allocate(backend, graph, error)) return false;
         } else if (!allocate(&r, backend, error)) return false;
+        lap.mark("fwd: gallocr/allocate");
         if (!device_input) {
             if (constants) ggml_backend_tensor_set(h, x, 0, ggml_nbytes(h));
             else setup_inputs(backend, h, cos_t, sin_t, mask, x, cosine, sine, mask_data);
         }
+        lap.mark("fwd: input upload");
         if (ggml_backend_graph_compute(backend, graph) != GGML_STATUS_SUCCESS) return fail(error, "forward graph compute failed");
+        lap.mark("fwd: graph_compute (launch)");
         result->hidden.clear();
         if (!device_output) { result->hidden.resize(static_cast<size_t>(config.hidden*sequence)); ggml_backend_tensor_get(out.hidden, result->hidden.data(), 0, ggml_nbytes(out.hidden)); }
         result->key.clear(); result->value.clear();
         if (key_cont && value_cont) { result->key.resize(ggml_nelements(key_cont)); result->value.resize(ggml_nelements(value_cont)); ggml_backend_tensor_get(key_cont,result->key.data(),0,ggml_nbytes(key_cont)); ggml_backend_tensor_get(value_cont,result->value.data(),0,ggml_nbytes(value_cont)); }
+        lap.mark("fwd: readback (waits for GPU)");
         return true;
     }
 
@@ -239,11 +250,14 @@ public:
                          ggml_tensor * device_input = nullptr, ggml_tensor * device_upstream = nullptr,
                          ggml_tensor * device_dx = nullptr) {
         using namespace yue2_aitk_executor_detail;
+        yue2_aitk_prof::Lap lap;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
         size_t hs=0; if (!checked_count(config.hidden, sequence, &hs) || ((!device_upstream || dy) && !finite_all(dy, hs))) return fail(error, "invalid/non-finite upstream gradient");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
         if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr)) return false;
+        lap.mark("bwd: validate inputs (host finite checks)");
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
+        lap.mark("bwd: ggml_init 64 MiB context");
         auto valid_device = [&](ggml_tensor * t) {
             return !t || (t->type == GGML_TYPE_F32 && ggml_is_contiguous(t) &&
                           t->ne[0] == config.hidden && t->ne[1] == sequence &&
@@ -264,10 +278,14 @@ public:
         ggml_set_param(h);
         Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length);
         ggml_tensor * loss=ggml_sum(r.ctx,ggml_mul(r.ctx,out.hidden,upstream)); ggml_cgraph * graph=ggml_new_graph_custom(r.ctx,65536,true); if(!loss||!graph) return fail(error,"backward graph allocation failed");
-        ggml_build_forward_expand(graph,loss); ggml_set_loss(loss); ggml_build_backward_expand(r.ctx,graph,nullptr);
+        ggml_build_forward_expand(graph,loss); ggml_set_loss(loss);
+        lap.mark("bwd: graph build");
+        ggml_build_backward_expand(r.ctx,graph,nullptr);
+        lap.mark("bwd: ggml_build_backward_expand");
         ggml_tensor * dx_copy = nullptr;
         if (device_dx) { ggml_tensor * gh = ggml_graph_get_grad(graph, h); if (!gh) return fail(error, "missing block input gradient"); dx_copy = ggml_cpy(r.ctx, gh, device_dx); ggml_set_output(dx_copy); ggml_build_forward_expand(graph, dx_copy); }
         if(!supports_all(backend,graph,error)) return false;
+        lap.mark("bwd: supports_op scan");
         const std::vector<ggml_tensor *> layer_params = yue2_aitk_layer_params(*adapters);
         if (workspace) {
             ggml_set_input(h); ggml_set_input(upstream);
@@ -279,13 +297,19 @@ public:
             }
             if (!workspace->allocate(backend, graph, error)) return false;
         } else if(!allocate(&r,backend,error)) return false;
+        lap.mark("bwd: gallocr/allocate");
         if (!device_input) { if (constants) ggml_backend_tensor_set(h,x,0,ggml_nbytes(h)); else setup_inputs(backend,h,cos_t,sin_t,mask,x,cosine,sine,mask_data); }
-        if (!device_upstream) ggml_backend_tensor_set(upstream,dy,0,ggml_nbytes(upstream)); ggml_graph_reset(graph);
+        if (!device_upstream) ggml_backend_tensor_set(upstream,dy,0,ggml_nbytes(upstream));
+        lap.mark("bwd: input upload");
+        ggml_graph_reset(graph);
+        lap.mark("bwd: ggml_graph_reset");
         if(ggml_backend_graph_compute(backend,graph)!=GGML_STATUS_SUCCESS) return fail(error,"backward graph compute failed");
+        lap.mark("bwd: graph_compute (launch)");
         auto get=[&](ggml_tensor*t,std::vector<float>&v,const char*n)->bool{ggml_tensor*g=ggml_graph_get_grad(graph,t);if(!g)return fail(error,std::string("missing gradient: ")+n);v.resize(ggml_nbytes(g)/sizeof(float));ggml_backend_tensor_get(g,v.data(),0,ggml_nbytes(g));return true;};
         if(!device_dx && !get(h,result->dx,"x")) return false;
         result->params.resize(layer_params.size());
         for(size_t i=0;i<layer_params.size();++i) if(!get(layer_params[i],result->params[i],ggml_get_name(layer_params[i]))) return false;
+        lap.mark("bwd: gradient readback (waits for GPU)");
         return true;
     }
 };

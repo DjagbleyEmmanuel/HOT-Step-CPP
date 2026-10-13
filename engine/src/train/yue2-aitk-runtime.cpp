@@ -1148,6 +1148,15 @@ static int run_impl(Config config, std::string * error) {
             line << "}}\n";
             jsonl << line.str();
             std::cout << line.str() << std::flush;
+            if (yue2_aitk_prof::on()) {
+                std::ostringstream prof;
+                prof << std::setprecision(6) << "{\"stage\":\"host_profile\",\"step\":" << metrics.step << ",\"ms\":{";
+                bool first = true;
+                for (const auto & kv : yue2_aitk_prof::totals()) { prof << (first ? "" : ",") << '"' << kv.first << "\":" << kv.second; first = false; }
+                prof << "}}\n";
+                std::cerr << prof.str() << std::flush;
+                yue2_aitk_prof::totals().clear();
+            }
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
             if (config.spike_factor > 0.0f) {
                 if (metrics.skipped) {
