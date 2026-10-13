@@ -685,6 +685,65 @@ static bool probe_supports(ggml_backend_t be, const Case & c, bool back) {
     return ok;
 }
 
+// S2c regression (no compute): the BF16 kernels have no fallback, so a view
+// the launch would resolve to "none" must be refused by supports_op instead.
+// A BF16 Q/K/V view at a 2-byte offset, or a BF16 backward whose dO sits at a
+// 4-byte offset, both have aligned strides; only view_offs gives them away.
+// Returns the number of probes whose answer is wrong.
+static int bf16_view_offs_regressions(ggml_backend_t be) {
+    ggml_init_params ip = {};
+    ip.mem_size         = ggml_tensor_overhead() * 64;
+    ip.no_alloc         = true;
+    ggml_context * ctx = ggml_init(ip);
+    if (!ctx) {
+        return 1;
+    }
+
+    const int64_t D = 128, S = 256, Nh = 16, Nkv = 8;
+    // One spare row so a view at a small byte offset stays inside the parent.
+    ggml_tensor * qp = ggml_new_tensor_4d(ctx, GGML_TYPE_BF16, D, S + 1, Nh,  1);
+    ggml_tensor * k  = ggml_new_tensor_4d(ctx, GGML_TYPE_BF16, D, S,     Nkv, 1);
+    ggml_tensor * v  = ggml_new_tensor_4d(ctx, GGML_TYPE_BF16, D, S,     Nkv, 1);
+    const float scale = 1.0f / std::sqrt((float) D);
+
+    auto q_at = [&](size_t offs) {
+        return ggml_view_4d(ctx, qp, D, S, Nh, 1, qp->nb[1], qp->nb[2], qp->nb[3], offs);
+    };
+    auto fwd = [&](ggml_tensor * q) {
+        ggml_tensor * n = ggml_flash_attn_train(ctx, q, k, v, nullptr, scale);
+        ggml_flash_attn_train_set_prec(n, GGML_PREC_BF16);
+        return n;
+    };
+    auto back = [&](ggml_tensor * q, size_t dfwd_offs) {
+        ggml_tensor * n  = fwd(q);
+        const int64_t ne = ggml_nelements(n);
+        ggml_tensor * dp = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ne + 4);
+        ggml_tensor * df = ggml_view_1d(ctx, dp, ne, dfwd_offs);
+        ggml_tensor * b  = ggml_flash_attn_train_back(ctx, q, k, v, nullptr, n, df, scale);
+        ggml_flash_attn_train_set_prec(b, GGML_PREC_BF16);
+        return b;
+    };
+
+    struct Probe { const char * name; ggml_tensor * node; bool want; };
+    const Probe probes[] = {
+        { "fwd  q view_offs 0", fwd(q_at(0)),          true  },
+        { "fwd  q view_offs 2", fwd(q_at(2)),          false },
+        { "back q view_offs 2", back(q_at(2), 0),      false },
+        { "back dO view_offs 0", back(q_at(0), 0),     true  },
+        { "back dO view_offs 4", back(q_at(0), 4),     false },
+        { "back dO view_offs 8", back(q_at(0), 8),     true  },
+    };
+    int bad = 0;
+    for (const Probe & pr : probes) {
+        const bool got = ggml_backend_supports_op(be, pr.node);
+        printf("bf16 supports_op %-20s %-3s (want %s)%s\n", pr.name, got ? "yes" : "no",
+               pr.want ? "yes" : "no", got == pr.want ? "" : "  FAIL");
+        bad += got != pr.want;
+    }
+    ggml_free(ctx);
+    return bad;
+}
+
 // ─── --bench mode ───────────────────────────────────────────────────────────
 //
 // HOT-Step patch: flash-attn-train (bench mode is test-tool-only, no ggml
@@ -2650,6 +2709,10 @@ int main(int argc, char ** argv) {
                "   (probed, not assumed)\n",
                yn(probe_supports(be_flash, cases[0], false)),
                yn(probe_supports(be_flash, cases[0], true)));
+    }
+    if (want_prec == "bf16" && bf16_view_offs_regressions(be_flash) != 0) {
+        printf("FAIL -- bf16 view_offs support regressions\n");
+        return 1;
     }
     printf("Nh=%lld D=%lld   prec=%s   tol=%.0e%s   cases=%zu   determinism check: %s\n",
            (long long) Nh, (long long) D, want_prec.c_str(), (double) PASS_REL,
