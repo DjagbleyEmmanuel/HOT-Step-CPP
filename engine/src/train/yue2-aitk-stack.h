@@ -144,7 +144,8 @@ inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig
 // checked and uploaded once and shared by every pass and step that asks for
 // the same shape (S2b, 2026-10-13); before, each pass rebuilt the mask on the
 // host (4,128^2 values for a whole-song AR) and every block call re-checked
-// the tables. At most 8 shapes and 256 MiB stay resident, oldest out first,
+// the tables. At most 8 shapes stay resident, oldest out first, under a soft
+// 256 MiB cap (a single larger shape is still admitted, alone),
 // and a failed upload frees the cache and retries (yue2-aitk-shape-cache.h);
 // block compute is synchronous, so an evicted entry is no longer being read.
 struct SharedConstants {
