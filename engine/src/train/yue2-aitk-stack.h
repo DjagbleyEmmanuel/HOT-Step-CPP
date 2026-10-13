@@ -3,13 +3,34 @@
 #include "st-write.h"
 #include <cstring>
 #include <functional>
+#include <cstdio>
+#include <memory>
 #include <cstdlib>
 
 // Recompute one block at a time. Keep layer checkpoints on the backend by
 // default; the diagnostic host tape packs the same rounded values as BF16.
+// Device canvases for the NAR's detached AR prefix (S2b, 2026-10-13): one K
+// and one V [D, length+count, Nkv] per layer, prefix rows written by the
+// capturing forward pass, the trailing `count` rows zero. The NAR forward and
+// its backward recompute read them in place, so the prefix never crosses the
+// bus and no per-layer canvas is allocated, cleared or uploaded.
+struct Yue2AitkPrefixDevice {
+    ggml_context * ctx = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
+    std::vector<ggml_tensor *> k, v;
+    int64_t count = 0;
+    Yue2AitkPrefixDevice() = default;
+    Yue2AitkPrefixDevice(const Yue2AitkPrefixDevice &) = delete;
+    Yue2AitkPrefixDevice & operator=(const Yue2AitkPrefixDevice &) = delete;
+    ~Yue2AitkPrefixDevice() { if (buffer) ggml_backend_buffer_free(buffer); if (ctx) ggml_free(ctx); }
+};
 struct Yue2AitkPrefixHost {
     int64_t length = 0;
     std::vector<std::vector<float>> keys, values; // [D,length,Nkv] per layer
+    // Set device_count (the NAR sequence the prefix will condition) before a
+    // capturing forward to capture into device canvases instead of host vectors.
+    int64_t device_count = 0;
+    std::shared_ptr<Yue2AitkPrefixDevice> device;
 };
 struct Yue2AitkStackTape {
     Yue2AitkStackTape() = default;
@@ -100,6 +121,23 @@ inline bool make_device_tape(ggml_backend_t backend, const Yue2AitkGraphConfig &
     tape->device_saved = save;
     return true;
 }
+inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig & c, size_t layers,
+                               int64_t length, Yue2AitkPrefixHost * prefix) {
+    auto d = std::make_shared<Yue2AitkPrefixDevice>();
+    ggml_init_params p{}; p.mem_size = (2 * layers + 2) * ggml_tensor_overhead() + 4096; p.no_alloc = true;
+    d->ctx = ggml_init(p);
+    if (!d->ctx) return false;
+    d->count = prefix->device_count;
+    for (size_t i = 0; i < layers; ++i) {
+        d->k.push_back(ggml_new_tensor_4d(d->ctx, GGML_TYPE_F32, c.head_dim, length + d->count, c.kv_heads, 1));
+        d->v.push_back(ggml_new_tensor_4d(d->ctx, GGML_TYPE_F32, c.head_dim, length + d->count, c.kv_heads, 1));
+    }
+    d->buffer = ggml_backend_alloc_ctx_tensors(d->ctx, backend);
+    if (!d->buffer) return false;
+    ggml_backend_buffer_clear(d->buffer, 0);
+    prefix->device = std::move(d);
+    return true;
+}
 struct PrefixCanvas {
     yue2_aitk_executor_detail::Runtime runtime;
     ggml_tensor * k=nullptr, * v=nullptr;
@@ -107,6 +145,12 @@ struct PrefixCanvas {
               const Yue2AitkPrefixHost * prefix, size_t layer, int64_t count, std::string * error) {
         if (!prefix) return true;
         using namespace yue2_aitk_executor_detail;
+        if (prefix->device) {
+            if (prefix->device->count != count || layer >= prefix->device->k.size())
+                return fail(error, "device AR prefix was captured for a different decoder length");
+            k = prefix->device->k[layer]; v = prefix->device->v[layer];
+            return true;
+        }
         if (prefix->length<=0 || prefix->length+count>24576 || layer>=prefix->keys.size() || layer>=prefix->values.size())
             return fail(error,"invalid detached AR prefix dimensions");
         const size_t expected=size_t(c.head_dim*c.kv_heads*prefix->length);
@@ -141,7 +185,15 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         return fail(error,"invalid expert forward request");
     tape->clear_device();
     tape->length=length; tape->nar=nar; tape->layer_inputs.clear(); tape->final_hidden.clear();
-    if (capture_prefix) { capture_prefix->length=length; capture_prefix->keys.clear(); capture_prefix->values.clear(); }
+    if (capture_prefix) {
+        capture_prefix->length=length; capture_prefix->keys.clear(); capture_prefix->values.clear();
+        capture_prefix->device.reset();
+        if (capture_prefix->device_count > 0 && fast_execution() && backend &&
+            !make_prefix_device(backend, c, expert.layers.size(), length, capture_prefix)) {
+            static bool warned = false;
+            if (!warned) { warned = true; std::fprintf(stderr, "[yue2-aitk] warning: no device memory for the AR prefix canvases; keeping the prefix on the host\n"); }
+        }
+    }
     std::vector<float> cosine,sine;
     trig(c,length,prefix?prefix->length:0,cosine,sine);
     Yue2AitkBlockConstants constants;
@@ -162,13 +214,16 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         Yue2AitkBlockForwardHost out;
         ggml_tensor * device_in = device ? tape->device_layers[save_tape ? layer : (layer & 1)] : nullptr;
         ggml_tensor * device_out = device ? tape->device_layers[save_tape ? layer + 1 : ((layer + 1) & 1)] : nullptr;
+        const bool device_capture = capture_prefix && capture_prefix->device;
         if (!Yue2AitkBlockExecutor::forward(backend,c,expert.layers[layer],layer_norms,
                 adapters?&adapters->layers[layer]:nullptr,device ? nullptr : hidden.data(),length,cosine.data(),sine.data(),
                 nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
-                prefix?prefix->length:0,error,!fast || capture_prefix != nullptr,
-                fast?&constants:nullptr,fast?&workspace:nullptr,device_in,device_out)) return false;
+                prefix?prefix->length:0,error,!fast || (capture_prefix != nullptr && !device_capture),
+                fast?&constants:nullptr,fast?&workspace:nullptr,device_in,device_out,
+                device_capture ? capture_prefix->device->k[layer] : nullptr,
+                device_capture ? capture_prefix->device->v[layer] : nullptr)) return false;
         if (!device) hidden=std::move(out.hidden);
-        if (capture_prefix) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
+        if (capture_prefix && !device_capture) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
     }
     if (device) {
         const ggml_tensor * final_tensor = tape->device_layers[save_tape ? expert.layers.size() : (expert.layers.size() & 1)];

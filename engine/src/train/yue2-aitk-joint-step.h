@@ -90,6 +90,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     // (~9% of a base-matched update). A crop or a frozen planner keeps it.
     const bool reuse_prefix=!planner_frozen && batch.nar.ar.input_ids==batch.ar.input_ids;
     Yue2AitkPrefixHost prefix;
+    prefix.device_count=static_cast<int64_t>(frames)+2;  // capture the NAR's conditioning on the device
     if(!planner_frozen) {
     notify("AR adapted forward");
     Yue2AitkEndpointHost embeds;

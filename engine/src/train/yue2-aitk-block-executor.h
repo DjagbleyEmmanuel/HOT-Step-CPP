@@ -169,9 +169,11 @@ public:
                         int64_t prefix_length = 0, std::string * error = nullptr,
                         bool capture_kv = true, Yue2AitkBlockConstants * constants = nullptr,
                         Yue2AitkBlockWorkspace * workspace = nullptr,
-                        ggml_tensor * device_input = nullptr, ggml_tensor * device_output = nullptr) {
+                        ggml_tensor * device_input = nullptr, ggml_tensor * device_output = nullptr,
+                        ggml_tensor * capture_k = nullptr, ggml_tensor * capture_v = nullptr) {
         using namespace yue2_aitk_executor_detail;
         if (!result) return fail(error, "forward result is null");
+        if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
         if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr)) return false;
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
@@ -194,6 +196,18 @@ public:
         ggml_tensor * value_cont = capture_kv && out.value ? ggml_cont(r.ctx, out.value) : nullptr;
         ggml_tensor * hidden_copy = device_output ? ggml_cpy(r.ctx, out.hidden, device_output) : nullptr;
         ggml_build_forward_expand(graph, hidden_copy ? hidden_copy : out.hidden); if (key_cont) ggml_build_forward_expand(graph, key_cont); if (value_cont) ggml_build_forward_expand(graph, value_cont);
+        if (capture_k) {
+            // The leading `sequence` rows of each [D, rows, Nkv] canvas take
+            // this block's post-RoPE K and its V; the caller zeroed the rest.
+            if (!out.key || !out.value || capture_k->ne[0] != out.key->ne[0] || capture_k->ne[1] < sequence ||
+                capture_k->ne[2] != out.key->ne[2] || !ggml_are_same_shape(capture_k, capture_v))
+                return fail(error, "device K/V capture canvas has the wrong shape");
+            auto rows = [&](ggml_tensor * canvas) {
+                return ggml_view_3d(r.ctx, canvas, canvas->ne[0], sequence, canvas->ne[2], canvas->nb[1], canvas->nb[2], 0);
+            };
+            ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.key, rows(capture_k)));
+            ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.value, rows(capture_v)));
+        }
         if (!supports_all(backend, graph, error)) return false;
         if (workspace) {
             ggml_set_input(h); ggml_set_output(hidden_copy ? hidden_copy : out.hidden);
