@@ -561,7 +561,7 @@ export function buildYue2PreprocessArgs(o: ResolvedYue2PreprocessOptions): strin
  *  engine's -14 LUFS for the tuned recipe, off (0) for base-matched, since
  *  the base was trained on raw recordings. */
 export function yue2LoudnessForMethod(method: unknown): number {
-  return method === 'base-matched' ? 0 : -14;
+  return method === 'base-matched' || method === 'ruach-parity' ? 0 : -14;
 }
 
 export interface ResolvedYue2TrainOptions extends Partial<Yue2OptimOptions> {

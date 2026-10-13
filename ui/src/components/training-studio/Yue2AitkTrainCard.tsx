@@ -167,7 +167,7 @@ const PRESETS = YUE2_JOINT_PRESETS;
 const presetValues = (p: typeof PRESETS[number]): Partial<Yue2JointTrainRequest> => ({
   ...(p.key === 'legacy' ? LEGACY_VALUES : { ...BASE_MATCHED_VALUES, stopMode: 'steps' as const }),
   steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
-const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.method === 'tuned') === (p.key === 'legacy')
+const activePreset = (f: Yue2JointTrainRequest) => f.method === 'ruach-parity' ? undefined : PRESETS.find(p => (f.method === 'tuned') === (p.key === 'legacy')
   && (p.key !== 'legacy' || f.targetKl === LEGACY_VALUES.targetKl) && f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum
   && (f.narCropFrames ?? 0) === p.narCropFrames && f.saveEvery === p.saveEvery && (f.adapterType !== 'lokr' || f.lokrDim === p.lokrDim))?.key;
 /** Presets show their cost relative to Balanced rather than wall-clock times
@@ -384,7 +384,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     writeStored(twoTakes, 1);
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
-  return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' ? 'tuned' : 'base-matched' };
+  return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' || stored.method === 'ruach-parity' ? stored.method : 'base-matched' };
 }
 function writeStored(key: string, value: unknown): void {
   if (typeof window === 'undefined') return;
@@ -524,7 +524,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (!batchDraft?.length || presetLoadGate.current.pending) return;
     setBatchStarting(true); setError('');
     try {
-      const timingWeight = lyricTiming
+      const batchTiming = form.method === 'ruach-parity' ? false : lyricTiming;
+      const timingWeight = batchTiming
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
       const recipe = { ...form, gpuUuid: runOn ? undefined : form.gpuUuid,
         device: runOn ? '' : defaultDevice === 'CUDA0' ? 'CUDA0' : form.device,
@@ -532,12 +533,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       if (runOn) {
-        await dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
+        await dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe });
         setBatchDraft(null);
         await setTrainingWorker(runOn);
         return;
       }
-      await startBatch({ datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
+      await startBatch({ datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe });
       setPhase('train');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -848,7 +849,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         if (next.datasetId === datasetId) {
           setPrepareJob(next);
           if (next.status === 'done' && prepareManifest && appliedPrepareJobId !== next.id) {
-            setForm(previous => ({ ...previous, checkpoint: prepare.checkpoint, dataset: prepareManifest }));
+            setForm(previous => ({ ...previous, checkpoint: previous.method === 'ruach-parity' ? '' : prepare.checkpoint, dataset: prepareManifest }));
             setAppliedPrepareJobId(next.id);
           }
         }
@@ -859,7 +860,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     if (prepareJob?.status === 'done' && prepareManifest && appliedPrepareJobId !== prepareJob.id) {
-      setForm(previous => ({ ...previous, checkpoint: prepare.checkpoint, dataset: prepareManifest }));
+      setForm(previous => ({ ...previous, checkpoint: previous.method === 'ruach-parity' ? '' : prepare.checkpoint, dataset: prepareManifest }));
       setAppliedPrepareJobId(prepareJob.id);
     }
   }, [prepareJob?.id, prepareJob?.status, prepareManifest, prepare.checkpoint, appliedPrepareJobId]);
@@ -1002,7 +1003,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (presetLoadGate.current.pending) return;
     setStarting(true); setError('');
     try {
-      const result = await startYue2AitkPrepare(datasetId, { ...prepare, lyricTiming });
+      const result = await startYue2AitkPrepare(datasetId, { ...prepare,
+        lyricTiming: form.method === 'ruach-parity' ? false : lyricTiming,
+        ...(form.method === 'ruach-parity' ? { captionGrammar: 'ruach-parity' as const } : {}) });
       setPrepareManifest(result.manifest);
       setAppliedPrepareJobId('');
       setPrepareJob(await getJob(result.jobId));
@@ -1220,11 +1223,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
             info={t('trainingStudio.yue2.method.presetInfo', 'Fast, Balanced and Thorough are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Legacy is the previous recipe: one song per update, stopping once the planner has moved a set distance from the base model, so it can finish sooner, but its adapters scored lower by ear than the three new presets. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
-          {!activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+          {form.method !== 'ruach-parity' && !activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
+        <button type="button" disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
+          method: 'ruach-parity', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 32, alpha: 32,
+          optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
+          beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
+          stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
+          gradAccum: 1, arCropFrames: 0, narCropFrames: 1500, abcDropout: 1,
+          captionDropout: 0, textDropout: 0, lyricDropout: 0, bothDropout: 0,
+          lyricTiming: false, cursorWeight: 0, calibrated: false, autoRefine: false,
+        })); }} className={`mt-3 px-3 py-2 rounded-lg border text-xs font-semibold disabled:opacity-40 ${form.method === 'ruach-parity'
+          ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+          : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50'}`}>
+          Ruach parity · fixed recipe
+        </button>
+        {form.method === 'ruach-parity' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method. Prepare a 0 LUFS cache before Start.</p>}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
-            onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
+            onClick={() => setForm(previous => ({ ...previous,
+              ...(previous.method === 'ruach-parity' ? DEFAULT_FORM : {}), ...presetValues(p) }))}
             className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${activePreset(form) === p.key
               ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
               : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>

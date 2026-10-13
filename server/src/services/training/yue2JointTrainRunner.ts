@@ -193,7 +193,7 @@ export interface ResolvedYue2JointTrainOptions {
    *  base was trained (docs/plans/yue2/31-base-matched-training.md), through
    *  the knobs below, applied by applyBaseMatchedRecipe. Recorded so the run
    *  index and the adapter card can say which. */
-  method?: 'tuned' | 'base-matched';
+  method?: 'tuned' | 'base-matched' | 'ruach-parity';
   /** Dataset-Calibrated Training (opt-in): how the album's profile resized
    *  steps and saveEvery. Absent on every run that did not opt in. */
   calibration?: Yue2Calibration;
@@ -303,6 +303,23 @@ export function applyBaseMatchedRecipe(body: Record<string, unknown>): Record<st
   return { ...out, ...BASE_MATCHED_FORCED };
 }
 
+/** Fixed native approximation of Ruach's joint-training recipe. */
+export function applyRuachParityRecipe(body: Record<string, unknown>): Record<string, unknown> {
+  return { ...body, method: 'ruach-parity', base: 'bf16', adapterType: 'lora',
+    rank: 32, alpha: 32, optimizer: 'adamw-lm', cautious: false,
+    lr: 1e-4, weightDecay: 0.01, beta1: 0.9, beta2: 0.999,
+    lrSchedule: 'constant', warmup: 0, plannerLrScale: 0.5, narLrScale: 1,
+    stopMode: 'steps', targetLoss: undefined, targetKl: undefined,
+    arLossWeight: 0.5, klWeight: 0.2, arTargets: 'tuned',
+    gradAccum: 1, arCropFrames: 0, narCropFrames: 1500,
+    abcDropout: 1, captionDropout: 0, textDropout: 0, lyricDropout: 0, bothDropout: 0,
+    lyricTiming: false, alignmentEnabled: false, cursorWeight: 0,
+    narExtraSteps: 0, spikeFactor: 0, reconStop: 0, reconTarget: 0,
+    planCheck: undefined, autoRefine: false, lrScale: 1,
+    refine: undefined, refinePlanner: undefined, freezePlannerNow: undefined,
+    unfreezePlanner: undefined, klCheckpointEvery: undefined };
+}
+
 /** The Refine tab's defaults, as one request body. Kept here so the
  *  automatic chain and the tab start the same job. */
 export function autoRefineRequest(sourceJobId: string, lastStep: number): Record<string, unknown> {
@@ -327,7 +344,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   // ~5 s a reading. The flag also keeps the frozen-teacher forward running
   // for the planner's KL to base, about 7% of every update; base-matched
   // pays it too, for reference (2026-10-06).
-  args.push('--nar-drift');
+  if (o.method !== 'ruach-parity') args.push('--nar-drift');
   if (o.rank !== undefined) args.push('--rank', String(o.rank));
   if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
   if (o.adapterType === 'lokr') {
@@ -439,6 +456,11 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (!o.checkpoint || !fs.existsSync(o.checkpoint) || !fs.statSync(o.checkpoint).isFile()) return `base checkpoint is missing or is not a file: ${o.checkpoint || '(empty)'}`;
   const manifestError = preparedManifest(o.dataset);
   if (manifestError) return `${manifestError}: ${o.dataset || '(empty)'}`;
+  if (o.method === 'ruach-parity') {
+    const prepared = JSON.parse(fs.readFileSync(o.dataset, 'utf8')) as Record<string, unknown>;
+    if (prepared.caption_grammar !== 'ruach-parity' || prepared.loudness_lufs !== 0)
+      return 'Ruach parity needs a dataset prepared with its caption grammar and loudness off.';
+  }
   if (!o.outDir) return 'Joint training requires a new output directory';
   if (fs.existsSync(o.outDir)) return `output directory already exists; choose a new directory: ${o.outDir}`;
   if (!fs.existsSync(path.dirname(o.outDir))) return `parent directory for joint-training output is missing: ${path.dirname(o.outDir)}`;
@@ -462,7 +484,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.stopMode === 'loss' && (o.targetLoss === undefined || !Number.isFinite(o.targetLoss) || o.targetLoss < 0)) return 'targetLoss must be a non-negative finite number when stopMode is loss';
   if (o.stopMode === 'kl' && (o.targetKl === undefined || !Number.isFinite(o.targetKl) || o.targetKl <= 0)) return 'targetKl must be a positive finite number when stopMode is kl';
   if (o.reconKeepDelta !== undefined && (!Number.isFinite(o.reconKeepDelta) || o.reconKeepDelta < 0 || o.reconKeepDelta > 1)) return 'reconKeepDelta must be between 0 and 1';
-  if (o.method !== undefined && o.method !== 'tuned' && o.method !== 'base-matched') return 'method must be tuned or base-matched';
+  if (o.method !== undefined && o.method !== 'tuned' && o.method !== 'base-matched' && o.method !== 'ruach-parity') return 'method must be tuned, base-matched or ruach-parity';
   if (o.warmup !== undefined && (!Number.isInteger(o.warmup) || o.warmup < 0 || o.warmup > o.steps)) return 'warmup must be an integer between 0 and steps';
   if (o.arLossWeight !== undefined && (!Number.isFinite(o.arLossWeight) || o.arLossWeight <= 0 || o.arLossWeight > 10)) return 'arLossWeight must be in (0, 10]';
   for (const [key, v] of [['beta1', o.beta1], ['beta2', o.beta2]] as const) if (v !== undefined && (!Number.isFinite(v) || v < 0 || v >= 1)) return `${key} must be in [0, 1)`;

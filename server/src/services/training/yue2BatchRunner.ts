@@ -95,7 +95,7 @@ const MAX_LISTED = 20;
 /** Body fields that belong to one dataset, never to a recipe. */
 /** The KL-rung refinement belongs to the tuned recipe; a base-matched run
  *  ends at its update count and is picked by ear from its own ladder. */
-const wantsRefine = (recipe: Record<string, unknown>) => recipe.autoRefine !== false && recipe.method !== 'base-matched';
+const wantsRefine = (recipe: Record<string, unknown>) => recipe.autoRefine !== false && recipe.method !== 'base-matched' && recipe.method !== 'ruach-parity';
 const RECIPE_STRIP = new Set(['dataset', 'output', 'resume', 'resumeRunId', 'resumeStep', 'preparation', 'checkpoint', 'autoPrepare']);
 
 const batches = new Map<string, BatchState>();

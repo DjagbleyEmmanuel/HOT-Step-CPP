@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
+import { applyRuachParityRecipe, buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
+
+test('Ruach parity forces its recipe and retains the companion decoder', () => {
+  const recipe = applyRuachParityRecipe({ method: 'ruach-parity', rank: 64, alpha: 256, adapterType: 'lokr',
+    optimizer: 'prodigy', gradAccum: 8, arCropFrames: 500, narCropFrames: 0,
+    lrSchedule: 'wsd', lyricTiming: true, cursorWeight: 0.08, klWeight: 0 });
+  assert.equal(recipe.rank, 32);
+  assert.equal(recipe.alpha, 32);
+  assert.equal(recipe.adapterType, 'lora');
+  assert.equal(recipe.optimizer, 'adamw-lm');
+  assert.equal(recipe.gradAccum, 1);
+  assert.equal(recipe.arCropFrames, 0);
+  assert.equal(recipe.narCropFrames, 1500);
+  assert.equal(recipe.lrSchedule, 'constant');
+  assert.equal(recipe.lyricTiming, false);
+  assert.equal(recipe.cursorWeight, 0);
+  assert.equal(recipe.klWeight, 0.2);
+  const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
+    steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
+  const parity = buildYue2JointTrainArgs({ ...base, method: 'ruach-parity' });
+  assert.equal(parity.includes('--nar-drift'), false);
+  assert.deepEqual(parity.slice(-2), ['--companion', 'nar-v9.safetensors']);
+  assert.ok(buildYue2JointTrainArgs({ ...base, method: 'base-matched' }).includes('--nar-drift'));
+  assert.ok(buildYue2JointTrainArgs({ ...base }).includes('--nar-drift'));
+});
 
 test('joint stop mode accepts the explicit step count sent by the UI', () => {
   assert.equal(parseYue2JointStopMode('steps'), 'steps');
@@ -140,4 +164,3 @@ test('wsd overshoot margin rides only with the wsd schedule', () => {
   assert.deepEqual(wsd.slice(wsd.indexOf('--lr-decay-steps'), wsd.indexOf('--lr-decay-steps') + 4), ['--lr-decay-steps', '40', '--kl-overshoot-margin', '0.15']);
   assert.equal(buildYue2JointTrainArgs({ ...base, lrSchedule: 'constant', klOvershootMargin: 0.15 }).includes('--kl-overshoot-margin'), false);
 });
-

@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
+import { ensureYue2PreparedDataset, preparationFingerprint } from './yue2AutoPrepare.js';
 import type { TrainingJob } from './labelingQueue.js';
 import type { ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
 
@@ -44,6 +44,13 @@ test('automatic preparation reuses unchanged inputs, but invalidates changed set
   fs.appendFileSync(f.o.legacyManifest, ' ');
   await ensureYue2PreparedDataset(f.job(), { ...f.o, lyricTiming: false }, f.prepare);
   assert.equal(f.calls(), 6);
+});
+
+test('Ruach preparation uses a separate cache key and leaves the old fingerprint intact', () => {
+  const f = fixture();
+  const old = preparationFingerprint(f.o);
+  assert.equal(preparationFingerprint({ ...f.o, captionGrammar: undefined }), old);
+  assert.notEqual(preparationFingerprint({ ...f.o, captionGrammar: 'ruach-parity' }), old);
 });
 
 test('missing prepared payload is regenerated instead of reused', async () => {
