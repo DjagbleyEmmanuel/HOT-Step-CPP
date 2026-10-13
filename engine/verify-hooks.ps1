@@ -247,6 +247,11 @@ Test-GgmlHook "BF16_ROUND unary op on CUDA (Hook 16)" @("$ggml\include\ggml.h", 
     @('GGML_UNARY_OP_BF16_ROUND', 'op_bf16_round') `
     "The YuE2 joint trainer refuses to start on CUDA."
 
+# Hook 18: a BF16 MUL_MAT weight operand may carry a gradient. The YuE2 trainer's
+#   BF16 tensor-core GEMMs cast F32 adapter factors to BF16 at every site.
+Test-GgmlHook "ggml.c BF16 MUL_MAT gradient (Hook 18)" @("$ggml\src\ggml.c") @('HOT-Step patch: bf16-mul-mat-grad') `
+    "YuE2 joint training aborts in ggml_build_backward_expand unless YUE2_AITK_PRECISION=strict-f32."
+
 # Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
 #   the only place ggml changes live now; local edits in engine/ggml are lost
 #   on the next submodule update and are not what CI or a user builds. Untracked

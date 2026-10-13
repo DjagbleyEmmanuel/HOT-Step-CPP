@@ -21,6 +21,7 @@ submodule at configure time.
 | mm-backward | `GGML_BACKWARD_MM=1` mul_mat formulation of the activation gradient | 8 |
 | quant-cpy-kquant | quant → F32 `CPY` for every type the dequantizers cover | 10 |
 | sched-unplaced-log | name the node no backend accepts | — |
+| bf16-mul-mat-grad | a BF16 `MUL_MAT` weight operand may carry a gradient | 18 |
 | zz-yue2-convrot8 | `CONVROT8` / `_BACK`, CUDA int8 rotated-linear training op | 15 |
 | zzz-yue2-bf16-round | `BF16_ROUND` unary op (CPU + CUDA) | 16 |
 | zzzz-vulkan-train-ops | Vulkan `BF16_ROUND` and fused training attention | 14 |
@@ -93,6 +94,8 @@ The `mm` arm also dequantizes a **block-quantized `src0`** to F32 before transpo
 - **`BF16_ROUND`**: one more entry in the generic `unary.comp`, round-to-nearest-even with NaN kept quiet, bit-identical to the CPU's `GGML_FP32_TO_BF16`.
 - **`FLASH_ATTN_TRAIN` / `_BACK`**: three new kernels (`fa_train_fwd`, `fa_train_bwd_dq`, `fa_train_bwd_dkv`) implementing the CPU oracle's maths and layouts: online softmax with LSE, then dQ per query row and dK/dV per key row recomputing P from the LSE. One 32-lane cluster per row, reduced with `subgroupShuffleXor`, so they need 32-wide subgroups with shuffle; without them `supports_op` says no and the trainer uses exact attention. `fattn-train-test --backend cuda` (which just asks for the first GPU) passes 49/49 against the CPU with `--extra` on an RTX 5090 and a 4090 over Vulkan, including GQA, S ≠ S_kv, dead key columns and bitwise determinism. The kernels are plain f32 scalar code: correct, several times slower than CUDA's.
 - **Dispatches are sliced** to about 2^25 (row, partner, head) pairs each (`GGML_VK_FA_TRAIN_SLICE_PAIRS` overrides, for tests). One dispatch over a whole song is seconds of GPU time, which freezes the desktop on a GPU that also drives a display and can trip the Windows TDR reset. The parity grid passes at the smallest slices too.
+
+`bf16-mul-mat-grad` relaxes one assert in `ggml_build_backward_expand`, which required every source on a gradient path to be F32 or F16. The YuE2 trainer casts its F32 adapter factors to BF16 at each GEMM so the products run on BF16 tensor cores, and that cast is `MUL_MAT`'s `src0` on the parameter's gradient path. `MUL_MAT`'s backward writes the `src0` gradient in F32 (`OUT_PROD`), and the cast's `CPY` backward reshapes it onto the F32 parameter, so nothing downstream needs the restriction. The allowance is BF16, `MUL_MAT`, `src0` only; every graph that built before builds the same. Lost, YuE2 joint training aborts at its first backward unless `YUE2_AITK_PRECISION=strict-f32`.
 
 `sched-unplaced-log` makes `ggml_backend_sched_split_graph` **name the node no backend accepts** before its `GGML_ASSERT(*cur_backend_id != -1)`: op, type, shape, and each source's type, strides and buffer. Without it, a user on Vulkan or Metal who reaches an op neither the GPU backend nor the CPU fallback supports sends a bare assert, and we have to guess which op it was.
 
