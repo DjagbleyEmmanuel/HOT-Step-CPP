@@ -276,7 +276,11 @@ private:
         }
         const double length=std::sqrt(squared);
         if (norm) *norm=length;
-        const float scale=(std::min)(1.0f,max_norm/(float(length)+1e-6f));
+        // Divide in double -- length can be far past FLT_MAX (a dense
+        // near-F32-limit gradient), and casting it to float first saturates
+        // to inf before the division ever runs. The result is always in
+        // [0,1] (min with 1.0), so the final cast to float is always safe.
+        const float scale=float((std::min)(1.0,double(max_norm)/(length+1e-6)));
         if (scale<1.0f || pre_scale!=1.0f) for (auto & slot : slots_) {
             if (scale<1.0f) for (float & value : slot.host) value*=scale;
             ggml_backend_tensor_set(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
@@ -296,25 +300,35 @@ private:
     // F64 accumulation handles it fine. rev 1 of this fix found the true
     // global max |value| on the device first (ggml_pool_1d MAX) to rescale
     // by -- correct, but ggml-cuda's pool1d kernel puts the whole reduction
-    // on ONE thread whenever the window covers the full tensor (nr==1), so
-    // it serially scanned millions of elements and turned clip into the new
-    // slowest stage (~2s/step). A fixed SAFE_SCALE sidesteps that: squaring
-    // (SAFE_SCALE*x) stays inside F32's normal range (no overflow, no
-    // flush-to-zero) for any |x| from ~1e-10 (far below any real gradient)
-    // to ~1e22 (well past the 1e20 adversarial case), so there is no need
-    // to find a per-call max at all -- just two more ggml_scale()s, each as
-    // cheap as the pre_scale one already there.
-    static constexpr float kClipSafeScale = 1e-6f;
+    // on ONE thread whenever the window covers the full tensor (nr==1: see
+    // ggml-cuda/pool1d.cu, parallel_elements = nr*OW), so it serially
+    // scanned millions of elements and turned clip into the new slowest
+    // stage (~2s/step). rev 2 used a fixed SAFE_SCALE instead -- wrong,
+    // Reviewer found a finite 1e26 still overflows after it (1e26*1e-6 =
+    // 1e20, squares to 1e40 > F32 max). rev 3 brings back the true max, but
+    // in two pool1d levels instead of one: level 1 reshapes each slot's
+    // |gradient| into [kAbsMaxBlock, blocks] so nr=blocks (parallel, one
+    // thread per block, not one thread total); level 2 does a single
+    // whole-tensor pool like rev 1's, but only over the *partial* maxes
+    // (one float per block across every slot combined, typically a few
+    // thousand values total, not millions), so the serial fallback is
+    // cheap there. Every element is then divided by that true max before
+    // squaring, which bounds the square to <=1 regardless of how large or
+    // small the raw gradient was -- no fixed constant, no overflow, for
+    // the entire finite F32 range.
+    static constexpr int64_t kAbsMaxBlock = 4096;
     bool clip_gradients_device(float max_norm, double * norm, std::string * error, float pre_scale) {
         const size_t n = slots_.size();
         if (n == 0) return fail(error, "no gradient slots to clip");
-        const size_t graph_size = 12*n + 64;
+        const size_t graph_size = 24*n + 128;
         ggml_init_params params{};
-        // Per slot: reshape, optional pre_scale, safe-scale, sqr, sum,
-        // running add, plus the apply pass's mul+cpy -- about half a dozen
-        // tensors; padded well past that since the pool is cheap and a
-        // miscount here is a hard abort.
-        params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(12*n+64) + 16384;
+        // Per slot: reshape, optional pre_scale, abs, optional pad,
+        // reshape-2d, pool1d, reshape-1d (max pass) then reshape, optional
+        // pre_scale, div, sqr, sum, running add (sum pass), plus the apply
+        // pass's mul+cpy, plus one concat into the running partial-max
+        // chain -- a dozen-plus tensors per slot; padded well past that
+        // since the pool is cheap and a miscount here is a hard abort.
+        params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(24*n+128) + 32768;
         params.no_alloc = true;
         ggml_context * ctx = ggml_init(params);
         if (!ctx) return fail(error, "failed to create clip context");
@@ -323,18 +337,48 @@ private:
         ggml_tensor * max_norm_t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
         ggml_tensor * clip_eps_t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
 
+        // Stage 1: true global max(|pre_scale * gradient|) across every
+        // slot, via the two-level pool above.
+        ggml_tensor * partials = nullptr;
+        for (size_t i = 0; i < n; ++i) {
+            ggml_tensor * flat = ggml_reshape_1d(ctx, slots_[i].gradient, ggml_nelements(slots_[i].gradient));
+            ggml_tensor * scaled = pre_scale != 1.0f ? ggml_scale(ctx, flat, pre_scale) : flat;
+            ggml_tensor * abs_t = ggml_abs(ctx, scaled);
+            const int64_t ne = abs_t->ne[0];
+            const int64_t blocks = (ne + kAbsMaxBlock - 1) / kAbsMaxBlock;
+            const int64_t padded_ne = blocks * kAbsMaxBlock;
+            ggml_tensor * padded = padded_ne != ne ? ggml_pad(ctx, abs_t, int(padded_ne - ne), 0, 0, 0) : abs_t;
+            ggml_tensor * grid = ggml_reshape_2d(ctx, padded, kAbsMaxBlock, blocks);
+            ggml_tensor * level1 = ggml_pool_1d(ctx, grid, GGML_OP_POOL_MAX, int(kAbsMaxBlock), int(kAbsMaxBlock), 0);
+            ggml_tensor * level1_flat = ggml_reshape_1d(ctx, level1, blocks);
+            partials = partials ? ggml_concat(ctx, partials, level1_flat, 0) : level1_flat;
+        }
+        ggml_tensor * global_max = ggml_pool_1d(ctx, partials, GGML_OP_POOL_MAX, int(partials->ne[0]), int(partials->ne[0]), 0);
+        // +eps so an all-zero gradient divides by eps, not zero.
+        ggml_tensor * denom = ggml_add(ctx, global_max, clip_eps_t);
+
+        // Stage 2: sum((pre_scale*gradient / denom)^2); every term is
+        // bounded to <=1 by construction, so the sum stays inside F32's
+        // range for any number of elements this trainer will ever see.
         ggml_tensor * total_norm_sq = nullptr;
         for (size_t i = 0; i < n; ++i) {
             ggml_tensor * flat = ggml_reshape_1d(ctx, slots_[i].gradient, ggml_nelements(slots_[i].gradient));
             ggml_tensor * scaled = pre_scale != 1.0f ? ggml_scale(ctx, flat, pre_scale) : flat;
-            ggml_tensor * safe = ggml_scale(ctx, scaled, kClipSafeScale);
+            ggml_tensor * safe = ggml_div(ctx, scaled, denom);
             ggml_tensor * sq = ggml_sqr(ctx, safe);
             ggml_tensor * s = ggml_sum(ctx, sq);
             total_norm_sq = total_norm_sq ? ggml_add(ctx, total_norm_sq, s) : s;
         }
-        ggml_tensor * length = ggml_scale(ctx, ggml_sqrt(ctx, total_norm_sq), 1.0f / kClipSafeScale);
-
-        ggml_tensor * ratio = ggml_div(ctx, max_norm_t, ggml_add(ctx, length, clip_eps_t));
+        // The true norm is denom * sqrt_sum, but that product can itself
+        // overflow F32 even though both factors never do on their own (a
+        // dense gradient near the F32 limit: denom ~1e38, sqrt_sum ~1e3,
+        // product ~1e41 > FLT_MAX). Never materialize that product in F32:
+        // keep it factored for the clip ratio --
+        //   max_norm/(denom*sqrt_sum + eps) == (max_norm/denom) / (sqrt_sum + eps/denom)
+        // -- and reconstruct the telemetry norm in host double from the two
+        // separately-read-back factors, where the product can't overflow.
+        ggml_tensor * sqrt_sum = ggml_sqrt(ctx, total_norm_sq);
+        ggml_tensor * ratio = ggml_div(ctx, ggml_div(ctx, max_norm_t, denom), ggml_add(ctx, sqrt_sum, ggml_div(ctx, clip_eps_t, denom)));
         ggml_tensor * scale = ggml_clamp(ctx, ratio, -(std::numeric_limits<float>::max)(), 1.0f);
         ggml_tensor * combined = pre_scale != 1.0f ? ggml_scale(ctx, scale, pre_scale) : scale;
 
@@ -344,7 +388,8 @@ private:
             ggml_tensor * updated = ggml_mul(ctx, slots_[i].gradient, combined);
             ggml_build_forward_expand(graph, ggml_cpy(ctx, updated, slots_[i].gradient));
         }
-        ggml_build_forward_expand(graph, length);
+        ggml_build_forward_expand(graph, denom);
+        ggml_build_forward_expand(graph, sqrt_sum);
 
         ggml_backend_buffer_t buffer = ggml_backend_alloc_ctx_tensors(ctx, backend_);
         if (!buffer) { ggml_free(ctx); return fail(error, "failed to allocate clip buffer"); }
@@ -355,12 +400,13 @@ private:
             ggml_backend_buffer_free(buffer); ggml_free(ctx);
             return fail(error, "clip graph failed");
         }
-        float length_f = 0.0f;
-        ggml_backend_tensor_get(length, &length_f, 0, sizeof(float));
+        float denom_f = 0.0f, sqrt_sum_f = 0.0f;
+        ggml_backend_tensor_get(denom, &denom_f, 0, sizeof(float));
+        ggml_backend_tensor_get(sqrt_sum, &sqrt_sum_f, 0, sizeof(float));
         ggml_backend_buffer_free(buffer);
         ggml_free(ctx);
-        if (!std::isfinite(length_f)) return fail(error, "non-finite gradient before clipping");
-        if (norm) *norm = double(length_f);
+        if (!std::isfinite(denom_f) || !std::isfinite(sqrt_sum_f)) return fail(error, "non-finite gradient before clipping");
+        if (norm) *norm = double(denom_f) * double(sqrt_sum_f);
         return true;
     }
 
