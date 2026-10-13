@@ -84,7 +84,7 @@ public:
     }
 
     void reset() {
-        initialized_ = false; slots_.clear(); frozen_.clear(); layer_slots_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
+        initialized_ = false; slots_.clear(); frozen_.clear(); layer_slots_ = {}; layer_grads_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
         if (buffer_) { ggml_backend_buffer_free(buffer_); buffer_ = nullptr; }
         if (ctx_) { ggml_free(ctx_); ctx_ = nullptr; }
         backend_ = nullptr;
@@ -143,6 +143,13 @@ public:
         return true;
     }
 
+    // The device gradient slots of one layer, in yue2_aitk_layer_params order,
+    // for block graphs that write their gradients in place (S2b).
+    const std::vector<ggml_tensor *> * gradient_tensors(bool nar, int layer) const {
+        if (!initialized_ || layer < 0 || layer >= kLayers) return nullptr;
+        return &layer_grads_[nar ? 0 : 1][static_cast<size_t>(layer)];
+    }
+
     // Planner freeze (--nar-extra-steps): every slot outside the decoder — the
     // planner's text_encoders.* adapters and the cursor head — is captured
     // once, then held. zero_planner_gradients() runs before clipping so the
@@ -192,18 +199,17 @@ public:
         return true;
     }
 
-    // Upload every slot's current host gradient (clipped by clip_gradients)
-    // into F32 tensors of matching shape. The LmOptim path uses this to fill
-    // its persistent accumulators, which live in a buffer this class does not
-    // own and must never be treated as its own gradient buffer.
-    bool fill_host_gradients(std::vector<ggml_tensor *> & targets, std::string * error = nullptr) const {
+    // Copy every slot's gradient into F32 tensors of matching shape, device to
+    // device. The LmOptim path uses this to fill its persistent accumulators,
+    // which live in a buffer this class does not own. Valid only after
+    // clip_gradients, which leaves each slot equal to its host copy.
+    bool fill_device_gradients(std::vector<ggml_tensor *> & targets, std::string * error = nullptr) const {
         if (!initialized_ || targets.size() != slots_.size()) return fail(error, "gradient target count does not match slot count");
         for (size_t i = 0; i < slots_.size(); ++i) {
-            const Slot & slot = slots_[i];
             ggml_tensor * target = targets[i];
-            if (!target || target->type != GGML_TYPE_F32 || !ggml_is_contiguous(target)) return fail(error, "gradient target must be contiguous F32");
-            for (int d = 0; d < GGML_MAX_DIMS; ++d) if (target->ne[d] != slot.parameter->ne[d]) return fail(error, "gradient target shape mismatch");
-            ggml_backend_tensor_set(target, slot.host.data(), 0, ggml_nbytes(target));
+            if (!target || target->type != GGML_TYPE_F32 || !ggml_is_contiguous(target) || !ggml_are_same_shape(target, slots_[i].gradient))
+                return fail(error, "gradient target must be contiguous F32 of the slot's shape");
+            ggml_backend_tensor_copy(slots_[i].gradient, target);
         }
         return true;
     }
@@ -249,6 +255,7 @@ private:
     std::vector<std::pair<size_t, std::vector<float>>> frozen_;  // slot index, held weights
     // [expert (0 = NAR, 1 = AR)][layer] -> slot indices in yue2_aitk_layer_params order.
     std::array<std::vector<std::vector<size_t>>, 2> layer_slots_{};
+    std::array<std::vector<std::vector<ggml_tensor *>>, 2> layer_grads_{};  // same order, gradient tensors
     uint32_t seed_ = kDefaultSeed;
     std::string init_policy_ = "native-v1";
     bool initialized_ = false;
@@ -264,7 +271,9 @@ private:
         static const char * names[kSites] = {"self_attn.qkv_proj", "self_attn.o_proj", "mlp.gate_up_proj", "mlp.down_proj"};
         if (expert.layers.size() != static_cast<size_t>(kLayers)) return fail(error, "adapter layer count mismatch");
         auto & per_layer = layer_slots_[static_cast<size_t>(expert_index)];
+        auto & grads = layer_grads_[static_cast<size_t>(expert_index)];
         per_layer.assign(static_cast<size_t>(kLayers), {});
+        grads.assign(static_cast<size_t>(kLayers), {});
         for (int layer=0; layer<kLayers; ++layer) for (int s=0; s<kSites; ++s) {
             std::vector<Yue2AitkSiteParam> params;
             yue2_aitk_site_params(yue2_aitk_site(expert.layers[static_cast<size_t>(layer)], s), &params);
@@ -277,6 +286,7 @@ private:
                 const std::string name = std::string(prefix) + ".model.layers." + std::to_string(layer) + "." + names[s] + p.suffix;
                 Slot slot{name,parameter,gradient,rows,cols,p.zero_init ? 1 : 0,std::vector<float>(static_cast<size_t>(rows*cols),0.0f)};
                 per_layer[static_cast<size_t>(layer)].push_back(slots_.size()); slots_.push_back(std::move(slot));
+                grads[static_cast<size_t>(layer)].push_back(gradient);
             }
         }
         return true;

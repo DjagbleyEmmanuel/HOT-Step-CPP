@@ -281,10 +281,15 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
 }
 
 using StoreGradients=std::function<bool(size_t,const Yue2AitkBlockBackwardHost &,std::string *)>;
+// Optional on the device tape: a layer's gradient slots, in
+// yue2_aitk_layer_params order. When set, the block graphs write (or with
+// accumulate, add) into them directly and `store` is not called.
+using GradientSinks=std::function<const std::vector<ggml_tensor *> *(size_t)>;
 inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
                       const Yue2AitkExpertAdapters & adapters,const Yue2AitkStackTape & tape,
                       const Yue2AitkPrefixHost * prefix,std::vector<float> gradient,
-                      const StoreGradients & store,std::string * error=nullptr) {
+                      const StoreGradients & store,std::string * error=nullptr,
+                      const GradientSinks & sinks={},bool accumulate=false) {
     using namespace yue2_aitk_executor_detail;
     const auto & expert=tape.nar?model.nar():model.ar();
     Yue2AitkGraphConfig c;
@@ -315,12 +320,14 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
             Yue2AitkBlockBackwardHost out;
             const size_t input_index = layer;
             const int next = ping ^ 1;
+            const std::vector<ggml_tensor *> * slots = sinks ? sinks(layer) : nullptr;
             if (!Yue2AitkBlockExecutor::backward(backend,c,expert.layers[layer],layer_norms,
                     &adapters.layers[layer],nullptr,nullptr,tape.length,cosine.data(),sine.data(),
                     tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
                     prefix?prefix->length:0,error,constants,fast?&workspace:nullptr,
-                    tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next])) return false;
-            { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
+                    tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next],
+                    slots,accumulate)) return false;
+            if (!slots) { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
             ping = next;
         }
         return true;

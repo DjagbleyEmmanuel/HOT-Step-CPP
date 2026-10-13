@@ -157,7 +157,8 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(adapted_norm.dx),
-        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why,input.accumulate);},error)) return false;
+        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why,input.accumulate);},error,
+        [&](size_t layer){return state.gradient_tensors(false,int(layer));},input.accumulate)) return false;
     }
     // Recompute with the current adapted AR. This cache is detached host data.
     // It is local to this step and cannot survive the optimizer update below.
@@ -185,7 +186,8 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     notify("NAR flow backward");
     if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.nar_adapters(),nar,&prefix,std::move(prediction.dx),
-        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why,input.accumulate);},error)) return false;
+        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why,input.accumulate);},error,
+        [&](size_t layer){return state.gradient_tensors(true,int(layer));},input.accumulate)) return false;
     if(!std::isfinite(result.ar_ce)||!std::isfinite(result.ar_kl)||!std::isfinite(result.nar_mse)) return fail(error,"nonfinite joint loss");
     if(!input.finalize) {
         // A micro-step of --grad-accum: the gradients stay in the slots for the
@@ -211,9 +213,9 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         return true;
     }
     if (lm) {
-        // The state's host gradients are the clipped, authoritative values;
-        // fill LmOptim's accumulators (own buffer) and step on its scheduler.
-        { YUE2_PROF("opt: fill LmOptim accumulators (H2D)"); if (!state.fill_host_gradients(lm->acc, error)) return false; }
+        // After the clip the device slots equal the clipped host values; copy
+        // them into LmOptim's accumulators (own buffer), step on its scheduler.
+        { YUE2_PROF("opt: fill LmOptim accumulators (D2D)"); if (!state.fill_device_gradients(lm->acc, error)) return false; }
         LmStepStats step_stats{};
         { YUE2_PROF("opt: lm_optim_step"); if (!lm_optim_step(lm, osched, &step_stats)) return fail(error, "optimizer step failed"); }
         result.step = lm->opt_step;

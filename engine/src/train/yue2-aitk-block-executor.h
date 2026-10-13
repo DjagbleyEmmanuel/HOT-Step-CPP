@@ -251,7 +251,9 @@ public:
                          Yue2AitkBlockConstants * constants = nullptr,
                          Yue2AitkBlockWorkspace * workspace = nullptr,
                          ggml_tensor * device_input = nullptr, ggml_tensor * device_upstream = nullptr,
-                         ggml_tensor * device_dx = nullptr) {
+                         ggml_tensor * device_dx = nullptr,
+                         const std::vector<ggml_tensor *> * gradient_sinks = nullptr,
+                         bool accumulate_sinks = false) {
         using namespace yue2_aitk_executor_detail;
         yue2_aitk_prof::Lap lap;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
@@ -287,9 +289,22 @@ public:
         lap.mark("bwd: ggml_build_backward_expand");
         ggml_tensor * dx_copy = nullptr;
         if (device_dx) { ggml_tensor * gh = ggml_graph_get_grad(graph, h); if (!gh) return fail(error, "missing block input gradient"); dx_copy = ggml_cpy(r.ctx, gh, device_dx); ggml_set_output(dx_copy); ggml_build_forward_expand(graph, dx_copy); }
+        const std::vector<ggml_tensor *> layer_params = yue2_aitk_layer_params(*adapters);
+        // Device gradient slots (S2b): the graph writes each parameter gradient
+        // into its slot, or adds it for --grad-accum, and nothing is read back.
+        // The finite check moves to the clip, which reads every slot.
+        if (gradient_sinks) {
+            if (gradient_sinks->size() != layer_params.size()) return fail(error, "gradient slot count mismatch");
+            for (size_t i = 0; i < layer_params.size(); ++i) {
+                ggml_tensor * g = ggml_graph_get_grad(graph, layer_params[i]), * sink = (*gradient_sinks)[i];
+                if (!g || !sink || !ggml_are_same_shape(g, sink) || g->type != GGML_TYPE_F32 || sink->type != GGML_TYPE_F32)
+                    return fail(error, "invalid gradient slot");
+                ggml_tensor * store = ggml_cpy(r.ctx, accumulate_sinks ? ggml_add(r.ctx, sink, g) : g, sink);
+                ggml_set_output(store); ggml_build_forward_expand(graph, store);
+            }
+        }
         if(!supports_all(backend,graph,error)) return false;
         lap.mark("bwd: supports_op scan");
-        const std::vector<ggml_tensor *> layer_params = yue2_aitk_layer_params(*adapters);
         if (workspace) {
             ggml_set_input(h); ggml_set_input(upstream);
             std::vector<ggml_tensor *> outputs = layer_params; outputs.insert(outputs.begin(), h);
@@ -310,8 +325,8 @@ public:
         lap.mark("bwd: graph_compute (launch)");
         auto get=[&](ggml_tensor*t,std::vector<float>&v,const char*n)->bool{ggml_tensor*g=ggml_graph_get_grad(graph,t);if(!g)return fail(error,std::string("missing gradient: ")+n);v.resize(ggml_nbytes(g)/sizeof(float));ggml_backend_tensor_get(g,v.data(),0,ggml_nbytes(g));return true;};
         if(!device_dx && !get(h,result->dx,"x")) return false;
-        result->params.resize(layer_params.size());
-        for(size_t i=0;i<layer_params.size();++i) if(!get(layer_params[i],result->params[i],ggml_get_name(layer_params[i]))) return false;
+        result->params.resize(gradient_sinks ? 0 : layer_params.size());
+        if (!gradient_sinks) for(size_t i=0;i<layer_params.size();++i) if(!get(layer_params[i],result->params[i],ggml_get_name(layer_params[i]))) return false;
         lap.mark("bwd: gradient readback (waits for GPU)");
         return true;
     }
