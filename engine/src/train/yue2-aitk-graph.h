@@ -40,6 +40,13 @@ namespace yue2_aitk_graph {
 // (Vulkan, Metal). The exact mul_mat -> soft_max -> mul_mat attention takes
 // its place; same maths, but it keeps the [keys, S, heads] probabilities.
 inline bool & math_attention() { static bool on = false; return on; }
+// Set once by the runner: true only once BF16 flash-attention MMA kernels
+// exist in HOT-ggml and the runner has verified real backend support (S2c,
+// RESEARCH/YUE2_S2C_DESIGN.md). Nothing sets this true yet, so the BF16 cast
+// below is dead code today -- the CUDA support probe in fattn-train.cu would
+// refuse the op regardless, but this keeps that refusal from ever being
+// exercised until a kernel exists for it to refuse.
+inline bool & bf16_attention_supported() { static bool on = false; return on; }
 // Training precision (S2a, 2026-10-13). Default: every training GEMM is a
 // BF16 x BF16 tensor-core product with FP32 accumulation and F32 output. The
 // inputs are already BF16-rounded, so each product is exact and only the
@@ -266,8 +273,16 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     }
 #ifndef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
     else {
-    ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, 1.0f);
-    ggml_flash_attn_train_set_prec(packed, c.attention_precision);
+    // S2c: BF16 attention is gated on a runner-verified capability, not just
+    // the requested precision -- bf16_attention_supported() is false until a
+    // runner sets it, so this is byte-for-byte today's F32/TF32 dispatch.
+    const bool bf16_attention = !strict_f32() && c.attention_precision == GGML_PREC_DEFAULT &&
+        bf16_attention_supported();
+    ggml_tensor * attn_q = bf16_attention ? ggml_cast(ctx, q, GGML_TYPE_BF16) : q;
+    ggml_tensor * attn_k = bf16_attention ? ggml_cast(ctx, k, GGML_TYPE_BF16) : k;
+    ggml_tensor * attn_v = bf16_attention ? ggml_cast(ctx, v, GGML_TYPE_BF16) : v;
+    ggml_tensor * packed = ggml_flash_attn_train(ctx, attn_q, attn_k, attn_v, mask, 1.0f);
+    ggml_flash_attn_train_set_prec(packed, bf16_attention ? GGML_PREC_BF16 : c.attention_precision);
     attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
     }
 #endif
