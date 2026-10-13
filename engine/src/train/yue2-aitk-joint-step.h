@@ -199,7 +199,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     notify("Joint clipping and optimizer update");
     if(planner_frozen) state.zero_planner_gradients();
-    { YUE2_PROF("opt: clip (D2H + host norm + H2D)"); if(!state.clip_gradients(1.0f,&result.gradient_norm,error,input.accum_scale)) return false; }
+    { YUE2_PROF("opt: clip (device; YUE2_AITK_CLIP_HOST=1: D2H + host norm + H2D)"); if(!state.clip_gradients(1.0f,&result.gradient_norm,error,input.accum_scale)) return false; }
     ggml_backend_synchronize(backend);
     if (input.skip_above>0 && result.gradient_norm>input.skip_above) {
         // A spike: no parameter or optimizer-moment changes. Clipping alone is

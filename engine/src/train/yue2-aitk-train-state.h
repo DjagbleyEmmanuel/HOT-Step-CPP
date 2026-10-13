@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -283,64 +284,83 @@ private:
         return true;
     }
 
-    // S2d-1: no gradient ever leaves the device. Pass 1 sums ||pre_scale*g||^2
-    // slot by slot on the GPU and reads back the one resulting scalar. Pass 2
-    // (skipped when the combined scale is exactly 1) writes pre_scale*scale
-    // back into each slot in place via ggml_cpy, which ggml_cpy returns as a
-    // view of its destination, so no extra device buffer is allocated for it.
+    // S2d-1 (rev 2, after review): no gradient ever leaves the device, and
+    // neither does the clip scale -- it is derived and applied entirely as
+    // device tensors, never read back and recomputed on the host. The one
+    // scalar that does come back (`length`) is read AFTER the scale and the
+    // in-place apply are already baked into the graph; it feeds only the
+    // *norm telemetry output, never the clip itself.
+    //
+    // Squaring a raw gradient in F32 can overflow (a legitimate finite value
+    // like 1e20 squares to 1e40, outside F32 range) even though the host's
+    // F64 accumulation handles it fine. rev 1 of this fix found the true
+    // global max |value| on the device first (ggml_pool_1d MAX) to rescale
+    // by -- correct, but ggml-cuda's pool1d kernel puts the whole reduction
+    // on ONE thread whenever the window covers the full tensor (nr==1), so
+    // it serially scanned millions of elements and turned clip into the new
+    // slowest stage (~2s/step). A fixed SAFE_SCALE sidesteps that: squaring
+    // (SAFE_SCALE*x) stays inside F32's normal range (no overflow, no
+    // flush-to-zero) for any |x| from ~1e-10 (far below any real gradient)
+    // to ~1e22 (well past the 1e20 adversarial case), so there is no need
+    // to find a per-call max at all -- just two more ggml_scale()s, each as
+    // cheap as the pre_scale one already there.
+    static constexpr float kClipSafeScale = 1e-6f;
     bool clip_gradients_device(float max_norm, double * norm, std::string * error, float pre_scale) {
         const size_t n = slots_.size();
-        const size_t graph_size = 8*n + 64;
-        ggml_init_params sum_params{};
-        // Up to 5 new tensor objects per slot (scale, square, per-slot sum,
-        // the running add) plus the view from the reshape; padded well past
-        // that since the pool is cheap and a miscount here is a hard abort.
-        sum_params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(8*n+64) + 16384;
-        sum_params.no_alloc = true;
-        ggml_context * sum_ctx = ggml_init(sum_params);
-        if (!sum_ctx) return fail(error, "failed to create clip sum-of-squares context");
-        ggml_cgraph * sum_graph = ggml_new_graph_custom(sum_ctx, graph_size, false);
-        ggml_tensor * total = nullptr;
-        for (auto & slot : slots_) {
-            ggml_tensor * flat = ggml_reshape_1d(sum_ctx, slot.gradient, ggml_nelements(slot.gradient));
-            ggml_tensor * scaled = pre_scale != 1.0f ? ggml_scale(sum_ctx, flat, pre_scale) : flat;
-            ggml_tensor * sq = ggml_sqr(sum_ctx, scaled);
-            ggml_tensor * s = ggml_sum(sum_ctx, sq);
-            total = total ? ggml_add(sum_ctx, total, s) : s;
+        if (n == 0) return fail(error, "no gradient slots to clip");
+        const size_t graph_size = 12*n + 64;
+        ggml_init_params params{};
+        // Per slot: reshape, optional pre_scale, safe-scale, sqr, sum,
+        // running add, plus the apply pass's mul+cpy -- about half a dozen
+        // tensors; padded well past that since the pool is cheap and a
+        // miscount here is a hard abort.
+        params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(12*n+64) + 16384;
+        params.no_alloc = true;
+        ggml_context * ctx = ggml_init(params);
+        if (!ctx) return fail(error, "failed to create clip context");
+        ggml_cgraph * graph = ggml_new_graph_custom(ctx, graph_size, false);
+
+        ggml_tensor * max_norm_t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+        ggml_tensor * clip_eps_t = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+
+        ggml_tensor * total_norm_sq = nullptr;
+        for (size_t i = 0; i < n; ++i) {
+            ggml_tensor * flat = ggml_reshape_1d(ctx, slots_[i].gradient, ggml_nelements(slots_[i].gradient));
+            ggml_tensor * scaled = pre_scale != 1.0f ? ggml_scale(ctx, flat, pre_scale) : flat;
+            ggml_tensor * safe = ggml_scale(ctx, scaled, kClipSafeScale);
+            ggml_tensor * sq = ggml_sqr(ctx, safe);
+            ggml_tensor * s = ggml_sum(ctx, sq);
+            total_norm_sq = total_norm_sq ? ggml_add(ctx, total_norm_sq, s) : s;
         }
-        ggml_build_forward_expand(sum_graph, total);
-        ggml_backend_buffer_t sum_buffer = ggml_backend_alloc_ctx_tensors(sum_ctx, backend_);
-        if (!sum_buffer) { ggml_free(sum_ctx); return fail(error, "failed to allocate clip sum-of-squares buffer"); }
-        if (ggml_backend_graph_compute(backend_, sum_graph) != GGML_STATUS_SUCCESS) {
-            ggml_backend_buffer_free(sum_buffer); ggml_free(sum_ctx);
-            return fail(error, "clip sum-of-squares graph failed");
+        ggml_tensor * length = ggml_scale(ctx, ggml_sqrt(ctx, total_norm_sq), 1.0f / kClipSafeScale);
+
+        ggml_tensor * ratio = ggml_div(ctx, max_norm_t, ggml_add(ctx, length, clip_eps_t));
+        ggml_tensor * scale = ggml_clamp(ctx, ratio, -(std::numeric_limits<float>::max)(), 1.0f);
+        ggml_tensor * combined = pre_scale != 1.0f ? ggml_scale(ctx, scale, pre_scale) : scale;
+
+        // Always applied -- whether combined == 1 is itself a device value,
+        // and branching on it would mean reading it back first.
+        for (size_t i = 0; i < n; ++i) {
+            ggml_tensor * updated = ggml_mul(ctx, slots_[i].gradient, combined);
+            ggml_build_forward_expand(graph, ggml_cpy(ctx, updated, slots_[i].gradient));
         }
-        float squared = 0.0f;
-        ggml_backend_tensor_get(total, &squared, 0, sizeof(float));
-        ggml_backend_buffer_free(sum_buffer);
-        ggml_free(sum_ctx);
-        if (!std::isfinite(squared)) return fail(error, "non-finite gradient before clipping");
-        const double length = std::sqrt(double(squared));
-        if (norm) *norm = length;
-        const float scale = (std::min)(1.0f, max_norm/(float(length)+1e-6f));
-        const float combined = pre_scale * scale;
-        if (combined == 1.0f) return true;
-        ggml_init_params apply_params{};
-        apply_params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(4*n+64) + 16384;
-        apply_params.no_alloc = true;
-        ggml_context * apply_ctx = ggml_init(apply_params);
-        if (!apply_ctx) return fail(error, "failed to create clip apply context");
-        ggml_cgraph * apply_graph = ggml_new_graph_custom(apply_ctx, graph_size, false);
-        for (auto & slot : slots_) {
-            ggml_tensor * scaled = ggml_scale(apply_ctx, slot.gradient, combined);
-            ggml_build_forward_expand(apply_graph, ggml_cpy(apply_ctx, scaled, slot.gradient));
+        ggml_build_forward_expand(graph, length);
+
+        ggml_backend_buffer_t buffer = ggml_backend_alloc_ctx_tensors(ctx, backend_);
+        if (!buffer) { ggml_free(ctx); return fail(error, "failed to allocate clip buffer"); }
+        const float eps = 1e-6f;
+        ggml_backend_tensor_set(max_norm_t, &max_norm, 0, sizeof(float));
+        ggml_backend_tensor_set(clip_eps_t, &eps, 0, sizeof(float));
+        if (ggml_backend_graph_compute(backend_, graph) != GGML_STATUS_SUCCESS) {
+            ggml_backend_buffer_free(buffer); ggml_free(ctx);
+            return fail(error, "clip graph failed");
         }
-        ggml_backend_buffer_t apply_buffer = ggml_backend_alloc_ctx_tensors(apply_ctx, backend_);
-        if (!apply_buffer) { ggml_free(apply_ctx); return fail(error, "failed to allocate clip apply buffer"); }
-        const bool ok = ggml_backend_graph_compute(backend_, apply_graph) == GGML_STATUS_SUCCESS;
-        ggml_backend_buffer_free(apply_buffer);
-        ggml_free(apply_ctx);
-        if (!ok) return fail(error, "clip apply graph failed");
+        float length_f = 0.0f;
+        ggml_backend_tensor_get(length, &length_f, 0, sizeof(float));
+        ggml_backend_buffer_free(buffer);
+        ggml_free(ctx);
+        if (!std::isfinite(length_f)) return fail(error, "non-finite gradient before clipping");
+        if (norm) *norm = double(length_f);
         return true;
     }
 
