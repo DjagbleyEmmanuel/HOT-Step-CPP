@@ -362,6 +362,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
       if (o.muonNsSteps !== undefined) args.push('--muon-ns-steps', String(o.muonNsSteps));
     }
   }
+  if (o.method === 'ruach-parity') args.push('--adam-eps', '1e-6');
   if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
   if (o.stopMode === 'kl' && o.targetKl !== undefined) args.push('--target-kl', String(o.targetKl));
   if (o.stopMode === 'kl' && o.targetKlMode === 'trend') args.push('--target-kl-mode', 'trend');

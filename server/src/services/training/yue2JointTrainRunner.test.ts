@@ -17,13 +17,24 @@ test('Ruach parity forces its recipe and retains the companion decoder', () => {
   assert.equal(recipe.lyricTiming, false);
   assert.equal(recipe.cursorWeight, 0);
   assert.equal(recipe.klWeight, 0.2);
+  assert.equal(recipe.weightDecay, 0.01);
+  assert.equal(recipe.beta1, 0.9);
+  assert.equal(recipe.beta2, 0.999);
+  assert.equal(recipe.lr, 1e-4);
+  assert.equal(recipe.plannerLrScale, 0.5);
+  assert.equal(recipe.abcDropout, 1);
+  assert.equal(recipe.arTargets, 'tuned');
   const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
     steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
   const parity = buildYue2JointTrainArgs({ ...base, method: 'ruach-parity' });
   assert.equal(parity.includes('--nar-drift'), false);
+  assert.deepEqual(parity.slice(parity.indexOf('--adam-eps'), parity.indexOf('--adam-eps') + 2), ['--adam-eps', '1e-6']);
   assert.deepEqual(parity.slice(-2), ['--companion', 'nar-v9.safetensors']);
-  assert.ok(buildYue2JointTrainArgs({ ...base, method: 'base-matched' }).includes('--nar-drift'));
-  assert.ok(buildYue2JointTrainArgs({ ...base }).includes('--nar-drift'));
+  const oldArgs = ['yue2-joint-train', '--checkpoint', 'base.gguf', '--dataset', 'dataset.json',
+    '--output', 'run', '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0',
+    '--nar-drift', '--companion', 'nar-v9.safetensors'];
+  assert.deepEqual(buildYue2JointTrainArgs({ ...base, method: 'base-matched' }), oldArgs);
+  assert.deepEqual(buildYue2JointTrainArgs({ ...base }), oldArgs);
 });
 
 test('joint stop mode accepts the explicit step count sent by the UI', () => {
