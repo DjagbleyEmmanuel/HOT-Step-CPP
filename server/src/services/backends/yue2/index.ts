@@ -1044,7 +1044,8 @@ function yue2LmAdapterCatalogue(): {
   // the other slot still has no matching result. Imports can hold one half.
   // The combined adapter.safetensors is an output/inspection artifact and is
   // intentionally not offered to either YuE2 slot.
-  for (const run of listAllYue2AitkRuns()) {
+  const jointRuns = listAllYue2AitkRuns();
+  for (const run of jointRuns) {
     for (const ckpt of run.checkpoints) {
       const imported = run.options.source === 'comfyui-import';
       if (imported ? !ckpt.arPath && !ckpt.narPath : !ckpt.arPath || !ckpt.narPath) continue;
@@ -1060,7 +1061,7 @@ function yue2LmAdapterCatalogue(): {
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const fileMeta = readSafetensorsMeta(abs);
-        const { trigger, inferred } = yue2AdapterTrigger(abs);
+        const { trigger, inferred } = yue2AdapterTrigger(abs, jointRuns);
         const rank = fileMeta?.rank;
         const steps = fileMeta?.steps ?? ckpt.step;
         paths.push(abs);
@@ -1097,7 +1098,7 @@ function yue2LmAdapterCatalogue(): {
     const kind: Yue2LmAdapterKind | null = /^yue2-ar-/.test(fileMeta?.format ?? '') ? 'ar'
       : /^yue2-nar-/.test(fileMeta?.format ?? '') ? 'nar' : null;
     if (!kind) continue;
-    const { trigger, inferred } = yue2AdapterTrigger(abs);
+    const { trigger, inferred } = yue2AdapterTrigger(abs, jointRuns);
     const runName = path.relative(folder, path.dirname(abs)) || path.basename(folder);
     const steps = fileMeta?.steps;
     paths.push(abs);

@@ -565,9 +565,9 @@ export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
 
 /** Resolve only paths present in the durable joint catalogue. This is shared by
  * the model picker, prompt builder and caption-source route. */
-export function jointRunForAdapter(adapterPath: string): Yue2AitkRunRecord | undefined {
+export function jointRunForAdapter(adapterPath: string, runs?: Yue2AitkRunRecord[]): Yue2AitkRunRecord | undefined {
   if (!adapterPath) return undefined;
   const wanted = path.resolve(adapterPath).toLowerCase();
-  return listAllYue2AitkRuns().find(run => run.checkpoints.some(checkpoint =>
+  return (runs ?? listAllYue2AitkRuns()).find(run => run.checkpoints.some(checkpoint =>
     [checkpoint.arPath, checkpoint.narPath].some(ref => ref && path.resolve(ref).toLowerCase() === wanted)));
 }
