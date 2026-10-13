@@ -1,7 +1,7 @@
 #pragma once
 #include "yue2-aitk-block-executor.h"
 #include "st-write.h"
-#include <algorithm>
+#include "yue2-aitk-shape-cache.h"
 #include <cstring>
 #include <functional>
 #include <cstdio>
@@ -144,9 +144,11 @@ inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig
 // checked and uploaded once and shared by every pass and step that asks for
 // the same shape (S2b, 2026-10-13); before, each pass rebuilt the mask on the
 // host (4,128^2 values for a whole-song AR) and every block call re-checked
-// the tables. Up to kSharedConstants shapes stay resident, oldest out first;
+// the tables. At most 8 shapes and 256 MiB stay resident, oldest out first,
+// and a failed upload frees the cache and retries (yue2-aitk-shape-cache.h);
 // block compute is synchronous, so an evicted entry is no longer being read.
 struct SharedConstants {
+    size_t bytes = 0;
     ggml_backend_t backend = nullptr;
     int64_t length = 0, prefix = 0;
     Yue2AitkMaskMode mode = Yue2AitkMaskMode::causal;
@@ -155,29 +157,27 @@ struct SharedConstants {
 };
 inline SharedConstants * shared_constants(ggml_backend_t backend, const Yue2AitkGraphConfig & c, int64_t length,
                                           int64_t prefix, Yue2AitkMaskMode mode, std::string * error) {
-    constexpr size_t kSharedConstants = 8;
     // Never destroyed: a static destructor would free CUDA buffers after the
     // backend is gone. The process exit reclaims them.
     static auto * cache = new std::vector<std::unique_ptr<SharedConstants>>();
-    for (size_t i = 0; i < cache->size(); ++i) {
-        const SharedConstants & e = *(*cache)[i];
-        if (e.backend == backend && e.length == length && e.prefix == prefix && e.mode == mode) {
-            std::rotate(cache->begin() + long(i), cache->begin() + long(i) + 1, cache->end());
-            return cache->back().get();
-        }
-    }
-    auto e = std::make_unique<SharedConstants>();
-    e->backend = backend; e->length = length; e->prefix = prefix; e->mode = mode;
-    { YUE2_PROF("stack: RoPE tables (host)"); trig(c, length, prefix, e->cosine, e->sine); }
-    if (!yue2_aitk_executor_detail::finite_all(e->cosine.data(), e->cosine.size()) ||
-        !yue2_aitk_executor_detail::finite_all(e->sine.data(), e->sine.size())) {
-        yue2_aitk_executor_detail::fail(error, "non-finite RoPE table");
-        return nullptr;
-    }
-    if (!e->constants.make(backend, c, length, prefix, mode, e->cosine.data(), e->sine.data(), error)) return nullptr;
-    if (cache->size() >= kSharedConstants) cache->erase(cache->begin());
-    cache->push_back(std::move(e));
-    return cache->back().get();
+    // F16 mask plus the two F32 half-width RoPE tables.
+    const size_t need = size_t(length) * size_t(length + prefix) * 2 + size_t(length) * size_t(c.head_dim) * 4;
+    return yue2_aitk_shape_cache::fetch(*cache, 8, size_t(256) << 20, need,
+        [&](const SharedConstants & e) {
+            return e.backend == backend && e.length == length && e.prefix == prefix && e.mode == mode;
+        },
+        [&]() -> std::unique_ptr<SharedConstants> {
+            auto e = std::make_unique<SharedConstants>();
+            e->backend = backend; e->length = length; e->prefix = prefix; e->mode = mode;
+            { YUE2_PROF("stack: RoPE tables (host)"); trig(c, length, prefix, e->cosine, e->sine); }
+            if (!yue2_aitk_executor_detail::finite_all(e->cosine.data(), e->cosine.size()) ||
+                !yue2_aitk_executor_detail::finite_all(e->sine.data(), e->sine.size())) {
+                yue2_aitk_executor_detail::fail(error, "non-finite RoPE table");
+                return nullptr;
+            }
+            if (!e->constants.make(backend, c, length, prefix, mode, e->cosine.data(), e->sine.data(), error)) return nullptr;
+            return e;
+        });
 }
 struct PrefixCanvas {
     yue2_aitk_executor_detail::Runtime runtime;
