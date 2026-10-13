@@ -57,7 +57,7 @@ inline bool precision_valid() {
     return v == "bf16" || v == "strict-f32";
 }
 inline bool & strict_f32() { static bool on = std::string(precision_name()) == "strict-f32"; return on; }
-// GEMMs built so far by path, for the runner's one-time step-1 log.
+// GEMMs built so far by path; the runner logs each step's share in train.jsonl.
 struct GemmCounts { int64_t bf16 = 0, f32 = 0; };
 inline GemmCounts & gemm_counts() { static GemmCounts c; return c; }
 // The one training GEMM: w [K, N] (weight or factor), x [K, S] F32.
