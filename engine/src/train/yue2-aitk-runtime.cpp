@@ -461,7 +461,7 @@ static int run_impl(Config config, std::string * error) {
     {
         // Fused training attention where the backend has it (CUDA, CPU); the
         // exact math attention elsewhere.
-        ggml_init_params ip = { 8 * ggml_tensor_overhead(), nullptr, true };
+        ggml_init_params ip = { 16 * ggml_tensor_overhead(), nullptr, true };
         ggml_context * probe = ggml_init(ip);
         ggml_tensor * q = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 16, 1);
         ggml_tensor * k = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 8, 1);
@@ -469,6 +469,21 @@ static int run_impl(Config config, std::string * error) {
         ggml_tensor * m = ggml_new_tensor_2d(probe, GGML_TYPE_F16, 16, 16);
         yue2_aitk_graph::math_attention() = !ggml_backend_supports_op(backend.value, ggml_flash_attn_train(probe, q, k, v, m, 1.0f)) ||
                                             std::getenv("YUE2_AITK_MATH_ATTENTION") != nullptr;
+        // S2c: BF16 attention only where the backend takes BOTH directions of
+        // the op as the graph builds them: contiguous BF16 Q/K/V at D = 128
+        // with GGML_PREC_BF16. CUDA says yes on sm_80+ only; CPU and Vulkan
+        // refuse, and the graph keeps today's F32/TF32 dispatch.
+        if (!yue2_aitk_graph::math_attention()) {
+            ggml_tensor * qb = ggml_new_tensor_4d(probe, GGML_TYPE_BF16, 128, 16, 16, 1);
+            ggml_tensor * kb = ggml_new_tensor_4d(probe, GGML_TYPE_BF16, 128, 16, 8, 1);
+            ggml_tensor * vb = ggml_new_tensor_4d(probe, GGML_TYPE_BF16, 128, 16, 8, 1);
+            ggml_tensor * fwd = ggml_flash_attn_train(probe, qb, kb, vb, m, 1.0f);
+            ggml_flash_attn_train_set_prec(fwd, GGML_PREC_BF16);
+            ggml_tensor * bwd = ggml_flash_attn_train_back(probe, qb, kb, vb, m, fwd, fwd, 1.0f);
+            ggml_flash_attn_train_set_prec(bwd, GGML_PREC_BF16);
+            yue2_aitk_graph::bf16_attention_supported() =
+                ggml_backend_supports_op(backend.value, fwd) && ggml_backend_supports_op(backend.value, bwd);
+        }
         ggml_free(probe);
     }
     std::fprintf(stderr, "[yue2-aitk] training device %s via %s; attention %s\n", ggml_backend_dev_name(device), reg_name,
@@ -477,10 +492,12 @@ static int run_impl(Config config, std::string * error) {
         fail(error, (std::string("YUE2_AITK_PRECISION must be bf16 or strict-f32, not ") + yue2_aitk_graph::precision_name()).c_str());
         return 1;
     }
-    std::fprintf(stderr, "[yue2-aitk] training precision %s: GEMM %s, attention dispatch unchanged\n",
+    std::fprintf(stderr, "[yue2-aitk] training precision %s: GEMM %s, attention %s\n",
                  yue2_aitk_graph::strict_f32() ? "strict-f32" : "bf16",
                  yue2_aitk_graph::strict_f32() ? "F32 (GGML_PREC_F32, the pre-S2a path)"
-                                               : "BF16 tensor-core, FP32 accumulate (quantized GGUF weights stay F32)");
+                                               : "BF16 tensor-core, FP32 accumulate (quantized GGUF weights stay F32)",
+                 !yue2_aitk_graph::strict_f32() && yue2_aitk_graph::bf16_attention_supported()
+                     ? "BF16 Q/K/V (unless YUE2_AITK_STRICT_F32/BASELINE)" : "dispatch unchanged");
     using AttentionPrecision = const char * (*)(int);
     const auto attention_precision = reinterpret_cast<AttentionPrecision>(ggml_backend_reg_get_proc_address(
         ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));

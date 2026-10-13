@@ -490,10 +490,25 @@ static bool arm_run(Arm &                       a,
     }
 
     if (flash) {
-        a.pkd = ggml_flash_attn_train(a.ctx, a.q, a.k, a.v, a.m, scale);
+        // --prec bf16: the YuE2 graph's shape (S2c) -- F32 parameters cast to
+        // BF16 storage right before the op, so the cast's backward is in the
+        // graph too and the gradients come back to the F32 q/k/v. Not on a CPU
+        // arm (the --large fused reference): CPU refuses BF16, and its F32
+        // operands already hold the same BF16-grid values.
+        ggml_tensor * fq = a.q;
+        ggml_tensor * fk = a.k;
+        ggml_tensor * fv = a.v;
+        const bool bf16_arm = g_prec == GGML_PREC_BF16 &&
+            ggml_backend_dev_type(ggml_backend_get_device(be)) != GGML_BACKEND_DEVICE_TYPE_CPU;
+        if (bf16_arm) {
+            fq = ggml_cast(a.ctx, a.q, GGML_TYPE_BF16);
+            fk = ggml_cast(a.ctx, a.k, GGML_TYPE_BF16);
+            fv = ggml_cast(a.ctx, a.v, GGML_TYPE_BF16);
+        }
+        a.pkd = ggml_flash_attn_train(a.ctx, fq, fk, fv, a.m, scale);
         // The BACK node inherits this through ggml_compute_backward: prec is a
         // property of the op PAIR, not of one node (design 2 / 3.2).
-        ggml_flash_attn_train_set_prec(a.pkd, g_prec);
+        ggml_flash_attn_train_set_prec(a.pkd, g_prec == GGML_PREC_BF16 && !bf16_arm ? GGML_PREC_F32 : g_prec);
         a.o   = ggml_flash_attn_train_get_o(a.ctx, a.pkd);
     } else {
         ggml_tensor * rk = a.k;
@@ -1270,6 +1285,92 @@ static int run_bench_lm(ggml_backend_t be_cuda, const std::vector<int64_t> & S_l
 // AR causal S 15496. Nominal flops: fwd 4*Nh*D*pairs, bwd 2.5x that (5 vs 2
 // matmuls, recompute included) -- NOT corrected for the prefix skip, so "nar"
 // shows a higher nominal number than it computes.
+// HOT-Step patch: --yue2-sites (S2c gate 3, RESEARCH/YUE2_S2C_TOLERANCES.md
+// item 3). The YuE2 attention sites at --bench-yue2's production shapes, with
+// the trainer's own mask rule (yue2-aitk-block-executor.h make_mask: key col is
+// visible to row r iff noncausal or col <= prefix + r), run twice on CUDA: the
+// strict arm (F32 operands, the resolver's TF32 kernels, what strict-f32 runs)
+// and the BF16 arm (the graph's cast to BF16 storage, GGML_PREC_BF16). Q and K
+// are left off the BF16 grid, as the graph's root-scaled q/k are; V is on it.
+// Metric: relative L2 of the BF16 arm against the strict arm.
+static int run_yue2_sites(ggml_backend_t be, double scale_f) {
+    struct Site { const char * name; int64_t S, S_kv; bool causal; };
+    const Site sites[] = {
+        { "ar-causal",          15496, 15496, true  },
+        { "nar-full",            9502, 24573, false },
+        { "nar-causal-prefix",   9502, 24573, true  },
+    };
+    const double lim[4] = { 0.005, 0.02, 0.02, 0.02 };
+    const char * nm[4]  = { "fwd", "dQ", "dK", "dV" };
+    printf("fattn-train-test --yue2-sites: BF16 arm vs strict (f32 operands) arm on %s, B=1 Nh=16 Nkv=8 D=128\n",
+           ggml_backend_name(be));
+    printf("%-18s %6s %6s %6s  %-10s %10s %10s %10s %10s  %s\n",
+           "site", "S", "S_kv", "prefix", "kernels", "fwd_relL2", "dQ_relL2", "dK_relL2", "dV_relL2", "verdict");
+    bool all_ok = true;
+    for (const Site & s0 : sites) {
+        Case c;
+        c.S    = std::max<int64_t>(16, (int64_t) (s0.S*scale_f));
+        c.S_kv = s0.S_kv == s0.S ? c.S : std::max<int64_t>(c.S, (int64_t) (s0.S_kv*scale_f));
+        c.B = 1; c.Nh = 16; c.Nkv = 8; c.D = 128;
+        c.mask = MASK_WIN;   // only "a mask is present" matters to arm_run; the data is below
+        const int64_t prefix = c.S_kv - c.S;
+
+        std::vector<float> hq((size_t) (c.D*c.S*c.Nh)), hk((size_t) (c.D*c.S_kv*c.Nkv)),
+                           hv((size_t) (c.D*c.S_kv*c.Nkv)), hw((size_t) (c.D*c.S*c.Nh));
+        fill(hq, 0x51E50001u + (uint64_t) c.S);
+        fill(hk, 0x51E50002u + (uint64_t) c.S);
+        fill(hv, 0x51E50003u + (uint64_t) c.S);
+        fill(hw, 0x51E50004u + (uint64_t) c.S);
+        for (float & e : hv) {
+            e = ggml_bf16_to_fp32(ggml_fp32_to_bf16(e));
+        }
+        std::vector<uint16_t> hm((size_t) (c.S_kv*c.S));
+        for (int64_t r = 0; r < c.S; ++r) {
+            for (int64_t col = 0; col < c.S_kv; ++col) {
+                const bool visible = !s0.causal || col <= prefix + r;
+                hm[(size_t) (r*c.S_kv + col)] = ggml_fp32_to_fp16(visible ? 0.0f : -INFINITY);
+            }
+        }
+
+        std::vector<float> out[2][4];
+        std::string kern[2];
+        bool ran = true;
+        for (int arm = 0; arm < 2 && ran; ++arm) {
+            g_prec = arm == 0 ? GGML_PREC_DEFAULT : GGML_PREC_BF16;
+            Arm a;
+            ran = arm_run(a, true, true, c, c.S, 1, hq, hk, hv, hw, hm, be,
+                          out[arm][0], out[arm][1], out[arm][2], out[arm][3]);
+            kern[arm] = prec_short(last_prec(0)) + "/" + prec_short(last_prec(1));
+        }
+        if (!ran) {
+            printf("%-18s run failed\n", s0.name);
+            all_ok = false;
+            continue;
+        }
+        double e[4];
+        bool ok = kern[0] == "tf32/tf32" && kern[1] == "bf16/bf16";
+        for (int t = 0; t < 4; ++t) {
+            double num = 0.0, den = 0.0;
+            bool fin = true;
+            for (size_t i = 0; i < out[0][t].size(); ++i) {
+                const double x = out[1][t][i], y = out[0][t][i];
+                fin = fin && std::isfinite(x) && std::isfinite(y);
+                num += (x - y)*(x - y);
+                den += y*y;
+            }
+            e[t] = fin && den > 0.0 ? std::sqrt(num/den) : INFINITY;
+            ok = ok && e[t] <= lim[t];
+        }
+        all_ok = all_ok && ok;
+        printf("%-18s %6lld %6lld %6lld  %-10s %10.3e %10.3e %10.3e %10.3e  %s%s\n",
+               s0.name, (long long) c.S, (long long) c.S_kv, (long long) prefix, kern[1].c_str(),
+               e[0], e[1], e[2], e[3], ok ? "PASS" : "FAIL", kern[0] == "tf32/tf32" ? "" : " (strict arm not tf32)");
+    }
+    printf("limits: %s <= %.1f%%, %s/%s/%s <= %.0f%% each\n%s\n", nm[0], 100*lim[0], nm[1], nm[2], nm[3], 100*lim[1],
+           all_ok ? "PASS" : "FAIL");
+    return all_ok ? 0 : 1;
+}
+
 static int run_bench_yue2(ggml_backend_t be, const char * only) {
     const int64_t B = 1, Nh = 16, Nkv = 8, D = 128;
     struct Geo { const char * name; int64_t S, S_kv; BenchMask mk; int32_t kvgs; };
@@ -1623,6 +1724,15 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
     fill(hk, 0x51ED0002u + (uint64_t) c.S * 131 + (uint64_t) c.B);
     fill(hv, 0x51ED0003u + (uint64_t) c.S * 131 + (uint64_t) c.B);
     fill(hw, 0x51ED0004u + (uint64_t) c.S * 131 + (uint64_t) c.B);
+    // --prec bf16: inputs on the BF16 grid, as the YuE2 graph's are, so both
+    // arms see the same values and the error measured is the kernel's alone.
+    if (g_prec == GGML_PREC_BF16) {
+        for (std::vector<float> * x : { &hq, &hk, &hv }) {
+            for (float & e : *x) {
+                e = ggml_bf16_to_fp32(ggml_fp32_to_bf16(e));
+            }
+        }
+    }
 
     // ── mask, straight out of the trainer's own builders ──
     std::vector<uint16_t> hm;
@@ -1924,17 +2034,18 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
     // and proves nothing, so it is failed on TWO independent grounds: the
     // backend's own answer about which kernel it launched, and an error too
     // small to have come from 10 mantissa bits.
+    const std::string want_kernel = g_prec == GGML_PREC_BF16 ? "bf16" : "tf32";
     if (r.ok && g_prec != GGML_PREC_F32) {
-        if (r.prec != "tf32") {
+        if (r.prec != want_kernel) {
             r.ok   = false;
-            r.note = "dispatch did not select the TF32 kernel: " + std::string(last_prec(0));
-        } else if (with_grads && r.prec_bwd != "tf32") {
+            r.note = "dispatch did not select the " + want_kernel + " kernel: " + std::string(last_prec(0));
+        } else if (with_grads && r.prec_bwd != want_kernel) {
             // The backward is its own dispatch and its own three kernels. A
             // forward that went TF32 while the backward quietly stayed on v1
             // would pass every tolerance here AND be a different function from
             // the one the forward's LSE was computed for (design 2).
             r.ok   = false;
-            r.note = "backward did not select the TF32 kernels: " + std::string(last_prec(1));
+            r.note = "backward did not select the " + want_kernel + " kernels: " + std::string(last_prec(1));
         } else {
             float worst = r.fwd_rel;
             if (with_grads) {
@@ -1944,8 +2055,9 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
                 r.ok   = false;
                 char buf[160];
                 snprintf(buf, sizeof(buf),
-                         "worst rel err %.3e is below the tf32 floor %.0e -- f32-sized, "
-                         "so the TF32 kernel cannot have run", (double) worst, (double) PASS_FLOOR);
+                         "worst rel err %.3e is below the %s floor %.0e -- f32-sized, "
+                         "so the %s kernel cannot have run", (double) worst, want_kernel.c_str(),
+                         (double) PASS_FLOOR, want_kernel.c_str());
                 r.note = buf;
             }
         }
@@ -2023,6 +2135,7 @@ int main(int argc, char ** argv) {
     bool        bench = false;
     bool        bench_tr = false;
     bool        bench_yue2 = false;
+    bool        yue2_sites = false;
     bool        saved_check = false;
     bool        dsw_check   = false;
     std::string yue2_only;
@@ -2072,6 +2185,9 @@ int main(int argc, char ** argv) {
         } else if (a == "--bench-yue2") {
             bench      = true;
             bench_yue2 = true;
+        } else if (a == "--yue2-sites") {
+            bench      = true;
+            yue2_sites = true;
         } else if (a == "--yue2-only" && i + 1 < argc) {
             yue2_only = argv[++i];
         } else if (a == "--yue2-scale" && i + 1 < argc) {
@@ -2153,8 +2269,8 @@ int main(int argc, char ** argv) {
             }
         } else if (a == "--prec" && i + 1 < argc) {
             want_prec = argv[++i];
-            if (want_prec != "f32" && want_prec != "tf32") {
-                fprintf(stderr, "[fattn-train-test] --prec takes f32 or tf32\n");
+            if (want_prec != "f32" && want_prec != "tf32" && want_prec != "bf16") {
+                fprintf(stderr, "[fattn-train-test] --prec takes f32, tf32 or bf16\n");
                 return 2;
             }
         } else {
@@ -2247,6 +2363,8 @@ int main(int argc, char ** argv) {
             rc = run_dsw_check(be_cuda);
         } else if (saved_check) {
             rc = run_saved_check(be_cuda);
+        } else if (yue2_sites) {
+            rc = run_yue2_sites(be_cuda, g_bench_yue2_scale);
         } else if (bench_yue2) {
             // One NAR call is ~5 s fwd + ~20 s bwd per layer: 10+50 iters would be ~30 min per case.
             if (!g_bench_iters_given) { g_bench_warm = 1; g_bench_iters = 3; }
@@ -2314,9 +2432,9 @@ int main(int argc, char ** argv) {
     // ignoring it prints a tf32 header and a green table having never touched
     // a tensor core, which is a non-run that reports as a pass (design 5.3).
     // Vulkan has no TF32 kernel here any more than CPU does.
-    if (want_prec == "tf32") {
+    if (want_prec == "tf32" || want_prec == "bf16") {
         if (!is_cuda) {
-            fprintf(stderr, "[fattn-train-test] --prec tf32 needs --backend cuda "
+            fprintf(stderr, "[fattn-train-test] --prec tf32/bf16 needs --backend cuda "
                             "(the CPU and Vulkan paths ignore the flag and always compute in f32)\n");
             if (be_flash != be) {
                 ggml_backend_free(be_flash);
@@ -2324,8 +2442,9 @@ int main(int argc, char ** argv) {
             ggml_backend_free(be);
             return 2;
         }
-        g_prec     = GGML_PREC_DEFAULT;
-        PASS_REL   = 5e-3f;    // measured: the CUDA exact path's own cuBLAS-TF32 rounding
+        g_prec     = want_prec == "bf16" ? GGML_PREC_BF16 : GGML_PREC_DEFAULT;
+        PASS_REL   = 5e-3f;    // measured: the CUDA exact path's own cuBLAS-TF32 rounding;
+                               // bf16: RESEARCH/YUE2_S2C_TOLERANCES.md item 2, the same bar
         PASS_FLOOR = 1e-5f;    // and the floor that says the kernel really ran
     }
 
@@ -2339,7 +2458,7 @@ int main(int argc, char ** argv) {
             g_last_prec = (fa_last_prec_fn) ggml_backend_reg_get_proc_address(
                     freg, "ggml_backend_cuda_fattn_train_last_prec");
         }
-        if (!g_last_prec && want_prec == "tf32") {
+        if (!g_last_prec && want_prec != "f32") {
             fprintf(stderr, "[fattn-train-test] this ggml-cuda build does not export "
                             "ggml_backend_cuda_fattn_train_last_prec, so --prec tf32 could not "
                             "be verified against the kernel that ran\n");
