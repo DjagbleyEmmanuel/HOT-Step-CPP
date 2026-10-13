@@ -1,6 +1,7 @@
 #pragma once
 #include "yue2-aitk-block-executor.h"
 #include "st-write.h"
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <cstdio>
@@ -138,6 +139,46 @@ inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig
     prefix->device = std::move(d);
     return true;
 }
+// Block constants (the RoPE tables and the attention mask) depend only on the
+// sequence length, the prefix length and the mask mode. They are built,
+// checked and uploaded once and shared by every pass and step that asks for
+// the same shape (S2b, 2026-10-13); before, each pass rebuilt the mask on the
+// host (4,128^2 values for a whole-song AR) and every block call re-checked
+// the tables. Up to kSharedConstants shapes stay resident, oldest out first;
+// block compute is synchronous, so an evicted entry is no longer being read.
+struct SharedConstants {
+    ggml_backend_t backend = nullptr;
+    int64_t length = 0, prefix = 0;
+    Yue2AitkMaskMode mode = Yue2AitkMaskMode::causal;
+    std::vector<float> cosine, sine;
+    Yue2AitkBlockConstants constants;
+};
+inline SharedConstants * shared_constants(ggml_backend_t backend, const Yue2AitkGraphConfig & c, int64_t length,
+                                          int64_t prefix, Yue2AitkMaskMode mode, std::string * error) {
+    constexpr size_t kSharedConstants = 8;
+    // Never destroyed: a static destructor would free CUDA buffers after the
+    // backend is gone. The process exit reclaims them.
+    static auto * cache = new std::vector<std::unique_ptr<SharedConstants>>();
+    for (size_t i = 0; i < cache->size(); ++i) {
+        const SharedConstants & e = *(*cache)[i];
+        if (e.backend == backend && e.length == length && e.prefix == prefix && e.mode == mode) {
+            std::rotate(cache->begin() + long(i), cache->begin() + long(i) + 1, cache->end());
+            return cache->back().get();
+        }
+    }
+    auto e = std::make_unique<SharedConstants>();
+    e->backend = backend; e->length = length; e->prefix = prefix; e->mode = mode;
+    { YUE2_PROF("stack: RoPE tables (host)"); trig(c, length, prefix, e->cosine, e->sine); }
+    if (!yue2_aitk_executor_detail::finite_all(e->cosine.data(), e->cosine.size()) ||
+        !yue2_aitk_executor_detail::finite_all(e->sine.data(), e->sine.size())) {
+        yue2_aitk_executor_detail::fail(error, "non-finite RoPE table");
+        return nullptr;
+    }
+    if (!e->constants.make(backend, c, length, prefix, mode, e->cosine.data(), e->sine.data(), error)) return nullptr;
+    if (cache->size() >= kSharedConstants) cache->erase(cache->begin());
+    cache->push_back(std::move(e));
+    return cache->back().get();
+}
 struct PrefixCanvas {
     yue2_aitk_executor_detail::Runtime runtime;
     ggml_tensor * k=nullptr, * v=nullptr;
@@ -194,15 +235,18 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
             if (!warned) { warned = true; std::fprintf(stderr, "[yue2-aitk] warning: no device memory for the AR prefix canvases; keeping the prefix on the host\n"); }
         }
     }
-    std::vector<float> cosine,sine;
-    { YUE2_PROF("stack: RoPE tables (host)"); trig(c,length,prefix?prefix->length:0,cosine,sine); }
-    Yue2AitkBlockConstants constants;
     Yue2AitkBlockWorkspace workspace;
     const bool fast = fast_execution();
+    const Yue2AitkMaskMode mask_mode = nar ? Yue2AitkMaskMode::noncausal : Yue2AitkMaskMode::causal;
+    SharedConstants * shared = fast ? shared_constants(backend, c, length, prefix ? prefix->length : 0, mask_mode, error) : nullptr;
+    if (fast && !shared) return false;
+    std::vector<float> local_cosine, local_sine;
+    if (!shared) trig(c, length, prefix ? prefix->length : 0, local_cosine, local_sine);
+    const std::vector<float> & cosine = shared ? shared->cosine : local_cosine;
+    const std::vector<float> & sine = shared ? shared->sine : local_sine;
+    Yue2AitkBlockConstants * constants = shared ? &shared->constants : nullptr;
     const bool device = fast && backend != nullptr && std::getenv("YUE2_AITK_HOST_TAPE") == nullptr;
     if (device && !make_device_tape(backend, c, expert.layers.size(), length, save_tape, tape, error)) return false;
-    if (fast && !constants.make(backend,c,length,prefix?prefix->length:0,
-            nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,cosine.data(),sine.data(),error)) return false;
     std::vector<float> hidden=initial;
     if (device) ggml_backend_tensor_set(tape->device_layers[0], initial.data(), 0, ggml_nbytes(tape->device_layers[0]));
     for (size_t layer=0;layer<expert.layers.size();++layer) {
@@ -219,7 +263,7 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
                 adapters?&adapters->layers[layer]:nullptr,device ? nullptr : hidden.data(),length,cosine.data(),sine.data(),
                 nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
                 prefix?prefix->length:0,error,!fast || (capture_prefix != nullptr && !device_capture),
-                fast?&constants:nullptr,fast?&workspace:nullptr,device_in,device_out,
+                constants,fast?&workspace:nullptr,device_in,device_out,
                 device_capture ? capture_prefix->device->k[layer] : nullptr,
                 device_capture ? capture_prefix->device->v[layer] : nullptr)) return false;
         if (!device) hidden=std::move(out.hidden);
@@ -249,12 +293,15 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         (device && (!tape.device_saved || tape.device_layers.size()!=expert.layers.size()+1))) ||
         adapters.layers.size()!=expert.layers.size() ||
         gradient.size()!=size_t(tape.length*c.hidden)) return fail(error,"invalid expert backward tape");
-    std::vector<float> cosine,sine;
-    { YUE2_PROF("stack: RoPE tables (host)"); trig(c,tape.length,prefix?prefix->length:0,cosine,sine); }
-    Yue2AitkBlockConstants constants;
     Yue2AitkBlockWorkspace workspace;
-    if (fast && !constants.make(backend,c,tape.length,prefix?prefix->length:0,
-            tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,cosine.data(),sine.data(),error)) return false;
+    const Yue2AitkMaskMode mask_mode = tape.nar ? Yue2AitkMaskMode::noncausal : Yue2AitkMaskMode::causal;
+    SharedConstants * shared = fast ? shared_constants(backend, c, tape.length, prefix ? prefix->length : 0, mask_mode, error) : nullptr;
+    if (fast && !shared) return false;
+    std::vector<float> local_cosine, local_sine;
+    if (!shared) trig(c, tape.length, prefix ? prefix->length : 0, local_cosine, local_sine);
+    const std::vector<float> & cosine = shared ? shared->cosine : local_cosine;
+    const std::vector<float> & sine = shared ? shared->sine : local_sine;
+    Yue2AitkBlockConstants * constants = shared ? &shared->constants : nullptr;
     if (device) {
         ggml_backend_tensor_set(tape.device_grad[0], gradient.data(), 0, ggml_nbytes(tape.device_grad[0]));
         int ping = 0;
@@ -270,7 +317,7 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
             if (!Yue2AitkBlockExecutor::backward(backend,c,expert.layers[layer],layer_norms,
                     &adapters.layers[layer],nullptr,nullptr,tape.length,cosine.data(),sine.data(),
                     tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
-                    prefix?prefix->length:0,error,fast?&constants:nullptr,fast?&workspace:nullptr,
+                    prefix?prefix->length:0,error,constants,fast?&workspace:nullptr,
                     tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next])) return false;
             { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
             ping = next;
@@ -288,7 +335,7 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         if (!Yue2AitkBlockExecutor::backward(backend,c,expert.layers[layer],layer_norms,
                 &adapters.layers[layer],input.data(),gradient.data(),tape.length,cosine.data(),sine.data(),
                 tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
-                prefix?prefix->length:0,error,fast?&constants:nullptr,fast?&workspace:nullptr)) return false;
+                prefix?prefix->length:0,error,constants,fast?&workspace:nullptr)) return false;
         if (!store(layer,out,error)) return false;
         gradient=std::move(out.dx);
     }

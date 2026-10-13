@@ -102,7 +102,8 @@ inline bool supports_all(ggml_backend_t backend, ggml_cgraph * graph, std::strin
 }
 inline bool validate_inputs(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
                             const float * x, const float * cosine, const float * sine,
-                            int64_t sequence, std::string * error, bool device_x = false) {
+                            int64_t sequence, std::string * error, bool device_x = false,
+                            bool checked_constants = false) {
     if (!backend || (!x && !device_x) || !cosine || !sine) return fail(error, "null block input/backend");
     if (c.hidden <= 0 || c.head_dim <= 0 || c.heads <= 0 || c.kv_heads <= 0 || sequence <= 0 || c.hidden != c.heads*c.head_dim)
         return fail(error, "invalid block dimensions");
@@ -110,7 +111,9 @@ inline bool validate_inputs(ggml_backend_t backend, const Yue2AitkGraphConfig & 
     // Device-resident stack inputs are validated by the producer before upload;
     // downloading them here would defeat the fast path. Constants remain host
     // inputs unless the shared constants object owns their device copies.
-    if ((!device_x && !finite_all(x, hs)) || !finite_all(cosine, ts) || !finite_all(sine, ts)) return fail(error, "non-finite block input");
+    // Shared block constants were checked once when they were built.
+    if ((!device_x && !finite_all(x, hs)) ||
+        (!checked_constants && (!finite_all(cosine, ts) || !finite_all(sine, ts)))) return fail(error, "non-finite block input");
     return true;
 }
 inline bool allocate(Runtime * r, ggml_backend_t backend, std::string * error) {
@@ -178,7 +181,7 @@ public:
         if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
         yue2_aitk_prof::Lap lap;
-        if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr)) return false;
+        if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr, constants != nullptr)) return false;
         lap.mark("fwd: validate inputs (host finite checks)");
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
         lap.mark("fwd: ggml_init 64 MiB context");
@@ -254,7 +257,7 @@ public:
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
         size_t hs=0; if (!checked_count(config.hidden, sequence, &hs) || ((!device_upstream || dy) && !finite_all(dy, hs))) return fail(error, "invalid/non-finite upstream gradient");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
-        if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr)) return false;
+        if (!validate_inputs(backend, config, x, cosine, sine, sequence, error, device_input != nullptr, constants != nullptr)) return false;
         lap.mark("bwd: validate inputs (host finite checks)");
         Runtime r; if (!make_runtime(backend, 64ull*1024ull*1024ull, &r, error)) return false;
         lap.mark("bwd: ggml_init 64 MiB context");
