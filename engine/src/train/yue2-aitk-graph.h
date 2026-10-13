@@ -43,11 +43,12 @@ inline bool & math_attention() { static bool on = false; return on; }
 // Training precision (S2a, 2026-10-13). Default: every training GEMM is a
 // BF16 x BF16 tensor-core product with FP32 accumulation and F32 output. The
 // inputs are already BF16-rounded, so each product is exact and only the
-// summation order differs from the F32 path; trainable and frozen F32
-// factors are cast to BF16 first, as the PyTorch reference does. Quantized
-// GGUF weights keep the F32 path. YUE2_AITK_PRECISION=strict-f32 restores the
-// previous dispatch (GGML_PREC_F32 GEMMs, today's attention) for every
-// recipe; the runner validates the value and logs which one is in force.
+// summation order differs from the F32 path; trainable F32 factors are
+// cast to BF16 first, as the PyTorch reference does. Quantized GGUF weights
+// and the frozen companion decoder (mm_f32) keep the F32 path.
+// YUE2_AITK_PRECISION=strict-f32 restores the previous dispatch
+// (GGML_PREC_F32 GEMMs, today's attention) for every recipe; the runner
+// validates the value and logs which one is in force.
 inline const char * precision_name() {
     const char * v = std::getenv("YUE2_AITK_PRECISION");
     return v && *v ? v : "bf16";
@@ -71,6 +72,16 @@ inline ggml_tensor * mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x) {
     }
     ++gemm_counts().bf16;
     return ggml_mul_mat(ctx, w->type == GGML_TYPE_BF16 ? w : ggml_cast(ctx, w, GGML_TYPE_BF16), x);
+}
+// The frozen companion decoder stays on the F32 path on both settings: its
+// stored F32 factors are not BF16-representable, so a BF16 cast would change
+// the decoder the adapter trains against (NAR gradients moved ~4%; S2a,
+// RESEARCH/YUE2_S2A_TOLERANCES.md).
+inline ggml_tensor * mm_f32(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x) {
+    ggml_tensor * y = ggml_mul_mat(ctx, w, x);
+    ggml_mul_mat_set_prec(y, GGML_PREC_F32);
+    ++gemm_counts().f32;
+    return y;
 }
 inline ggml_tensor * f32(ggml_context * ctx, ggml_tensor * x) {
     return x->type == GGML_TYPE_F32 ? x : ggml_cast(ctx, x, GGML_TYPE_F32);
@@ -115,8 +126,8 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols);
     ggml_tensor * base;
     if (w.dense) {
-        // Companion full-weight replacement (llm2vae): F32 weight, BF16 output.
-        base = mm(ctx, w.dense, round(ctx, x));
+        // Companion full-weight replacement (llm2vae): F32 maths, BF16 output.
+        base = mm_f32(ctx, w.dense, round(ctx, x));
         if (bias) base = ggml_add(ctx, base, f32(ctx, bias));
         base = round(ctx, base);
     } else if (!w.parts.empty()) {
@@ -136,8 +147,8 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     }
     if (w.frozen_a) {
         // Companion decoder LoRA: frozen, same boundaries as the trainable branch.
-        ggml_tensor * ca = mm(ctx, w.frozen_a, round(ctx, x));
-        ggml_tensor * cd = mm(ctx, w.frozen_b, ca);
+        ggml_tensor * ca = mm_f32(ctx, w.frozen_a, round(ctx, x));
+        ggml_tensor * cd = mm_f32(ctx, w.frozen_b, ca);
         base = round(ctx, ggml_add(ctx, base, round(ctx, cd)));
     }
     if (!adapter) return base;

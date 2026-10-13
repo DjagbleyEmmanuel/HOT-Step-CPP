@@ -34,12 +34,14 @@ quantized weight. Same seed, first step on CUDA: bf16 GGUF ar_ce 3.6378 / nar_ms
 provenance, so one prepared dataset serves every base; a mismatch is a warning.
 
 Training GEMMs run BF16 × BF16 on tensor cores with FP32 accumulation (2026-10-13), for
-every recipe: GGUF base and head weights in their own BF16, adapter factors (LoRA A/B,
-LoKr w1/w2) and the companion's F32 factors through a BF16 cast at each use, which is
-how the PyTorch reference trains. The inputs are already BF16-rounded, so only the
-summation order and the factor rounding change. Quantized GGUF bases keep the F32 path,
-and `CONVROT8` bases are unchanged (their base linears are not `mul_mat`). On the
-reference workload this took a step from 4.24 to 3.33 s on an RTX 5090.
+every recipe: GGUF base and head weights in their own BF16, trainable adapter factors
+(LoRA A/B, LoKr w1/w2) through a BF16 cast at each use, which is how the PyTorch
+reference trains. The inputs are already BF16-rounded, so only the summation order and
+the factor rounding change. Three things keep the F32 path: quantized GGUF bases,
+`CONVROT8` base linears (not `mul_mat`), and the frozen companion decoder. Its stored
+F32 factors are not BF16-representable, and casting them moved the decoder's gradients
+about 4%, so it stays exact; that costs no measurable time. On the reference workload a
+step went from 4.24 to 3.31 s on an RTX 5090 (4.30 to 3.38 s with the companion).
 `YUE2_AITK_PRECISION=strict-f32` restores the previous dispatch (every training GEMM
 `GGML_PREC_F32`, attention as before) bit for bit; any other value than `bf16` or
 `strict-f32` refuses to start. The run log names the precision at start-up, and each

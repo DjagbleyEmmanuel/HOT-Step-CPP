@@ -147,44 +147,44 @@ int main() {
     if (!backend) { std::puts("yue2-train-gemm-precision-test: backend init failed"); return 2; }
     std::printf("device %s\n", ggml_backend_dev_name(dev));
 
-    struct Case { const char * name; Builder build; int bf16_gemms; };
+    struct Case { const char * name; Builder build; int bf16_gemms; int f32_gemms; };  // fast-path counts
     std::vector<Case> cases;
     cases.push_back({"bf16 base + LoRA (qkv)", [](ggml_context * ctx) {
         Built b; ggml_tensor * x = input(ctx, b, kHidden);
         Yue2AitkConvRotLinear w = bf16_base(ctx, b, kHidden, kQkv);
         Yue2AitkFusedLora s = lora(ctx, b, kHidden, kQkv);
-        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 3});
+        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 3, 0});
     cases.push_back({"bf16 base + LoKr dim 128 f4 (qkv)", [](ggml_context * ctx) {
         Built b; ggml_tensor * x = input(ctx, b, kHidden);
         Yue2AitkConvRotLinear w = bf16_base(ctx, b, kHidden, kQkv);
         Yue2AitkFusedLora s; std::vector<ggml_tensor *> params;
         if (!yue2_aitk_detail::make_lokr_site(ctx, kHidden, kQkv, 128, 4, 64.0f, "lokr", &s, &params)) std::abort();
         for (ggml_tensor * t : params) b.leaves.push_back({t, 0.05f, true, ggml_get_name(t)});
-        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 2});
+        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 2, 0});
     cases.push_back({"bf16 base + companion + LoRA (qkv)", [](ggml_context * ctx) {
         Built b; ggml_tensor * x = input(ctx, b, kHidden);
         Yue2AitkConvRotLinear w = bf16_base(ctx, b, kHidden, kQkv);
         w.frozen_a = leaf(ctx, b, GGML_TYPE_F32, kHidden, 64, 0.02f, false, "comp.A");
         w.frozen_b = leaf(ctx, b, GGML_TYPE_F32, 64, kQkv, 0.02f, false, "comp.B");
         Yue2AitkFusedLora s = lora(ctx, b, kHidden, kQkv);
-        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 5});
+        b.y = yue2_aitk_graph::linear(ctx, w, x, &s); return b; }, 3, 2});
     cases.push_back({"companion dense llm2vae + bias", [](ggml_context * ctx) {
         Built b; ggml_tensor * x = input(ctx, b, kHidden);
         Yue2AitkConvRotLinear w; w.cols = kHidden; w.rows = kLatent;
         w.dense = leaf(ctx, b, GGML_TYPE_F32, kHidden, kLatent, 0.02f, false, "dense");
         ggml_tensor * bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, kLatent);
         b.leaves.push_back({bias, 0.1f, false, "bias"});
-        b.y = yue2_aitk_graph::linear(ctx, w, x, nullptr, bias); return b; }, 1});
+        b.y = yue2_aitk_graph::linear(ctx, w, x, nullptr, bias); return b; }, 0, 1});
     cases.push_back({"head logits (GGUF head, forward)", [](ggml_context * ctx) {
         Built b; b.backward = false; ggml_tensor * x = input(ctx, b, kHidden);
         ggml_tensor * head = leaf(ctx, b, GGML_TYPE_BF16, kHidden, kVocab, 0.02f, false, "head");
-        b.y = ggml_bf16_round(ctx, yue2_aitk_graph::mm(ctx, head, x)); return b; }, 1});
+        b.y = ggml_bf16_round(ctx, yue2_aitk_graph::mm(ctx, head, x)); return b; }, 1, 0});
     cases.push_back({"head hidden gradient (dense_t, forward)", [](ggml_context * ctx) {
         Built b; b.backward = false;
         ggml_tensor * g = leaf(ctx, b, GGML_TYPE_F32, kVocab, kSeq, 1e-3f, false, "logit_grad");
         b.x = g;
         ggml_tensor * head_t = leaf(ctx, b, GGML_TYPE_BF16, kVocab, kHidden, 0.02f, false, "head_t");
-        b.y = yue2_aitk_graph::mm(ctx, head_t, ggml_bf16_round(ctx, g)); return b; }, 1});
+        b.y = yue2_aitk_graph::mm(ctx, head_t, ggml_bf16_round(ctx, g)); return b; }, 1, 0});
 
     bool all = true;
     for (const Case & c : cases) {
@@ -196,15 +196,18 @@ int main() {
         bool ok = true;
         std::string why;
         // LoKr counts one site per linear; every other GEMM counts itself.
-        if (fast.counts.bf16 != c.bf16_gemms || fast.counts.f32 != 0) { ok = false; why += " fast-path-not-bf16"; }
-        if (strict.counts.f32 != c.bf16_gemms || strict.counts.bf16 != 0) { ok = false; why += " strict-path-not-f32"; }
+        // The frozen companion stays F32 on both paths (mm_f32).
+        if (fast.counts.bf16 != c.bf16_gemms || fast.counts.f32 != c.f32_gemms) { ok = false; why += " fast-path-counts"; }
+        if (strict.counts.f32 != c.bf16_gemms + c.f32_gemms || strict.counts.bf16 != 0) { ok = false; why += " strict-path-not-f32"; }
+        // No BF16 GEMM at all: the two paths must build the same graph.
+        if (c.bf16_gemms == 0 && rel_l2(fast.y, strict.y) != 0.0) { ok = false; why += " f32-only-case-differs"; }
         if (!finite(strict.y) || !finite(fast.y)) { ok = false; why += " non-finite-y"; }
         // Control: strict twice must agree, or the harness itself is broken.
         if (rel_l2(again.y, strict.y) != 0.0) { ok = false; why += " strict-not-repeatable"; }
         const double ry = rel_l2(fast.y, strict.y);
         if (!(ry <= 0.005)) { ok = false; why += " y"; }
-        std::printf("       %s: gemms bf16 %lld / strict f32 %lld | y rel-L2 %.3e",
-                    c.name, (long long) fast.counts.bf16, (long long) strict.counts.f32, ry);
+        std::printf("       %s: fast bf16 %lld f32 %lld / strict f32 %lld | y rel-L2 %.3e",
+                    c.name, (long long) fast.counts.bf16, (long long) fast.counts.f32, (long long) strict.counts.f32, ry);
         for (size_t i = 0; i < strict.grads.size() && i < fast.grads.size(); ++i) {
             const double r = rel_l2(fast.grads[i], strict.grads[i]);
             const double lim = i == 0 ? 0.01 : 0.02;
