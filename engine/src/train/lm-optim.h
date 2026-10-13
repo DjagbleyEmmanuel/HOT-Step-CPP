@@ -222,6 +222,10 @@ struct LmOptim {
      *  bug to find later. */
     float adam_beta1   = 0.9f;
     float adam_beta2   = 0.999f;
+    /** AdamW epsilon. 1e-8 is what every run before this field had; the
+     *  YuE2 joint trainer's --adam-eps sets it (torch's AdamW default is
+     *  1e-8 too, but recipes such as Ruach's pass 1e-6). */
+    float adam_eps     = 1e-8f;
     float grad_clip    = 1.0f;
     int   total_steps  = 1;
     int   warmup_steps = 1;
@@ -910,10 +914,12 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
                 ggml_tensor * m_new = ggml_add(ctx, ggml_scale(ctx, o->mom_m[j], b1), ggml_scale(ctx, g, 1.0f - b1));
                 ggml_tensor * v_new = ggml_add(ctx, ggml_scale(ctx, o->mom_v[j], b2), ggml_scale(ctx, ggml_sqr(ctx, g), 1.0f - b2));
                 ggml_tensor * mh    = ggml_scale(ctx, m_new, b1h);
-                // The fused op's eps is 1e-8 (p7[3] below); t_eps is 1e-6 by
-                // this struct's contract, so 0.01 * t_eps is that scalar
-                // without another caller-allocated tensor.
-                ggml_tensor * vh    = ggml_add(ctx, ggml_sqrt(ctx, ggml_scale(ctx, v_new, b2h)), ggml_scale(ctx, o->t_eps, 1e-2f));
+                // The fused op's eps is adam_eps (p7[3] below); t_eps is 1e-6 by
+                // this struct's contract, so (adam_eps / 1e-6) * t_eps is that
+                // scalar without another caller-allocated tensor. The default
+                // keeps the literal 1e-2 so old runs stay bit-identical.
+                const float eps_mul = o->adam_eps == 1e-8f ? 1e-2f : o->adam_eps / 1e-6f;
+                ggml_tensor * vh    = ggml_add(ctx, ggml_sqrt(ctx, ggml_scale(ctx, v_new, b2h)), ggml_scale(ctx, o->t_eps, eps_mul));
                 ggml_tensor * upd   = ggml_div(ctx, mh, vh);
                 if (o->cautious) {
                     upd = lm_cautious(ctx, upd, g);
@@ -1006,7 +1012,7 @@ static bool lm_optim_step(LmOptim * o, ggml_backend_sched_t sched, LmStepStats *
     const float p7[7] = { lr,
                           b1,
                           b2,
-                          1e-8f,
+                          o->adam_eps,
                           o->weight_decay,
                           1.0f / (1.0f - powf(b1, (float) o->opt_iter)),
                           1.0f / (1.0f - powf(b2, (float) o->opt_iter)) };

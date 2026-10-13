@@ -58,6 +58,21 @@ a stop at the next completed step and saves that state. The app's Windows Stop
 action currently terminates the process, so only already published checkpoints
 are guaranteed to survive it.
 
+`--adam-eps` sets the AdamW epsilon of the LmOptim rule (`--optimizer adamw-lm`, or
+Muon's AdamW-ruled parameters); without it the rule keeps 1e-8 and runs are
+bit-identical to before (10 steps, old and new binary: same losses, same adapter and
+`optimizer.resume` sha256). The 8-bit `adamw` kernel and Prodigy refuse the flag. The
+value is written to the resume record and a resume with a different one is refused.
+At real LoRA gradient sizes the choice is not cosmetic: on a one-step fixture,
+1e-8 against a reference run at 1e-6 moved the updated B factors by 25-82% (rel-L2).
+
+`--fixture-replay <dir>` runs one pinned joint step against a reference fixture and
+exits without training or saving: fixed window, stored flow noise and time, the
+Direct-mode prefix and an integer-hash LoRA A with B = 0 (formula in
+`engine/src/train/yue2-aitk-fixture-replay.h`). It writes step-1 losses, raw
+B gradients, post-update B and step-2 losses to `<dir>/replay-native.json` plus raw
+F32 dumps, for a parity check against another trainer's numbers.
+
 In Training Studio, Joint Training is the default. Complete
 the latent, semantic-token and ABC cache stages, then prepare the joint dataset
 and train. Legacy keeps the existing separate AR/NAR workflow. The joint

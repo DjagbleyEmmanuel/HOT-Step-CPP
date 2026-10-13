@@ -228,6 +228,13 @@ struct Config {
     // (0.9, 0.999) is what every run before this flag had.
     float beta1 = 0.9f;
     float beta2 = 0.999f;
+    // AdamW epsilon on the LmOptim AdamW rule (adamw-lm, and Muon's AdamW
+    // parameters). 0 = the optimizer's own value (1e-8), so a run that never
+    // passes --adam-eps is byte-identical to before.
+    float adam_eps = 0.0f;
+    // --fixture-replay <dir>: one pinned step against a reference fixture,
+    // then exit (yue2-aitk-fixture-replay.h). Nothing is trained or saved.
+    std::string fixture_replay;
     // Which AR positions the cross-entropy covers.
     //   tuned  every suffix token, MUSIC_START included, and ABC_END even when
     //          the sheet is dropped (the AITK recipe; yue2_model.py:447-456)
@@ -305,7 +312,8 @@ inline void usage(FILE * out) {
         "[--ar-crop-frames 0 (planner trains on the first N frames; 0 = whole song; needs --cursor-weight 0)] "
         "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)] "
         "[--ar-loss-weight 1.0 (planner CE weight against the flow loss; the base trained at 0.25)] "
-        "[--beta1 0.9] [--beta2 0.999 (Adam betas; the base trained at 0.9 / 0.95)] "
+        "[--beta1 0.9] [--beta2 0.999 (Adam betas; the base trained at 0.9 / 0.95)] [--adam-eps 1e-8 (adamw-lm / muon)] "
+        "[--fixture-replay <dir> (one pinned step against a reference fixture, then exit)] "
         "[--ar-targets tuned|base (base: CE only on tokens the model generates at inference)] "
         "[--grad-accum 1 (songs per optimizer update; needs --cursor-weight 0 above 1)] "
         "[--text-dropout 0] [--lyric-dropout 0] [--both-dropout 0 (condition dropout rates; need a dataset prepared with the variants, no --caption-dropout, --cursor-weight 0)]\n");
@@ -578,6 +586,11 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--beta2")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.beta2) || parsed.beta2 < 0.0f || parsed.beta2 >= 1.0f) { if (error) *error = "--beta2 must be in [0, 1)"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--adam-eps")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.adam_eps) || !(parsed.adam_eps > 0.0f) || parsed.adam_eps > 1e-2f) { if (error) *error = "--adam-eps must be in (0, 0.01]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--fixture-replay")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.fixture_replay, error)) return ParseResult::error;
         } else if (!std::strcmp(arg, "--ar-targets")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.ar_targets, error)) return ParseResult::error;
             if (parsed.ar_targets != "tuned" && parsed.ar_targets != "base") { if (error) *error = "--ar-targets must be tuned or base"; return ParseResult::error; }

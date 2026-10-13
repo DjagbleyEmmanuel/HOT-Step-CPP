@@ -12,6 +12,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include "yue2-aitk-joint-step.h"
 #include "yue2-aitk-resume.h"
 #include "yue2-aitk-embedding-dequant.h"
+#include "yue2-aitk-fixture-replay.h"
 
 #include <csignal>
 #include <cstdlib>
@@ -159,6 +160,8 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
       if(yyjson_val * v=yyjson_obj_get(root,"beta1")) { if(!yyjson_is_num(v)) return fail(error,"resume beta1 field is malformed"); b1=float(yyjson_get_num(v)); }
       if(yyjson_val * v=yyjson_obj_get(root,"beta2")) { if(!yyjson_is_num(v)) return fail(error,"resume beta2 field is malformed"); b2=float(yyjson_get_num(v)); }
       if(b1!=config.beta1 || b2!=config.beta2) return fail(error,"resume Adam betas mismatch; start a new run"); }
+    { float eps=0.0f; if(yyjson_val * v=yyjson_obj_get(root,"adam_eps")) { if(!yyjson_is_num(v)) return fail(error,"resume adam_eps field is malformed"); eps=float(yyjson_get_num(v)); }
+      if(eps!=config.adam_eps) return fail(error,"resume --adam-eps mismatch; start a new run"); }
     { std::string was="tuned"; if(yyjson_val * v=yyjson_obj_get(root,"ar_targets")) str_field(v,&was); if(was!=config.ar_targets) return fail(error,"resume ar_targets mismatch; start a new run"); }
     { yyjson_val * v=yyjson_obj_get(root,"ar_loss_weight"); const double was=v&&yyjson_is_num(v)?yyjson_get_num(v):1.0; if(was!=double(config.ar_loss_weight)) std::fprintf(stderr,"[yue2-aitk] resume note: ar-loss-weight changed from %.9g to %.9g; the run continues with the new value\n", was, (double)config.ar_loss_weight); }
     { yyjson_val * v=yyjson_obj_get(root,"grad_accum"); const int was=v&&yyjson_is_int(v)?int(yyjson_get_sint(v)):1; if(was!=config.grad_accum) std::fprintf(stderr,"[yue2-aitk] resume note: grad-accum changed from %d to %d; the run continues with the new value\n", was, config.grad_accum); }
@@ -226,6 +229,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.ar_loss_weight!=1.0f) yyjson_mut_obj_add_real(doc,root,"ar_loss_weight",config.ar_loss_weight);
     if (config.beta1!=0.9f) yyjson_mut_obj_add_real(doc,root,"beta1",config.beta1);
     if (config.beta2!=0.999f) yyjson_mut_obj_add_real(doc,root,"beta2",config.beta2);
+    if (config.adam_eps>0.0f) yyjson_mut_obj_add_real(doc,root,"adam_eps",config.adam_eps);
     if (config.ar_targets!="tuned") yyjson_mut_obj_add_strcpy(doc,root,"ar_targets",config.ar_targets.c_str());
     if (config.grad_accum!=1) yyjson_mut_obj_add_int(doc,root,"grad_accum",config.grad_accum);
     if (config.text_dropout>0.0f) yyjson_mut_obj_add_real(doc,root,"text_dropout",config.text_dropout);
@@ -329,6 +333,11 @@ static int run_impl(Config config, std::string * error) {
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
         // only — a HALF-honoured split is worse than a refused one.
         fail(error, "--planner-lr-scale / --nar-lr-scale are not supported with --optimizer muon"); return 1;
+    }
+    if (config.adam_eps > 0.0f && config.optimizer != "adamw-lm" && config.optimizer != "muon") {
+        // The 8-bit kernel keeps its own eps (1e-6) and Prodigy its own; a
+        // flag they would ignore is refused instead.
+        fail(error, "--adam-eps needs the LmOptim AdamW rule: --optimizer adamw-lm or muon"); return 1;
     }
     if (config.lr_schedule != "cosine" && config.optimizer == "adamw") {
         // The native AdamW8bit branch has always been flat after warmup; a
@@ -643,6 +652,10 @@ static int run_impl(Config config, std::string * error) {
                 o.weight_decay = config.weight_decay;
                 o.grad_clip = 0.0f;  // state.clip_gradients(1.0) is the only clipper
                 o.adam_beta1 = config.beta1; o.adam_beta2 = config.beta2;
+                if (config.adam_eps > 0.0f) {
+                    o.adam_eps = config.adam_eps;
+                    std::fprintf(stderr, "[yue2-aitk] AdamW eps %.3g\n", (double) o.adam_eps);
+                }
                 o.prodigy_d0 = config.prodigy_d0;
                 o.muon.lr_scale = config.muon_lr_scale;
                 o.muon.ns_steps = config.muon_ns_steps;
@@ -857,6 +870,15 @@ static int run_impl(Config config, std::string * error) {
         // 0: the stops, the rungs, the checkpoint meters. Otherwise the joint
         // step skips the frozen teacher forward (yue2-aitk-joint-step.h).
         const bool measure_kl = config.target_kl > 0.0f || config.kl_checkpoint_every > 0.0f || config.nar_drift || config.target_loss > 0.0f;
+        if (!config.fixture_replay.empty()) {
+            yue2_aitk_fixture::Args fa;
+            fa.dir = std::filesystem::u8path(config.fixture_replay);
+            fa.kl_weight = config.kl_weight; fa.ar_loss_weight = config.ar_loss_weight;
+            fa.beta1 = config.beta1; fa.beta2 = config.beta2; fa.lr = config.lr; fa.weight_decay = config.weight_decay;
+            if (!yue2_aitk_fixture::run(fa, backend.value, model, state, use_lm ? nullptr : adamw.get(),
+                                        use_lm ? &lm->opt : nullptr, use_lm ? lm->osched : nullptr, error)) return 1;
+            return 0;
+        }
         // wsd: start the tail now (idempotent). The stop that asked for it acts
         // when the tail ends.
         auto start_tail = [&](const char * why) {
