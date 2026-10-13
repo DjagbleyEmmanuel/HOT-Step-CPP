@@ -683,6 +683,14 @@ link_ggml_backends(yue2-rms-double-round-test)
 add_executable(yue2-linear-lora-round-test tools/yue2-linear-lora-round-test.cpp)
 link_ggml_backends(yue2-linear-lora-round-test)
 
+# yue2-train-gemm-precision-test: S2a gate for the YuE2 trainer's BF16
+# tensor-core GEMMs. Runs yue2_aitk_graph::linear() and the head-loss GEMMs
+# at YuE2 shapes, forward and backward, on the BF16 path and the strict-F32
+# rollback (YUE2_AITK_PRECISION=strict-f32) and checks they agree within the
+# frozen limits. See engine/tools/yue2-train-gemm-precision-test.cpp.
+add_executable(yue2-train-gemm-precision-test tools/yue2-train-gemm-precision-test.cpp)
+link_ggml_backends(yue2-train-gemm-precision-test)
+
 # yue2-mul-bf16-dispatch-profile: diagnostic tool (no PASS/FAIL) that
 # measures the real wall-clock cost of mul_bf16()'s 3-dispatch pattern
 # (round(a), round(b), mul+round-epilogue) vs a proxy for a fully fused

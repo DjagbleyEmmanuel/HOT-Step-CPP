@@ -13,6 +13,7 @@
 // gradient by the KL weight again.
 
 #include "yue2-aitk-model.h"
+#include "yue2-aitk-graph.h"
 #include "../../ggml/include/ggml-alloc.h"
 #if YUE2_AITK_CUDA_RUNTIME
 #include "joint_loss_cuda.h"
@@ -176,14 +177,11 @@ struct ChunkWorkspace {
             // incoming gradient) over a plain mul_mat; the backward reads the
             // BF16 transpose load_gguf built, since W^T g is not a mul_mat of W.
             auto logits = [&](ggml_tensor * h) {
-                ggml_tensor * y = ggml_mul_mat(tmp.ctx, request.head->parts[0], ggml_bf16_round(tmp.ctx, h));
-                ggml_mul_mat_set_prec(y, GGML_PREC_F32);
-                return ggml_bf16_round(tmp.ctx, y);
+                return ggml_bf16_round(tmp.ctx, yue2_aitk_graph::mm(tmp.ctx, request.head->parts[0], ggml_bf16_round(tmp.ctx, h)));
             };
             adapted_logits = logits(adapted);
             base_logits = logits(base);
-            hidden_grad = ggml_mul_mat(tmp.ctx, request.head->dense_t, ggml_bf16_round(tmp.ctx, logit_grad));
-            ggml_mul_mat_set_prec(hidden_grad, GGML_PREC_F32);
+            hidden_grad = yue2_aitk_graph::mm(tmp.ctx, request.head->dense_t, ggml_bf16_round(tmp.ctx, logit_grad));
         } else {
             adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
                 request.head->scales_f32, nullptr, request.head->rotation, true);

@@ -473,6 +473,14 @@ static int run_impl(Config config, std::string * error) {
     }
     std::fprintf(stderr, "[yue2-aitk] training device %s via %s; attention %s\n", ggml_backend_dev_name(device), reg_name,
                  yue2_aitk_graph::math_attention() ? "exact (no fused training kernel on this backend)" : "fused");
+    if (!yue2_aitk_graph::precision_valid()) {
+        fail(error, (std::string("YUE2_AITK_PRECISION must be bf16 or strict-f32, not ") + yue2_aitk_graph::precision_name()).c_str());
+        return 1;
+    }
+    std::fprintf(stderr, "[yue2-aitk] training precision %s: GEMM %s, attention dispatch unchanged\n",
+                 yue2_aitk_graph::strict_f32() ? "strict-f32" : "bf16",
+                 yue2_aitk_graph::strict_f32() ? "F32 (GGML_PREC_F32, the pre-S2a path)"
+                                               : "BF16 tensor-core, FP32 accumulate (quantized GGUF weights stay F32)");
     using AttentionPrecision = const char * (*)(int);
     const auto attention_precision = reinterpret_cast<AttentionPrecision>(ggml_backend_reg_get_proc_address(
         ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));
@@ -1001,6 +1009,7 @@ static int run_impl(Config config, std::string * error) {
             auto stage_start = step_start;
             std::string previous_stage;
             std::vector<std::pair<std::string,double>> stage_times;
+            const yue2_aitk_graph::GemmCounts gemm_seen = yue2_aitk_graph::gemm_counts();
             const auto finish_stage = [&]() {
                 const auto now = Clock::now();
                 if (!previous_stage.empty()) {
@@ -1126,6 +1135,9 @@ static int run_impl(Config config, std::string * error) {
                    << ",\"cursor_frames\":" << metrics.cursor_frames;
             line
                    << ",\"step_ms\":" << step_ms
+                   << ",\"gemm\":\"" << (yue2_aitk_graph::strict_f32() ? "strict-f32" : "bf16")
+                   << "\",\"gemm_bf16\":" << (yue2_aitk_graph::gemm_counts().bf16 - gemm_seen.bf16)
+                   << ",\"gemm_f32\":" << (yue2_aitk_graph::gemm_counts().f32 - gemm_seen.f32)
                    << ",\"attention_forward\":\"" << (attention_precision?attention_precision(0):"unknown")
                    << "\",\"attention_backward\":\"" << (attention_precision?attention_precision(1):"unknown")
                    << "\",\"stage_ms\":{";

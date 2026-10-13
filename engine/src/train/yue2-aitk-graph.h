@@ -40,6 +40,38 @@ namespace yue2_aitk_graph {
 // (Vulkan, Metal). The exact mul_mat -> soft_max -> mul_mat attention takes
 // its place; same maths, but it keeps the [keys, S, heads] probabilities.
 inline bool & math_attention() { static bool on = false; return on; }
+// Training precision (S2a, 2026-10-13). Default: every training GEMM is a
+// BF16 x BF16 tensor-core product with FP32 accumulation and F32 output. The
+// inputs are already BF16-rounded, so each product is exact and only the
+// summation order differs from the F32 path; trainable and frozen F32
+// factors are cast to BF16 first, as the PyTorch reference does. Quantized
+// GGUF weights keep the F32 path. YUE2_AITK_PRECISION=strict-f32 restores the
+// previous dispatch (GGML_PREC_F32 GEMMs, today's attention) for every
+// recipe; the runner validates the value and logs which one is in force.
+inline const char * precision_name() {
+    const char * v = std::getenv("YUE2_AITK_PRECISION");
+    return v && *v ? v : "bf16";
+}
+inline bool precision_valid() {
+    const std::string v = precision_name();
+    return v == "bf16" || v == "strict-f32";
+}
+inline bool & strict_f32() { static bool on = std::string(precision_name()) == "strict-f32"; return on; }
+// GEMMs built so far by path, for the runner's one-time step-1 log.
+struct GemmCounts { int64_t bf16 = 0, f32 = 0; };
+inline GemmCounts & gemm_counts() { static GemmCounts c; return c; }
+// The one training GEMM: w [K, N] (weight or factor), x [K, S] F32.
+inline ggml_tensor * mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x) {
+    const bool tensor_core = !strict_f32() && (w->type == GGML_TYPE_BF16 || w->type == GGML_TYPE_F32);
+    if (!tensor_core) {
+        ggml_tensor * y = ggml_mul_mat(ctx, w, x);
+        ggml_mul_mat_set_prec(y, GGML_PREC_F32);
+        ++gemm_counts().f32;
+        return y;
+    }
+    ++gemm_counts().bf16;
+    return ggml_mul_mat(ctx, w->type == GGML_TYPE_BF16 ? w : ggml_cast(ctx, w, GGML_TYPE_BF16), x);
+}
 inline ggml_tensor * f32(ggml_context * ctx, ggml_tensor * x) {
     return x->type == GGML_TYPE_F32 ? x : ggml_cast(ctx, x, GGML_TYPE_F32);
 }
@@ -83,9 +115,8 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols);
     ggml_tensor * base;
     if (w.dense) {
-        // Companion full-weight replacement (llm2vae): F32 maths, BF16 output.
-        base = ggml_mul_mat(ctx, w.dense, round(ctx, x));
-        ggml_mul_mat_set_prec(base, GGML_PREC_F32);
+        // Companion full-weight replacement (llm2vae): F32 weight, BF16 output.
+        base = mm(ctx, w.dense, round(ctx, x));
         if (bias) base = ggml_add(ctx, base, f32(ctx, bias));
         base = round(ctx, base);
     } else if (!w.parts.empty()) {
@@ -94,9 +125,7 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
         ggml_tensor * xr = round(ctx, x);
         std::vector<ggml_tensor *> ys;
         for (ggml_tensor * p : w.parts) {
-            ggml_tensor * y = ggml_mul_mat(ctx, p, xr);
-            ggml_mul_mat_set_prec(y, GGML_PREC_F32);
-            ys.push_back(y);
+            ys.push_back(mm(ctx, p, xr));
         }
         base = join_rows(ctx, ys);
         if (bias) base = ggml_add(ctx, base, round(ctx, f32(ctx, bias)));
@@ -107,26 +136,33 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     }
     if (w.frozen_a) {
         // Companion decoder LoRA: frozen, same boundaries as the trainable branch.
-        ggml_tensor * ca = ggml_mul_mat(ctx, w.frozen_a, round(ctx, x));
-        ggml_mul_mat_set_prec(ca, GGML_PREC_F32);
-        ggml_tensor * cd = ggml_mul_mat(ctx, w.frozen_b, ca);
-        ggml_mul_mat_set_prec(cd, GGML_PREC_F32);
+        ggml_tensor * ca = mm(ctx, w.frozen_a, round(ctx, x));
+        ggml_tensor * cd = mm(ctx, w.frozen_b, ca);
         base = round(ctx, ggml_add(ctx, base, round(ctx, cd)));
     }
     if (!adapter) return base;
     if (adapter->is_lokr()) {
-        // Same boundary as the LoRA branch: BF16-rounded input, F32 factor
-        // maths (lokr-apply.h, shared with the DiT trainer), BF16 delta.
+        // Same boundary as the LoRA branch: BF16-rounded input, BF16 delta.
+        // lokr-apply.h is shared with the DiT trainer, so the BF16 factor
+        // copies are made here (w1 scaled in F32 first); strict keeps F32.
         // [out_k, out_l*S] is the same bytes as [out, S].
-        ggml_tensor * d = lokr_apply_delta(ctx, round(ctx, x), adapter->lokr);
+        LokrApplySite site = adapter->lokr;
+        if (!strict_f32()) {
+            auto bf16 = [&](ggml_tensor * t) { return t ? ggml_cast(ctx, t, GGML_TYPE_BF16) : nullptr; };
+            site.w1 = bf16(site.scale == 1.0f ? site.w1 : ggml_scale(ctx, site.w1, site.scale));
+            site.scale = 1.0f;
+            site.w2 = bf16(site.w2); site.w2_a = bf16(site.w2_a); site.w2_b = bf16(site.w2_b);
+        }
+        gemm_counts().bf16 += strict_f32() ? 0 : 1;
+        gemm_counts().f32 += strict_f32() ? 1 : 0;
+        ggml_tensor * d = lokr_apply_delta(ctx, round(ctx, x), site);
         ggml_tensor * delta = round(ctx, ggml_reshape_2d(ctx, d, base->ne[0], base->ne[1]));
         return round(ctx, ggml_add(ctx, base, delta));
     }
-    // FP32 trainables and FP32 LoRA math; only the branch output is BF16.
-    ggml_tensor * ax = ggml_mul_mat(ctx, adapter->a, round(ctx, x));
-    ggml_mul_mat_set_prec(ax, GGML_PREC_F32);
-    ggml_tensor * delta = ggml_mul_mat(ctx, adapter->b, ax);
-    ggml_mul_mat_set_prec(delta, GGML_PREC_F32);
+    // FP32 trainables; the products use their BF16 casts (strict: F32 maths).
+    // Only the branch output is BF16-rounded.
+    ggml_tensor * ax = mm(ctx, adapter->a, round(ctx, x));
+    ggml_tensor * delta = mm(ctx, adapter->b, ax);
     delta = round(ctx, ggml_scale(ctx, delta, adapter->scale));
     return round(ctx, ggml_add(ctx, base, delta));
 }

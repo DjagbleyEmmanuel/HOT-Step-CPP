@@ -33,6 +33,20 @@ quantized weight. Same seed, first step on CUDA: bf16 GGUF ar_ce 3.6378 / nar_ms
 1.18468 against ConvRot's 3.6373 / 1.18457. Preparation records a base only as
 provenance, so one prepared dataset serves every base; a mismatch is a warning.
 
+Training GEMMs run BF16 × BF16 on tensor cores with FP32 accumulation (2026-10-13), for
+every recipe: GGUF base and head weights in their own BF16, adapter factors (LoRA A/B,
+LoKr w1/w2) and the companion's F32 factors through a BF16 cast at each use, which is
+how the PyTorch reference trains. The inputs are already BF16-rounded, so only the
+summation order and the factor rounding change. Quantized GGUF bases keep the F32 path,
+and `CONVROT8` bases are unchanged (their base linears are not `mul_mat`). On the
+reference workload this took a step from 4.24 to 3.33 s on an RTX 5090.
+`YUE2_AITK_PRECISION=strict-f32` restores the previous dispatch (every training GEMM
+`GGML_PREC_F32`, attention as before) bit for bit; any other value than `bf16` or
+`strict-f32` refuses to start. The run log names the precision at start-up, and each
+`joint` line in `train.jsonl` records `gemm` plus how many GEMMs took each path
+(`gemm_bf16`, `gemm_f32`). The casts need the HOT-ggml `bf16-mul-mat-grad` change.
+`yue2-train-gemm-precision-test` checks both paths against each other at YuE2 shapes.
+
 `--device` takes any ggml device (`CUDA0`, `Vulkan0`, `MTL0`, `CPU`). Off CUDA the
 same trainer runs from ggml ops: `--optimizer adamw` (the CUDA 8-bit kernel) maps
 to LmOptim's AdamW, the head's CE + KL gradient is built from `soft_max`/`log`/

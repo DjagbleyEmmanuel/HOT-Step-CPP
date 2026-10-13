@@ -47,6 +47,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
+| `yue2-train-gemm-precision-test` | `tools/yue2-train-gemm-precision-test.cpp` | The YuE2 trainer's BF16 GEMMs against `YUE2_AITK_PRECISION=strict-f32`, forward and backward, at YuE2 shapes on the first GPU |
 | `convrot-graph-probe` | `tools/convrot-graph-probe.cpp` | ConvRot8 under repeated CUDA graph capture and replay (CUDA only, see [ggml-fork.md](ggml-fork.md)) |
 
 `fattn-train-test --backend cpu\|cuda\|vulkan` (default `cpu`, both arms on CPU) resolves the
