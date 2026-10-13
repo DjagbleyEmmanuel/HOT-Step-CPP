@@ -2,6 +2,7 @@
 
 A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Three music models run natively in the C++ engine and switch from the toolbar: **ACE-Step 1.5**, **MiniMax-Music3** and **YuE2**.
 
+[![Open in Colab](https://img.shields.io/badge/Open%20in%20Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white)](https://colab.research.google.com/github/scragnog/HOT-Step-CPP/blob/master/colab/HOT-Step.ipynb)
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/ezVtmg9GKX)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/scragnog)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-scragnog-FFD21E?style=for-the-badge)](https://huggingface.co/scragnog)
