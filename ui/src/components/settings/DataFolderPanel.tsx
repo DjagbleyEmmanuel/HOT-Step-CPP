@@ -24,7 +24,7 @@ export function DataFolderPanel() {
     } finally { setBusy(false); }
   };
   const bytes = (value: number) => `${(value / 1e9).toFixed(2)} GB`;
-  const blocked = busy || !location || location.mode === 'dev' || !!location.override || !!location.pending;
+  const blocked = busy || !location || !!location.override || !!location.pending;
   return <section className="settings-section">
     <div className="settings-section-header"><span className="settings-section-title">{t('settings.dataFolder.title')}</span></div>
     <div className="space-y-3 text-sm text-zinc-700 dark:text-zinc-300">
@@ -49,34 +49,32 @@ export function DataFolderPanel() {
           })}>{t('settings.dataFolder.restart')}</button>
           <button className="settings-save-btn" disabled={busy} onClick={() => void run(async () => { await dataFolderApi.cancel(); await reload(); })}>{t('settings.dataFolder.cancel')}</button>
         </div>}
-        {location.mode === 'release' && <>
-          <ParamLabel label={t('settings.dataFolder.action')} info={t('settings.dataFolder.actionInfo')} />
-          <StyledSelect value={kind} disabled={blocked} accent="emerald" onChange={value => { change(); setKind(value as DataFolderOperation); }} options={(['move', 'repoint', 'create', 'import'] as const).map(value => ({ value, label: t(`settings.dataFolder.${value}`) }))} />
-          <p>{t(`settings.dataFolder.${kind}Info`)}</p>
-          <label className="flex flex-col gap-1">
-            <ParamLabel label={t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')} info={t('settings.dataFolder.targetInfo')} />
-            <input className="w-full rounded border border-zinc-300 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900" disabled={blocked} value={target} onChange={e => { change(); setTarget(e.target.value); }} />
-          </label>
-          <button className="settings-save-btn" disabled={blocked || !target.trim()} onClick={() => void run(async () => {
-            const currentRevision = revision.current;
-            const result = await dataFolderApi.preview(kind, target.trim());
-            if (currentRevision === revision.current) setPreview(result);
-            await reload();
-          })}>{t('settings.dataFolder.preview')}</button>
-          {preview && <div className="space-y-2">
-            <p className="break-all">{t('settings.dataFolder.current')}: {location.dataRoot}</p>
-            <p className="break-all">{t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')}: {preview.target}</p>
-            <p>{t('settings.dataFolder.size', { size: bytes(preview.bytes) })}</p>
-            {preview.crossVolume && <p>{t('settings.dataFolder.space', { needed: bytes(preview.needBytes), free: preview.freeBytes === null ? t('settings.dataFolder.unknown') : bytes(preview.freeBytes) })}</p>}
-            {preview.mappings.map(item => <p key={item.name} className="break-all">{item.name}: {item.from} → {item.to}</p>)}
-            {preview.errors.map((item, i) => <p role="alert" key={i} className="text-red-600 dark:text-red-400">{item}</p>)}
-            {preview.blockers.map((item, i) => <p key={i}>{item}</p>)}
-            <button className="settings-save-btn" disabled={blocked || !preview.ok || preview.blockers.length > 0 || location.blockers.length > 0} onClick={() => void run(async () => {
-              await dataFolderApi.schedule(preview.kind, preview.target);
-              window.dispatchEvent(new CustomEvent('hotstep:restarting'));
-            })}>{t('settings.dataFolder.confirm')}</button>
-          </div>}
-        </>}
+        <ParamLabel label={t('settings.dataFolder.action')} info={t('settings.dataFolder.actionInfo')} />
+        <StyledSelect value={kind} disabled={blocked} accent="emerald" onChange={value => { change(); setKind(value as DataFolderOperation); }} options={(['move', 'repoint', 'create', 'import'] as const).map(value => ({ value, label: t(`settings.dataFolder.${value}`) }))} />
+        <p>{t(`settings.dataFolder.${kind}Info`)}</p>
+        <label className="flex flex-col gap-1">
+          <ParamLabel label={t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')} info={t('settings.dataFolder.targetInfo')} />
+          <input className="w-full rounded border border-zinc-300 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900" disabled={blocked} value={target} onChange={e => { change(); setTarget(e.target.value); }} />
+        </label>
+        <button className="settings-save-btn" disabled={blocked || !target.trim()} onClick={() => void run(async () => {
+          const currentRevision = revision.current;
+          const result = await dataFolderApi.preview(kind, target.trim());
+          if (currentRevision === revision.current) setPreview(result);
+          await reload();
+        })}>{t('settings.dataFolder.preview')}</button>
+        {preview && <div className="space-y-2">
+          <p className="break-all">{t('settings.dataFolder.current')}: {location.dataRoot || t('settings.dataFolder.dev')}</p>
+          <p className="break-all">{t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')}: {preview.target}</p>
+          <p>{t('settings.dataFolder.size', { size: bytes(preview.bytes) })}</p>
+          {preview.crossVolume && <p>{t('settings.dataFolder.space', { needed: bytes(preview.needBytes), free: preview.freeBytes === null ? t('settings.dataFolder.unknown') : bytes(preview.freeBytes) })}</p>}
+          {preview.mappings.map(item => <p key={item.name} className="break-all">{item.name}: {item.from} → {item.to}</p>)}
+          {preview.errors.map((item, i) => <p role="alert" key={i} className="text-red-600 dark:text-red-400">{item}</p>)}
+          {preview.blockers.map((item, i) => <p key={i}>{item}</p>)}
+          <button className="settings-save-btn" disabled={blocked || !preview.ok || preview.blockers.length > 0 || location.blockers.length > 0} onClick={() => void run(async () => {
+            await dataFolderApi.schedule(preview.kind, preview.target);
+            window.dispatchEvent(new CustomEvent('hotstep:restarting'));
+          })}>{t('settings.dataFolder.confirm')}</button>
+        </div>}
       </>}
     </div>
   </section>;

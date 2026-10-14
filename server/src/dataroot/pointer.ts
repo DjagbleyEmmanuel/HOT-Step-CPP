@@ -6,7 +6,7 @@
 
 import path from 'path';
 import { RUNTIME } from './bootstrap.js';
-import { ENV_PATH_KEYS, isInside, readPointer, writePointer, type OperationKind, type PendingOperation } from './paths.js';
+import { ENV_PATH_KEYS, isInside, otherPointerRoots, readPointer, writePointer, type OperationKind, type PendingOperation } from './paths.js';
 import { planOperation, sizeOperation } from './transfer.js';
 
 export type ScheduleKind = Exclude<OperationKind, 'migrate'>;
@@ -42,7 +42,7 @@ export interface DataLocation {
 }
 
 function pointerPath(): string {
-  if (!RUNTIME.pointerPath) throw Object.assign(new Error('The data folder can only be changed in the release app'), { status: 400 });
+  if (!RUNTIME.pointerPath) throw Object.assign(new Error('The data folder cannot be changed in this app'), { status: 400 });
   return RUNTIME.pointerPath;
 }
 
@@ -74,9 +74,13 @@ export interface OperationPreview {
   freeBytes: number | null;
 }
 
+/** A dev checkout with no data folder yet moves its checkout folders (the
+ *  same plan a release runs for its own old layout, with dev paths). */
 function plan(kind: ScheduleKind, target: string, currentDb: string | null) {
-  if (!RUNTIME.appRoot) throw Object.assign(new Error('The data folder can only be changed in the release app'), { status: 400 });
-  return planOperation(kind, target, { appRoot: RUNTIME.appRoot, currentRoot: RUNTIME.dataRoot, currentDb });
+  if (!RUNTIME.appRoot) throw Object.assign(new Error('The data folder cannot be changed in this app'), { status: 400 });
+  const dev = RUNTIME.mode === 'dev';
+  const k: OperationKind = dev && kind === 'move' && !RUNTIME.dataRoot ? 'migrate' : kind;
+  return planOperation(k, target, { appRoot: RUNTIME.appRoot, currentRoot: RUNTIME.dataRoot, currentDb, dev });
 }
 
 /** Validate an operation and size it. Writes nothing. `currentDb` is
@@ -84,6 +88,10 @@ function plan(kind: ScheduleKind, target: string, currentDb: string | null) {
 export function previewOperation(kind: ScheduleKind, target: string, currentDb: string | null): OperationPreview {
   const { op, errors } = plan(kind, target, currentDb);
   if (RUNTIME.override) errors.push('HOT_STEP_DATA_ROOT is set for this process; clear it before changing the data folder');
+  if (kind !== 'import' && RUNTIME.profileDir && RUNTIME.pointerPath) {
+    const other = otherPointerRoots(RUNTIME.profileDir, RUNTIME.pointerPath).find(r => isInside(r, op.destination) || isInside(op.destination, r));
+    if (other) errors.push(`${other} belongs to another HOT-Step install (${RUNTIME.mode === 'dev' ? 'the release app or another checkout' : 'a development checkout'}); each keeps its own data folder`);
+  }
   const size = errors.length ? { bytes: 0, crossVolume: false, needBytes: 0, freeBytes: null } : sizeOperation(op);
   if (size.crossVolume && size.freeBytes !== null && size.freeBytes < size.needBytes) {
     errors.push(`not enough free space: ${(size.needBytes / 1e9).toFixed(1)} GB needed, ${(size.freeBytes / 1e9).toFixed(1)} GB free`);
@@ -102,7 +110,9 @@ export function scheduleOperation(kind: ScheduleKind, target: string, currentDb:
   if (blockers.length) throw Object.assign(new Error(`Wait for running work to finish: ${blockers.join('; ')}`), { status: 409, blockers });
   const preview = previewOperation(kind, target, currentDb);
   if (!preview.ok) throw Object.assign(new Error(preview.errors.join('; ')), { status: 400, errors: preview.errors });
-  const ptr = readPointer(file) ?? { version: 1 as const, root: RUNTIME.dataRoot, pending: null };
+  const ptr = readPointer(file) ?? {
+    version: 1 as const, root: RUNTIME.dataRoot, pending: null, ...(RUNTIME.mode === 'dev' ? { checkout: RUNTIME.appRoot! } : {}),
+  };
   if (ptr.pending) throw Object.assign(new Error('Another data-folder change is already scheduled'), { status: 409 });
   const { op } = plan(kind, target, currentDb);
   ptr.pending = op;

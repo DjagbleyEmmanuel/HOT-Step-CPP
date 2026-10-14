@@ -1,9 +1,10 @@
 // dataroot/paths.ts — Data-root layout, profile pointer and legacy-install
-// inspection for the release build (HOT_STEP_ROOT set).
+// inspection. A release (HOT_STEP_ROOT set) uses data-location.json; a dev
+// checkout uses its own data-location.dev-<hash>.json and only once Settings
+// has scheduled something into it.
 //
 // Pure helpers only: nothing here runs at import. bootstrap.ts decides which
 // root is active, transfer.ts moves data, pointer.ts is the Settings API.
-// Dev (no HOT_STEP_ROOT) never touches any of this.
 
 import fs from 'fs';
 import os from 'os';
@@ -145,6 +146,30 @@ export function profileDir(env: NodeJS.ProcessEnv = process.env, platform: strin
 }
 
 export const POINTER_FILE = 'data-location.json';
+
+/** A dev checkout's own pointer, keyed to the checkout folder so it never
+ *  shares the release pointer or another checkout's. */
+export function devPointerFile(prof: string, checkout: string): string {
+  return path.join(prof, `data-location.dev-${crypto.createHash('sha256').update(norm(checkout)).digest('hex').slice(0, 12)}.json`);
+}
+
+/** Roots (and pending destinations) named by every pointer in `prof` except
+ *  `except`, so one install never picks a folder another one uses. */
+export function otherPointerRoots(prof: string, except: string): string[] {
+  const out: string[] = [];
+  let names: string[] = [];
+  try { names = fs.readdirSync(prof); } catch { return out; }
+  for (const n of names.filter(n => /^data-location(\.dev-[0-9a-f]+)?\.json$/.test(n))) {
+    const f = path.join(prof, n);
+    if (samePath(f, except)) continue;
+    try {
+      const p = readPointer(f);
+      if (p?.root) out.push(p.root);
+      if (p?.pending && p.pending.kind !== 'import') out.push(p.pending.destination);
+    } catch { /* unreadable: its own install reports it */ }
+  }
+  return out;
+}
 export const LOCK_FILE = 'data-transfer.lock';
 export const RESTART_MARKER_FILE = 'restart-requested';
 
@@ -186,6 +211,8 @@ export interface PendingOperation {
   /** Import only: a blank library (fresh install, no songs) renamed aside first. */
   setAside?: string[];
   setAsideDone?: boolean;
+  /** The source is a dev checkout that stays the app: keep its .env binary paths. */
+  keepAppBinaries?: boolean;
   /** Set by hand (see the error page) to undo a same-volume move. */
   abandon?: boolean;
   error: string | null;
@@ -195,6 +222,8 @@ export interface Pointer {
   version: 1;
   root: string | null;
   pending: PendingOperation | null;
+  /** Dev pointers only: the checkout this file belongs to (for people reading it). */
+  checkout?: string;
 }
 
 export function writeJsonAtomic(file: string, data: unknown): void {
@@ -216,7 +245,7 @@ export function readPointer(file: string): Pointer | null {
   if (p.pending && (!Array.isArray(p.pending.mappings) || typeof p.pending.destination !== 'string')) {
     throw new Error(`${file} has an unreadable pending operation`);
   }
-  return { version: 1, root: p.root ?? null, pending: p.pending ?? null };
+  return { version: 1, root: p.root ?? null, pending: p.pending ?? null, ...(typeof p.checkout === 'string' ? { checkout: p.checkout } : {}) };
 }
 
 export function writePointer(file: string, p: Pointer): void {
@@ -234,6 +263,10 @@ export function newPending(kind: OperationKind, source: string | null, destinati
 
 export interface LegacyInstall {
   appRoot: string;
+  /** What relative .env values resolve against. */
+  base: string;
+  /** A dev checkout: server/data is its library, not bundled resources. */
+  dev?: boolean;
   envFile: string | null;
   env: Record<string, string>;
   /** Effective DATA_DIR of that install. */
@@ -254,6 +287,7 @@ export function inspectLegacy(appRoot: string): LegacyInstall {
   const at = (v: string | undefined, d: string) => (v ? path.resolve(app, v) : d);
   return {
     appRoot: app,
+    base: app,
     envFile: fs.existsSync(envFile) ? envFile : null,
     env,
     dataDir: path.resolve(app, env.DATA_DIR || './data'),
@@ -261,6 +295,30 @@ export function inspectLegacy(appRoot: string): LegacyInstall {
     adapters: at(env.ACESTEPCPP_ADAPTERS, path.join(app, 'adapters')),
     logs: path.join(app, 'logs'),
     whisperDir: env.WHISPER_EXE ? path.dirname(path.resolve(app, env.WHISPER_EXE)) : path.join(app, 'tools', 'whisper'),
+  };
+}
+
+/** A dev checkout's paths, resolved the way config.ts does without a data
+ *  folder: DATA_DIR against server/, other relative values against the
+ *  server's cwd (server/, where dev.bat starts it), logs and Whisper under
+ *  the checkout. */
+export function inspectDevLegacy(checkout: string): LegacyInstall {
+  const app = path.resolve(checkout);
+  const base = path.join(app, 'server');
+  const envFile = path.join(app, '.env');
+  const env = fs.existsSync(envFile) ? dotenvParse(fs.readFileSync(envFile, 'utf-8')) : {};
+  const at = (v: string | undefined, d: string) => (v ? path.resolve(base, v) : d);
+  return {
+    appRoot: app,
+    base,
+    dev: true,
+    envFile: fs.existsSync(envFile) ? envFile : null,
+    env,
+    dataDir: path.resolve(base, env.DATA_DIR || './data'),
+    models: at(env.ACESTEPCPP_MODELS, path.join(app, 'models')),
+    adapters: at(env.ACESTEPCPP_ADAPTERS, path.join(app, 'adapters')),
+    logs: path.join(app, 'logs'),
+    whisperDir: env.WHISPER_EXE ? path.dirname(path.resolve(base, env.WHISPER_EXE)) : path.join(app, 'tools', 'whisper'),
   };
 }
 
@@ -276,7 +334,7 @@ function hasContent(dir: string, exclude: string[] = []): boolean {
  *  nested in another is dropped: the outer move carries it. */
 export function legacyMappings(legacy: LegacyInstall, destRoot: string): Mapping[] {
   const l = dataLayout(destRoot);
-  const bundled = samePath(legacy.dataDir, path.join(legacy.appRoot, 'server', 'data')) ? BUNDLED_DATA_NAMES : undefined;
+  const bundled = !legacy.dev && samePath(legacy.dataDir, path.join(legacy.appRoot, 'server', 'data')) ? BUNDLED_DATA_NAMES : undefined;
   const candidates: Mapping[] = [
     { name: 'library', from: legacy.dataDir, to: l.library, exclude: bundled, state: 'pending' },
     { name: 'models', from: legacy.models, to: l.models, state: 'pending' },

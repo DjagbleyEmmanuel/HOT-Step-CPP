@@ -9,7 +9,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { resolveRuntime } from './bootstrap.js';
-import { dataLayout, initLayout, isInside, readPointer, rewritePath, writePointer, BUNDLED_DATA_NAMES, POINTER_FILE, LOCK_FILE } from './paths.js';
+import { dataLayout, devPointerFile, initLayout, isInside, otherPointerRoots, readPointer, rewritePath, writePointer, BUNDLED_DATA_NAMES, POINTER_FILE, LOCK_FILE } from './paths.js';
 import { hooks, planOperation, rewriteDb, runPending } from './transfer.js';
 
 const quiet = () => {};
@@ -44,12 +44,16 @@ function makeDb(file: string, rows: { adapter?: string; sourceDir?: string; para
   db.close();
 }
 
-test('dev: no HOT_STEP_ROOT means no data root, no profile, nothing created', async () => {
-  const r = await resolveRuntime({ env: {}, log: quiet });
+test('dev: no HOT_STEP_ROOT and no dev pointer means no data root, nothing created', async () => {
+  const f = fixture();
+  const r = await resolveRuntime({ env: { HOT_STEP_PROFILE_DIR: f.prof }, log: quiet, checkoutRoot: f.app });
   assert.ok(r.ok);
   assert.equal(r.runtime.mode, 'dev');
   assert.equal(r.runtime.dataRoot, null);
   assert.equal(r.runtime.envPath, null);
+  assert.equal(r.runtime.restartMarkerPath, null);
+  assert.equal(r.runtime.pointerPath, devPointerFile(f.prof, f.app));
+  assert.ok(!fs.existsSync(f.prof), 'profile untouched');
 });
 
 test('path boundaries: sibling prefixes are outside, case is ignored on Windows', () => {
@@ -335,7 +339,7 @@ console.log('@@' + JSON.stringify({ data: m.config.data.dir, training: m.config.
 
 test('config in dev keeps the checkout layout', () => {
   const serverDir = SERVER_DIR;
-  const c = loadConfig({});
+  const c = loadConfig({ HOT_STEP_PROFILE_DIR: fixture().prof });
   assert.equal(c.portable, false);
   assert.equal(c.root, path.dirname(serverDir));
   assert.equal(c.env, path.join(path.dirname(serverDir), '.env'));
@@ -507,4 +511,160 @@ test('trackBusy keeps work busy after its map entry is deleted, until it settles
   await assert.rejects(failing, /engine gone/);
   await new Promise(r => setImmediate(r));
   assert.ok(!getBusyBlockers().some(b => b.includes('fixture-stem')));
+});
+
+// ── Dev checkouts ────────────────────────────────────────────────────
+
+/** A disposable checkout: git-initialised, with tracked server/src/data and
+ *  tools files, and the untracked folders a dev checkout fills at runtime. */
+function devCheckout() {
+  const f = fixture();
+  const co = path.join(f.base, 'checkout');
+  write(path.join(co, 'server', 'src', 'data', 'model-registry.json'), '{}');
+  write(path.join(co, 'tools', 'cg.cmd'), 'tracked');
+  write(path.join(co, '.env.example'), 'DATA_DIR=./server/data\n');
+  execFileSync('git', ['init', '-q'], { cwd: co });
+  execFileSync('git', ['add', 'server/src/data/model-registry.json', 'tools/cg.cmd', '.env.example'], { cwd: co });
+  return { ...f, co, env: { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv, ptrFile: devPointerFile(f.prof, co) };
+}
+
+test('dev and release pointers are separate files, keyed per checkout, and never read each other', async () => {
+  const f = devCheckout();
+  const other = path.join(f.base, 'checkout2');
+  assert.notEqual(devPointerFile(f.prof, f.co), devPointerFile(f.prof, other));
+  assert.notEqual(path.basename(devPointerFile(f.prof, f.co)), POINTER_FILE);
+
+  // Release first run writes data-location.json; dev keeps its checkout paths.
+  const rel = await resolveRuntime({ env: { HOT_STEP_ROOT: f.app, HOT_STEP_PROFILE_DIR: f.prof }, log: quiet });
+  assert.ok(rel.ok && rel.runtime.dataRoot === f.sibling);
+  const dev0 = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co });
+  assert.ok(dev0.ok && dev0.runtime.dataRoot === null);
+
+  // A dev pointer gives dev its own folder; the release pointer is unchanged.
+  const devRoot = path.join(f.base, 'dev-data');
+  initLayout(dataLayout(devRoot));
+  writePointer(f.ptrFile, { version: 1, root: devRoot, pending: null, checkout: f.co });
+  const dev1 = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co });
+  assert.ok(dev1.ok, !dev1.ok ? dev1.error : '');
+  assert.equal(dev1.runtime.mode, 'dev');
+  assert.equal(dev1.runtime.dataRoot, devRoot);
+  assert.equal(dev1.runtime.restartMarkerPath, null, 'dev keeps the checkout restart marker');
+  assert.equal(dev1.runtime.runtimeLibDir, null, 'dev runtime DLLs stay beside the dev engine');
+  assert.equal(readPointer(f.ptrFile)!.checkout, f.co);
+  assert.equal(readPointer(path.join(f.prof, POINTER_FILE))!.root, f.sibling);
+  const rel2 = await resolveRuntime({ env: { HOT_STEP_ROOT: f.app, HOT_STEP_PROFILE_DIR: f.prof }, log: quiet });
+  assert.ok(rel2.ok && rel2.runtime.dataRoot === f.sibling);
+
+  // Each sees the other's folder as taken (Settings refuses those targets).
+  assert.deepEqual(otherPointerRoots(f.prof, f.ptrFile), [f.sibling]);
+  assert.deepEqual(otherPointerRoots(f.prof, path.join(f.prof, POINTER_FILE)), [devRoot]);
+});
+
+test('a release first run refuses a sibling folder a dev checkout already uses', async () => {
+  const f = devCheckout();
+  initLayout(dataLayout(f.sibling));
+  writePointer(f.ptrFile, { version: 1, root: f.sibling, pending: null, checkout: f.co });
+  const r = await resolveRuntime({ env: { HOT_STEP_ROOT: f.app, HOT_STEP_PROFILE_DIR: f.prof }, log: quiet });
+  assert.ok(!r.ok && /development checkout/.test(r.error));
+  assert.ok(!fs.existsSync(path.join(f.prof, POINTER_FILE)));
+});
+
+test('dev Move maps the checkout paths (DATA_DIR against server/), leaves tracked files, and only runs once scheduled', async () => {
+  const f = devCheckout();
+  // The root .env.example value resolves against server/, i.e. server/server/data.
+  const lib = path.join(f.co, 'server', 'server', 'data');
+  makeDb(path.join(lib, 'hotstep.db'), [{ adapter: path.join(f.co, 'adapters', 'a.safetensors'), params: { ref: path.join(lib, 'references', 'r.flac') } }]);
+  write(path.join(lib, 'references', 'r.flac'));
+  write(path.join(f.co, 'models', 'm.gguf'));
+  write(path.join(f.co, 'adapters', 'a.safetensors'));
+  write(path.join(f.co, 'logs', 'session.log'));
+  write(path.join(f.co, 'tools', 'whisper', 'whisper-cli.exe'));
+  const exe = path.join(f.co, 'engine', 'build', 'Debug', 'ace-server.exe');
+  write(path.join(f.co, '.env'), ['DATA_DIR=./server/data', 'GEMINI_API_KEY=secret123', `ACESTEPCPP_EXE=${exe}`].join('\n'));
+
+  // Booting dev with no pointer moves nothing.
+  const before = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co });
+  assert.ok(before.ok && before.runtime.dataRoot === null);
+  assert.ok(fs.existsSync(path.join(lib, 'hotstep.db')));
+
+  const dest = path.join(f.base, 'Dev-Data');
+  const { op, errors } = planOperation('migrate', dest, { appRoot: f.co, currentRoot: null, currentDb: null, dev: true });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(Object.fromEntries(op.mappings.map(m => [m.name, m.from])), {
+    library: lib, models: path.join(f.co, 'models'), adapters: path.join(f.co, 'adapters'),
+    logs: path.join(f.co, 'logs'), whisper: path.join(f.co, 'tools', 'whisper'),
+  });
+  assert.ok(op.mappings.every(m => !m.exclude), 'server/data in dev is the library, not bundled resources');
+
+  // What Settings does: write the dev pointer, then restart.
+  writePointer(f.ptrFile, { version: 1, root: null, pending: op, checkout: f.co });
+  const r = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co, skipEngineProbe: true });
+  assert.ok(r.ok, !r.ok ? r.error : '');
+  const l = dataLayout(dest);
+  assert.equal(r.runtime.mode, 'dev');
+  assert.equal(r.runtime.dataRoot, dest);
+  assert.equal(r.runtime.envPath, l.envPath);
+  for (const p of [path.join(l.library, 'hotstep.db'), path.join(l.library, 'references', 'r.flac'), path.join(l.models, 'm.gguf'),
+    path.join(l.adapters, 'a.safetensors'), path.join(l.logs, 'session.log'), path.join(l.whisperDir, 'whisper-cli.exe')]) {
+    assert.ok(fs.existsSync(p), p);
+  }
+  // Tracked files and bundled resources stay in the checkout.
+  assert.ok(fs.existsSync(path.join(f.co, 'server', 'src', 'data', 'model-registry.json')));
+  assert.ok(fs.existsSync(path.join(f.co, 'tools', 'cg.cmd')));
+  assert.ok(fs.existsSync(path.join(f.co, '.env.example')));
+  // Settings follow; the checkout's own engine path stays valid, so it is kept.
+  const env = fs.readFileSync(l.envPath, 'utf-8');
+  assert.match(env, /GEMINI_API_KEY=secret123/);
+  assert.doesNotMatch(env, /DATA_DIR=/);
+  assert.ok(env.includes(`ACESTEPCPP_EXE=${exe}`));
+  assert.ok(fs.existsSync(path.join(f.co, '.env.migrated')) && !fs.existsSync(path.join(f.co, '.env')));
+  const conn = new Database(path.join(l.library, 'hotstep.db'), { readonly: true });
+  assert.equal((conn.prepare('SELECT adapter_path FROM album_presets').get() as any).adapter_path, path.join(l.adapters, 'a.safetensors'));
+  assert.equal(JSON.parse((conn.prepare('SELECT generation_params FROM songs').get() as any).generation_params).ref, path.join(l.library, 'references', 'r.flac'));
+  conn.close();
+  assert.deepEqual(readPointer(f.ptrFile), { version: 1, root: dest, pending: null, checkout: f.co });
+});
+
+test('dev Move with no .env uses server/data and refuses tracked sources or a populated target', () => {
+  const f = devCheckout();
+  write(path.join(f.co, 'server', 'data', 'hotstep.db'), 'db');
+  const ctx = { appRoot: f.co, currentRoot: null, currentDb: null, dev: true };
+  const ok = planOperation('migrate', path.join(f.base, 'D1'), ctx);
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.op.mappings.map(m => m.from), [path.join(f.co, 'server', 'data')]);
+
+  write(path.join(f.base, 'D2', 'something.txt'));
+  assert.ok(planOperation('migrate', path.join(f.base, 'D2'), ctx).errors.some(e => /not empty/.test(e)));
+  assert.ok(planOperation('migrate', path.join(f.co, 'inside'), ctx).errors.some(e => /inside the app folder/.test(e)));
+
+  // DATA_DIR=. would carry server/ itself, tracked sources included.
+  write(path.join(f.co, '.env'), 'DATA_DIR=.\n');
+  const bad = planOperation('migrate', path.join(f.base, 'D3'), ctx);
+  assert.ok(bad.errors.some(e => /git tracks/.test(e) && e.includes('model-registry.json')), bad.errors.join('; '));
+});
+
+test('dev pointer with no root and nothing pending (an abandoned first move) keeps the checkout paths', async () => {
+  const f = devCheckout();
+  writePointer(f.ptrFile, { version: 1, root: null, pending: null, checkout: f.co });
+  const r = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co });
+  assert.ok(r.ok && r.runtime.dataRoot === null);
+});
+
+test('config in dev with a dev pointer uses the data folder but keeps the checkout and its restart marker', () => {
+  const f = fixture();
+  const checkout = path.dirname(SERVER_DIR);
+  const root = path.join(f.base, 'dev-data');
+  initLayout(dataLayout(root));
+  writePointer(devPointerFile(f.prof, checkout), { version: 1, root, pending: null, checkout });
+  const c = loadConfig({ HOT_STEP_PROFILE_DIR: f.prof });
+  const l = dataLayout(root);
+  assert.equal(c.portable, false);
+  assert.equal(c.root, checkout);
+  assert.equal(c.data, l.library);
+  assert.equal(c.models, l.models);
+  assert.equal(c.adapters, l.adapters);
+  assert.equal(c.env, l.envPath);
+  assert.equal(c.logs, l.logs);
+  assert.equal(c.marker, path.join(checkout, '.restart-requested'));
+  assert.doesNotMatch(fs.readFileSync(l.envPath, 'utf-8'), /^DATA_DIR=/m, 'example DATA_DIR dropped');
 });

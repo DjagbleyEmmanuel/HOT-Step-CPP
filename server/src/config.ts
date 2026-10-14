@@ -12,29 +12,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ── Portable mode detection ─────────────────────────────────────────
 // When HOT_STEP_ROOT is set (by the release launcher), app files resolve
 // from the distribution root and user data from the data folder RUNTIME
-// chose (dataroot/bootstrap.ts). Otherwise, fall back to __dirname-based
-// resolution for development mode, unchanged.
+// chose (dataroot/bootstrap.ts). Otherwise app files resolve from the
+// checkout, and user data from the checkout too unless Settings gave this
+// checkout a data folder (its dev pointer).
 export const PORTABLE_MODE = RUNTIME.mode === 'release';
 export const PROJECT_ROOT = RUNTIME.appRoot ?? path.resolve(__dirname, '../..');  // two levels up from server/src/
-/** Release data folder (null in dev). */
+/** Data folder (null in a dev checkout that has none). */
 export const DATA_ROOT = RUNTIME.dataRoot;
 export const LOGS_DIR = RUNTIME.logsDir ?? path.join(PROJECT_ROOT, 'logs');
 export const RESTART_MARKER_PATH = RUNTIME.restartMarkerPath ?? path.join(PROJECT_ROOT, '.restart-requested');
 
-/** A DATA_DIR-style value: dev resolves it against server/ as it always has;
- *  a release resolves it against the data folder. */
+/** A DATA_DIR-style value: resolved against the data folder when there is
+ *  one, otherwise against server/ as dev always has. */
 function resolveDataDir(v: string | undefined): string {
   if (RUNTIME.dataRoot) return v ? path.resolve(RUNTIME.dataRoot, v) : RUNTIME.libraryDir!;
   return path.resolve(__dirname, '..', v || './data');
 }
-/** Other path values: relative ones resolve against the data folder in a release. */
+/** Other path values: relative ones resolve against the data folder when there is one. */
 function resolveDataPath(v: string): string {
   return RUNTIME.dataRoot && v ? path.resolve(RUNTIME.dataRoot, v) : v;
 }
 
 // Load .env (optional — smart defaults work without it). Dev: project root.
-// Release: <data>/settings/.env. On first launch, bootstrap it from
-// .env.example so settings are writable; a release drops the example's
+// With a data folder: <data>/settings/.env. On first launch, bootstrap it from
+// .env.example so settings are writable; a data folder drops the example's
 // DATA_DIR line, which belonged to the old in-app layout.
 const ENV_PATH = RUNTIME.envPath ?? path.join(PROJECT_ROOT, '.env');
 
@@ -47,7 +48,7 @@ export const APP_VERSION: string = (() => {
 const ENV_EXAMPLE_PATH = path.join(PROJECT_ROOT, '.env.example');
 if (!fs.existsSync(ENV_PATH) && fs.existsSync(ENV_EXAMPLE_PATH)) {
   try {
-    if (PORTABLE_MODE) {
+    if (DATA_ROOT) {
       fs.mkdirSync(path.dirname(ENV_PATH), { recursive: true });
       fs.writeFileSync(ENV_PATH, fs.readFileSync(ENV_EXAMPLE_PATH, 'utf-8').replace(/^DATA_DIR=.*$/m, '# DATA_DIR='), 'utf-8');
     } else {

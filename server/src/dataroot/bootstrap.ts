@@ -1,27 +1,31 @@
 // dataroot/bootstrap.ts — Decide the data root before anything else loads.
 //
 // config.ts imports RUNTIME from here, so this module is evaluated before any
-// module that opens SQLite, log files or the engine. In dev (no HOT_STEP_ROOT)
-// it does nothing and every path keeps its checkout default. In a release it
-// picks the root (HOT_STEP_DATA_ROOT, profile pointer, this app's old layout,
-// then <parent of app>/HOT-Step-Data), runs a pending move/import/migration,
-// and on any failure serves one plain page and never lets the app start.
+// module that opens SQLite, log files or the engine. In a release it picks the
+// root (HOT_STEP_DATA_ROOT, profile pointer, this app's old layout, then
+// <parent of app>/HOT-Step-Data), runs a pending move/import/migration, and on
+// any failure serves one plain page and never lets the app start.
+// A dev checkout (no HOT_STEP_ROOT) keeps its checkout paths until Settings
+// writes its own dev pointer; from then on it works like a release, except
+// that nothing is migrated automatically and restart keeps the dev marker.
 
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import {
   DEFAULT_DATA_FOLDER, LOCK_FILE, POINTER_FILE, RESTART_MARKER_FILE,
-  dataLayout, initLayout, isDataLayout, isEmptyDir, legacyMappings, inspectLegacy, profileDir, readPointer, writePointer,
+  dataLayout, devPointerFile, initLayout, isDataLayout, isEmptyDir, isInside, legacyMappings, inspectLegacy, otherPointerRoots,
+  profileDir, readPointer, writePointer,
   type Pointer,
 } from './paths.js';
 import { planOperation, runPending } from './transfer.js';
 
 export interface Runtime {
   mode: 'dev' | 'release';
-  /** Release only: the unpacked app folder (HOT_STEP_ROOT). */
+  /** The unpacked app folder (HOT_STEP_ROOT), or the dev checkout. */
   appRoot: string | null;
   dataRoot: string | null;
   profileDir: string | null;
@@ -39,11 +43,25 @@ export interface Runtime {
   userPluginsDir: string | null;
 }
 
-const DEV: Runtime = {
-  mode: 'dev', appRoot: null, dataRoot: null, profileDir: null, pointerPath: null, override: null, envPath: null,
-  logsDir: null, restartMarkerPath: null, libraryDir: null, modelsDir: null, adaptersDir: null, whisperDir: null,
-  runtimeLibDir: null, userPluginsDir: null,
-};
+/** Dev with no data folder: every path null, so config.ts keeps the checkout
+ *  defaults. With one: the release layout, but runtime DLLs stay beside the
+ *  dev engine build and restart keeps the checkout's marker for the dev wrapper. */
+function dev(checkout: string, prof: string, ptrFile: string, root: string | null): Runtime {
+  const base: Runtime = {
+    mode: 'dev', appRoot: checkout, dataRoot: null, profileDir: prof, pointerPath: ptrFile, override: null, envPath: null,
+    logsDir: null, restartMarkerPath: null, libraryDir: null, modelsDir: null, adaptersDir: null, whisperDir: null,
+    runtimeLibDir: null, userPluginsDir: null,
+  };
+  if (!root) return base;
+  const l = dataLayout(root);
+  return {
+    ...base, dataRoot: l.root, envPath: l.envPath, logsDir: l.logs, libraryDir: l.library, modelsDir: l.models,
+    adaptersDir: l.adapters, whisperDir: l.whisperDir, userPluginsDir: l.plugins,
+  };
+}
+
+/** server/src/dataroot -> checkout root. */
+const CHECKOUT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 export type Resolution = { ok: true; runtime: Runtime } | { ok: false; error: string; pointerPath: string | null };
 
@@ -97,13 +115,58 @@ export interface ResolveOptions {
   log?: (msg: string) => void;
   /** Skip the "engine still running" probe (tests). */
   skipEngineProbe?: boolean;
+  /** Dev checkout root (tests); defaults to the checkout this file is in. */
+  checkoutRoot?: string;
+}
+
+/** Run ptr.pending (if any) under the transfer lock. Returns an error or null. */
+async function runPendingAtBoot(ptrFile: string, ptr: Pointer, appRoot: string, prof: string, opts: ResolveOptions, log: (m: string) => void): Promise<string | null> {
+  const op = ptr.pending;
+  if (!op) return null;
+  if (!opts.skipEngineProbe) {
+    const envFile = op.envSource ?? (ptr.root ? dataLayout(ptr.root).envPath : null);
+    const port = enginePort(envFile);
+    if (await portInUse(port)) return `Something is still listening on the engine port ${port}. Close every HOT-Step window, then restart.`;
+  }
+  try {
+    withLock(prof, () => runPending(ptrFile, ptr, appRoot, log));
+  } catch (e: any) {
+    return `Moving data to ${op.destination} stopped: ${e.message}. Nothing was overwritten; restart to try again.`;
+  }
+  return null;
+}
+
+/** Dev: no pointer (or one left with neither root nor work) keeps the
+ *  checkout paths. Nothing is migrated unless Settings scheduled it. */
+async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m: string) => void): Promise<Resolution> {
+  const checkout = path.resolve(opts.checkoutRoot ?? CHECKOUT_ROOT);
+  const prof = profileDir(env);
+  const ptrFile = devPointerFile(prof, checkout);
+  const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
+  try {
+    let ptr: Pointer | null;
+    try { ptr = readPointer(ptrFile); } catch (e: any) { return fail(`${e.message}. Fix or delete it, then restart.`); }
+    if (!ptr || (!ptr.root && !ptr.pending)) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
+    const err = await runPendingAtBoot(ptrFile, ptr, checkout, prof, opts, log);
+    if (err) return fail(err);
+    if (!ptr.root) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) }; // abandoned before any root
+    try { fs.accessSync(ptr.root, fs.constants.R_OK | fs.constants.W_OK); } catch {
+      return fail(`The data folder ${ptr.root} is missing or cannot be written. Reconnect the drive, or correct "root" in ${ptrFile} `
+        + `(or delete that file to go back to this checkout's own folders), then restart.`);
+    }
+    initLayout(dataLayout(ptr.root));
+    log(`[Data] Dev data folder: ${ptr.root}`);
+    return { ok: true, runtime: dev(checkout, prof, ptrFile, ptr.root) };
+  } catch (e: any) {
+    return fail(String(e?.message ?? e));
+  }
 }
 
 /** Pick the data root and run whatever transfer is pending. */
 export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolution> {
   const env = opts.env ?? process.env;
   const log = opts.log ?? (m => console.log(m));
-  if (!env.HOT_STEP_ROOT) return { ok: true, runtime: DEV };
+  if (!env.HOT_STEP_ROOT) return resolveDev(opts, env, log);
 
   const appRoot = path.resolve(env.HOT_STEP_ROOT);
   const prof = profileDir(env);
@@ -125,6 +188,9 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
     if (!ptr) {
       // First run of the new layout on this machine.
       const sibling = path.join(path.dirname(appRoot), DEFAULT_DATA_FOLDER);
+      if (otherPointerRoots(prof, ptrFile).some(r => isInside(r, sibling) || isInside(sibling, r))) {
+        return fail(`${sibling} is a development checkout's data folder. Set HOT_STEP_DATA_ROOT, or move that checkout's data elsewhere, then restart.`);
+      }
       const legacy = inspectLegacy(appRoot);
       const hasLegacy = legacyMappings(legacy, sibling).length > 0 || !!legacy.envFile;
       if (hasLegacy) {
@@ -147,19 +213,8 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
       }
     }
 
-    if (ptr.pending) {
-      const op = ptr.pending;
-      if (!opts.skipEngineProbe) {
-        const envFile = op.envSource ?? (ptr.root ? dataLayout(ptr.root).envPath : null);
-        const port = enginePort(envFile);
-        if (await portInUse(port)) return fail(`Something is still listening on the engine port ${port}. Close every HOT-Step window, then restart.`);
-      }
-      try {
-        withLock(prof, () => runPending(ptrFile, ptr!, appRoot, log));
-      } catch (e: any) {
-        return fail(`Moving data to ${op.destination} stopped: ${e.message}. Nothing was overwritten; restart to try again.`);
-      }
-    }
+    const err = await runPendingAtBoot(ptrFile, ptr, appRoot, prof, opts, log);
+    if (err) return fail(err);
 
     const root = ptr.root;
     if (!root) return fail(`${ptrFile} names no data folder.`);

@@ -8,11 +8,12 @@
 // (pending.mappings[].state) after every step, so a crash resumes. Existence
 // on both sides decides what a half-done rename means; nothing is overwritten.
 
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import {
-  dataLayout, initLayout, inspectLegacy, isDataLayout, isEmptyDir, isInside, legacyMappings, migrateEnvText, newPending,
+  dataLayout, initLayout, inspectDevLegacy, inspectLegacy, isDataLayout, isEmptyDir, isInside, legacyMappings, migrateEnvText, newPending,
   rewriteEnvText, rewritePath, samePath, writeJsonAtomic, writePointer,
   type Mapping, type OperationKind, type PathPair, type PendingOperation, type Pointer,
 } from './paths.js';
@@ -242,7 +243,7 @@ export function settleEnv(op: PendingOperation): void {
   if (op.envSource) {
     const src = fs.existsSync(op.envSource) ? op.envSource : `${op.envSource}.migrated`;
     if (!fs.existsSync(src)) throw new TransferError(`the old settings file ${op.envSource} is gone`);
-    text = migrateEnvText(fs.readFileSync(src, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.source);
+    text = migrateEnvText(fs.readFileSync(src, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.keepAppBinaries ? null : op.source);
     const backup = `${l.envPath}.before-${op.kind}-${op.id.slice(0, 8)}`;
     if (fs.existsSync(l.envPath) && !fs.existsSync(backup)) fs.renameSync(l.envPath, backup);
   } else if (fs.existsSync(l.envPath)) {
@@ -340,6 +341,17 @@ export interface PlanContext {
   currentRoot: string | null;
   /** Active DB path, which may be external (DATA_DIR override). */
   currentDb: string | null;
+  /** appRoot is a dev checkout: migrate reads its dev paths and leaves tracked files alone. */
+  dev?: boolean;
+}
+
+/** Git-tracked files under any of `dirs` in `checkout`. Throws when git cannot
+ *  answer, so a dev move never runs without the check. */
+export function trackedFiles(checkout: string, dirs: string[]): string[] {
+  const rels = dirs.map(d => path.relative(checkout, d)).filter(r => r && !r.startsWith('..') && !path.isAbsolute(r));
+  if (!rels.length) return [];
+  const out = execFileSync('git', ['ls-files', '-z', '--', ...rels], { cwd: checkout, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15000, windowsHide: true });
+  return out.split('\0').filter(Boolean);
 }
 
 /** Build a pending operation and the reasons it cannot run. Writes nothing.
@@ -368,8 +380,17 @@ export function planOperation(kind: OperationKind, target: string, ctx: PlanCont
     const root = kind === 'migrate' ? dest : ctx.currentRoot;
     if (!root) errors.push('there is no current data folder to import into');
     const into = root ?? dest;
-    const legacy = inspectLegacy(legacyRoot);
+    const legacy = kind === 'migrate' && ctx.dev ? inspectDevLegacy(legacyRoot) : inspectLegacy(legacyRoot);
     const mappings = legacyMappings(legacy, into);
+    if (legacy.dev) {
+      if (!isEmptyDir(dest)) errors.push(`${dest} is not empty`);
+      try {
+        const tracked = trackedFiles(legacy.appRoot, mappings.map(m => m.from));
+        if (tracked.length) errors.push(`refusing to move files git tracks in this checkout: ${tracked.slice(0, 5).join(', ')}${tracked.length > 5 ? ', ...' : ''}`);
+      } catch (e: any) {
+        errors.push(`could not ask git which files this checkout tracks: ${e.message}`);
+      }
+    }
     const library = dataLayout(into).library;
     if (kind === 'import') {
       if (samePath(legacyRoot, ctx.appRoot)) errors.push('that is this app folder');
@@ -383,7 +404,8 @@ export function planOperation(kind: OperationKind, target: string, ctx: PlanCont
     op = newPending(kind, legacyRoot, into, {
       mappings,
       envSource: legacy.envFile,
-      envBase: legacy.appRoot,
+      envBase: legacy.base,
+      keepAppBinaries: legacy.dev || undefined,
       dbPath: path.join(legacy.dataDir, 'hotstep.db'),
       copies: kind === 'import' ? importCopies(legacyRoot, ctx.appRoot, into) : [],
       setAside: kind === 'import' ? [library] : undefined,

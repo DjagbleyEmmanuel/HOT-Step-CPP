@@ -2151,7 +2151,7 @@
     "settings.dataFolder.loading": "Loading data folder...",
     "settings.dataFolder.current": "Current data folder",
     "settings.dataFolder.currentInfo": "Contains your library, models, adapters, settings and downloaded tools. Releases remember this location across app versions.",
-    "settings.dataFolder.dev": "Development checkout keeps its existing paths. Data-folder changes are available in the release app.",
+    "settings.dataFolder.dev": "This development checkout's own folders. Move them to a data folder, or use an existing one; nothing changes until you confirm.",
     "settings.dataFolder.override": "HOT_STEP_DATA_ROOT is set to {{path}}. Clear this process override before changing the saved location.",
     "settings.dataFolder.externals": "External locations",
     "settings.dataFolder.externalsInfo": "These paths are outside the managed data folder. Moving the folder leaves them in place.",

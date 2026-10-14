@@ -99,7 +99,7 @@ A repo-root `data/` folder is not the live data folder in either layout.
 A release keeps user data in one folder outside the app, so a new version unzipped
 elsewhere finds the same library. Code: `server/src/dataroot/` (`paths.ts` layout and
 pointer, `bootstrap.ts` start-up choice, `transfer.ts` moves and path rewrites,
-`pointer.ts` the Settings API). A checkout (no `HOT_STEP_ROOT`) never uses any of it.
+`pointer.ts` the Settings API). A checkout (no `HOT_STEP_ROOT`) uses it only once Settings has given it a data folder; see [Dev checkouts](#dev-checkouts).
 
 | Child | Holds |
 |---|---|
@@ -139,6 +139,31 @@ workflow jobs, model, MuScriptor and cover-art downloads, training and the GPU l
 long-running job type registers its own check. If the folder is
 missing, the pointer is unreadable or a move stops part way, the server prints the reason
 and serves one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
+
+### Dev checkouts
+
+A checkout keeps its own paths (`.env` at the root, `DATA_DIR` against `server/`, `models/`,
+`adapters/`, `logs/`, `tools/whisper/`) until someone confirms a change in the Settings
+data-folder panel. Nothing migrates on boot. The change is recorded in the checkout's own
+pointer, `data-location.dev-<hash>.json` in the same profile folder, where `<hash>` is the
+first 12 hex digits of the SHA-256 of the checkout path (lower-cased on Windows and macOS).
+The file also holds a `checkout` field naming that path. A release never reads it, and a
+checkout never reads `data-location.json`, so each install and each checkout has its own
+pointer. Settings refuses a target that any other pointer in the profile already uses, and
+a release's first run refuses a `HOT-Step-Data` sibling that a checkout already uses.
+
+**Move current data** from a checkout with no data folder moves those checkout paths with
+the same rename-or-copy rules as a release migration. Only folders inside the checkout
+move. The root `.env` becomes `settings/.env` (left behind as `.env.migrated`) with its
+engine binary paths kept, since the checkout is still the app. Planning asks git which
+files it tracks and refuses to move any of them, so `server/src/data` and other tracked
+files stay put. Once the checkout has a data folder, **Move**, **Use existing folder**,
+**Create empty data folder** and **Import previous install** work as in a release. Runtime
+DLLs stay beside the dev engine build, and restart still uses the checkout's
+`.restart-requested` marker and `server/restart-loop.cmd`, so it works when the root
+changes. A failed transfer serves its explanation page on `:3001`; the Vite UI on `:3000`
+shows only failed API calls, so read the server window. Deleting the dev pointer points the
+checkout back at its own folders; data that already moved stays in the data folder.
 
 ## Ports and hosts
 
@@ -280,7 +305,7 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 |---|---|---|---|
 | `HOT_STEP_ROOT` | unset | `config.ts` | Project root. Setting it turns on portable mode, which among other things downloads the CUDA runtime DLLs on a Windows CUDA build's first launch. Set by the portable launchers `release/HOT-Step.bat` and `release/HOT-Step.sh` |
 | `HOT_STEP_DATA_ROOT` | unset | `dataroot/bootstrap.ts` | Release only. Use this data folder for this process, ignoring `data-location.json`. A scheduled move does not run while it is set |
-| `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Release only. Replaces the profile folder that holds `data-location.json`. Meant for test fixtures |
+| `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Replaces the profile folder that holds `data-location.json` and the dev pointers. Meant for test fixtures |
 | `HOT_STEP_DEV` | unset | `routes/shutdown.ts` | Set by `dev.bat`. Lets `POST /api/shutdown` kill the Vite process on port 3000 after checking it is Node running Vite. Windows only |
 | `HOTSTEP_GENERATE_CAPTURE` | unset | `services/generation/requestCapture.ts` | Dev only, honoured only when `HOT_STEP_DEV` is set. `record` saves every `POST /api/generate` body as a fixture under `<data dir>/dev-captures/generate/`, then generates as normal; `capture-only` saves it and queues nothing. See [Generation API contracts](api-contracts.md#fixture-capture-dev-only) |
 | `PP_STEM_CACHE_GB` | `4` | `services/generation/stemCache.ts` | Disk budget for cached vocal and instrumental stems that the post-processing chain reuses when it runs again on the same audio. `0` disables the cache |

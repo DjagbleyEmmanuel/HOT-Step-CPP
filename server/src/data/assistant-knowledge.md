@@ -495,7 +495,11 @@ Open the Data folder panel in Settings, choose an action and enter an absolute p
 
 Click **Preview change** to see the folders, size and space required. Finish queued and active work and downloads, then click **Confirm and restart**. Transfers run before the library opens; the launch console shows progress. Same-volume moves rename folders. Across volumes, HOT-Step copies and checks file sizes before removing verified source folders. External path overrides remain outside the transfer.
 
-If restart fails, the change remains scheduled. Use **Restart to apply**, or **Cancel scheduled change** before transfer begins. A process `HOT_STEP_DATA_ROOT` override must be cleared before Settings can change the saved location. Development checkouts retain their existing paths and show this panel as read-only.
+If restart fails, the change remains scheduled. Use **Restart to apply**, or **Cancel scheduled change** before transfer begins. A process `HOT_STEP_DATA_ROOT` override must be cleared before Settings can change the saved location.
+
+## Development checkouts
+
+A development checkout started with `dev.bat` uses its own folders until you change them in this panel. Nothing moves at startup. **Move current data** carries the checkout's library, models, adapters, logs, Whisper and `.env` into the destination and leaves files tracked by git in place. The checkout's choice is saved in its own `data-location.dev-<hash>.json` in the profile folder below, separate from the release app's `data-location.json`. Settings will not let a checkout and a release share a data folder. Deleting that file points the checkout back at its own folders; data that already moved stays where it is.
 
 ## Recover a missing drive or interrupted transfer
 
