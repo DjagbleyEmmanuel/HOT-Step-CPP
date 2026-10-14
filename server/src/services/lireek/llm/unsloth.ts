@@ -10,19 +10,11 @@ export class UnslothProvider extends LLMProvider {
   name = 'Unsloth Studio';
   get defaultModel() { return config.lireek.unslothModel; }
 
-  // True when Studio is running on this machine. A local instance serves its
-  // /v1 endpoints without enforcing a real token — the login/JWT step only
-  // exists for remote installs — so a local one needs no credentials at all
-  // and we skip the /api/auth/login round-trip (see authenticate()).
-  private get isLocal(): boolean {
-    try {
-      const host = new URL(config.lireek.unslothBaseUrl)
-        .hostname.replace(/^\[|\]$/g, '').toLowerCase();
-      return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-    } catch {
-      return false;
-    }
-  }
+  // Studio's opt-in "keyless API access" setting (off by default) admits
+  // loopback callers to /v1 without a real credential — an absent, empty, or
+  // whitelisted dummy bearer (unsloth: studio/backend/utils/keyless_api_access.py).
+  // 'not-needed' is one of the approved dummies; verified locally with curl.
+  private static readonly KEYLESS_BEARER = 'not-needed';
 
   // The provider appends /v1/... (and /api/auth/login) to the base itself, so a
   // base pasted from an OpenAI-compat example — which already ends in /v1 — would
@@ -31,22 +23,28 @@ export class UnslothProvider extends LLMProvider {
   private get baseUrl(): string {
     return config.lireek.unslothBaseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '');
   }
-  
+
   private cachedToken = '';
   private tokenExpiry = 0;
 
-  isAvailable() {
-    // Local Studio needs no credentials (see isLocal), so it's always
-    // available; a remote one still requires both username and password.
-    if (this.isLocal) return true;
+  private hasCredentials(): boolean {
     return !!config.lireek.unslothUsername && !!config.lireek.unslothPassword;
   }
 
+  isAvailable() {
+    // Usable with both credentials set (local or remote), or when the user has
+    // opted into keyless local mode via UNSLOTH_KEYLESS. The default base URL is
+    // already loopback, so "points at localhost" must NOT count as "installed" —
+    // otherwise a fresh install would show the provider as available with
+    // nothing configured.
+    return this.hasCredentials() || config.lireek.unslothKeyless;
+  }
+
   private async authenticate(): Promise<string> {
-    // Local Studio accepts any Bearer token on its /v1 endpoints (it only
-    // enforces a real JWT on the login route), so skip authentication and use
-    // a static placeholder — no username/password required.
-    if (this.isLocal) return 'not-needed';
+    // Keyless local mode: no credentials to log in with — Studio's keyless API
+    // access admits the approved dummy bearer instead (see KEYLESS_BEARER).
+    // Real credentials win when both are present.
+    if (config.lireek.unslothKeyless && !this.hasCredentials()) return UnslothProvider.KEYLESS_BEARER;
 
     const now = Date.now() / 1000;
     if (this.cachedToken && now < this.tokenExpiry - 60) return this.cachedToken;
@@ -57,7 +55,7 @@ export class UnslothProvider extends LLMProvider {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    
+
     // Unsloth also sometimes takes username instead of email, trying generic handling if this fails
     if (!resp.ok) {
         const payload2 = { username: config.lireek.unslothUsername, password: config.lireek.unslothPassword };
@@ -85,6 +83,7 @@ export class UnslothProvider extends LLMProvider {
   }
 
   private async getLocalModels(): Promise<string[]> {
+    if (!this.isAvailable()) return []; // no credentials configured — don't probe
     try {
       const token = await this.authenticate();
       const resp = await fetch(`${this.baseUrl}/v1/models`, {
