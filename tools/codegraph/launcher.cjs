@@ -69,13 +69,17 @@ function synced(freshness) {
   }
 }
 
+// The marker only skips the next sync. A sandbox that cannot replace it
+// (EPERM on a file another sandbox identity created) still gets a fresh index.
 function markSynced(freshness) {
   const temp = `${marker}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify({ version: 1, fingerprint: freshness }) + '\n');
   try {
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, fingerprint: freshness }) + '\n');
     fs.renameSync(temp, marker);
+  } catch (error) {
+    process.stderr.write(`cg: could not save sync marker, next query will sync again (${error.code || error.message})\n`);
   } finally {
-    if (fs.existsSync(temp)) fs.unlinkSync(temp);
+    try { fs.unlinkSync(temp); } catch {}
   }
 }
 
