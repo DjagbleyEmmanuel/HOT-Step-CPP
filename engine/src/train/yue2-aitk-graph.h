@@ -178,7 +178,8 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     // Only the branch output is BF16-rounded.
     ggml_tensor * ax = mm(ctx, adapter->a, round(ctx, x));
     ggml_tensor * delta = mm(ctx, adapter->b, ax);
-    delta = round(ctx, ggml_scale(ctx, delta, adapter->scale));
+    // x * 1.0f is exact: alpha == rank skips the scale pass and its backward.
+    delta = round(ctx, adapter->scale == 1.0f ? delta : ggml_scale(ctx, delta, adapter->scale));
     return round(ctx, ggml_add(ctx, base, delta));
 }
 inline ggml_tensor * slice_rows(ggml_context * ctx, ggml_tensor * x, int64_t first, int64_t width) {
@@ -219,7 +220,8 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
                                  const Yue2AitkLayerAdapters * adapters, ggml_tensor * h,
                                  ggml_tensor * cosine, ggml_tensor * sine, ggml_tensor * mask,
                                  ggml_tensor * prefix_k_canvas = nullptr,
-                                 ggml_tensor * prefix_v_canvas = nullptr, int64_t prefix_length = 0) {
+                                 ggml_tensor * prefix_v_canvas = nullptr, int64_t prefix_length = 0,
+                                 int64_t causal_hint = -1) {
     const int64_t S = h->ne[1], D = c.head_dim, Q = D*c.heads, KV = D*c.kv_heads;
     GGML_ASSERT(c.hidden == Q && h->ne[0] == c.hidden && prefix_length >= 0);
     GGML_ASSERT((prefix_k_canvas == nullptr) == (prefix_v_canvas == nullptr));
@@ -280,6 +282,11 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     ggml_tensor * attn_v = bf16_attention ? ggml_cast(ctx, v, GGML_TYPE_BF16) : v;
     ggml_tensor * packed = ggml_flash_attn_train(ctx, attn_q, attn_k, attn_v, mask, 1.0f);
     ggml_flash_attn_train_set_prec(packed, bf16_attention ? GGML_PREC_BF16 : c.attention_precision);
+    // The mask is exactly "key j visible iff j <= causal_hint + row" (the
+    // executor's make_mask), so CUDA skips reading it; the prefix rows' dK/dV
+    // go into the detached canvas, whose SET backward never reads them.
+    if (causal_hint >= 0) ggml_flash_attn_train_set_causal(packed, int32_t(causal_hint));
+    if (prefix_k_canvas && prefix_length > 0) ggml_flash_attn_train_set_kv_grad_start(packed, int32_t(prefix_length));
     attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
     }
 #endif
