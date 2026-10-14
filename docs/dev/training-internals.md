@@ -55,6 +55,16 @@ transfer, clip, optimizer, head loss). A phase that ends in a blocking read incl
 wait for the GPU. LmOptim logs once per run where its scheduler placed each optimizer
 graph (`[lm-optim] ... graph placement: CUDA0=N`, plus any ops that fell back to the CPU).
 
+The AR head's CE + KL stays on the device by default (`Yue2AitkArHeadRows` in
+`yue2-aitk-endpoints.h`, device mode of `yue2-aitk-head-loss.h`): the final-norm graph is
+built once per expert pass, prediction rows are gathered with `get_rows`, each head chunk's
+F32 gradient lands in a device tensor, and a scatter graph applies the BF16 rounding, the
+`--ar-loss-weight` scale and `set_rows` into the norm's dy. Only the norm's dx comes back
+to the host. Setting `YUE2_AITK_HEAD_HOST` (any value) restores the previous host
+round-trip bit for bit; the cursor loss reads host rows, so `--cursor-weight` above 0 takes
+the host path too. `yue2-head-loss-device-test` checks the two modes against each other on
+the CPU backend.
+
 `--device` takes any ggml device (`CUDA0`, `Vulkan0`, `MTL0`, `CPU`). Off CUDA the
 same trainer runs from ggml ops: `--optimizer adamw` (the CUDA 8-bit kernel) maps
 to LmOptim's AdamW, the head's CE + KL gradient is built from `soft_max`/`log`/
