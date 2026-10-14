@@ -316,19 +316,32 @@ private:
     // squaring, which bounds the square to <=1 regardless of how large or
     // small the raw gradient was -- no fixed constant, no overflow, for
     // the entire finite F32 range.
+    //
+    // S2e-1: level 1's own pool1d call still had every one of its `blocks`
+    // threads serially scanning the full kAbsMaxBlock=4096-wide window
+    // (ggml-cuda/pool1d.cu loops `b..e` on one thread per output element,
+    // independent of nr) -- 97ms/step of GPU time by itself. Splitting that
+    // one 4096-wide pool into two cascaded kAbsMaxSubBlock=64-wide pools
+    // (64*64==4096) turns one thread's 4096-iteration loop into two
+    // 64-iteration loops spread over 64x more threads; max(max(...)) over a
+    // partition is still the true max, so this is bit-identical, just more
+    // parallel. No ggml-cuda edit needed.
     static constexpr int64_t kAbsMaxBlock = 4096;
+    static constexpr int64_t kAbsMaxSubBlock = 64;
+    static_assert(kAbsMaxSubBlock * kAbsMaxSubBlock == kAbsMaxBlock, "two cascaded sub-block pools must cover one kAbsMaxBlock exactly");
     bool clip_gradients_device(float max_norm, double * norm, std::string * error, float pre_scale) {
         const size_t n = slots_.size();
         if (n == 0) return fail(error, "no gradient slots to clip");
-        const size_t graph_size = 24*n + 128;
+        const size_t graph_size = 28*n + 128;
         ggml_init_params params{};
         // Per slot: reshape, optional pre_scale, abs, optional pad,
-        // reshape-2d, pool1d, reshape-1d (max pass) then reshape, optional
-        // pre_scale, div, sqr, sum, running add (sum pass), plus the apply
-        // pass's mul+cpy, plus one concat into the running partial-max
-        // chain -- a dozen-plus tensors per slot; padded well past that
-        // since the pool is cheap and a miscount here is a hard abort.
-        params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(24*n+128) + 32768;
+        // two cascaded reshape-2d+pool1d pairs (S2e-1) then reshape (max
+        // pass) then reshape, optional pre_scale, div, sqr, sum, running
+        // add (sum pass), plus the apply pass's mul+cpy, plus one concat
+        // into the running partial-max chain -- under 20 tensors per slot;
+        // padded well past that since the pool is cheap and a miscount
+        // here is a hard abort.
+        params.mem_size = ggml_graph_overhead_custom(graph_size, false) + ggml_tensor_overhead()*(28*n+128) + 32768;
         params.no_alloc = true;
         ggml_context * ctx = ggml_init(params);
         if (!ctx) return fail(error, "failed to create clip context");
@@ -348,9 +361,15 @@ private:
             const int64_t blocks = (ne + kAbsMaxBlock - 1) / kAbsMaxBlock;
             const int64_t padded_ne = blocks * kAbsMaxBlock;
             ggml_tensor * padded = padded_ne != ne ? ggml_pad(ctx, abs_t, int(padded_ne - ne), 0, 0, 0) : abs_t;
-            ggml_tensor * grid = ggml_reshape_2d(ctx, padded, kAbsMaxBlock, blocks);
-            ggml_tensor * level1 = ggml_pool_1d(ctx, grid, GGML_OP_POOL_MAX, int(kAbsMaxBlock), int(kAbsMaxBlock), 0);
-            ggml_tensor * level1_flat = ggml_reshape_1d(ctx, level1, blocks);
+            // Two cascaded 64-wide pools instead of one 4096-wide pool (see
+            // comment above): sub-level a reduces every 64 raw elements in
+            // parallel, sub-level b reduces every 64 of those partials down
+            // to one max per kAbsMaxBlock-sized block.
+            ggml_tensor * grid_a = ggml_reshape_2d(ctx, padded, kAbsMaxSubBlock, (padded_ne / kAbsMaxSubBlock));
+            ggml_tensor * level_a = ggml_pool_1d(ctx, grid_a, GGML_OP_POOL_MAX, int(kAbsMaxSubBlock), int(kAbsMaxSubBlock), 0);
+            ggml_tensor * grid_b = ggml_reshape_2d(ctx, level_a, kAbsMaxSubBlock, blocks);
+            ggml_tensor * level_b = ggml_pool_1d(ctx, grid_b, GGML_OP_POOL_MAX, int(kAbsMaxSubBlock), int(kAbsMaxSubBlock), 0);
+            ggml_tensor * level1_flat = ggml_reshape_1d(ctx, level_b, blocks);
             partials = partials ? ggml_concat(ctx, partials, level1_flat, 0) : level1_flat;
         }
         ggml_tensor * global_max = ggml_pool_1d(ctx, partials, GGML_OP_POOL_MAX, int(partials->ne[0]), int(partials->ne[0]), 0);
