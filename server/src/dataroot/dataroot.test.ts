@@ -378,7 +378,8 @@ test('an unreachable source stops the move; a finished rename with no source lef
   assert.equal(kept.root, oldRoot);
   assert.ok(kept.pending && kept.pending.mappings[0].state === 'pending');
 
-  // The rename already happened and removed the emptied source: that is landed data.
+  // A journaled rename that finished and removed the emptied source: that is landed data.
+  kept.pending!.mappings[0].method = 'rename';
   fs.mkdirSync(newRoot, { recursive: true });
   fs.renameSync(path.join(oldRoot + '-unplugged', 'library'), path.join(newRoot, 'library'));
   runPending(f.ptrFile, kept, f.app, quiet);
@@ -454,4 +455,31 @@ test('migration that stops on a DB collision resumes once the collision is fixed
   const conn = new Database(path.join(lib, 'hotstep.db'), { readonly: true });
   assert.equal((conn.prepare('SELECT source_dir FROM training_datasets').get() as any).source_dir, path.join(lib, 'training', 'x'));
   conn.close();
+});
+
+test('a copy cut short whose source then goes missing keeps pending and stops', () => {
+  const f = fixture();
+  const oldRoot = path.join(f.base, 'old-root');
+  const newRoot = path.join(f.base, 'new-root');
+  write(path.join(oldRoot, 'library', 'a.wav'), 'a');
+  write(path.join(oldRoot, 'library', 'b.wav'), 'b');
+  const { op } = planOperation('move', newRoot, { appRoot: f.app, currentRoot: oldRoot, currentDb: null });
+  const ptr = { version: 1 as const, root: oldRoot, pending: op };
+  writePointer(f.ptrFile, ptr);
+  // a.wav lands, b.wav hits an obstacle.
+  fs.mkdirSync(path.join(newRoot, 'library', 'b.wav'), { recursive: true });
+  const real = hooks.sameVolume;
+  hooks.sameVolume = () => false;
+  try {
+    assert.throws(() => runPending(f.ptrFile, ptr, f.app, quiet));
+    assert.ok(fs.existsSync(path.join(newRoot, 'library', 'a.wav')));
+    assert.equal(readPointer(f.ptrFile)!.pending!.mappings[0].method, 'copy', 'method journaled');
+    fs.renameSync(oldRoot, oldRoot + '-unplugged');
+    const again = readPointer(f.ptrFile)!;
+    assert.throws(() => runPending(f.ptrFile, again, f.app, quiet), /not known to be complete/);
+  } finally { hooks.sameVolume = real; }
+  const kept = readPointer(f.ptrFile)!;
+  assert.equal(kept.root, oldRoot);
+  assert.equal(kept.pending!.mappings[0].state, 'pending');
+  assert.ok(fs.existsSync(path.join(oldRoot + '-unplugged', 'library', 'b.wav')));
 });

@@ -507,14 +507,20 @@ export function runPending(ptrFile: string, ptr: Pointer, appRoot: string, log: 
     for (const m of op.mappings) {
       if (m.state !== 'pending') continue;
       if (!fs.existsSync(m.from)) {
-        // Only a rename that finished (and removed the emptied source) may
-        // leave no source; an unplugged drive must not activate an empty copy.
-        if (isEmptyDir(m.to)) throw new TransferError(`${m.name}: ${m.from} is not reachable and nothing has arrived at ${m.to}`);
+        // A finished rename removes its emptied source. Anything else with the
+        // source gone (an unplugged drive, a copy cut short) must stop here.
+        if (m.method !== 'rename' || isEmptyDir(m.to)) {
+          throw new TransferError(`${m.name}: ${m.from} is not reachable and the transfer into ${m.to} is not known to be complete`);
+        }
         m.state = 'moved';
         persist(ptrFile, ptr);
         continue;
       }
-      if (hooks.sameVolume(m.from, m.to)) { moveByRename(m, log); m.state = 'moved'; }
+      if (!m.method) {
+        m.method = hooks.sameVolume(m.from, m.to) ? 'rename' : 'copy';
+        persist(ptrFile, ptr);
+      }
+      if (m.method === 'rename') { moveByRename(m, log); m.state = 'moved'; }
       else { copyMapping(m, log); m.state = 'copied'; }
       persist(ptrFile, ptr);
     }

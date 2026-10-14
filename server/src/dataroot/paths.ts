@@ -158,6 +158,10 @@ export interface Mapping {
   /** Top-level names in `from` that stay behind (bundled resources). */
   exclude?: string[];
   state: MappingState;
+  /** Journaled before the first file is touched. Only a rename removes its
+   *  source (once every entry has moved), so only a rename may finish with
+   *  the source gone. */
+  method?: 'rename' | 'copy';
 }
 
 export interface PendingOperation {
