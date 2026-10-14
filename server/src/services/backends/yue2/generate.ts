@@ -112,6 +112,8 @@ const YUE2_COALESCE_WAIT_MS = 750;
 
 export interface Yue2ParamMapping {
   req: Yue2SynthRequest;
+  /** Score supplied before app planning can add ABC to the request. */
+  abcSupplied: boolean;
   notes: string[];
   /** What the user typed, before the adapter's style template wrapped it.
    *  req.style is the prompt the MODEL needs; this is the one a human wrote,
@@ -526,7 +528,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     ...(seed >= 0 ? { seed } : {}),
   };
 
-  return { req, notes, caption, halves: styled.halves };
+  return { req, abcSupplied: !!abc, notes, caption, halves: styled.halves };
 }
 
 /** First non-empty line of the caption, for StableStep's own SA3 prompt —
@@ -590,6 +592,7 @@ type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason:
 interface Yue2PreparedJob {
   job: GenerationJob;
   req: Yue2SynthRequest;
+  abcSupplied: boolean;
   caption: string;
   halves: Yue2StyleHalves;
   autoReplan?: Yue2AutoReplan;
@@ -626,7 +629,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   // submit, never from job.params (the raw request body) — index.ts's
   // resolveRequest already validated it there.
   const captured = jobCover(job);
-  const { req, notes, caption, halves } = mapYue2Params(yue2JobParams(job), jobPick(job));
+  const { req, abcSupplied, notes, caption, halves } = mapYue2Params(yue2JobParams(job), jobPick(job));
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
@@ -664,7 +667,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
     throw new Error('YuE2 needs a caption — the Style Description field is empty');
   }
 
-  return { job, req, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover };
+  return { job, req, abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover };
 }
 
 // ── Auto-replan ──
@@ -1427,7 +1430,7 @@ async function finishYue2Job(
           end_reason: td.end_reason ?? finalDetail.end_reason,
           stage_end_reasons: td.stage_end_reasons ?? finalDetail.stage_end_reasons,
           duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
-          abc_supplied: !!req.abc,
+          abc_supplied: p.abcSupplied,
           ...(parts.length > 1 ? { song: td.song, variation: td.variation, noise_seed: td.noise_seed } : {}),
           ...(scoreHealth ? { score_health: scoreHealth } : {}),
           ...(autoReplan ? { auto_replan: autoReplan } : {}),

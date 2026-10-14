@@ -97,6 +97,27 @@ const pick: Yue2PersistedSelection = {
 const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse', 'V: Vocal', 'C4|', ''].join('\n');
 const lyrics = '[Verse]\nfirst line';
 
+test('score provenance survives app planning, engine fallback and instrumental planning', () => {
+  for (const instrumental of [false, true]) {
+    for (const yue2AutoReplan of [false, true]) {
+      const mapped = mapYue2Params({ caption: 'folk', lyrics, instrumental, yue2AutoReplan }, pick);
+      assert.equal(mapped.abcSupplied, false, 'no user score, including engine fallback');
+      // planYue2Jobs installs the chosen LM score into the mutable request.
+      mapped.req.abc = abc;
+      assert.equal(mapped.abcSupplied, false, 'an app-planned score is still LM-planned');
+    }
+  }
+});
+
+test('score provenance counts only supplied scores the request actually uses', () => {
+  for (const yue2Abc of [undefined, '', '   ', abc]) {
+    for (const yue2Cot of ['full', 'off']) {
+      const mapped = mapYue2Params({ caption: 'folk', lyrics, yue2Abc, yue2Cot }, pick);
+      assert.equal(mapped.abcSupplied, yue2Abc === abc && yue2Cot !== 'off');
+    }
+  }
+});
+
 test('yue2LyricSchedule defaults to off when a score and lyrics are supplied', () => {
   const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc }, pick);
   assert.equal(req.lyric_schedule, undefined);
