@@ -1,0 +1,41 @@
+export type DataFolderOperation = 'move' | 'repoint' | 'create' | 'import';
+export interface DataFolderPending {
+  kind: DataFolderOperation | 'migrate';
+  source: string | null;
+  destination: string;
+}
+export interface DataFolderLocation {
+  mode: 'dev' | 'release';
+  appRoot: string | null;
+  dataRoot: string | null;
+  override: string | null;
+  pending: DataFolderPending | null;
+  externals: Array<{ key: string; path: string }>;
+  blockers: string[];
+}
+export interface DataFolderPreview {
+  ok: boolean;
+  errors: string[];
+  kind: DataFolderOperation;
+  target: string;
+  mappings: Array<{ name: string; from: string; to: string }>;
+  bytes: number;
+  crossVolume: boolean;
+  needBytes: number;
+  freeBytes: number | null;
+  blockers: string[];
+}
+async function request<T>(suffix = '', body?: unknown): Promise<T> {
+  const response = await fetch(`/api/settings/data-folder${suffix}`, body === undefined ? undefined : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `API error: ${response.status}`);
+  return data as T;
+}
+export const dataFolderApi = {
+  location: () => request<DataFolderLocation>(),
+  preview: (kind: DataFolderOperation, target: string) => request<DataFolderPreview>('/preview', { kind, target }),
+  schedule: (kind: DataFolderOperation, target: string) => request<{ pending: DataFolderPending; restartRequested: boolean }>('/schedule', { kind, target }),
+  cancel: () => request<{ cancelled: boolean }>('/cancel', {}),
+};

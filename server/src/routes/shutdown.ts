@@ -11,7 +11,10 @@ import { Router } from 'express';
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { PROJECT_ROOT, PORTABLE_MODE } from '../config.js';
+import { RESTART_MARKER_PATH, PORTABLE_MODE } from '../config.js';
+import { closeDb } from '../db/database.js';
+import { getDataLocation, getBusyBlockers } from '../dataroot/pointer.js';
+import { closeLogger } from '../services/logger.js';
 import { killActiveChildren } from '../services/training/labelingQueue.js';
 import { stopAceServer } from '../services/aceEngineProcess.js';
 import type { ShutdownResponse, RestartResponse } from '../contracts/shutdown.js';
@@ -126,10 +129,16 @@ function killSelf(): void {
 }
 
 async function stopEverything(restart: boolean): Promise<void> {
+  // Resolve the queue at shutdown: its generation/backend imports form a cycle
+  // with the worker updater, which imports this restart helper.
+  const { audioIntentQueue } = await import('./audioQueue.js');
+  audioIntentQueue().stop();
   killTrainingChildren();
   // Through the owning module so the exit handler knows this was deliberate —
   // the old port-based taskkill made it log "crash 1/3, restarting in 3 s".
   await stopAceServer(restart ? 'Server restarting' : 'Server shutting down', 15_000, { suspend: false });
+  closeDb();
+  closeLogger();
   if (!restart) killVite();
   // Portable restart: HOT-Step.bat runs node directly, so our parent IS the
   // restart loop — exiting is enough there. Every other case needs the tree kill.
@@ -142,7 +151,8 @@ async function stopEverything(restart: boolean): Promise<void> {
 
 /** Used by a completed worker bundle update after its builds have finished. */
 export function requestWorkerRestart(): void {
-  fs.writeFileSync(path.join(PROJECT_ROOT, '.restart-requested'), new Date().toISOString(), 'utf8');
+  fs.mkdirSync(path.dirname(RESTART_MARKER_PATH), { recursive: true });
+  fs.writeFileSync(RESTART_MARKER_PATH, new Date().toISOString(), 'utf8');
   setTimeout(() => void stopEverything(true), 300);
 }
 
@@ -157,6 +167,13 @@ router.post('/', (_req, res) => {
 router.post('/restart', (_req, res) => {
   console.log('[Server] Restart requested via API');
   try {
+    if (getDataLocation().pending) {
+      const blockers = getBusyBlockers();
+      if (blockers.length) {
+        res.status(409).json({ error: `Wait for running work to finish: ${blockers.join('; ')}`, blockers });
+        return;
+      }
+    }
     requestWorkerRestart();
     console.log('[Server] Wrote restart marker');
     res.json({ success: true, message: 'Restarting...' } satisfies RestartResponse);

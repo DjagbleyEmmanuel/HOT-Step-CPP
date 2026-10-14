@@ -14,6 +14,7 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { getStemStats, deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
+import { DataFolderPanel } from './DataFolderPanel';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -950,6 +951,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* ═══════════════ STORAGE & DATA TAB ═══════════════ */}
       {activeTab === 'storage' && (
       <>
+      <DataFolderPanel />
       {/* Stem Storage Section */}
       <div className="settings-section">
         <div className="settings-section-header">

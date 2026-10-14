@@ -16,8 +16,30 @@ import {
 } from '../config.js';
 import { listGpus } from '../services/gpuDevices.js';
 import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../contracts/settings.js';
+import { getDataLocation, getBusyBlockers, previewOperation, scheduleOperation, cancelPending, registerBusyCheck } from '../dataroot/pointer.js';
+import { listJobs } from '../services/training/labelingQueue.js';
+import { gpuLaneBusy, gpuLaneDepth } from '../services/generation/gpuLane.js';
+import { createDataFolderHandlers } from './settingsDataFolder.js';
+import { requestWorkerRestart } from './shutdown.js';
 
 const router = Router();
+
+registerBusyCheck('training', () => listJobs().filter(j => j.status === 'queued' || j.status === 'running')
+  .map(j => `Training ${j.id}: ${j.status}`));
+registerBusyCheck('gpu-lane', () => gpuLaneBusy() || gpuLaneDepth() > 0 ? ['GPU work is running or queued'] : []);
+
+const dataFolder = createDataFolderHandlers({
+  location: getDataLocation,
+  blockers: getBusyBlockers,
+  preview: (kind, target) => previewOperation(kind, target, config.data.dbPath),
+  schedule: (kind, target) => scheduleOperation(kind, target, config.data.dbPath),
+  cancel: cancelPending,
+  restart: requestWorkerRestart,
+});
+router.get('/data-folder', dataFolder.location);
+router.post('/data-folder/preview', dataFolder.preview);
+router.post('/data-folder/schedule', dataFolder.schedule);
+router.post('/data-folder/cancel', dataFolder.cancel);
 
 /** Set of exposed keys for fast lookup */
 const exposedSet = new Set<string>(EXPOSED_ENV_KEYS);

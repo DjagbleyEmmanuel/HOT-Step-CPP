@@ -353,7 +353,7 @@ Browse, download and remove every model file in the app. Details: [Model Manager
 
 ## Settings
 
-Configuration for engine, server, providers, downloads and storage. Details: [Settings](docs/user/studios/settings.md)
+Configuration for engine, server, providers, downloads and storage, with release data-folder move, repoint, empty-library and previous-install import actions. Details: [Settings](docs/user/studios/settings.md)
 
 | Feature | What it does |
 |---|---|
