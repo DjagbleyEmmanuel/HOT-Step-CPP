@@ -24,6 +24,7 @@ submodule at configure time.
 | bf16-mul-mat-grad | a BF16 `MUL_MAT` weight operand may carry a gradient | 18 |
 | zz-yue2-convrot8 | `CONVROT8` / `_BACK`, CUDA int8 rotated-linear training op | 15 |
 | zzz-yue2-bf16-round | `BF16_ROUND` unary op (CPU + CUDA) | 16 |
+| cuda-bf16-round-fuse | CUDA runs an F32 `ADD`/`SUB`/`MUL` and its single-consumer `BF16_ROUND` as one launch; `GGML_CUDA_NO_BF16_ROUND_FUSION=1` turns it off | — |
 | zzzz-vulkan-train-ops | Vulkan `BF16_ROUND` and fused training attention | 14 |
 | ggml-rpc patch-level check | refuse an RPC server that lacks the fork's ops | — |
 
