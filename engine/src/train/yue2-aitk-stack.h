@@ -50,10 +50,14 @@ struct Yue2AitkStackTape {
     ggml_tensor * device_grad[2] = {nullptr, nullptr};
     bool device_tape = false;
     bool device_saved = false;
+    // Set before forward: the final hidden stays on the device as device_final
+    // (final_hidden stays empty) for a device consumer such as the AR head rows.
+    bool keep_device_final = false;
+    const ggml_tensor * device_final = nullptr;
     void clear_device() {
         if (device_buffer) ggml_backend_buffer_free(device_buffer);
         if (device_ctx) ggml_free(device_ctx);
-        device_buffer = nullptr; device_ctx = nullptr; device_layers.clear();
+        device_buffer = nullptr; device_ctx = nullptr; device_layers.clear(); device_final = nullptr;
         device_grad[0] = device_grad[1] = nullptr; device_tape = false; device_saved = false;
     }
     ~Yue2AitkStackTape() {
@@ -63,6 +67,16 @@ struct Yue2AitkStackTape {
 
 namespace yue2_aitk_stack {
 inline bool fast_execution() { return std::getenv("YUE2_AITK_BASELINE") == nullptr; }
+// Device-only blocks launch without waiting, so the host builds block N+1
+// while the GPU runs block N; each stack call synchronizes once at its end.
+// A host prefix canvas (uploaded and freed per layer) keeps the blocking path.
+inline bool async_blocks(const Yue2AitkPrefixHost * prefix) {
+    static const bool sync = std::getenv("YUE2_AITK_SYNC_BLOCKS") != nullptr;
+    return !sync && (!prefix || prefix->device);
+}
+// Declared after a stack call's workspace: any return, an error one included,
+// waits for launched blocks before the workspace and tapes free their buffers.
+struct SyncOnExit { ggml_backend_t backend; ~SyncOnExit() { if (backend) ggml_backend_synchronize(backend); } };
 inline std::vector<float> widen(const std::vector<uint16_t> & source) {
     std::vector<float> result(source.size());
     for (size_t i=0; i<source.size(); ++i) {
@@ -147,7 +161,8 @@ inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig
 // the tables. At most 8 shapes stay resident, oldest out first, under a soft
 // 256 MiB cap (a single larger shape is still admitted, alone),
 // and a failed upload frees the cache and retries (yue2-aitk-shape-cache.h);
-// block compute is synchronous, so an evicted entry is no longer being read.
+// every stack call synchronizes before it returns, so an evicted entry is no
+// longer being read.
 struct SharedConstants {
     size_t bytes = 0;
     ggml_backend_t backend = nullptr;
@@ -237,6 +252,7 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
         }
     }
     Yue2AitkBlockWorkspace workspace;
+    SyncOnExit sync_on_exit{backend};
     const bool fast = fast_execution();
     const Yue2AitkMaskMode mask_mode = nar ? Yue2AitkMaskMode::noncausal : Yue2AitkMaskMode::causal;
     SharedConstants * shared = fast ? shared_constants(backend, c, length, prefix ? prefix->length : 0, mask_mode, error) : nullptr;
@@ -266,13 +282,16 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
                 prefix?prefix->length:0,error,!fast || (capture_prefix != nullptr && !device_capture),
                 constants,fast?&workspace:nullptr,device_in,device_out,
                 device_capture ? capture_prefix->device->k[layer] : nullptr,
-                device_capture ? capture_prefix->device->v[layer] : nullptr)) return false;
+                device_capture ? capture_prefix->device->v[layer] : nullptr,
+                device && async_blocks(prefix))) return false;
         if (!device) hidden=std::move(out.hidden);
         if (capture_prefix && !device_capture) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
     }
     if (device) {
         YUE2_PROF("stack: final hidden readback");
+        ggml_backend_synchronize(backend);
         const ggml_tensor * final_tensor = tape->device_layers[save_tape ? expert.layers.size() : (expert.layers.size() & 1)];
+        if (tape->keep_device_final) { tape->device_final = final_tensor; return true; }
         tape->final_hidden.resize(static_cast<size_t>(c.hidden * length));
         ggml_backend_tensor_get(final_tensor, tape->final_hidden.data(), 0, ggml_nbytes(final_tensor));
         if (!save_tape) tape->clear_device();
@@ -298,8 +317,10 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
     if (!store || ((!device && tape.layer_inputs.size()!=expert.layers.size()) ||
         (device && (!tape.device_saved || tape.device_layers.size()!=expert.layers.size()+1))) ||
         adapters.layers.size()!=expert.layers.size() ||
-        gradient.size()!=size_t(tape.length*c.hidden)) return fail(error,"invalid expert backward tape");
+        (gradient.size()!=size_t(tape.length*c.hidden) && !(device && gradient.empty())))
+        return fail(error,"invalid expert backward tape");
     Yue2AitkBlockWorkspace workspace;
+    SyncOnExit sync_on_exit{backend};
     const Yue2AitkMaskMode mask_mode = tape.nar ? Yue2AitkMaskMode::noncausal : Yue2AitkMaskMode::causal;
     SharedConstants * shared = fast ? shared_constants(backend, c, tape.length, prefix ? prefix->length : 0, mask_mode, error) : nullptr;
     if (fast && !shared) return false;
@@ -309,7 +330,8 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
     const std::vector<float> & sine = shared ? shared->sine : local_sine;
     Yue2AitkBlockConstants * constants = shared ? &shared->constants : nullptr;
     if (device) {
-        ggml_backend_tensor_set(tape.device_grad[0], gradient.data(), 0, ggml_nbytes(tape.device_grad[0]));
+        // Empty: the caller already wrote the top gradient into device_grad[0].
+        if (!gradient.empty()) ggml_backend_tensor_set(tape.device_grad[0], gradient.data(), 0, ggml_nbytes(tape.device_grad[0]));
         int ping = 0;
         for (size_t end=expert.layers.size(); end>0; --end) {
             const size_t layer = end - 1;
@@ -326,10 +348,11 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
                     tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
                     prefix?prefix->length:0,error,constants,fast?&workspace:nullptr,
                     tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next],
-                    slots,accumulate)) return false;
+                    slots,accumulate,async_blocks(prefix))) return false;
             if (!slots) { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
             ping = next;
         }
+        ggml_backend_synchronize(backend);
         return true;
     }
     for (size_t end=expert.layers.size();end>0;--end) {

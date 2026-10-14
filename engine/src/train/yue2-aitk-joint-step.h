@@ -91,11 +91,19 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     const bool reuse_prefix=!planner_frozen && batch.nar.ar.input_ids==batch.ar.input_ids;
     Yue2AitkPrefixHost prefix;
     prefix.device_count=static_cast<int64_t>(frames)+2;  // capture the NAR's conditioning on the device
+    // Stage outputs stay on the device: the AR head and the NAR final take the
+    // stack's final hidden and hand dx back as device tensors
+    // (YUE2_AITK_HANDOFF_HOST=1: through host vectors, as before).
+    static const bool handoff_host=std::getenv("YUE2_AITK_HANDOFF_HOST")!=nullptr;
     if(!planner_frozen) {
     notify("AR adapted forward");
     Yue2AitkEndpointHost embeds;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),batch.ar.input_ids.size(),&embeds,error)) return false;
+    static const bool head_host=std::getenv("YUE2_AITK_HEAD_HOST")!=nullptr;
+    const bool device_head=!head_host && !(input.cursor_weight>0 && !input.cursor_frames.empty());
+    const bool device_handoff=device_head && !handoff_host;
     Yue2AitkStackTape ar;
+    ar.keep_device_final=device_handoff;
     if(!yue2_aitk_stack::forward(backend,model,&state.ar_adapters(),false,embeds.values,
         batch.ar.input_ids.size(),nullptr,true,&ar,reuse_prefix?&prefix:nullptr,error)) return false;
     // The frozen teacher exists for the KL term. With no KL weight and nothing
@@ -110,18 +118,21 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     // Device head: final norm, row gather, head loss and the norm's dy stay on
     // the device. The cursor loss reads and writes host rows, so it keeps the
     // host path, as does YUE2_AITK_HEAD_HOST=1 (bit-identical rollback).
-    static const bool head_host=std::getenv("YUE2_AITK_HEAD_HOST")!=nullptr;
     std::vector<float> ar_dx;
-    if(!head_host && !(input.cursor_weight>0 && !input.cursor_frames.empty())) {
+    if(device_head) {
     Yue2AitkArHeadRows rows;
     {
         Yue2AitkStackTape base;
+        base.keep_device_final=device_handoff;
         if(teacher) {
             notify("AR frozen teacher forward");
             if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
         }
+        // A host tape (YUE2_AITK_HOST_TAPE=1) leaves device_final null and fills final_hidden.
+        auto source=[](const Yue2AitkStackTape & t){Yue2AitkArHeadRows::Source s;if(t.device_final)s.device=t.device_final;else s.host=&t.final_hidden;return s;};
+        const Yue2AitkArHeadRows::Source base_source=source(base);
         YUE2_PROF("head: AR final norm + row gather (device)");
-        if(!rows.init(backend,model,ar.final_hidden,teacher?&base.final_hidden:nullptr,ar.length,batch.ar.prediction_positions,ar_w,error)) return false;
+        if(!rows.init(backend,model,source(ar),teacher?&base_source:nullptr,ar.length,batch.ar.prediction_positions,ar_w,error)) return false;
     }
     std::vector<uint32_t> targets(N);
     for(size_t i=0;i<N;++i) targets[i]=uint32_t(batch.ar.target_ids[i]);
@@ -134,7 +145,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     { YUE2_PROF("head: CE/KL compute"); if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false; }
     result.ar_ce=double(ce)/N;result.ar_kl=teacher?double(kl)/N:0.0;
     notify("AR transformer backward");
-    { YUE2_PROF("head: dy scatter + AR final norm backward (device)"); if(!rows.backward(backend,&ar_dx,error)) return false; }
+    { YUE2_PROF("head: dy scatter + AR final norm backward (device)"); if(!rows.backward(backend,&ar_dx,error,device_handoff&&ar.device_tape?ar.device_grad[0]:nullptr)) return false; }
     } else {
     // Final norm's small graph currently shares a forward/backward entry point.
     std::vector<float> zeros(ar.final_hidden.size(),0.0f);
@@ -205,9 +216,10 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     Yue2AitkEndpointHost frontend;
     if(!Yue2AitkEndpoints::nar_frontend(backend,model,input.noisy_latents.data(),frames,input.timestep,&frontend,error)) return false;
     Yue2AitkStackTape nar;
+    nar.keep_device_final=!handoff_host;
     if(!yue2_aitk_stack::forward(backend,model,&state.nar_adapters(),true,frontend.values,frames+2,&prefix,true,&nar,nullptr,error)) return false;
     std::vector<float> flow_grad((frames+2)*C,0.0f); Yue2AitkEndpointHost prediction;
-    if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error)) return false;
+    if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error,nar.device_final)) return false;
     for(size_t i=0;i<frames*C;++i) {
         const float diff=prediction.values[C+i]-input.flow_target[i];
         result.nar_mse+=double(diff)*diff;
@@ -215,7 +227,8 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     result.nar_mse/=double(frames*C);
     notify("NAR flow backward");
-    if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error)) return false;
+    if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error,
+        nar.device_final,nar.device_final?nar.device_grad[0]:nullptr)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.nar_adapters(),nar,&prefix,std::move(prediction.dx),
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why,input.accumulate);},error,
         [&](size_t layer){return state.gradient_tensors(true,int(layer));},input.accumulate)) return false;

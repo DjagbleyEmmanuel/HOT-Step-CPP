@@ -8,6 +8,7 @@
 #include "yue2-aitk-host-profile.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -150,17 +151,24 @@ struct Yue2AitkBlockWorkspace {
 struct Yue2AitkBlockConstants {
     yue2_aitk_executor_detail::Runtime runtime;
     ggml_tensor * cosine = nullptr, * sine = nullptr, * mask = nullptr;
+    // The backward graphs' loss seed: dL/dL = 1. Their loss gradient
+    // accumulator points here instead of being set by ggml_graph_reset, a
+    // blocking 4-byte upload per block (YUE2_AITK_BLOCK_RESET=1 restores it).
+    ggml_tensor * one = nullptr;
     bool make(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
               int64_t count, int64_t prefix, Yue2AitkMaskMode mode,
               const float * cos_data, const float * sin_data, std::string * error) {
         using namespace yue2_aitk_executor_detail;
         YUE2_PROF("constants: mask build + upload");
-        if (!make_runtime(backend, 4*ggml_tensor_overhead()+1024, &runtime, error)) return false;
+        if (!make_runtime(backend, 5*ggml_tensor_overhead()+1024, &runtime, error)) return false;
         cosine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
         sine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
         std::vector<uint16_t> host;
         mask = make_mask(runtime.ctx, count, prefix, mode, &host, error);
-        if (!mask || !cosine || !sine || !allocate(&runtime, backend, error)) return false;
+        one = ggml_new_tensor_1d(runtime.ctx, GGML_TYPE_F32, 1);
+        if (!mask || !cosine || !sine || !one || !allocate(&runtime, backend, error)) return false;
+        const float onef = 1.0f;
+        ggml_backend_tensor_set(one, &onef, 0, sizeof(onef));
         ggml_backend_tensor_set(cosine, cos_data, 0, ggml_nbytes(cosine));
         ggml_backend_tensor_set(sine, sin_data, 0, ggml_nbytes(sine));
         ggml_backend_tensor_set(mask, host.data(), 0, ggml_nbytes(mask));
@@ -180,7 +188,8 @@ public:
                         bool capture_kv = true, Yue2AitkBlockConstants * constants = nullptr,
                         Yue2AitkBlockWorkspace * workspace = nullptr,
                         ggml_tensor * device_input = nullptr, ggml_tensor * device_output = nullptr,
-                        ggml_tensor * capture_k = nullptr, ggml_tensor * capture_v = nullptr) {
+                        ggml_tensor * capture_k = nullptr, ggml_tensor * capture_v = nullptr,
+                        bool async = false) {
         using namespace yue2_aitk_executor_detail;
         if (!result) return fail(error, "forward result is null");
         if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
@@ -236,7 +245,12 @@ public:
             else setup_inputs(backend, h, cos_t, sin_t, mask, x, cosine, sine, mask_data);
         }
         lap.mark("fwd: input upload");
-        if (ggml_backend_graph_compute(backend, graph) != GGML_STATUS_SUCCESS) return fail(error, "forward graph compute failed");
+        // async: the caller keeps every input and output on the device and
+        // synchronizes before it reads anything back; a block with a host
+        // readback still waits here.
+        const bool launch_async = async && device_output && !key_cont && !value_cont;
+        if ((launch_async ? ggml_backend_graph_compute_async(backend, graph) : ggml_backend_graph_compute(backend, graph)) != GGML_STATUS_SUCCESS)
+            return fail(error, "forward graph compute failed");
         lap.mark("fwd: graph_compute (launch)");
         result->hidden.clear();
         if (!device_output) { result->hidden.resize(static_cast<size_t>(config.hidden*sequence)); ggml_backend_tensor_get(out.hidden, result->hidden.data(), 0, ggml_nbytes(out.hidden)); }
@@ -258,7 +272,7 @@ public:
                          ggml_tensor * device_input = nullptr, ggml_tensor * device_upstream = nullptr,
                          ggml_tensor * device_dx = nullptr,
                          const std::vector<ggml_tensor *> * gradient_sinks = nullptr,
-                         bool accumulate_sinks = false) {
+                         bool accumulate_sinks = false, bool async = false) {
         using namespace yue2_aitk_executor_detail;
         yue2_aitk_prof::Lap lap;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
@@ -293,6 +307,15 @@ public:
         ggml_build_backward_expand(r.ctx,graph,nullptr);
         lap.mark("bwd: ggml_build_backward_expand");
         ggml_tensor * dx_copy = nullptr;
+        static const bool block_reset = std::getenv("YUE2_AITK_BLOCK_RESET") != nullptr;
+        const bool seed_from_constant = workspace && constants && constants->one && !block_reset;
+        if (seed_from_constant) {
+            ggml_tensor * seed = ggml_graph_get_grad_acc(graph, loss);
+            if (!seed || !ggml_is_scalar(seed) || seed->type != GGML_TYPE_F32) return fail(error, "unexpected loss gradient accumulator");
+            // Read only: the loss feeds no node, so nothing accumulates into it.
+            if (ggml_backend_tensor_alloc(constants->one->buffer, seed, constants->one->data) != GGML_STATUS_SUCCESS)
+                return fail(error, "loss seed binding failed");
+        }
         if (device_dx) { ggml_tensor * gh = ggml_graph_get_grad(graph, h); if (!gh) return fail(error, "missing block input gradient"); dx_copy = ggml_cpy(r.ctx, gh, device_dx); ggml_set_output(dx_copy); ggml_build_forward_expand(graph, dx_copy); }
         const std::vector<ggml_tensor *> layer_params = yue2_aitk_layer_params(*adapters);
         // Device gradient slots (S2b): the graph writes each parameter gradient
@@ -324,9 +347,14 @@ public:
         if (!device_input) { if (constants) ggml_backend_tensor_set(h,x,0,ggml_nbytes(h)); else setup_inputs(backend,h,cos_t,sin_t,mask,x,cosine,sine,mask_data); }
         if (!device_upstream) ggml_backend_tensor_set(upstream,dy,0,ggml_nbytes(upstream));
         lap.mark("bwd: input upload");
-        ggml_graph_reset(graph);
+        const bool launch_async = async && device_dx && gradient_sinks;
+        if (!seed_from_constant) {
+            // ggml_graph_reset uploads on another stream: let in-flight blocks finish first.
+            if (launch_async) ggml_backend_synchronize(backend);
+            ggml_graph_reset(graph);
+        }
         lap.mark("bwd: ggml_graph_reset");
-        if(ggml_backend_graph_compute(backend,graph)!=GGML_STATUS_SUCCESS) return fail(error,"backward graph compute failed");
+        if((launch_async ? ggml_backend_graph_compute_async(backend,graph) : ggml_backend_graph_compute(backend,graph))!=GGML_STATUS_SUCCESS) return fail(error,"backward graph compute failed");
         lap.mark("bwd: graph_compute (launch)");
         auto get=[&](ggml_tensor*t,std::vector<float>&v,const char*n)->bool{ggml_tensor*g=ggml_graph_get_grad(graph,t);if(!g)return fail(error,std::string("missing gradient: ")+n);v.resize(ggml_nbytes(g)/sizeof(float));ggml_backend_tensor_get(g,v.data(),0,ggml_nbytes(g));return true;};
         if(!device_dx && !get(h,result->dx,"x")) return false;

@@ -37,6 +37,9 @@ The YuE2 trainer's own speed changes sit outside the fork:
 |---|---|
 | gradient clip runs on the device, its abs-max as two cascaded 64-wide pools | `YUE2_AITK_CLIP_HOST=1` keeps the host path (D2H, host norm, H2D) |
 | a LoRA scale of exactly 1.0 (alpha == rank) is skipped | none: `x * 1.0f` is bit-exact, so there is nothing to roll back |
+| device-only stack blocks launch async, and each stack call synchronizes once at its end | `YUE2_AITK_SYNC_BLOCKS=1` waits after every block |
+| the block backward's loss seed points at a resident 1.0 instead of `ggml_graph_reset` uploading it per block | `YUE2_AITK_BLOCK_RESET=1` |
+| the AR head rows and the NAR final read the stack's final hidden and write dx as device tensors | `YUE2_AITK_HANDOFF_HOST=1` hands them over through host vectors |
 
 `cpy-q-occupancy` (the quant → F32 copy launch geometry) is upstream since ggml-org
 `b64fb805`; Hook 9 checks the launch shape itself. Hook 17 checks that `engine/ggml` is clean
