@@ -42,11 +42,7 @@ const upload = multer({
 function getToolPath(name: string): string {
   // Strip .exe on non-Windows (macOS/Linux binaries have no extension)
   const binaryName = process.platform === 'win32' ? name : name.replace(/\.exe$/, '');
-  const aceExe = config.aceServer.exe;
-  if (aceExe) {
-    return path.join(path.dirname(aceExe), binaryName);
-  }
-  return path.resolve(process.cwd(), '..', 'engine', 'build', 'Release', binaryName);
+  return path.join(path.dirname(config.aceServer.exe), binaryName);
 }
 
 /** Convert any audio format to WAV using mp3-codec (for MP3) or ffmpeg (for everything else) */

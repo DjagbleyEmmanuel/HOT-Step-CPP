@@ -12,7 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION } from './config.js';
+import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT } from './config.js';
 import { initLogger, closeLogger } from './services/logger.js';
 import { initDb, closeDb } from './db/database.js';
 // lireekDb is now part of the unified hotstep.db — no separate init needed
@@ -444,6 +444,7 @@ const server = app.listen(config.server.port, config.server.host, () => {
   console.log(`[Server] HOT-Step CPP v${APP_VERSION}`);
   console.log(`[Server] Listening on http://localhost:${config.server.port}`);
   console.log(`[Server] ace-server URL: ${config.aceServer.url}`);
+  if (DATA_ROOT) console.log(`[Server] Data folder: ${DATA_ROOT}`);
   console.log(`[Server] Data directory: ${config.data.dir}`);
   console.log('');
   console.log(`  🎵 Open http://localhost:${config.server.port} in your browser`);

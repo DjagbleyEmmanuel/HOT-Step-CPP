@@ -12,9 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pushLog } from '../routes/logs.js';
-import { PROJECT_ROOT } from '../config.js';
-
-const projectRoot = PROJECT_ROOT;
+import { LOGS_DIR } from '../config.js';
 
 /** Current session log directory (null if not initialized) */
 let sessionDir: string | null = null;
@@ -45,7 +43,7 @@ function isoTimestamp(): string {
  * console output you care about.
  */
 export function initLogger(): string {
-  const logsRoot = path.join(projectRoot, 'logs');
+  const logsRoot = LOGS_DIR;
   if (!fs.existsSync(logsRoot)) {
     fs.mkdirSync(logsRoot, { recursive: true });
   }
@@ -183,7 +181,7 @@ export function finishGenerationLog(jobId: string, taskType: string = 'text2musi
   const logPath = path.join(generationsDir, `gen_${jobId}_${taskType}.log`);
   try {
     fs.writeFileSync(logPath, buf.join('\n') + '\n');
-    console.log(`[Logger] Generation log saved: ${path.relative(projectRoot, logPath)}`);
+    console.log(`[Logger] Generation log saved: ${path.relative(path.dirname(LOGS_DIR), logPath)}`);
   } catch (e) {
     console.error(`[Logger] Failed to write generation log: ${e}`);
   }
@@ -205,7 +203,7 @@ export function failGenerationLog(jobId: string, error: string, taskType: string
   const logPath = path.join(generationsDir, `gen_${jobId}_${taskType}.log`);
   try {
     fs.writeFileSync(logPath, buf.join('\n') + '\n');
-    console.log(`[Logger] Generation log (failed) saved: ${path.relative(projectRoot, logPath)}`);
+    console.log(`[Logger] Generation log (failed) saved: ${path.relative(path.dirname(LOGS_DIR), logPath)}`);
   } catch (e) {
     console.error(`[Logger] Failed to write generation log: ${e}`);
   }

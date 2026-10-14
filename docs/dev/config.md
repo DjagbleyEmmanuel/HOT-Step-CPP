@@ -9,10 +9,14 @@ models and its data folder on its own.
 
 1. `config.ts` sets the project root. If `HOT_STEP_ROOT` is set (the portable launchers set
    it), that is the root and the app runs in portable mode. Otherwise the root is two levels
-   above `server/src/`, which is the repo root.
-2. If `<root>/.env` does not exist and `<root>/.env.example` does, the example is copied to
-   `.env` on first launch, so the Settings page has a file to write to.
-3. `dotenv` loads `<root>/.env` into `process.env`. Variables already set in the shell win,
+   above `server/src/`, which is the repo root. In portable mode, `dataroot/bootstrap.ts`
+   then picks the data folder before anything opens a file; see
+   [Release data folder](#release-data-folder).
+2. If the `.env` does not exist and `<root>/.env.example` does, the example is copied to
+   `.env` on first launch, so the Settings page has a file to write to. The `.env` is
+   `<root>/.env` in a checkout and `<data folder>/settings/.env` in a release (the release
+   copy drops the example's `DATA_DIR` line).
+3. `dotenv` loads that `.env` into `process.env`. Variables already set in the shell win,
    because `dotenv` does not override them.
 4. An empty `CUDA_VISIBLE_DEVICES` is deleted from `process.env`. An empty value hides every
    GPU from child processes, and the Settings GPU picker writes exactly that for "Auto".
@@ -24,7 +28,7 @@ app runs; see [Settings page and hot reload](#settings-page-and-hot-reload).
 
 | Store | What goes there | Edited from |
 |---|---|---|
-| `<root>/.env` | Paths, ports, engine flags, GPU choice, LLM keys and endpoints, labelling throughput | Settings, Environment and AI Services tabs, or a text editor |
+| `<root>/.env` (release: `<data folder>/settings/.env`) | Paths, ports, engine flags, GPU choice, LLM keys and endpoints, labelling throughput | Settings, Environment and AI Services tabs, or a text editor |
 | SQLite `settings` table in `hotstep.db` | Active backend (`active_backend_id`), MiniMax-Music3 and YuE2 model and adapter selections, custom Lyric Studio prompts (`prompt_<name>`), the Insta-Gen system prompt (`instagen_system_prompt`), training defaults (`training_defaults_v1`), active training models (`active_models_v1`) | The matching UI controls |
 | Browser `localStorage` | Generation parameters in `ui/src/stores/globalParamsStore.ts` (keys prefixed `hs-`) and other per-browser UI state | The generation controls |
 
@@ -66,22 +70,65 @@ In the tables below, the Settings column says where a key appears:
 | `WHISPER_MODELS_DIR` | `<models>/whisper` | env only | Whisper model folder |
 | `ESSENTIA_BIN` | `<root>/Essentia/essentia_streaming_extractor_music[.exe]` | env only | Essentia extractor used for BPM and key analysis and dataset labelling |
 
+In a release the defaults in this table that sit under `<root>` or `<data dir>` move into the
+data folder instead: `<data dir>` is `<data folder>/library`, models and adapters are
+`<data folder>/models` and `/adapters`, Whisper is `<data folder>/tools/whisper`. A relative
+value in the release `.env` resolves against the data folder. Engine, Essentia and noise
+samples stay in the app.
+
 ### How DATA_DIR resolves
 
-`DATA_DIR` is resolved against the folder one level above the running server code, not
-against the project root:
+In a git checkout, `DATA_DIR` is resolved against `server/`, the folder one level above
+`server/src/`. The default `./data` means `server/data/`. The repo's `.env.example` sets
+`DATA_DIR=./server/data`, which is wrong for a checkout: it resolves to
+`server/server/data/` and the app starts with an empty library. In a checkout, use
+`DATA_DIR=./data` or an absolute path.
 
-- In a git checkout the server runs from `server/src/`, so the base is `server/`. The
-  default `./data` means `server/data/`.
-- In a portable release the server is bundled into `server/server.mjs`, so the base is the
-  package root. The shipped `.env.example` sets `DATA_DIR=./server/data`, which means
-  `<package>/server/data/`.
+In a release, an unset `DATA_DIR` means `<data folder>/library`, and a relative one
+resolves against the data folder.
 
-Because of this, the repo's `.env.example` value is wrong for a git checkout. If it is
-copied to `.env` there, `./server/data` resolves to `server/server/data/` and the app starts
-with an empty library. In a checkout, use `DATA_DIR=./data` or an absolute path.
+Releases before the data folder resolved it against the package root, so the shipped
+`DATA_DIR=./server/data` put the library in `<package>/server/data/`, beside the bundled
+catalogues, and no `DATA_DIR` meant `<package>/data/`. The first-run migration reads that
+install's `.env` to find which one it used.
 
 A repo-root `data/` folder is not the live data folder in either layout.
+
+### Release data folder
+
+A release keeps user data in one folder outside the app, so a new version unzipped
+elsewhere finds the same library. Code: `server/src/dataroot/` (`paths.ts` layout and
+pointer, `bootstrap.ts` start-up choice, `transfer.ts` moves and path rewrites,
+`pointer.ts` the Settings API). A checkout (no `HOT_STEP_ROOT`) never uses any of it.
+
+| Child | Holds |
+|---|---|
+| `library/` | What `DATA_DIR` held: `hotstep.db`, audio, references, stems, training, VST state, lyrics, MuScriptor |
+| `models/`, `adapters/` | Engine models (with cover art, Whisper models, TRT caches) and adapters |
+| `settings/.env` | Settings and API keys |
+| `logs/` | Session logs |
+| `tools/whisper/`, `tools/runtime/` | Whisper binary; Model Manager runtime DLLs, put on the engine's PATH through `TENSORRT_LIBS` |
+| `plugins/` | User plugin overlay |
+| `hot-step-data.json` | Marks the folder as a HOT-Step data folder |
+
+The chosen folder is recorded in `data-location.json` in the profile folder:
+`%LOCALAPPDATA%\HOT-Step\` on Windows, `~/Library/Application Support/HOT-Step/` on
+macOS, `$XDG_CONFIG_HOME/hot-step/` or `~/.config/hot-step/` on Linux. The release restart
+marker (`restart-requested`) and the transfer lock live there too.
+
+At start-up the folder is, in order: `HOT_STEP_DATA_ROOT`; the folder in
+`data-location.json`; if neither exists and this app folder still holds data from an older
+version, that data moved to `HOT-Step-Data` beside the app; otherwise a new, empty
+`HOT-Step-Data` beside the app. The move renames folders when source and destination are
+on the same drive, and copies, checks sizes, then deletes the source when they are not.
+Stored absolute paths inside the moved folders (preset adapters and references, dataset
+folders, rung checkpoints, settings, JSON request columns, JSON files under the library)
+are rewritten after a backup of the DB. Paths outside the moved folders are left alone.
+
+Settings schedules a move, repoint, new folder or import from an older install into
+`data-location.json`; the next start carries it out before the DB opens. If the folder is
+missing, the pointer is unreadable or a move stops part way, the server prints the reason
+and serves one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
 
 ## Ports and hosts
 
@@ -222,6 +269,8 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 | Variable | Default | Read in | Effect |
 |---|---|---|---|
 | `HOT_STEP_ROOT` | unset | `config.ts` | Project root. Setting it turns on portable mode, which among other things downloads the CUDA runtime DLLs on a Windows CUDA build's first launch. Set by the portable launchers `release/HOT-Step.bat` and `release/HOT-Step.sh` |
+| `HOT_STEP_DATA_ROOT` | unset | `dataroot/bootstrap.ts` | Release only. Use this data folder for this process, ignoring `data-location.json`. A scheduled move does not run while it is set |
+| `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Release only. Replaces the profile folder that holds `data-location.json`. Meant for test fixtures |
 | `HOT_STEP_DEV` | unset | `routes/shutdown.ts` | Set by `dev.bat`. Lets `POST /api/shutdown` kill the Vite process on port 3000 after checking it is Node running Vite. Windows only |
 | `HOTSTEP_GENERATE_CAPTURE` | unset | `services/generation/requestCapture.ts` | Dev only, honoured only when `HOT_STEP_DEV` is set. `record` saves every `POST /api/generate` body as a fixture under `<data dir>/dev-captures/generate/`, then generates as normal; `capture-only` saves it and queues nothing. See [Generation API contracts](api-contracts.md#fixture-capture-dev-only) |
 | `PP_STEM_CACHE_GB` | `4` | `services/generation/stemCache.ts` | Disk budget for cached vocal and instrumental stems that the post-processing chain reuses when it runs again on the same audio. `0` disables the cache |

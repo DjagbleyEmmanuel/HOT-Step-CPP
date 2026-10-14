@@ -13,7 +13,7 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { getFFmpegPath } from '../config.js';
+import { config, getFFmpegPath } from '../config.js';
 
 
 /** Extensions the C++ engine can decode natively */
@@ -173,7 +173,7 @@ export function timeStretchPitchShift(
   }
 
   // Write source to temp file
-  const tmpDir = path.join(process.cwd(), 'data', 'tmp');
+  const tmpDir = path.join(config.data.dir, 'tmp');
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const tmpIn = path.join(tmpDir, `stretch_in_${id}.wav`);

@@ -25,9 +25,7 @@ const router = Router();
 /** Get mp3-codec binary path (platform-aware: no .exe on macOS/Linux) */
 function getMp3CodecPath(): string {
   const ext = process.platform === 'win32' ? '.exe' : '';
-  const aceExe = config.aceServer.exe;
-  if (aceExe) return path.join(path.dirname(aceExe), `mp3-codec${ext}`);
-  return path.resolve(process.cwd(), '..', 'engine', 'build', 'Release', `mp3-codec${ext}`);
+  return path.join(path.dirname(config.aceServer.exe), `mp3-codec${ext}`);
 }
 
 /** Convert WAV to target format with optional metadata embedding */

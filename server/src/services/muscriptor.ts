@@ -18,6 +18,7 @@ import fs from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { config } from '../config.js';
+import { registerBusyCheck } from '../dataroot/pointer.js';
 
 export const MUSCRIPTOR_DIR = path.join(config.data.dir, 'muscriptor');
 
@@ -173,3 +174,7 @@ export function startModelDownload(m: MuscriptorModel): { started: boolean; erro
 
   return { started: true };
 }
+
+registerBusyCheck('muscriptor-downloads', () => [...downloads.entries()]
+  .filter(([, s]) => s.downloading)
+  .map(([m]) => `downloading MuScriptor ${m}`));

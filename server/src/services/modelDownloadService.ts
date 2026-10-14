@@ -13,7 +13,8 @@ import https from 'https';
 import http from 'http';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
+import { config, PORTABLE_MODE, PROJECT_ROOT, RUNTIME_LIB_DIR } from '../config.js';
+import { registerBusyCheck } from '../dataroot/pointer.js';
 import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 
 // Load registry - resolve path based on mode:
@@ -136,9 +137,10 @@ class ModelDownloadService extends EventEmitter {
     return config.aceServer.models;
   }
 
-  /** Get the engine directory (where ace-server.exe lives) for runtime DLLs */
+  /** Where runtime DLLs go: the data folder's tools/runtime in a release
+   *  (on the engine's PATH via trtLibs), beside ace-server in dev. */
   get engineDir(): string {
-    return path.dirname(config.aceServer.exe);
+    return RUNTIME_LIB_DIR ?? path.dirname(config.aceServer.exe);
   }
 
   /** Resolve the target directory for a registry file */
@@ -309,9 +311,10 @@ class ModelDownloadService extends EventEmitter {
       }
     }
 
-    // Scan engine directory for runtime DLLs
-    const engDir = this.engineDir;
-    if (fs.existsSync(engDir)) {
+    // Scan for runtime DLLs: the download folder, and beside ace-server, where
+    // a release ships some and older versions downloaded them
+    for (const engDir of new Set([this.engineDir, path.dirname(config.aceServer.exe)])) {
+      if (!fs.existsSync(engDir)) continue;
       for (const f of fs.readdirSync(engDir)) {
         if (f.endsWith('.dll')) files.add(f);
       }
@@ -868,3 +871,8 @@ class ModelDownloadService extends EventEmitter {
 }
 
 export const modelDownloadService = new ModelDownloadService();
+
+// A data-folder move must not start under a download writing into models/.
+registerBusyCheck('model-downloads', () => modelDownloadService.getJobs()
+  .filter(j => j.status === 'downloading' || j.status === 'queued')
+  .map(j => `downloading ${j.filename}`));
