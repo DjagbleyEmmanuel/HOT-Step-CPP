@@ -31,6 +31,13 @@ submodule at configure time.
 | zzzz-vulkan-train-ops | Vulkan `BF16_ROUND` and fused training attention | 14 |
 | ggml-rpc patch-level check | refuse an RPC server that lacks the fork's ops | — |
 
+The YuE2 trainer's own speed changes sit outside the fork:
+
+| change | rollback |
+|---|---|
+| gradient clip runs on the device, its abs-max as two cascaded 64-wide pools | `YUE2_AITK_CLIP_HOST=1` keeps the host path (D2H, host norm, H2D) |
+| a LoRA scale of exactly 1.0 (alpha == rank) is skipped | none: `x * 1.0f` is bit-exact, so there is nothing to roll back |
+
 `cpy-q-occupancy` (the quant → F32 copy launch geometry) is upstream since ggml-org
 `b64fb805`; Hook 9 checks the launch shape itself. Hook 17 checks that `engine/ggml` is clean
 and at the pinned commit.

@@ -179,6 +179,7 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     ggml_tensor * ax = mm(ctx, adapter->a, round(ctx, x));
     ggml_tensor * delta = mm(ctx, adapter->b, ax);
     // x * 1.0f is exact: alpha == rank skips the scale pass and its backward.
+    // Bit-identical either way, so this has no rollback switch.
     delta = round(ctx, adapter->scale == 1.0f ? delta : ggml_scale(ctx, delta, adapter->scale));
     return round(ctx, ggml_add(ctx, base, delta));
 }
