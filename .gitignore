@@ -78,6 +78,10 @@ models/onnx/dit-stream/
 
 # Downloaded tools (whisper.cpp, etc.)
 tools/*
+!tools/cg
+!tools/cg.cmd
+!tools/codegraph/
+tools/codegraph/node_modules/
 !tools/listening-save.mjs
 !tools/listening-save.test.mjs
 !tools/yue2-aitk-reference/

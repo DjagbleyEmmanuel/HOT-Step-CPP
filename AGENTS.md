@@ -259,3 +259,9 @@ only ever saw a rolling window and are lossy.
 | In-app assistant behaviour/KB | [server/src/data/assistant-knowledge.md](server/src/data/assistant-knowledge.md) |
 
 > **Doc convention:** committed docs = `README.md`, `FEATURES.md`, everything under `docs/user/` and `docs/dev/`, `engine/docs/ARCHITECTURE.md`, and the skills. Internal planning/investigation docs live in `docs/plans/`, which is **gitignored** (local only); distil lasting decisions into `docs/dev/`. This file (`AGENTS.md`) is committed; `CLAUDE.md` only imports it.
+
+## Codegraph
+
+Install the pinned CLI with `npm ci` in `tools/codegraph/`, then run `tools/cg.cmd init .` once to create the index. Use `tools/cg.cmd` from PowerShell or `tools/cg` from Git Bash. The wrapper disables telemetry and downloads, and syncs the shared index before a structural query when tracked or untracked files have changed. A query sees the files as they were when sync ran; an edit during or after sync needs another query to refresh it. If sync fails or the index is busy, use `rg` and do not trust the old graph.
+
+Use codegraph for callers, impact, and cross-file structure. Use `rg` for literal text and exact filenames. Keep codegraph output small with each command's documented flags (`tools/cg.cmd <command> --help`).
