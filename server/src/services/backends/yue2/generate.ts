@@ -77,6 +77,7 @@ export function jobCover(job: GenerationJob): { cover: Yue2CoverSubmission; abc:
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
+import type { PollWatchdogOptions } from '../../generation/pollUntilDone.js';
 import type { GenerationAttempt } from '../types.js';
 import { buildSessionCodes } from '../../yue2Takes.js';
 
@@ -86,7 +87,7 @@ export interface Yue2GenerationDeps {
   attempt: GenerationAttempt;
   signal: AbortSignal;
   pollUntilDone(
-    aceJobId: string, job: GenerationJob, signal: AbortSignal, timeoutMinutes?: number,
+    aceJobId: string, job: GenerationJob, signal: AbortSignal, timeoutMinutes?: number, options?: PollWatchdogOptions,
   ): Promise<void>;
   /** YuE2 jobs still waiting behind this one, oldest first, for coalescing.
    *  Absent = never coalesce. */
@@ -1094,7 +1095,10 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     }, DETAIL_POLL_MS);
     detailTimer.unref?.();
 
-    await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes);
+    await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes, {
+      // No chunk cap means the engine can render the full 360 s song at 25 fps.
+      narChunkFrames: req.nar_chunk_frames || 9000,
+    });
     clearInterval(detailTimer);
     detailTimer = undefined;
     const generateMs = Math.round(performance.now() - submitStart);

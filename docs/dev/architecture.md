@@ -90,7 +90,12 @@ to shut down first. See [building.md](building.md#engine-rebuild-rules).
 4. The engine accepts each `/lm` or `/synth` as an async job and returns a job id. The
    server polls `GET /job?id=<id>` and fetches the result with `GET /job?id=<id>&result=1`.
    The polling loop is `services/generation/pollUntilDone.ts`, which also holds the stall
-   and wall-clock watchdogs.
+   and wall-clock watchdogs. YuE2 supplies the submitted NAR chunk frame cap,
+   or 9000 frames for an uncapped song. During NAR and the completed semantic
+   handoff, the silence allowance is 400 ms per frame plus 2 minutes, with a
+   15-minute floor and a 9000-frame ceiling. Actual phase/step changes reset
+   the timer; repeated running responses do not. Other phases retain their
+   existing limits, and the user-configured wall-clock timeout still applies.
 5. The UI polls `GET /api/generate/status/:id` until the job finishes.
 
 `ace-server` answers HTTP on one thread. While it runs DiT, VAE or adapter work it cannot
