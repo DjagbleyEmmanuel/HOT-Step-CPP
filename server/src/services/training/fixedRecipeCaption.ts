@@ -1,5 +1,5 @@
-// Ruach Studio a697397, lab/training.py:97-153 and lab/trainer/prompt.py:18-43.
-// Applied only by the ruach-parity preparation mode.
+// Lyric cue cleanup and caption parsing for the fixed-recipe method.
+// Applied only by the fixed-recipe preparation mode.
 const KNOWN: Record<string, string> = {
   intro: 'Intro', verse: 'Verse', 'pre-chorus': 'Pre-Chorus', prechorus: 'Pre-Chorus',
   chorus: 'Chorus', bridge: 'Bridge', interlude: 'Interlude', inst: 'Inst',
@@ -13,7 +13,7 @@ function splitLines(text: string): string[] {
   return text.split(/\r\n|\r|\n/).filter((_, i, lines) => i < lines.length - 1 || lines[i] !== '');
 }
 
-export function cleanRuachLyrics(text: string): { lyrics: string; hints: string[] } {
+export function cleanFixedRecipeLyrics(text: string): { lyrics: string; hints: string[] } {
   const lines: string[] = [], hints: string[] = [];
   let started = false;
   for (const line of splitLines(text || '')) {
@@ -50,7 +50,7 @@ function normalizeSection(line: string): string {
   return line.slice(0, left + 1) + body + line.slice(right);
 }
 
-export function parseRuachCaption(text: string): { style: string; lyrics: string } {
+export function parseFixedRecipeCaption(text: string): { style: string; lyrics: string } {
   const sections: Record<string, string[]> = { tags: [] };
   let current = 'tags';
   for (const line of splitLines(text || '')) {
@@ -65,8 +65,8 @@ export function parseRuachCaption(text: string): { style: string; lyrics: string
   return { style: sections.tags.join('\n').trim(), lyrics: (sections.lyrics ?? []).join('\n').trim() };
 }
 
-export function prepareRuachCaption(caption: string, lyrics: string): { style: string; lyrics: string } {
-  const parsed = parseRuachCaption(caption);
+export function prepareFixedRecipeCaption(caption: string, lyrics: string): { style: string; lyrics: string } {
+  const parsed = parseFixedRecipeCaption(caption);
   return { style: parsed.style.split(/\s+/).join(' ').normalize('NFC'),
-    lyrics: cleanRuachLyrics(lyrics || parsed.lyrics).lyrics.normalize('NFC') };
+    lyrics: cleanFixedRecipeLyrics(lyrics || parsed.lyrics).lyrics.normalize('NFC') };
 }

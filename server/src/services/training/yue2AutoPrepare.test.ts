@@ -46,11 +46,11 @@ test('automatic preparation reuses unchanged inputs, but invalidates changed set
   assert.equal(f.calls(), 6);
 });
 
-test('Ruach preparation uses a separate cache key and leaves the old fingerprint intact', () => {
+test('Fixed-recipe preparation uses a separate cache key and leaves the old fingerprint intact', () => {
   const f = fixture();
   const old = preparationFingerprint(f.o);
   assert.equal(preparationFingerprint({ ...f.o, captionGrammar: undefined }), old);
-  assert.notEqual(preparationFingerprint({ ...f.o, captionGrammar: 'ruach-parity' }), old);
+  assert.notEqual(preparationFingerprint({ ...f.o, captionGrammar: 'fixed-recipe' }), old);
 });
 
 test('missing prepared payload is regenerated instead of reused', async () => {

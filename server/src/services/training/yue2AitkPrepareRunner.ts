@@ -11,7 +11,7 @@ import { withFfmpegOnPath } from '../../config.js';
 import { aceTrainExe } from './aceTrain.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, trainerLine, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
-import { prepareRuachCaption } from './ruachCaption.js';
+import { prepareFixedRecipeCaption } from './fixedRecipeCaption.js';
 import { randomUUID } from 'crypto';
 
 export type AitkPrepareModelName = 'vae' | 'semantic' | 'sheetsage';
@@ -24,16 +24,16 @@ export interface ResolvedYue2AitkPrepareOptions {
   models: Record<AitkPrepareModelName, string>;
   lyricTiming?: boolean;
   trigger?: string;
-  captionGrammar?: 'ruach-parity';
+  captionGrammar?: 'fixed-recipe';
 }
 
-export function ruachLegacyManifest(text: string): string {
+export function fixedRecipeLegacyManifest(text: string): string {
   const manifest = JSON.parse(text) as { sources?: Array<Record<string, unknown>>; caption_format?: string };
-  if (!Array.isArray(manifest.sources)) throw new Error('Ruach caption preparation needs legacy manifest sources');
+  if (!Array.isArray(manifest.sources)) throw new Error('Fixed-recipe caption preparation needs legacy manifest sources');
   for (const source of manifest.sources) {
     const caption = String(source.caption ?? '');
     const lyrics = String(source.lyrics ?? '');
-    const cleaned = prepareRuachCaption(caption, lyrics);
+    const cleaned = prepareFixedRecipeCaption(caption, lyrics);
     source.caption = cleaned.style;
     source.lyrics = cleaned.lyrics;
   }
@@ -110,12 +110,12 @@ export function validateYue2AitkPrepareOptions(o: ResolvedYue2AitkPrepareOptions
   if (o.trigger !== undefined && (!o.trigger.trim() || o.trigger.length > 128 || /[\r\n\0]/.test(o.trigger))) return 'trigger must be a nonempty single-line phrase of at most 128 characters';
   const manifestError = regularFile(o.legacyManifest, 'legacy manifest', MAX_MANIFEST_BYTES);
   if (manifestError) return manifestError;
-  if (o.captionGrammar === 'ruach-parity') {
-    if (o.lyricTiming !== false) return 'Ruach parity preparation needs lyric timing off.';
+  if (o.captionGrammar === 'fixed-recipe') {
+    if (o.lyricTiming !== false) return 'Fixed recipe preparation needs lyric timing off.';
     try {
       const legacy = JSON.parse(fs.readFileSync(o.legacyManifest, 'utf8')) as { loudness_target_lufs?: unknown };
-      if (legacy.loudness_target_lufs !== 0) return 'Ruach parity needs a YuE2 cache cut with loudness off (0 LUFS).';
-    } catch { return 'Ruach parity needs a valid YuE2 cache manifest.'; }
+      if (legacy.loudness_target_lufs !== 0) return 'Fixed recipe needs a YuE2 cache cut with loudness off (0 LUFS).';
+    } catch { return 'Fixed recipe needs a valid YuE2 cache manifest.'; }
   }
   const checkpointError = regularFile(o.checkpoint, 'raw ConvRot checkpoint');
   if (checkpointError) return checkpointError;
@@ -193,13 +193,13 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
   job.total = 1;
   emitProgress(job);
   let temporaryManifest: string | undefined;
-  if (o.captionGrammar === 'ruach-parity') {
+  if (o.captionGrammar === 'fixed-recipe') {
     try {
-      temporaryManifest = path.join(path.dirname(o.legacyManifest), `.ruach-caption-${randomUUID()}.json`);
-      fs.writeFileSync(temporaryManifest, ruachLegacyManifest(fs.readFileSync(o.legacyManifest, 'utf8')));
+      temporaryManifest = path.join(path.dirname(o.legacyManifest), `.fixed-recipe-caption-${randomUUID()}.json`);
+      fs.writeFileSync(temporaryManifest, fixedRecipeLegacyManifest(fs.readFileSync(o.legacyManifest, 'utf8')));
     } catch (err) {
       if (temporaryManifest) fs.rmSync(temporaryManifest, { force: true });
-      finishJob(job, 'failed', `Ruach caption preparation failed: ${err instanceof Error ? err.message : String(err)}`);
+      finishJob(job, 'failed', `Fixed-recipe caption preparation failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
   }
@@ -235,8 +235,8 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
     if (error) throw new Error(`Preparation finished without a valid output: ${error}`);
     const value = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
     if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Preparation wrote an invalid schema-1 dataset manifest');
-    if (o.captionGrammar === 'ruach-parity') {
-      value.caption_grammar = 'ruach-parity';
+    if (o.captionGrammar === 'fixed-recipe') {
+      value.caption_grammar = 'fixed-recipe';
       value.loudness_lufs = 0;
       fs.writeFileSync(manifest, JSON.stringify(value));
     }

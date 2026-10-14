@@ -4,9 +4,9 @@
 
 ## YuE2 joint training
 
-The opt-in `ruach-parity` method uses the bf16 LM base, rank-32 LoRA at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing, and a cache cut with loudness off. The server forces these values even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.
+The opt-in `fixed-recipe` method uses the bf16 LM base, rank-32 LoRA at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing, and a cache cut with loudness off. The server forces these values even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.
 
-The method's preparation mode cleans lyric cues and unsupported section headings using the rules from Ruach Studio commit `a697397`, then applies its caption parser and NFC normalization. It writes an isolated prepared-dataset cache index and marks the output manifest with `caption_grammar: ruach-parity` and `loudness_lufs: 0`; the start path rejects a manifest without both markers. Caption cleanup uses a temporary copy of the legacy manifest, leaving the old method cache index alone.
+The method's preparation mode cleans lyric cues and unsupported section headings, then applies its caption parser and NFC normalization. It writes an isolated prepared-dataset cache index and marks the output manifest with `caption_grammar: fixed-recipe` and `loudness_lufs: 0`; the start path rejects a manifest without both markers. Caption cleanup uses a temporary copy of the legacy manifest, leaving the old method cache index alone.
 
 The joint run index reconciles with the configured `yue2-joint-adapters` folder at startup and when its folder set changes. Missing finished runs leave the index. Copied folders enter from `run.json`, or from a unique dataset trigger in the folder name for older runs. Every index write also saves the current record in the run folder; an unavailable adapters root leaves the index alone.
 

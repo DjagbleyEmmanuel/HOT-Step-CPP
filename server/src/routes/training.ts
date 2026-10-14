@@ -166,7 +166,7 @@ import {
   type ResolvedYue2AitkPrepareOptions,
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
-import { parseYue2JointStopMode, applyBaseMatchedRecipe, applyRuachParityRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
+import { parseYue2JointStopMode, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
@@ -3521,11 +3521,11 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     }
     // Base-matched method: the fixed parts of the recipe replace whatever the
     // body says (they define the method); its knobs fill in where blank.
-    if (b.method !== undefined && b.method !== 'tuned' && b.method !== 'base-matched' && b.method !== 'ruach-parity') {
-      res.status(400).json({ error: 'method must be tuned, base-matched or ruach-parity.' });
+    if (b.method !== undefined && b.method !== 'tuned' && b.method !== 'base-matched' && b.method !== 'fixed-recipe') {
+      res.status(400).json({ error: 'method must be tuned, base-matched or fixed-recipe.' });
       return;
     }
-    const method = b.method === 'base-matched' || b.method === 'ruach-parity' ? b.method : 'tuned';
+    const method = b.method === 'base-matched' || b.method === 'fixed-recipe' ? b.method : 'tuned';
     // Dataset-Calibrated Training (opt-in): a fresh base-matched run that asks
     // for it gets steps and saveEvery sized to the album before the recipe
     // fills in warmup from the step count. Without calibrated: true, nothing here runs.
@@ -3546,7 +3546,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       b = { ...b, steps: calibration.steps, saveEvery: calibration.saveEvery };
     }
     if (method === 'base-matched') b = applyBaseMatchedRecipe(b);
-    if (method === 'ruach-parity') b = applyRuachParityRecipe(b);
+    if (method === 'fixed-recipe') b = applyFixedRecipe(b);
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
     const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
@@ -3557,10 +3557,10 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       if ('error' in base) { res.status(400).json({ error: base.error }); return; }
       checkpoint = base.checkpoint;
     }
-    if (method === 'ruach-parity') {
+    if (method === 'fixed-recipe') {
       const bf16 = resolveYue2JointBase('bf16');
       if ('error' in bf16 || path.resolve(checkpoint) !== path.resolve(bf16.checkpoint)) {
-        res.status(400).json({ error: 'Ruach parity requires the installed bf16 YuE2 base.' });
+        res.status(400).json({ error: 'Fixed recipe requires the installed bf16 YuE2 base.' });
         return;
       }
     }
@@ -3600,8 +3600,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       preparation = { ...prepDefaults, checkpoint, models,
         legacyManifest: prepString('legacyManifest', prepDefaults.legacyManifest),
         tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
-        trigger: method === 'ruach-parity' ? undefined : ds.customTag || ds.slug,
-        ...(method === 'ruach-parity' ? { captionGrammar: 'ruach-parity' as const } : {}),
+        trigger: method === 'fixed-recipe' ? undefined : ds.customTag || ds.slug,
+        ...(method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}),
         lyricTiming: b.lyricTiming === undefined ? b.alignmentEnabled !== false : b.lyricTiming === true };
       const prepError = foreignYue2Manifest(ds, preparation.legacyManifest) || validateYue2AitkPrepareOptions(preparation);
       if (prepError) { res.status(400).json({ error: prepError }); return; }
@@ -3623,13 +3623,13 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         return;
       }
       const trigger = ds.customTag || ds.slug;
-      if (method === 'ruach-parity' ? manifest.caption_grammar !== 'ruach-parity' || manifest.loudness_lufs !== 0
+      if (method === 'fixed-recipe' ? manifest.caption_grammar !== 'fixed-recipe' || manifest.loudness_lufs !== 0
         : manifest.style_template !== 'upstream' || manifest.trigger !== trigger || !manifest.items.every((item: unknown) => {
           const style = item && typeof item === 'object' ? (item as Record<string, unknown>).style : undefined;
           return typeof style === 'string' && (style === trigger || style.startsWith(`${trigger}, in the style of ${trigger}. `));
         })) {
-        res.status(400).json({ error: method === 'ruach-parity'
-          ? 'Prepared dataset needs Ruach caption grammar and loudness off. Reprepare with Ruach parity selected.'
+        res.status(400).json({ error: method === 'fixed-recipe'
+          ? 'Prepared dataset needs fixed-recipe caption grammar and loudness off. Reprepare with Fixed recipe selected.'
           : 'Prepared dataset does not contain this dataset trigger in its training styles. Reprepare with the current joint trainer.' });
         return;
       }
@@ -3799,9 +3799,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       arCropFrames = v;
     }
     // Base-matched knobs (any method may set them; absent = engine default).
-    const baseMatched: { method?: 'base-matched' | 'ruach-parity'; warmup?: number; arLossWeight?: number; beta1?: number; beta2?: number; arTargets?: 'base'; gradAccum?: number; textDropout?: number; lyricDropout?: number; bothDropout?: number } = {};
+    const baseMatched: { method?: 'base-matched' | 'fixed-recipe'; warmup?: number; arLossWeight?: number; beta1?: number; beta2?: number; arTargets?: 'base'; gradAccum?: number; textDropout?: number; lyricDropout?: number; bothDropout?: number } = {};
     if (method === 'base-matched') baseMatched.method = 'base-matched';
-    if (method === 'ruach-parity') baseMatched.method = 'ruach-parity';
+    if (method === 'fixed-recipe') baseMatched.method = 'fixed-recipe';
     for (const [key, lo, hi, int, zeroOk] of [['warmup', 0, 0x7fffffff, true, true], ['arLossWeight', 0, 10, false, false], ['beta1', 0, 0.999999, false, true], ['beta2', 0, 0.999999, false, true],
       ['gradAccum', 1, 256, true, true], ['textDropout', 0, 1, false, true], ['lyricDropout', 0, 1, false, true], ['bothDropout', 0, 1, false, true]] as const) {
       if (b[key] === undefined || b[key] === null || b[key] === '') continue;
@@ -4027,17 +4027,17 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       res.status(400).json({ error: 'models must provide exactly vae=FILE, semantic=FILE, and sheetsage=FILE (repeat model fields are accepted)' });
       return;
     }
-    const ruachBase = b.captionGrammar === 'ruach-parity' ? resolveYue2JointBase('bf16') : undefined;
-    if (ruachBase && 'error' in ruachBase) { res.status(400).json({ error: ruachBase.error }); return; }
+    const fixedBase = b.captionGrammar === 'fixed-recipe' ? resolveYue2JointBase('bf16') : undefined;
+    if (fixedBase && 'error' in fixedBase) { res.status(400).json({ error: fixedBase.error }); return; }
     const options: ResolvedYue2AitkPrepareOptions = {
       legacyManifest: str('legacyManifest') || str('manifest') || defaults.options.legacyManifest,
-      checkpoint: ruachBase && 'checkpoint' in ruachBase ? ruachBase.checkpoint : str('checkpoint') || defaults.options.checkpoint,
+      checkpoint: fixedBase && 'checkpoint' in fixedBase ? fixedBase.checkpoint : str('checkpoint') || defaults.options.checkpoint,
       tokenizer: str('tokenizer') || defaults.options.tokenizer,
       output: str('output') || defaults.options.output,
       models,
-      trigger: b.captionGrammar === 'ruach-parity' ? undefined : ds.customTag || ds.slug,
-      ...(b.captionGrammar === 'ruach-parity' ? { captionGrammar: 'ruach-parity' as const } : {}),
-      lyricTiming: b.captionGrammar === 'ruach-parity' ? false : b.lyricTiming !== false,
+      trigger: b.captionGrammar === 'fixed-recipe' ? undefined : ds.customTag || ds.slug,
+      ...(b.captionGrammar === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}),
+      lyricTiming: b.captionGrammar === 'fixed-recipe' ? false : b.lyricTiming !== false,
     };
     const error = foreignYue2Manifest(ds, options.legacyManifest) || validateYue2AitkPrepareOptions(options);
     if (error) { res.status(400).json({ error }); return; }

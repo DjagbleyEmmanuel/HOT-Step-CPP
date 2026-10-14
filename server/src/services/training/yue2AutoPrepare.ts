@@ -31,15 +31,15 @@ export function preparationFingerprint(o: ResolvedYue2AitkPrepareOptions): strin
     files: [...new Set(files)].sort().map(stamp), ...(o.captionGrammar ? { captionGrammar: o.captionGrammar } : {}) })).digest('hex');
 }
 
-function outputFingerprint(manifest: string, captionGrammar?: 'ruach-parity'): string {
+function outputFingerprint(manifest: string, captionGrammar?: 'fixed-recipe'): string {
   if (fs.statSync(manifest).size > 16 * 1024 * 1024) throw new Error('Prepared manifest exceeds 16 MiB');
   const text = fs.readFileSync(manifest, 'utf8');
   const data = JSON.parse(text);
   if (data.schema_version !== 1 || data.recipe_version !== 'aitk-yue2-2026-09-16' || !Array.isArray(data.items) || !data.items.length) {
     throw new Error('Invalid prepared dataset');
   }
-  if (captionGrammar === 'ruach-parity' && (data.caption_grammar !== 'ruach-parity' || data.loudness_lufs !== 0)) {
-    throw new Error('Prepared dataset has no Ruach parity caption and loudness markers');
+  if (captionGrammar === 'fixed-recipe' && (data.caption_grammar !== 'fixed-recipe' || data.loudness_lufs !== 0)) {
+    throw new Error('Prepared dataset has no Fixed recipe caption and loudness markers');
   }
   // Prepared before 2026-09-20: no trigger-only prefixes, so caption dropout
   // (a card default) is refused by the engine. Stale, so it re-prepares.
@@ -66,8 +66,8 @@ export async function ensureYue2PreparedDataset(job: TrainingJob, options: Resol
   // what must invalidate a prepared dataset built from the stale captions.
   await refreshYue2ManifestCaptions(job, options.legacyManifest);
   const fingerprint = preparationFingerprint(options);
-  const index = path.join(path.dirname(options.legacyManifest), options.captionGrammar === 'ruach-parity'
-    ? 'aitk-auto-prepare-ruach-v1.json' : 'aitk-auto-prepare-v1.json');
+  const index = path.join(path.dirname(options.legacyManifest), options.captionGrammar === 'fixed-recipe'
+    ? 'aitk-auto-prepare-fixed-recipe-v1.json' : 'aitk-auto-prepare-v1.json');
   try {
     const cached = JSON.parse(fs.readFileSync(index, 'utf8'));
     if (cached.fingerprint === fingerprint && cached.outputFingerprint === outputFingerprint(cached.manifest, options.captionGrammar)) {

@@ -762,7 +762,7 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  server forces its fixed parts (no KL anchor or stops, one rate for both
    *  halves, AdamW with the report's betas, cosine to a floor) and fills the
    *  knobs below where blank. */
-  method?: 'tuned' | 'base-matched' | 'ruach-parity';
+  method?: 'tuned' | 'base-matched' | 'fixed-recipe';
   /** Base-matched knobs (blank = the method's default). */
   warmup?: number;
   arLossWeight?: number;
@@ -879,7 +879,7 @@ export interface Yue2AitkPrepareRequest {
   output: string;
   models: { vae: string; semantic: string; sheetsage: string };
   lyricTiming?: boolean;
-  captionGrammar?: 'ruach-parity';
+  captionGrammar?: 'fixed-recipe';
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */

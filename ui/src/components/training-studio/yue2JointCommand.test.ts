@@ -31,13 +31,13 @@ test('joint resume retains its selected run and skips automatic preparation', ()
   assert.equal(captured.cursorWeight, 0);
 });
 
-test('Ruach parity captures preparation without lyric timing even when the old toggle is on', () => {
-  const form = { ...YUE2_JOINT_FORM_DEFAULTS, method: 'ruach-parity' } as Yue2JointTrainRequest;
+test('Fixed recipe captures preparation without lyric timing even when the old toggle is on', () => {
+  const form = { ...YUE2_JOINT_FORM_DEFAULTS, method: 'fixed-recipe' } as Yue2JointTrainRequest;
   const prepare = { lyricTiming: true } as Yue2AitkPrepareRequest;
   const captured = captureJointOverrides(form, prepare, true, 'CUDA0', '');
   assert.equal(captured.lyricTiming, false);
   assert.equal(captured.cursorWeight, 0);
-  assert.deepEqual(captured.preparation, { lyricTiming: false, captionGrammar: 'ruach-parity' });
+  assert.deepEqual(captured.preparation, { lyricTiming: false, captionGrammar: 'fixed-recipe' });
   assert.equal(prepare.lyricTiming, true);
 });
 

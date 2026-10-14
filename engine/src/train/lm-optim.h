@@ -226,7 +226,7 @@ struct LmOptim {
     float adam_beta2   = 0.999f;
     /** AdamW epsilon. 1e-8 is what every run before this field had; the
      *  YuE2 joint trainer's --adam-eps sets it (torch's AdamW default is
-     *  1e-8 too, but recipes such as Ruach's pass 1e-6). */
+     *  1e-8 too, but the fixed-recipe method passes 1e-6). */
     float adam_eps     = 1e-8f;
     float grad_clip    = 1.0f;
     int   total_steps  = 1;

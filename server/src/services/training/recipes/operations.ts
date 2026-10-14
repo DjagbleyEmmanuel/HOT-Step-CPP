@@ -7,7 +7,7 @@ import {
 import { MM3_LM_DEFAULTS, applyMm3Preset } from '../mm3Train.js';
 import { YUE2_NAR_DEFAULTS, applyYue2Preset } from '../yue2Train.js';
 import { YUE2_AR_DEFAULTS } from '../yue2ArTrain.js';
-import { applyBaseMatchedRecipe, applyRuachParityRecipe } from '../yue2JointTrainRunner.js';
+import { applyBaseMatchedRecipe, applyFixedRecipe } from '../yue2JointTrainRunner.js';
 import { getTrainingDefaults, resolveTrainingDefaultLayers } from '../trainingDefaults.js';
 import { workerJson } from '../trainingWorkers.js';
 import { acceptTrainingSnapshot, registerTrainingOperations, resolveTrainingWorker, trainingOp, TrainingOperationFailure, type TrainingOperationDeps } from '../operations.js';
@@ -66,8 +66,8 @@ export function resolveRecipe(family: TrainingRecipeFamily, overrides: Record<st
     resolved, execution, provenance: layers.provenance, deferred: recipe.deferred,
     ...(family === 'yue2-joint' && resolved.method === 'base-matched'
       ? { effective: applyBaseMatchedRecipe(resolved) }
-      : family === 'yue2-joint' && resolved.method === 'ruach-parity'
-        ? { effective: applyRuachParityRecipe(resolved) } : {}) };
+      : family === 'yue2-joint' && resolved.method === 'fixed-recipe'
+        ? { effective: applyFixedRecipe(resolved) } : {}) };
 }
 
 export function mountTrainingRecipes(router: Router, deps: TrainingOperationDeps) {
