@@ -4,6 +4,7 @@
 // Query functions mirror those in server/src/db/lireekDb.ts.
 
 import Database from 'better-sqlite3';
+import { existsSync } from 'node:fs';
 import path from 'path';
 // Canonical key spelling, shared with the in-app path via the re-exported
 // prompts module (server/src/services/lireek/prompts.ts).
@@ -27,7 +28,11 @@ function resolveDbPath(): string {
 export function initDb(): void {
   const dbPath = resolveDbPath();
   console.error(`[mcp-lyricstudio] Opening database: ${dbPath}`);
-  db = new Database(dbPath);
+  // HOTSTEP_DB must point to an existing database, including after a data move.
+  if (!existsSync(dbPath)) {
+    throw new Error(`[mcp-lyricstudio] Database not found: ${dbPath}. Set HOTSTEP_DB to the existing hotstep.db file.`);
+  }
+  db = new Database(dbPath, { fileMustExist: true });
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 }
