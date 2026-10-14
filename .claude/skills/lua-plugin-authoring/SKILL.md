@@ -78,7 +78,7 @@ All contracts below are verified against `engine/src/lua-plugin.h` (the single s
 ```lua
 solver = {
     name = "my_solver", display = "My Solver", description = "...",
-    nfe = 1, order = 1,          -- informational (shown in <data root>/logs/UI)
+    nfe = 1, order = 1,          -- informational (shown in logs/UI)
     needs_model = false,          -- true => step() gets model_fn + vt_buf
     stateful = false, stochastic = false,  -- informational
     -- owns_loop = true          -- advanced: define sample() instead of step(); see reference.md

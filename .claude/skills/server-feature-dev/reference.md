@@ -13,7 +13,7 @@ Deep detail supporting [SKILL.md](SKILL.md). All paths repo-relative; all line n
 | Method | Engine endpoint | Timeout tier | Returns |
 |---|---|---|---|
 | `health()` | `GET /health` | QUICK | `{ status }` |
-| `props()` | `GET /props` | QUICK | <data root>/models/adapters/defaults (`AceProps`, :22-35) |
+| `props()` | `GET /props` | QUICK | models/adapters/defaults (`AceProps`, :22-35) |
 | `plugins()` | `GET /plugins` | QUICK | Lua plugin registry (solvers/schedulers/guidance/postprocess) |
 | `warm(req, keepLoaded=true)` | `POST /warm[?keep_loaded=1]` | QUICK | job id — pre-loads DiT+VAE+adapter; no-op under strict eviction |
 | `listJobs()` | `GET /jobs` | QUICK | every job in the engine's in-memory table (reconcile after disconnect) |

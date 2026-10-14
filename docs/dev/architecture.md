@@ -141,7 +141,7 @@ Every API mount is registered in `server/src/index.ts`. Route files are in
 | Player waveform peaks | `/api/audio` | `audio.ts` | `audio/peaks.ts` | `ui/src/audio/peaksClient.ts` | none |
 | Models dropdown | `/api/models` | `models.ts` | `aceClient.ts` (`GET /props`) | `global-bar/ModelsDropdown.tsx` | `model-registry.h`, `model-store.cpp` |
 | Model Manager (downloads) | `/api/model-manager` | `modelManager.ts` | `modelDownloadService.ts`, `server/src/data/model-registry.json` | `model-manager/` | none |
-| DiT adapters (LoRA, LoKr) | `/api/adapters` | `adapters.ts` | `<data root>/adapters/stMetadata.ts`, `generation/adapterSections.ts` | `create/AdaptersAccordion.tsx`, `global-bar/AdaptersDropdown.tsx` | `adapter-merge.h`, `adapter-runtime.h` |
+| DiT adapters (LoRA, LoKr) | `/api/adapters` | `adapters.ts` | `adapters/stMetadata.ts`, `generation/adapterSections.ts` | `create/AdaptersAccordion.tsx`, `global-bar/AdaptersDropdown.tsx` | `adapter-merge.h`, `adapter-runtime.h` |
 | Stem Studio | `/api/stem-studio` | `stemStudio.ts` | `aceClient.ts`, `audioConvert.ts` | `stem-studio/` | `/synth` (extract), `/supersep/*` |
 | SuperSep proxy | `/api/supersep` | `supersep.ts` | `audioConvert.ts` | `shared/StemMixer.tsx`, `services/supersepApi.ts` | `supersep.cpp` |
 | Stem Builder | uses the generate and stem APIs | none | none | `stem-builder/` | none of its own |
@@ -270,4 +270,4 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
 
 `server/src/dataroot/bootstrap.ts` resolves the release data folder before consumers open the database, logs or children. `HOT_STEP_ROOT` selects release mode; without it the checkout keeps its existing paths. The profile pointer and pending-transfer journal are outside both app and data folders. The release launcher and shutdown route share a profile `restart-requested` marker; dev retains its checkout marker.
 
-App-owned `<data root>/library/` contains bundled catalogues and assistant knowledge. Managed library, models, adapters, settings, logs and downloaded tools live under the effective data root. External overrides remain external. See [Configuration](config.md#release-data-folder).
+App-owned `server/data/` contains bundled catalogues and assistant knowledge. Managed library, models, adapters, settings, logs and downloaded tools live under the effective data root. External overrides remain external. See [Configuration](config.md#release-data-folder).

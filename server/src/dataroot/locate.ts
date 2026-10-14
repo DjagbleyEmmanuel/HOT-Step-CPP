@@ -76,7 +76,8 @@ function children(root: string | null, checkout: string, env: NodeJS.ProcessEnv)
   const l = root ? dataLayout(root) : null;
   const envFile = l ? l.envPath : path.join(checkout, '.env');
   const file = envFileValues(envFile);
-  const val = (k: string) => env[k] || file[k] || '';
+  // config.ts: dotenv never overrides a variable the process already has, even an empty one.
+  const val = (k: string) => (k in env && env[k] !== undefined ? env[k]! : file[k]) ?? '';
   const base = root ?? path.join(checkout, 'server');
   const pick = (key: string, fallback: string, rel = base): string => {
     const v = val(key);

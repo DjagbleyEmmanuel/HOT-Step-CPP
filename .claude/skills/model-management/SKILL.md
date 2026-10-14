@@ -181,7 +181,7 @@ Download mechanics: HuggingFace URL `https://huggingface.co/{repo}/resolve/main/
 | `engine/tools/quantize.cpp` → `engine/build/Release/quantize.exe` | BF16 GGUF → K-quant/FP4 GGUF |
 | `engine/convert.py` | HF safetensors checkpoint dir → BF16 GGUF (hardcoded dirs) |
 | `engine/tools/ace-server.cpp` | Startup validation, `/props` endpoint |
-| `server/src/config.ts` | `aceServer.<data root>/models/adapters/onnxDir`, `keepLoaded`, warm-on-startup, whisper paths |
+| `server/src/config.ts` | `aceServer.models/adapters/onnxDir`, `keepLoaded`, warm-on-startup, whisper paths |
 | `server/src/services/modelDownloadService.ts` | Download jobs, resume, validation, installed-check, variant filtering |
 | `server/src/routes/modelManager.ts` | `/api/model-manager/*` REST + SSE |
 | `server/src/routes/models.ts` | `/api/models` (proxies engine `/props`), `/api/models/pp-vae` |

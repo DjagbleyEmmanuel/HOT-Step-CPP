@@ -129,7 +129,7 @@ cd ../..
 
 ## Get the models
 
-Put GGUF files in `<data root>/models/` at the repo root, or download them in the app from
+Put GGUF files in `<data root>/models/`, or download them in the app from
 Models, Get More Models (the Model Manager). The minimum ACE-Step set is one file of each
 type from [Serveurperso/ACE-Step-1.5-GGUF](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/tree/main):
 
@@ -315,7 +315,7 @@ Layout of a Windows package, as assembled by `release.yml`:
 | `runtime/node.exe` | Portable Node 24.18.0 |
 | `server/server.mjs` | The server bundled with esbuild (`release/esbuild.config.mjs`) |
 | `server/ffmpeg.exe` | From the `ffmpeg-static` package |
-| `<data root>/library/` | Everything from `server/src/data/`, copied whole |
+| `server/data/` | Everything from `server/src/data/`, copied whole |
 | `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, and `engine/plugins/` |
 | `plugins/` | The repo-root plugin overlay |
 | `VERSION` | The release version, shown by the app |
@@ -383,7 +383,7 @@ To build a package locally:
 
 ## Release assembly and data paths
 
-CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, with immutable resources copied wholesale from `server/src/data/` into app-owned `<data root>/library/`. The local macOS `package-release.sh` uses the same bundle, flat `engine/` binaries and `runtime/bin/node` layout as CI. Both local packagers include `ace-train`, `ace-midi` and `ace-caption`.
+CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, with immutable resources copied wholesale from `server/src/data/` into app-owned `server/data/`. The local macOS `package-release.sh` uses the same bundle, flat `engine/` binaries and `runtime/bin/node` layout as CI. Both local packagers include `ace-train`, `ace-midi` and `ace-caption`.
 
 Every package ships `release/.env.example` as `.env.example`, the shared launcher, `profile-path.mjs` and `README.txt`. No assembler precreates app-root models or adapters. Bootstrap creates the sibling data layout. The release template leaves managed paths unset; the checkout template retains its existing values. Launchers use `profile-path.mjs` to resolve the stable profile restart marker, matching `dataroot/paths.ts`, including `HOT_STEP_PROFILE_DIR` fixtures. Dev wrappers retain the checkout `.restart-requested` marker.
 

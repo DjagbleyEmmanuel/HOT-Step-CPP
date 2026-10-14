@@ -963,7 +963,7 @@ Same again with the live teacher (drop `--reg-topk`, it does nothing here):
 - Legacy corpus: `server/scripts/stamp-adapter-triggers.mjs`, dry-run by default. Verified on a copy — 132 MB payload SHA-256 identical, header stays 8-byte aligned, `.bak` kept.
 
 **Adapter layout (per-base + per-run, 2026-07-28)**
-- `<adapters>/lm-06b|lm-17b|lm-4b/<artist>/<run>/` and `<adapters>/dit-<shorthand>/<artist>/<run>/`, where `<run>` = `YYYY-MM-DD_HH-MM-SS` (<data root>/logs/ convention) — retraining an artist never overwrites an earlier adapter. Artist names carry **no** `-<size>` suffix; the parent folder says the base.
+- `<adapters>/lm-06b|lm-17b|lm-4b/<artist>/<run>/` and `<adapters>/dit-<shorthand>/<artist>/<run>/`, where `<run>` = `YYYY-MM-DD_HH-MM-SS` (logs/ convention) — retraining an artist never overwrites an earlier adapter. Artist names carry **no** `-<size>` suffix; the parent folder says the base.
 - Single source of truth: `server/src/services/training/adapterLayout.ts` (size slugs, the confirmed DiT shorthand map `xl-thirds`/`xl-base-turbo`/`xl-sft-turbo`/…, run stamps, latest-run resolution). `migrate-adapter-layout.mjs` moves an old corpus; its shorthand map must stay in sync.
 - Writes go through `lmRunDirFor`/`ditRunDirFor` (fresh stamped dir); reads through `adapterDirFor`/`adapterDitDirFor` (newest run → unversioned artist dir → legacy flat `lm/<name>-4B` / root DiT dir). Two legacy forms are read-everywhere, written-never.
 - Scanners: `GET /api/adapters/lm` walks all lm-* roots + legacy `lm/` (entries carry `lmSize`, `run`, `trigger`) — this is what the global-bar planner list, Lyric Studio's preset picker and the Training Studio picker all consume. `POST /api/adapters/scan` descends into `dit-*` folders (and their run subdirs) only.

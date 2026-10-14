@@ -782,3 +782,16 @@ test('locateData: reports a pending move and a bad pointer without acting on the
   const bad = locateData({ env, checkoutRoot: checkout });
   assert.match(bad.pointerError!, /not valid JSON/); assert.equal(bad.root, null);
 });
+
+test('locateData: an empty process variable beats the .env file, like dotenv', () => {
+  const f = fixture();
+  const checkout = path.join(f.base, 'co');
+  const root = path.join(f.base, 'data');
+  initLayout(dataLayout(root));
+  writePointer(devPointerFile(f.prof, checkout), { version: 1, root, pending: null });
+  fs.writeFileSync(dataLayout(root).envPath, `ACESTEPCPP_ADAPTERS=${path.join(f.base, 'elsewhere')}
+`);
+  const r = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof, ACESTEPCPP_ADAPTERS: '' } as NodeJS.ProcessEnv, checkoutRoot: checkout });
+  assert.equal(r.children!.adapters, dataLayout(root).adapters);
+  assert.deepEqual(r.overrides, []);
+});

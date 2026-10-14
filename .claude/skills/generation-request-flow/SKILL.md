@@ -20,7 +20,7 @@ Terms used below:
 ## When to use this skill
 
 - Adding a new generation parameter (UI knob → engine behavior).
-- Debugging: a param is set in the UI but the engine <data root>/logs/behavior show the default.
+- Debugging: a param is set in the UI but the engine logs/behavior show the default.
 - Modifying `server/src/routes/generate.ts`, `translateParams.ts`, `aceClient.ts`, or `engine/tools/hot-step-server.cpp` request handling.
 - Understanding generation modes (`text2music`, `cover`, `repaint`, `lego`, …) or the job queue/watchdogs.
 
