@@ -58,6 +58,13 @@ struct Request {
     uint16_t * adapted_hidden_grad_bf16 = nullptr; // host [positions, hidden]
     float * ce_sum = nullptr; // raw sum over target positions
     float * kl_sum = nullptr; // raw sum over target positions
+    // Device mode (adapted_rows set): the rows are already on the backend as
+    // [hidden, positions] F32 (Yue2AitkArHeadRows), the raw F32 hidden gradient
+    // is copied into adapted_grad_rows, and the three host hidden pointers above
+    // are unused. A nonfinite input then shows up as a nonfinite CE or KL sum.
+    const ggml_tensor * adapted_rows = nullptr;
+    const ggml_tensor * base_rows = nullptr;
+    ggml_tensor * adapted_grad_rows = nullptr;
 };
 
 inline const char * status_string(Status status) {
@@ -234,9 +241,17 @@ struct ChunkWorkspace {
     }
 };
 
+inline bool rows_match(const ggml_tensor * t, const Request & request) {
+    return t && t->data && t->type == GGML_TYPE_F32 && ggml_is_contiguous(t) && ggml_n_dims(t) <= 2 &&
+           t->ne[0] == static_cast<int64_t>(request.hidden) && t->ne[1] == static_cast<int64_t>(request.positions);
+}
+
 inline Status compute(const Request & request, std::string * error = nullptr) {
-    if (!request.backend || !request.head || !request.adapted_hidden || !request.base_hidden ||
-        !request.targets || !request.adapted_hidden_grad_bf16 || !request.ce_sum || !request.kl_sum ||
+    const bool device = request.adapted_rows != nullptr;
+    if (!request.backend || !request.head || !request.targets || !request.ce_sum || !request.kl_sum ||
+        (device ? !rows_match(request.adapted_rows, request) || !rows_match(request.base_rows, request) ||
+                  !rows_match(request.adapted_grad_rows, request)
+                : !request.adapted_hidden || !request.base_hidden || !request.adapted_hidden_grad_bf16) ||
         !request.positions || !request.hidden || request.hidden > std::numeric_limits<int64_t>::max() ||
         request.positions > std::numeric_limits<int>::max() || !std::isfinite(request.kl_weight) ||
         request.kl_weight < 0.0f || request.head->rows != static_cast<int64_t>(kVocab) ||
@@ -258,7 +273,7 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         return fail(Status::invalid_argument, error, "head-loss request size overflows");
     for (std::size_t i = 0; i < request.positions; ++i) {
         if (request.targets[i] >= kVocab) return fail(Status::invalid_argument, error, "head-loss target is outside vocabulary");
-        for (std::size_t j = 0; j < request.hidden; ++j) {
+        for (std::size_t j = 0; !device && j < request.hidden; ++j) {
             if (!std::isfinite(request.adapted_hidden[i * request.hidden + j]) ||
                 !std::isfinite(request.base_hidden[i * request.hidden + j]))
                 return fail(Status::invalid_argument, error, "head-loss hidden input is nonfinite");
@@ -268,7 +283,22 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
     if (cuda && !device_guard.valid)
         return fail(Status::unsupported_backend, error, "unable to select the GGML CUDA backend device");
 
-    std::vector<float> chunk_grad(kArChunk * request.hidden);
+    std::vector<float> chunk_grad(device ? 0 : kArChunk * request.hidden);
+    // Chunk-sized views of the device rows, for the copies in and out.
+    Temporary views;
+    if (device) {
+        ggml_init_params params{};
+        params.mem_size = ggml_tensor_overhead() * 4; // reset every chunk
+        params.no_alloc = true;
+        views.ctx = ggml_init(params);
+        if (!views.ctx) return fail(Status::allocation_failure, error, "head-loss view context allocation failed");
+    }
+    auto rows_view = [&](const ggml_tensor * rows, std::size_t offset, std::size_t count) {
+        ggml_tensor * t = const_cast<ggml_tensor *>(rows);
+        ggml_tensor * v = ggml_view_2d(views.ctx, t, t->ne[0], int64_t(count), t->nb[1], offset * t->nb[1]);
+        ggml_backend_view_init(v); // the copies need the view's buffer, not just its data
+        return v;
+    };
     std::vector<float> per_ce(request.positions), per_kl(request.positions);
     ChunkWorkspace full_workspace;
     ChunkWorkspace tail_workspace;
@@ -294,8 +324,14 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         ggml_tensor * per_kl_t = workspace.per_kl_t;
         ggml_cgraph * forward = workspace.forward;
         ggml_cgraph * backward = workspace.backward;
-        ggml_backend_tensor_set(adapted, request.adapted_hidden + offset * request.hidden, 0, ggml_nbytes(adapted));
-        ggml_backend_tensor_set(base, request.base_hidden + offset * request.hidden, 0, ggml_nbytes(base));
+        if (device) {
+            ggml_reset(views.ctx);
+            ggml_backend_tensor_copy(rows_view(request.adapted_rows, offset, count), adapted);
+            ggml_backend_tensor_copy(rows_view(request.base_rows, offset, count), base);
+        } else {
+            ggml_backend_tensor_set(adapted, request.adapted_hidden + offset * request.hidden, 0, ggml_nbytes(adapted));
+            ggml_backend_tensor_set(base, request.base_hidden + offset * request.hidden, 0, ggml_nbytes(base));
+        }
         ggml_backend_tensor_set(targets, request.targets + offset, 0, ggml_nbytes(targets));
         if (!cuda) {
             std::vector<int32_t> flat(count);
@@ -340,10 +376,16 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
             return fail(Status::graph_failure, error, "head-loss backward graph failed");
         }
         ggml_backend_synchronize(request.backend);
+        if (device) {
+            ggml_backend_tensor_copy(hidden_grad, rows_view(request.adapted_grad_rows, offset, count));
+            continue;
+        }
         ggml_backend_tensor_get(hidden_grad, chunk_grad.data(), 0, count * request.hidden * sizeof(float));
         for (std::size_t i = 0; i < count * request.hidden; ++i)
             request.adapted_hidden_grad_bf16[offset * request.hidden + i] = f32_to_bf16(chunk_grad[i]);
     }
+    if (device && (!std::isfinite(*request.ce_sum) || !std::isfinite(*request.kl_sum)))
+        return fail(Status::invalid_argument, error, "head-loss hidden input is nonfinite");
     return Status::success;
 }
 

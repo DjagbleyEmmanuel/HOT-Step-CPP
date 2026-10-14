@@ -98,14 +98,48 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     Yue2AitkStackTape ar;
     if(!yue2_aitk_stack::forward(backend,model,&state.ar_adapters(),false,embeds.values,
         batch.ar.input_ids.size(),nullptr,true,&ar,reuse_prefix?&prefix:nullptr,error)) return false;
-    // Final norm's small graph currently shares a forward/backward entry point.
-    std::vector<float> zeros(ar.final_hidden.size(),0.0f);
-    Yue2AitkEndpointHost adapted_norm;
-    if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     // The frozen teacher exists for the KL term. With no KL weight and nothing
     // reading the KL, its forward is a wasted pass: the adapted hidden stands
     // in as "base", so the kernel's (p - q) term is zero and ar_kl reads 0.
     const bool teacher=input.kl_weight>0 || input.measure_kl;
+    // The head kernel's gradient is d(CE + kl_weight * KL). --ar-loss-weight w
+    // wants d(w * CE + kl_weight * KL) = w * d(CE + (kl_weight / w) * KL): the
+    // kernel runs at kl_weight / w and the hidden gradient is scaled by w. At
+    // w = 1 both are exact identities.
+    const float ar_w=input.ar_loss_weight;
+    // Device head: final norm, row gather, head loss and the norm's dy stay on
+    // the device. The cursor loss reads and writes host rows, so it keeps the
+    // host path, as does YUE2_AITK_HEAD_HOST=1 (bit-identical rollback).
+    static const bool head_host=std::getenv("YUE2_AITK_HEAD_HOST")!=nullptr;
+    std::vector<float> ar_dx;
+    if(!head_host && !(input.cursor_weight>0 && !input.cursor_frames.empty())) {
+    Yue2AitkArHeadRows rows;
+    {
+        Yue2AitkStackTape base;
+        if(teacher) {
+            notify("AR frozen teacher forward");
+            if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
+        }
+        YUE2_PROF("head: AR final norm + row gather (device)");
+        if(!rows.init(backend,model,ar.final_hidden,teacher?&base.final_hidden:nullptr,ar.length,batch.ar.prediction_positions,ar_w,error)) return false;
+    }
+    std::vector<uint32_t> targets(N);
+    for(size_t i=0;i<N;++i) targets[i]=uint32_t(batch.ar.target_ids[i]);
+    float ce=0,kl=0;
+    yue2_aitk_head_loss::Request head;
+    head.backend=backend;head.head=&model.lm_head();head.targets=targets.data();head.positions=N;head.hidden=H;
+    head.adapted_rows=rows.rows;head.base_rows=teacher?rows.base_rows:rows.rows;head.adapted_grad_rows=rows.grad;
+    head.kl_weight=input.kl_weight/ar_w;head.ce_sum=&ce;head.kl_sum=&kl;
+    notify("AR CE and KL backward");
+    { YUE2_PROF("head: CE/KL compute"); if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false; }
+    result.ar_ce=double(ce)/N;result.ar_kl=teacher?double(kl)/N:0.0;
+    notify("AR transformer backward");
+    { YUE2_PROF("head: dy scatter + AR final norm backward (device)"); if(!rows.backward(backend,&ar_dx,error)) return false; }
+    } else {
+    // Final norm's small graph currently shares a forward/backward entry point.
+    std::vector<float> zeros(ar.final_hidden.size(),0.0f);
+    Yue2AitkEndpointHost adapted_norm;
+    if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     std::vector<float> selected(N*H),selected_base(teacher?N*H:0);
     std::vector<uint32_t> targets(N);
     if(teacher) {
@@ -125,16 +159,11 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     yue2_aitk_head_loss::Request head;
     head.backend=backend;head.head=&model.lm_head();head.adapted_hidden=selected.data();
     head.base_hidden=teacher?selected_base.data():selected.data();head.targets=targets.data();head.positions=N;
-    // The kernel's gradient is d(CE + kl_weight * KL). --ar-loss-weight w wants
-    // d(w * CE + kl_weight * KL) = w * d(CE + (kl_weight / w) * KL): the kernel
-    // runs at kl_weight / w and the hidden gradient is scaled by w below. At
-    // w = 1 both are exact identities.
     head.hidden=H;head.kl_weight=input.kl_weight/input.ar_loss_weight;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
     notify("AR CE and KL backward");
     { YUE2_PROF("head: CE/KL compute"); if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false; }
     result.ar_ce=double(ce)/N;result.ar_kl=teacher?double(kl)/N:0.0;
     notify("AR transformer backward");
-    const float ar_w=input.ar_loss_weight;
     for(size_t i=0;i<N;++i) for(size_t d=0;d<H;++d)
         zeros[batch.ar.prediction_positions[i]*H+d]=ggml_bf16_to_fp32(ggml_bf16_t{selected_grad[i*H+d]})*ar_w;
     if(input.cursor_weight>0 && !input.cursor_frames.empty()) {
@@ -156,7 +185,9 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         result.cursor_frames=input.cursor_frames.size();
     }
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
-    if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(adapted_norm.dx),
+    ar_dx=std::move(adapted_norm.dx);
+    }
+    if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(ar_dx),
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why,input.accumulate);},error,
         [&](size_t layer){return state.gradient_tensors(false,int(layer));},input.accumulate)) return false;
     }

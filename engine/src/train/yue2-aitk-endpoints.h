@@ -42,12 +42,7 @@ public:
 
     static bool ar_final_norm(ggml_backend_t backend, const Yue2AitkModel & model,
                               const float * hidden, const float * dy, int64_t tokens,
-                              Yue2AitkEndpointHost * out, std::string * error=nullptr) {
-        using namespace yue2_aitk_endpoints_detail; if(!out||!shape2(hidden,2048,tokens)||!shape2(dy,2048,tokens)||!model.ar().final_norm)return fail(error,"invalid AR final norm request"); Runtime r;if(!init(backend,&r,error))return false;
-        ggml_tensor*x=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,2048,tokens),*up=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,2048,tokens);if(!x||!up)return fail(error,"AR final norm input allocation failed");ggml_set_param(x);
-        ggml_tensor*y=yue2_aitk_graph::rms(r.ctx,yue2_aitk_graph::round(r.ctx,x),model.ar().final_norm,1e-6f);ggml_tensor*loss=ggml_sum(r.ctx,ggml_mul(r.ctx,y,up));ggml_cgraph*g=ggml_new_graph_custom(r.ctx,4096,true);if(!loss||!g)return fail(error,"AR final norm graph allocation failed");ggml_build_forward_expand(g,loss);ggml_set_loss(loss);ggml_build_backward_expand(r.ctx,g,nullptr);if(!support(backend,g,error)||!alloc(&r,backend,error))return false;ggml_backend_tensor_set(x,hidden,0,ggml_nbytes(x));ggml_backend_tensor_set(up,dy,0,ggml_nbytes(up));if(!compute(backend,g,error))return false;
-        out->values.resize(ggml_nelements(y));ggml_backend_tensor_get(y,out->values.data(),0,ggml_nbytes(y));ggml_tensor*gx=ggml_graph_get_grad(g,x);if(!gx)return fail(error,"AR final norm gradient missing");out->dx.resize(ggml_nelements(gx));ggml_backend_tensor_get(gx,out->dx.data(),0,ggml_nbytes(gx));return true;
-    }
+                              Yue2AitkEndpointHost * out, std::string * error=nullptr);
 
     static bool nar_frontend(ggml_backend_t backend, const Yue2AitkModel & model,
                              const float * latents, int64_t frames, float timestep,
@@ -66,8 +61,62 @@ public:
     }
 };
 
+// The AR final norm's graph, held open so its input, output and dy can stay on
+// the device (Yue2AitkArHeadRows); ar_final_norm is the host wrapper over it.
+struct Yue2AitkArNormGraph {
+    yue2_aitk_endpoints_detail::Runtime r; ggml_tensor *x=nullptr,*up=nullptr,*y=nullptr,*gx=nullptr; ggml_cgraph *g=nullptr;
+    bool build(ggml_backend_t backend,const Yue2AitkModel & model,int64_t tokens,std::string * error) {
+        using namespace yue2_aitk_endpoints_detail; if(!model.ar().final_norm)return fail(error,"invalid AR final norm request"); if(!init(backend,&r,error))return false;
+        x=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,2048,tokens);up=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,2048,tokens);if(!x||!up)return fail(error,"AR final norm input allocation failed");ggml_set_param(x);
+        y=yue2_aitk_graph::rms(r.ctx,yue2_aitk_graph::round(r.ctx,x),model.ar().final_norm,1e-6f);ggml_tensor*loss=ggml_sum(r.ctx,ggml_mul(r.ctx,y,up));g=ggml_new_graph_custom(r.ctx,4096,true);if(!loss||!g)return fail(error,"AR final norm graph allocation failed");ggml_build_forward_expand(g,loss);ggml_set_loss(loss);ggml_build_backward_expand(r.ctx,g,nullptr);if(!support(backend,g,error)||!alloc(&r,backend,error))return false;
+        gx=ggml_graph_get_grad(g,x);return gx?true:fail(error,"AR final norm gradient missing");
+    }
+};
 
+inline bool Yue2AitkEndpoints::ar_final_norm(ggml_backend_t backend, const Yue2AitkModel & model,
+                                             const float * hidden, const float * dy, int64_t tokens,
+                                             Yue2AitkEndpointHost * out, std::string * error) {
+    using namespace yue2_aitk_endpoints_detail; if(!out||!shape2(hidden,2048,tokens)||!shape2(dy,2048,tokens))return fail(error,"invalid AR final norm request");
+    Yue2AitkArNormGraph n;if(!n.build(backend,model,tokens,error))return false;ggml_backend_tensor_set(n.x,hidden,0,ggml_nbytes(n.x));ggml_backend_tensor_set(n.up,dy,0,ggml_nbytes(n.up));if(!compute(backend,n.g,error))return false;
+    out->values.resize(ggml_nelements(n.y));ggml_backend_tensor_get(n.y,out->values.data(),0,ggml_nbytes(n.y));out->dx.resize(ggml_nelements(n.gx));ggml_backend_tensor_get(n.gx,out->dx.data(),0,ggml_nbytes(n.gx));return true;
+}
 
-
-
-
+// Device-resident AR final norm around the head loss: the prediction rows are
+// gathered on the device for the head kernel, and its F32 hidden gradient goes
+// back as the norm's dy (BF16-rounded, times grad_scale, scattered to the
+// prediction rows) without a host hop. Only dx comes back to the host, since
+// the stack tape is host data. Same graphs and rounding as the host path.
+struct Yue2AitkArHeadRows {
+    Yue2AitkArNormGraph adapted;
+    yue2_aitk_endpoints_detail::Runtime r;
+    ggml_tensor *pos=nullptr,*rows=nullptr,*base_rows=nullptr,*grad=nullptr; ggml_cgraph *gather=nullptr,*scatter=nullptr;
+    // base_hidden null: no teacher, base_rows stays null.
+    bool init(ggml_backend_t backend,const Yue2AitkModel & model,const std::vector<float> & hidden,const std::vector<float> * base_hidden,
+              int64_t tokens,const std::vector<size_t> & positions,float grad_scale,std::string * error) {
+        using namespace yue2_aitk_endpoints_detail; const int64_t n=int64_t(positions.size());
+        if(tokens<=0||n<=0||hidden.size()!=size_t(tokens)*2048||(base_hidden&&base_hidden->size()!=hidden.size()))return fail(error,"invalid AR head rows request");
+        std::vector<int32_t> index(positions.size());for(size_t i=0;i<positions.size();++i){if(positions[i]>=size_t(tokens))return fail(error,"invalid AR head rows request");index[i]=int32_t(positions[i]);}
+        auto open=[&](Yue2AitkArNormGraph & g,const std::vector<float> & h){if(!g.build(backend,model,tokens,error))return false;ggml_backend_tensor_set(g.x,h.data(),0,ggml_nbytes(g.x));ggml_backend_tensor_memset(g.up,0,0,ggml_nbytes(g.up));return compute(backend,g.g,error);};
+        Yue2AitkArNormGraph base; // only its gathered rows outlive init
+        if(!open(adapted,hidden)||(base_hidden&&!open(base,*base_hidden)))return false;
+        if(!yue2_aitk_endpoints_detail::init(backend,&r,error))return false;
+        pos=ggml_new_tensor_1d(r.ctx,GGML_TYPE_I32,n);grad=ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,2048,n);if(!pos||!grad)return fail(error,"AR head rows allocation failed");
+        // Gather from leaf aliases of the computed norm outputs: get_rows on y itself would pull the whole norm graph into gather.
+        auto alias=[&](const ggml_tensor*y){ggml_tensor*t=ggml_new_tensor(r.ctx,y->type,GGML_MAX_DIMS,y->ne);if(t){t->buffer=y->buffer;t->data=y->data;}return t;};
+        ggml_tensor*ya=alias(adapted.y),*yb=base_hidden?alias(base.y):nullptr;if(!ya||(base_hidden&&!yb))return fail(error,"AR head rows allocation failed");
+        rows=ggml_get_rows(r.ctx,ya,pos);if(base_hidden)base_rows=ggml_get_rows(r.ctx,yb,pos);
+        ggml_tensor*dy=yue2_aitk_graph::round(r.ctx,grad);if(grad_scale!=1.0f)dy=ggml_scale(r.ctx,dy,grad_scale);dy=ggml_set_rows(r.ctx,adapted.up,dy,pos);
+        gather=ggml_new_graph_custom(r.ctx,16,false);scatter=ggml_new_graph_custom(r.ctx,16,false);if(!rows||(base_hidden&&!base_rows)||!dy||!gather||!scatter)return fail(error,"AR head rows graph allocation failed");
+        ggml_build_forward_expand(gather,rows);if(base_rows)ggml_build_forward_expand(gather,base_rows);ggml_build_forward_expand(scatter,dy);
+        if(!support(backend,gather,error)||!support(backend,scatter,error)||!alloc(&r,backend,error))return false;
+        ggml_backend_tensor_set(pos,index.data(),0,ggml_nbytes(pos));
+        return ggml_backend_graph_compute(backend,gather)==GGML_STATUS_SUCCESS?true:fail(error,"AR head rows gather failed");
+    }
+    // After the head loss has filled grad: scatter it into dy, run the norm backward, read dx.
+    bool backward(ggml_backend_t backend,std::vector<float> * dx,std::string * error) {
+        using namespace yue2_aitk_endpoints_detail;
+        if(ggml_backend_graph_compute(backend,scatter)!=GGML_STATUS_SUCCESS)return fail(error,"AR head rows scatter failed");
+        if(!compute(backend,adapted.g,error))return false;
+        dx->resize(ggml_nelements(adapted.gx));ggml_backend_tensor_get(adapted.gx,dx->data(),0,ggml_nbytes(adapted.gx));return true;
+    }
+};
