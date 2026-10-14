@@ -200,6 +200,10 @@ respawn and file-lock loop.
   `http://localhost:3001/api/shutdown` so Node stops the engine, Vite and itself; waits for
   `ace-server.exe` to exit, force-killing it after 10 seconds and giving up after 15; then
   calls `engine\build.cmd`. It is safe when the app is not running.
+- **Work-channel reservations are optional.** The rebuild runs without joining a channel by
+  default, even when `data/collaboration.db` exists. If you are using the HOT-Step work
+  channel, set `HOTSTEP_WORK_CHANNEL=1` for the rebuild to reserve `app-server`, `gpu` and
+  `engine-build` through `work-run.ps1`. See the [work-channel guide](../../tools/mcp-lyricstudio/README.md#resource-reservations-and-guarded-commands).
 - **It does not restart the app.** Start it again with `dev.bat`, detached (the shutdown also
   killed Vite); `LAUNCH.bat` is the end-user prod launcher.
 - **Check the build yourself.** Look for `error C` or `error LNK` lines in the output and

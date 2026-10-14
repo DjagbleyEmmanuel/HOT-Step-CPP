@@ -140,9 +140,8 @@ Thumbs.db
 # person's machine, not the project's.
 .codex/
 
-# Dev-only scripts (local only, not needed by end users)
+# Local dev-only scripts (dev-rebuild.bat is shared and tracked)
 dev.bat
-dev-rebuild.bat
 server/restart-loop.cmd
 
 # Local-only content
