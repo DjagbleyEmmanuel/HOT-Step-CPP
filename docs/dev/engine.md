@@ -303,8 +303,9 @@ xoshiro256** generator, so seeded plugins draw the same numbers as before. `Plug
 `engine/plugins/{solvers,schedulers,guidance,postprocess}/` and then the same four
 folders under the project root `plugins/`, once at startup. `ace-server` then
 scans the root given by `--user-plugins`, which the release app sets to
-`<data folder>/plugins`. Duplicate names keep the first one loaded, so shipped
-plugins win. `ace-server` and `ace-synth` both call it. `lua-plugin.h` runs each file in its own sandboxed VM,
+`<data folder>/plugins`. A user plugin replaces a shipped plugin of the same name
+(the shipped Lua state is closed and the log names both files); any other duplicate
+keeps the first one loaded. `ace-server` and `ace-synth` both call it. `lua-plugin.h` runs each file in its own sandboxed VM,
 passes float arrays without copying, reads each plugin's metadata and parameter
 schema, and exposes the native `apg()` helper and the optional `post_step()` hook
 to guidance plugins.
@@ -517,4 +518,4 @@ Routes `ace-server` adds on top of upstream's `/lm`, `/synth`, `/understand`,
 
 ## Release data paths
 
-Release engine executables and shipped plugins remain app-owned. The server passes the data folder plugin overlay through `--user-plugins-dir` and supplies absolute model and tool paths. Downloaded runtime libraries live under `<data folder>/tools/runtime`. See [Data folder and upgrades](../user/data-folder.md).
+Release engine executables and shipped plugins remain app-owned. The server passes the data folder plugin overlay through `--user-plugins` and supplies absolute model and tool paths. Downloaded runtime libraries live under `<data folder>/tools/runtime`. See [Data folder and upgrades](../user/data-folder.md).

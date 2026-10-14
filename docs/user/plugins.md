@@ -69,7 +69,9 @@ If a plugin does not show up, check the newest `logs/<session>/ace_engine.log`. 
 engine logs a `[Plugins] Loaded ...` count at startup and a warning for each file it
 skips: a file that declares the wrong type for its folder, or a name that is already
 taken. When two plugins share a name the first one loaded wins, so a community plugin
-cannot replace a built-in one of the same name.
+in the app's `plugins/` folder cannot replace a built-in one of the same name. The
+exception is the data folder's `plugins/` in release builds: a plugin there replaces
+the built-in of the same name, and the log says which file won.
 
 Plugins run in a sandbox with no access to files or the operating system. They can still
 produce bad audio if they are wrong, so treat a new one like any other setting and compare

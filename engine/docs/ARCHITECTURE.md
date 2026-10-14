@@ -663,7 +663,7 @@ Notes the usage text does not cover:
   scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
 - `--user-plugins <dir>` is a plugin root with the same `solvers/`, `schedulers/`,
   `guidance/` and `postprocess/` subfolders as `engine/plugins/`. It is scanned last,
-  so a shipped plugin keeps its name if a user file declares the same one. The release
+  and a user file that declares a shipped plugin's name replaces it. The release
   app passes `<data folder>/plugins`; dev passes nothing.
 - The app starts ace-server on port 8085.
 
