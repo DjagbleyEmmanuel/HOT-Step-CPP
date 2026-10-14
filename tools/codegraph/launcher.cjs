@@ -91,12 +91,14 @@ function waitForLock() {
 }
 
 function sync() {
+  let lastError;
   for (let attempt = 0; attempt < 5; attempt++) {
     waitForLock();
     const freshness = fingerprint();
     if (synced(freshness) && fs.existsSync(path.join(graphDir, 'codegraph.db'))) return;
-    const result = run(process.execPath, [binary, 'sync', root, '--quiet']);
+    const result = run(process.execPath, [binary, 'sync', root]);
     if (result.status === 0) {
+      lastError = undefined;
       const after = fingerprint();
       if (freshness === after) {
         markSynced(after);
@@ -104,14 +106,14 @@ function sync() {
       }
       continue;
     }
-    const message = `${result.stderr}\n${result.stdout}`;
+    const message = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
+    lastError = message || `codegraph sync exited with status ${result.status ?? 'unknown'}`;
     if (!lockError.test(message)) {
-      process.stderr.write(message || 'codegraph sync failed\n');
-      process.exit(result.status || 1);
+      throw new Error(`codegraph sync failed: ${lastError}`);
     }
     pause(250 * (attempt + 1));
   }
-  throw new Error('index busy or files kept changing; use grep');
+  throw new Error(`index busy or files kept changing; use grep${lastError ? ` (${lastError})` : ''}`);
 }
 
 try {
