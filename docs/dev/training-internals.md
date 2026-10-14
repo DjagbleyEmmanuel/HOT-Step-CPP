@@ -61,8 +61,8 @@ built once per expert pass, prediction rows are gathered with `get_rows`, each h
 F32 gradient lands in a device tensor, and a scatter graph applies the BF16 rounding, the
 `--ar-loss-weight` scale and `set_rows` into the norm's dy. Only the norm's dx comes back
 to the host. Setting `YUE2_AITK_HEAD_HOST` (any value) restores the previous host
-round-trip bit for bit; the cursor loss reads host rows, so `--cursor-weight` above 0 takes
-the host path too. `yue2-head-loss-device-test` checks the two modes against each other on
+round-trip bit for bit; the cursor loss reads host rows, so `--cursor-weight` above 0 with
+non-empty cursor frames takes the host path too. `yue2-head-loss-device-test` checks the two modes against each other on
 the CPU backend.
 
 `--device` takes any ggml device (`CUDA0`, `Vulkan0`, `MTL0`, `CPU`). Off CUDA the
