@@ -151,13 +151,15 @@ The file also holds a `checkout` field naming that path. A release never reads i
 checkout never reads `data-location.json`, so each install and each checkout has its own
 pointer. Settings refuses a target that any other pointer in the profile already uses, and
 a release's first run refuses a `HOT-Step-Data` sibling that a checkout already uses.
+These compare real locations, and start-up checks them again before a transfer and
+before opening the folder.
 
 **Move current data** from a checkout with no data folder moves those checkout paths with
 the same rename-or-copy rules as a release migration. Only folders inside the checkout
 move. The root `.env` becomes `settings/.env` (left behind as `.env.migrated`) with its
-engine binary paths kept, since the checkout is still the app. Planning asks git which
-files it tracks and refuses to move any of them, so `server/src/data` and other tracked
-files stay put. Once the checkout has a data folder, **Move**, **Use existing folder**,
+engine binary paths kept, since the checkout is still the app. Planning resolves links and junctions, refuses a source or `.env` that leads outside the
+checkout or onto files git tracks, and checks again before anything moves, so
+`server/src/data` and other tracked files stay put. Once the checkout has a data folder, **Move**, **Use existing folder**,
 **Create empty data folder** and **Import previous install** work as in a release. Runtime
 DLLs stay beside the dev engine build, and restart still uses the checkout's
 `.restart-requested` marker and `server/restart-loop.cmd`, so it works when the root

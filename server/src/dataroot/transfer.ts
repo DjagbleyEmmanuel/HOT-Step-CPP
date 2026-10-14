@@ -14,7 +14,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import {
   dataLayout, initLayout, inspectDevLegacy, inspectLegacy, isDataLayout, isEmptyDir, isInside, legacyMappings, migrateEnvText, newPending,
-  rewriteEnvText, rewritePath, samePath, writeJsonAtomic, writePointer,
+  otherPointerRoots, rewriteEnvText, rewritePath, samePath, writeJsonAtomic, writePointer,
   type Mapping, type OperationKind, type PathPair, type PendingOperation, type Pointer,
 } from './paths.js';
 
@@ -243,7 +243,7 @@ export function settleEnv(op: PendingOperation): void {
   if (op.envSource) {
     const src = fs.existsSync(op.envSource) ? op.envSource : `${op.envSource}.migrated`;
     if (!fs.existsSync(src)) throw new TransferError(`the old settings file ${op.envSource} is gone`);
-    text = migrateEnvText(fs.readFileSync(src, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.keepAppBinaries ? null : op.source);
+    text = migrateEnvText(fs.readFileSync(src, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.devCheckout ? null : op.source);
     const backup = `${l.envPath}.before-${op.kind}-${op.id.slice(0, 8)}`;
     if (fs.existsSync(l.envPath) && !fs.existsSync(backup)) fs.renameSync(l.envPath, backup);
   } else if (fs.existsSync(l.envPath)) {
@@ -354,6 +354,34 @@ export function trackedFiles(checkout: string, dirs: string[]): string[] {
   return out.split('\0').filter(Boolean);
 }
 
+/** Why a dev checkout's sources may not move: a source (or .env) that is a
+ *  link leading outside the checkout, or one whose real location git tracks.
+ *  Checked on real paths, so a junction onto server/src/data is caught. */
+export function devSourceErrors(checkout: string, sources: string[], envFile: string | null): string[] {
+  const co = canonical(checkout);
+  const errors: string[] = [];
+  const real: string[] = [];
+  for (const s of [...sources, ...(envFile && fs.existsSync(envFile) ? [envFile] : [])]) {
+    const r = canonical(s);
+    if (!isInside(co, r) || samePath(co, r)) errors.push(`${s} leads to ${r}, outside this checkout's own folders`);
+    else real.push(r);
+  }
+  try {
+    const tracked = trackedFiles(co, real);
+    if (tracked.length) errors.push(`refusing to move files git tracks in this checkout: ${tracked.slice(0, 5).join(', ')}${tracked.length > 5 ? ', ...' : ''}`);
+  } catch (e: any) {
+    errors.push(`could not ask git which files this checkout tracks: ${e.message}`);
+  }
+  return errors;
+}
+
+/** The other install (pointer root or pending destination) that `root` would
+ *  share a folder with, compared on real locations; null when none. */
+export function sharedRoot(prof: string, ptrFile: string, root: string): string | null {
+  const r = canonical(root);
+  return otherPointerRoots(prof, ptrFile).find(o => { const c = canonical(o); return isInside(c, r) || isInside(r, c); }) ?? null;
+}
+
 /** Build a pending operation and the reasons it cannot run. Writes nothing.
  *  `target` is the new root (move/create/repoint/migrate) or the old app
  *  folder to import from (import). */
@@ -384,12 +412,7 @@ export function planOperation(kind: OperationKind, target: string, ctx: PlanCont
     const mappings = legacyMappings(legacy, into);
     if (legacy.dev) {
       if (!isEmptyDir(dest)) errors.push(`${dest} is not empty`);
-      try {
-        const tracked = trackedFiles(legacy.appRoot, mappings.map(m => m.from));
-        if (tracked.length) errors.push(`refusing to move files git tracks in this checkout: ${tracked.slice(0, 5).join(', ')}${tracked.length > 5 ? ', ...' : ''}`);
-      } catch (e: any) {
-        errors.push(`could not ask git which files this checkout tracks: ${e.message}`);
-      }
+      errors.push(...devSourceErrors(legacy.appRoot, mappings.map(m => m.from), legacy.envFile));
     }
     const library = dataLayout(into).library;
     if (kind === 'import') {
@@ -405,7 +428,7 @@ export function planOperation(kind: OperationKind, target: string, ctx: PlanCont
       mappings,
       envSource: legacy.envFile,
       envBase: legacy.base,
-      keepAppBinaries: legacy.dev || undefined,
+      devCheckout: legacy.dev ? legacy.appRoot : undefined,
       dbPath: path.join(legacy.dataDir, 'hotstep.db'),
       copies: kind === 'import' ? importCopies(legacyRoot, ctx.appRoot, into) : [],
       setAside: kind === 'import' ? [library] : undefined,
@@ -503,6 +526,11 @@ export function runPending(ptrFile: string, ptr: Pointer, appRoot: string, log: 
   if (op.abandon) { abandon(ptrFile, ptr, log); return; }
   try {
     const errs = validateOperation(op, appRoot);
+    // A link can change between Settings and this restart: check the real sources again.
+    if (op.devCheckout) {
+      errs.push(...devSourceErrors(op.devCheckout, op.mappings.filter(m => m.state === 'pending').map(m => m.from),
+        op.envDone ? null : op.envSource));
+    }
     if (errs.length) throw new TransferError(errs.join('; '));
     const l = dataLayout(op.destination);
 

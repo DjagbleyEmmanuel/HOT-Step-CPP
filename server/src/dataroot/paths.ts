@@ -211,8 +211,10 @@ export interface PendingOperation {
   /** Import only: a blank library (fresh install, no songs) renamed aside first. */
   setAside?: string[];
   setAsideDone?: boolean;
-  /** The source is a dev checkout that stays the app: keep its .env binary paths. */
-  keepAppBinaries?: boolean;
+  /** The source is this dev checkout, which stays the app: its .env binary
+   *  paths are kept and its real sources are checked against git again
+   *  before anything moves. */
+  devCheckout?: string;
   /** Set by hand (see the error page) to undo a same-volume move. */
   abandon?: boolean;
   error: string | null;

@@ -17,11 +17,11 @@ import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import {
   DEFAULT_DATA_FOLDER, LOCK_FILE, POINTER_FILE, RESTART_MARKER_FILE,
-  dataLayout, devPointerFile, initLayout, isDataLayout, isEmptyDir, isInside, legacyMappings, inspectLegacy, otherPointerRoots,
+  dataLayout, devPointerFile, initLayout, isDataLayout, isEmptyDir, legacyMappings, inspectLegacy,
   profileDir, readPointer, writePointer,
   type Pointer,
 } from './paths.js';
-import { planOperation, runPending } from './transfer.js';
+import { planOperation, runPending, sharedRoot } from './transfer.js';
 
 export interface Runtime {
   mode: 'dev' | 'release';
@@ -123,6 +123,8 @@ export interface ResolveOptions {
 async function runPendingAtBoot(ptrFile: string, ptr: Pointer, appRoot: string, prof: string, opts: ResolveOptions, log: (m: string) => void): Promise<string | null> {
   const op = ptr.pending;
   if (!op) return null;
+  const shared = op.abandon ? null : sharedRoot(prof, ptrFile, op.destination);
+  if (shared) return `${op.destination} is the same folder as ${shared}, which another HOT-Step install uses. Cancel this change in ${ptrFile}, then restart.`;
   if (!opts.skipEngineProbe) {
     const envFile = op.envSource ?? (ptr.root ? dataLayout(ptr.root).envPath : null);
     const port = enginePort(envFile);
@@ -154,6 +156,8 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
       return fail(`The data folder ${ptr.root} is missing or cannot be written. Reconnect the drive, or correct "root" in ${ptrFile} `
         + `(or delete that file to go back to this checkout's own folders), then restart.`);
     }
+    const sharedWith = sharedRoot(prof, ptrFile, ptr.root);
+    if (sharedWith) return fail(`The data folder ${ptr.root} is the same folder as ${sharedWith}, which another HOT-Step install uses. Point this one elsewhere in ${ptrFile}, then restart.`);
     initLayout(dataLayout(ptr.root));
     log(`[Data] Dev data folder: ${ptr.root}`);
     return { ok: true, runtime: dev(checkout, prof, ptrFile, ptr.root) };
@@ -188,7 +192,7 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
     if (!ptr) {
       // First run of the new layout on this machine.
       const sibling = path.join(path.dirname(appRoot), DEFAULT_DATA_FOLDER);
-      if (otherPointerRoots(prof, ptrFile).some(r => isInside(r, sibling) || isInside(sibling, r))) {
+      if (sharedRoot(prof, ptrFile, sibling)) {
         return fail(`${sibling} is a development checkout's data folder. Set HOT_STEP_DATA_ROOT, or move that checkout's data elsewhere, then restart.`);
       }
       const legacy = inspectLegacy(appRoot);
@@ -221,6 +225,8 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
     try { fs.accessSync(root, fs.constants.R_OK | fs.constants.W_OK); } catch {
       return fail(`The data folder ${root} is missing or cannot be written. Reconnect the drive, or correct "root" in ${ptrFile}, then restart.`);
     }
+    const sharedWith = sharedRoot(prof, ptrFile, root);
+    if (sharedWith) return fail(`The data folder ${root} is the same folder as ${sharedWith}, which another HOT-Step install uses. Point this one elsewhere in ${ptrFile}, then restart.`);
     initLayout(dataLayout(root));
     return { ok: true, runtime: release(appRoot, root, prof, null) };
   } catch (e: any) {

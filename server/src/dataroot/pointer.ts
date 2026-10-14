@@ -6,8 +6,8 @@
 
 import path from 'path';
 import { RUNTIME } from './bootstrap.js';
-import { ENV_PATH_KEYS, isInside, otherPointerRoots, readPointer, writePointer, type OperationKind, type PendingOperation } from './paths.js';
-import { planOperation, sizeOperation } from './transfer.js';
+import { ENV_PATH_KEYS, isInside, readPointer, writePointer, type OperationKind, type PendingOperation } from './paths.js';
+import { planOperation, sharedRoot, sizeOperation } from './transfer.js';
 
 export type ScheduleKind = Exclude<OperationKind, 'migrate'>;
 
@@ -89,7 +89,7 @@ export function previewOperation(kind: ScheduleKind, target: string, currentDb: 
   const { op, errors } = plan(kind, target, currentDb);
   if (RUNTIME.override) errors.push('HOT_STEP_DATA_ROOT is set for this process; clear it before changing the data folder');
   if (kind !== 'import' && RUNTIME.profileDir && RUNTIME.pointerPath) {
-    const other = otherPointerRoots(RUNTIME.profileDir, RUNTIME.pointerPath).find(r => isInside(r, op.destination) || isInside(op.destination, r));
+    const other = sharedRoot(RUNTIME.profileDir, RUNTIME.pointerPath, op.destination);
     if (other) errors.push(`${other} belongs to another HOT-Step install (${RUNTIME.mode === 'dev' ? 'the release app or another checkout' : 'a development checkout'}); each keeps its own data folder`);
   }
   const size = errors.length ? { bytes: 0, crossVolume: false, needBytes: 0, freeBytes: null } : sizeOperation(op);

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { resolveRuntime } from './bootstrap.js';
 import { dataLayout, devPointerFile, initLayout, isInside, otherPointerRoots, readPointer, rewritePath, writePointer, BUNDLED_DATA_NAMES, POINTER_FILE, LOCK_FILE } from './paths.js';
-import { hooks, planOperation, rewriteDb, runPending } from './transfer.js';
+import { hooks, planOperation, rewriteDb, runPending, sharedRoot } from './transfer.js';
 
 const quiet = () => {};
 
@@ -668,3 +668,57 @@ test('config in dev with a dev pointer uses the data folder but keeps the checko
   assert.equal(c.marker, path.join(checkout, '.restart-requested'));
   assert.doesNotMatch(fs.readFileSync(l.envPath, 'utf-8'), /^DATA_DIR=/m, 'example DATA_DIR dropped');
 });
+
+test('dev Move refuses a source that is a junction onto tracked files, at plan time and again before moving', () => {
+  const f = devCheckout();
+  const tracked = path.join(f.co, 'server', 'src', 'data', 'model-registry.json');
+  fs.mkdirSync(path.join(f.co, 'server'), { recursive: true });
+  fs.symlinkSync(path.join(f.co, 'server', 'src', 'data'), path.join(f.co, 'server', 'data'), 'junction');
+  const ctx = { appRoot: f.co, currentRoot: null, currentDb: null, dev: true };
+  const bad = planOperation('migrate', path.join(f.base, 'D1'), ctx);
+  assert.ok(bad.errors.some(e => /git tracks/.test(e) && e.includes('model-registry.json')), bad.errors.join('; '));
+
+  // Planned against a real folder, swapped for the junction before restart.
+  fs.unlinkSync(path.join(f.co, 'server', 'data')); // the junction, not its target
+  write(path.join(f.co, 'server', 'data', 'hotstep.db'), 'db');
+  const { op, errors } = planOperation('migrate', path.join(f.base, 'D2'), ctx);
+  assert.deepEqual(errors, []);
+  fs.rmSync(path.join(f.co, 'server', 'data'), { recursive: true });
+  fs.symlinkSync(path.join(f.co, 'server', 'src', 'data'), path.join(f.co, 'server', 'data'), 'junction');
+  const ptr = { version: 1 as const, root: null, pending: op, checkout: f.co };
+  writePointer(f.ptrFile, ptr);
+  assert.throws(() => runPending(f.ptrFile, ptr, f.co, quiet), /git tracks/);
+  assert.ok(fs.existsSync(tracked), 'tracked resource untouched');
+  assert.ok(isEmptyDirOrMissing(path.join(f.base, 'D2', 'library')));
+});
+
+test('dev Move refuses a tracked .env', () => {
+  const f = devCheckout();
+  write(path.join(f.co, '.env'), 'GEMINI_API_KEY=x\n');
+  execFileSync('git', ['add', '-f', '.env'], { cwd: f.co });
+  const r = planOperation('migrate', path.join(f.base, 'D1'), { appRoot: f.co, currentRoot: null, currentDb: null, dev: true });
+  assert.ok(r.errors.some(e => /git tracks/.test(e) && e.includes('.env')), r.errors.join('; '));
+});
+
+test('a junction into another install\'s data folder counts as that folder, in Settings and at activation', async () => {
+  const f = devCheckout();
+  const rel = await resolveRuntime({ env: { HOT_STEP_ROOT: f.app, HOT_STEP_PROFILE_DIR: f.prof }, log: quiet });
+  assert.ok(rel.ok);
+  const link = path.join(f.base, 'looks-separate');
+  fs.symlinkSync(f.sibling, link, 'junction');
+  assert.equal(sharedRoot(f.prof, f.ptrFile, link), f.sibling);
+  assert.equal(sharedRoot(f.prof, f.ptrFile, path.join(f.base, 'really-separate')), null);
+
+  // Scheduled anyway (pointer edited by hand): refused before running.
+  writePointer(f.ptrFile, { version: 1, root: null, pending: planOperation('repoint', link, { appRoot: f.co, currentRoot: null, currentDb: null, dev: true }).op, checkout: f.co });
+  const pend = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co, skipEngineProbe: true });
+  assert.ok(!pend.ok && /another HOT-Step install/.test(pend.error));
+  // Already active: refused at start-up.
+  writePointer(f.ptrFile, { version: 1, root: link, pending: null, checkout: f.co });
+  const act = await resolveRuntime({ env: f.env, log: quiet, checkoutRoot: f.co });
+  assert.ok(!act.ok && /another HOT-Step install/.test(act.error));
+});
+
+function isEmptyDirOrMissing(dir: string): boolean {
+  try { return fs.readdirSync(dir).length === 0; } catch { return true; }
+}
