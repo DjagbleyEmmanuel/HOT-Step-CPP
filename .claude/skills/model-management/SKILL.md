@@ -235,3 +235,7 @@ Download mechanics: HuggingFace URL `https://huggingface.co/{repo}/resolve/main/
 - `engine/docs/ARCHITECTURE.md` — engine internals, request JSON, generation modes (committed).
 - `README.md` — install/build; states safetensors DiT/LM/Text-Enc/VAE all loadable and BF16 safetensors bit-perfect vs BF16 GGUF.
 - `docs/plans/2026-05-03-model-manager-design.md` — original Model Manager design (**gitignored, local-only, may be absent**; code has drifted from it — trust code).
+
+## Release data folder
+
+Release models and adapters default to the shared data folder; downloaded runtime libraries go in `tools/runtime/`. Bundled engine binaries and `server/data/` catalogues stay with the app. Route new writable release paths through the data-root resolver. See [Configuration](../../../docs/dev/config.md#release-data-folder).

@@ -514,3 +514,7 @@ Routes `ace-server` adds on top of upstream's `/lm`, `/synth`, `/understand`,
 - [building.md](building.md): build scripts, toolchains, optional SDKs
 - [plugins-authoring.md](plugins-authoring.md): writing Lua plugins
 - [training-internals.md](training-internals.md): the training system
+
+## Release data paths
+
+Release engine executables and shipped plugins remain app-owned. The server passes the data folder plugin overlay through `--user-plugins-dir` and supplies absolute model and tool paths. Downloaded runtime libraries live under `<data folder>/tools/runtime`. See [Data folder and upgrades](../user/data-folder.md).

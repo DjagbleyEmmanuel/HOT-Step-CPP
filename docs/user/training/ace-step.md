@@ -136,3 +136,7 @@ New adapters are available straight away, with no restart. Planner adapters appe
 - [Backends](../backends.md)
 - [Getting higher quality output](../quality.md)
 - [Training internals](../../dev/training-internals.md)
+
+## Release storage
+
+Training defaults to `<data folder>/library/training`; models and adapters remain in the shared data folder across app upgrades. External folder overrides stay external. See [Data folder and upgrades](../data-folder.md).

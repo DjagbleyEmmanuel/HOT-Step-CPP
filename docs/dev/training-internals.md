@@ -1031,3 +1031,7 @@ All are `train-dit --adapter-type lora` variants (rsLoRA and LoRA+ also in `trai
 ## Where the deep documents live
 
 `docs/plans/` is **gitignored (local-only)** — on the maintainer's machine the full design/implementation plans exist: `2026-07-27-training-studio-design.md` (master design), `-dataset-studio-implementation.md`, `-preprocess-implementation.md`, `-lm-trainer-implementation.md`, `2026-07-28-lm-4b-training.md`, `-dit-trainer-implementation.md`, `-lm-speed-levers.md`, `-codes-preview.md`. Each contains the frozen contracts and verification ladders. The commit history (`git log --oneline --grep=training`) carries the measured numbers per milestone.
+
+## Release data paths
+
+Release defaults place training under `<data folder>/library/training`. The server supplies absolute child paths; moves rewrite persisted dataset and checkpoint paths inside transferred folders after a database backup. External paths stay unchanged. See [Data folder and upgrades](../user/data-folder.md).

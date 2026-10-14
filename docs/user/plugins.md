@@ -183,3 +183,7 @@ seed, as described in
 - [Backends](backends.md)
 - [Getting higher quality output](quality.md)
 - [Plugin authoring](../dev/plugins-authoring.md)
+
+## Release data paths
+
+In release builds, put your plugins in the shared data folder's `plugins/`, under the appropriate category. Shipped plugins stay with the app; user plugins with the same name take precedence. See [Data folder and upgrades](data-folder.md).

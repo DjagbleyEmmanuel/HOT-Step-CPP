@@ -349,3 +349,7 @@ For reading the logs, see the troubleshooting page.
 - [ACE-Step training](training/ace-step.md)
 - [MiniMax-Music3 training](training/minimax-music3.md)
 - [YuE2 training](training/yue2.md)
+
+## Release data paths
+
+Release adapters default to the shared data folder's `adapters/`. A managed-folder move updates saved adapter paths inside transferred folders. An adapter directory override outside that folder remains external. See [Data folder and upgrades](data-folder.md).

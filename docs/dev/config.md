@@ -304,3 +304,7 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 - [building.md](building.md)
 - [engine.md](engine.md)
 - [api.md](api.md)
+
+### Release template and launcher contract
+
+Packagers use `release/.env.example`, leaving managed paths unset. The root `.env.example` is for dev and keeps `DATA_DIR=./server/data` and its lyric-export override. Do not copy that template into a release. `release/profile-path.mjs` mirrors `profileDir()` and `RESTART_MARKER_FILE`; keep that contract synchronized. Relative `HOT_STEP_PROFILE_DIR` overrides resolve against the launch process cwd. Ordinary data discovery uses absolute `HOT_STEP_ROOT` and the profile pointer. See [Data folder and upgrades](../user/data-folder.md).

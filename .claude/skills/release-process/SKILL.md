@@ -312,3 +312,7 @@ recent test-tag naming history): see [reference.md](reference.md).
   absent** on your checkout.
 - `CLAUDE.md` — repo-wide git rules (master only, explicit-path staging, push
   needs approval) that still apply during releasing.
+
+## Shared data layout
+
+Check all three CI assemblers and both local packagers when changing release layout. Packages use `release/.env.example`, leave managed paths unset and copy `server/src/data/` wholesale into app-owned `server/data/`. Include `profile-path.mjs` with each launcher. Release restart state is `<profile>/restart-requested`, matching `dataroot/paths.ts`; dev keeps its checkout marker. Run the prereq script for layout fixtures and distribution checks. See [Data folder and upgrades](../../../docs/user/data-folder.md).

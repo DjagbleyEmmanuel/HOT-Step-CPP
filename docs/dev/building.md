@@ -376,3 +376,11 @@ To build a package locally:
 - [releasing.md](releasing.md)
 - [plugins-authoring.md](plugins-authoring.md)
 - [ggml-fork.md](ggml-fork.md)
+
+## Release assembly and data paths
+
+CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, with immutable resources copied wholesale from `server/src/data/` into app-owned `server/data/`. The local macOS `package-release.sh` uses the same bundle, flat `engine/` binaries and `runtime/bin/node` layout as CI. Both local packagers include `ace-train`, `ace-midi` and `ace-caption`.
+
+Every package ships `release/.env.example` as `.env.example`, the shared launcher, `profile-path.mjs` and `README.txt`. No assembler precreates app-root models or adapters. Bootstrap creates the sibling data layout. The release template leaves managed paths unset; the checkout template retains its existing values. Launchers use `profile-path.mjs` to resolve the stable profile restart marker, matching `dataroot/paths.ts`, including `HOT_STEP_PROFILE_DIR` fixtures. Dev wrappers retain the checkout `.restart-requested` marker.
+
+Run `node server/scripts/check-release-prereqs.mjs` before shipping. It checks all three CI platform sections and both local assemblers, then runs disposable layout fixtures. Fixtures cover profile defaults for each platform, release reuse and unchanged dev selection; they do not run native Linux or macOS binaries. See [Data folder and upgrades](../user/data-folder.md).

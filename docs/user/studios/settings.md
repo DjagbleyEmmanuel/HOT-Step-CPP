@@ -159,3 +159,5 @@ Saving the Environment or AI Services tab only writes keys you changed; unmodifi
 - [Troubleshooting](../troubleshooting.md)
 - [Configuration](../../dev/config.md)
 - [Lyric Studio](lyric-studio.md)
+
+For upgrade, layout and recovery instructions, see [Data folder and upgrades](../data-folder.md).

@@ -402,3 +402,5 @@ For contributors and agents. Details: [Building](docs/dev/building.md), [HTTP AP
 | Release prerequisites | `check-release-prereqs.mjs` confirms every model and data file is reachable by a user. |
 | Docs checks | `tools/docs/build-docs.mjs` regenerates tables; `check-docs.mjs` catches drift and broken links. |
 | Lyric Studio MCP server | [`tools/mcp-lyricstudio`](tools/mcp-lyricstudio/README.md) exposes Lyric Studio to Claude Code and Codex, with shared discussion rooms and full-conversation PDF export. |
+
+- [Data folder and upgrades](docs/user/data-folder.md): release data persists outside the app across versions, with move, repoint and import actions in Settings.

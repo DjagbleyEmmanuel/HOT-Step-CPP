@@ -79,3 +79,7 @@ A transcription job that runs past an hour is stopped automatically.
 - [Library](library.md)
 - [Stem Studio](stem-studio.md)
 - [Model Manager](model-manager.md)
+
+## Release data paths
+
+Release MuScriptor tokens and preserved optional-install files live under `<data folder>/library/muscriptor`, with weights under `library/models/muscriptor` unless overridden. The shipped `ace-midi` stays in the app. Upgrading reuses downloaded weights; preserved optional Python environments may need rebuilding after relocation. See [Data folder and upgrades](../data-folder.md).

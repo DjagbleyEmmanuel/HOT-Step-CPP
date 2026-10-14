@@ -382,3 +382,7 @@ It also runs inside `check-release-prereqs.mjs` and in CI (`docs.yml`).
   multi-platform CI build — never push casual `v*` tags).
 - `docs/plans/` — internal design/investigation docs. **Gitignored, local-only —
   may be absent on a fresh clone.**
+
+## Release layout checks
+
+The prereq script checks each CI platform and both local assemblers through `release/check-layout.mjs`, then runs `server/scripts/release-layout.test.ts` with isolated profile/data fixtures. The Windows fixture runs the launcher against a stub server from another cwd. Linux/macOS default-path fixtures and shell syntax checks are not native engine coverage. Report a Cache Warm gate failure separately from layout/Hugging Face checks.

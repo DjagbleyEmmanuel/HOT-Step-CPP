@@ -57,3 +57,7 @@ See [the model list](../models.md) for every file in the catalogue: exact filena
 - [Settings](settings.md)
 - [Models](../models.md)
 - [Troubleshooting](../troubleshooting.md)
+
+## Release data paths
+
+Release downloads use the shared data folder for models and downloaded runtime libraries. Upgrading reuses these files through the saved profile location. See [Data folder and upgrades](../data-folder.md).

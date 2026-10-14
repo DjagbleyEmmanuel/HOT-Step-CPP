@@ -256,3 +256,9 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
 - [api.md](api.md)
 - [../user/backends.md](../user/backends.md)
 - [plugins-authoring.md](plugins-authoring.md)
+
+## Release storage boundary
+
+`server/src/dataroot/bootstrap.ts` resolves the release data folder before consumers open the database, logs or children. `HOT_STEP_ROOT` selects release mode; without it the checkout keeps its existing paths. The profile pointer and pending-transfer journal are outside both app and data folders. The release launcher and shutdown route share a profile `restart-requested` marker; dev retains its checkout marker.
+
+App-owned `server/data/` contains bundled catalogues and assistant knowledge. Managed library, models, adapters, settings, logs and downloaded tools live under the effective data root. External overrides remain external. See [Configuration](config.md#release-data-folder).

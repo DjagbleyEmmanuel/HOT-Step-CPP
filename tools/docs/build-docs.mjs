@@ -191,6 +191,7 @@ function assistantBlocks(plugins) {
   const troubleshooting = exists(path.join(ROOT, 'docs/user/troubleshooting.md')) ? read(path.join(ROOT, 'docs/user/troubleshooting.md')) : '';
   const backends = exists(path.join(ROOT, 'docs/user/backends.md')) ? read(path.join(ROOT, 'docs/user/backends.md')) : '';
   return {
+    'data-folder': read(path.join(ROOT, 'docs/user/data-folder.md')).trim().replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'),
     studios: studios.map(([name, para]) => `- **${name}**: ${para}`).join('\n'),
     backends: firstParagraph(backends),
     solvers: plugins.solvers, schedulers: plugins.schedulers, guidance: plugins.guidance,

@@ -252,7 +252,7 @@ New-Item -ItemType Directory -Force $engineOut | Out-Null
 $buildRelease = Join-Path (Join-Path $ProjectRoot "engine") "build\Release"
 
 $engineFiles = @(
-    "ace-server.exe", "mastering.exe", "mp3-codec.exe",
+    "ace-server.exe", "ace-train.exe", "ace-midi.exe", "ace-caption.exe", "mastering.exe", "mp3-codec.exe",
     "neural-codec.exe", "vst-host.exe", "quantize.exe",
     "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"
 )
@@ -269,7 +269,7 @@ foreach ($file in $engineFiles) {
     if (Test-Path $src) {
         Copy-Item $src (Join-Path $engineOut $file)
     } else {
-        Write-Warning "  Missing engine file: $file"
+        throw "Missing required engine file: $file"
     }
 }
 
@@ -357,8 +357,7 @@ if (Test-Path $ffmpegSrc) {
 # Copy data files (model-registry.json, assistant-knowledge.md)
 $dataOut = Join-Path $serverOut "data"
 New-Item -ItemType Directory -Force $dataOut | Out-Null
-Copy-Item (Join-Path (Join-Path (Join-Path $ProjectRoot "server") "src\data") "model-registry.json") (Join-Path $dataOut "model-registry.json")
-Copy-Item (Join-Path (Join-Path (Join-Path $ProjectRoot "server") "src\data") "assistant-knowledge.md") (Join-Path $dataOut "assistant-knowledge.md")
+Copy-Item (Join-Path $ProjectRoot "server/src/data/*") $dataOut -Recurse -Force
 
 # UI: pre-built dist
 Write-Host "  Copying UI..."
@@ -384,14 +383,14 @@ if (Test-Path $noiseSrc) {
     Copy-Item -Recurse $noiseSrc (Join-Path $dist "noise_samples")
 }
 
-# Empty directories for user content
-New-Item -ItemType Directory -Force (Join-Path $dist "models") | Out-Null
-New-Item -ItemType Directory -Force (Join-Path $dist "adapters") | Out-Null
+# Mutable data folders are initialized beside the app at first boot.
 
 # Config and docs
-Copy-Item (Join-Path $ProjectRoot ".env.example") (Join-Path $dist ".env.example")
+Copy-Item (Join-Path $ReleaseDir ".env.example") (Join-Path $dist ".env.example")
+Copy-Item (Join-Path $ReleaseDir "profile-path.mjs") (Join-Path $dist "profile-path.mjs")
 Copy-Item (Join-Path $ReleaseDir "HOT-Step.bat") (Join-Path $dist "HOT-Step.bat")
 Copy-Item (Join-Path $ReleaseDir "README.txt") (Join-Path $dist "README.txt")
+Copy-Item (Join-Path $ProjectRoot "open-browser-if-needed.ps1") (Join-Path $dist "open-browser-if-needed.ps1")
 
 Write-Host "  Assembly complete" -ForegroundColor Green
 

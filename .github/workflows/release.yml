@@ -608,9 +608,7 @@ jobs:
             Copy-Item -Recurse "noise_samples" "$dist/noise_samples"
           }
 
-          # Empty user directories
-          New-Item -ItemType Directory -Force "$dist/models" | Out-Null
-          New-Item -ItemType Directory -Force "$dist/adapters" | Out-Null
+          # Mutable data folders are initialized beside the app at first boot.
 
           # Build variant marker (so server knows whether CUDA runtime is needed)
           # Both CUDA variants are 'cuda' from the server's perspective
@@ -624,7 +622,8 @@ jobs:
           }
 
           # Config and docs
-          Copy-Item ".env.example" "$dist/.env.example"
+          Copy-Item "release/.env.example" "$dist/.env.example"
+          Copy-Item "release/profile-path.mjs" "$dist/profile-path.mjs"
           Copy-Item "release/HOT-Step.bat" "$dist/HOT-Step.bat"
           Copy-Item "open-browser-if-needed.ps1" "$dist/open-browser-if-needed.ps1"
           Copy-Item "release/README.txt" "$dist/README.txt"
@@ -978,13 +977,14 @@ jobs:
           # Noise samples
           [ -d "noise_samples" ] && cp -r noise_samples "$DIST/noise_samples"
 
-          # Empty user directories
-          mkdir -p "$DIST/models" "$DIST/adapters"
+          # Mutable data folders are initialized beside the app at first boot.
 
           # Config
-          cp .env.example "$DIST/.env.example"
+          cp release/.env.example "$DIST/.env.example"
+          cp release/profile-path.mjs "$DIST/profile-path.mjs"
 
           # Launch script: the shared one, with the restart loop (#172).
+          cp release/README.txt "$DIST/README.txt"
           cp release/HOT-Step.sh "$DIST/HOT-Step.sh"
           chmod +x "$DIST/HOT-Step.sh"
 
@@ -1479,8 +1479,7 @@ jobs:
           # Noise samples
           [ -d "noise_samples" ] && cp -r noise_samples "$DIST/noise_samples"
 
-          # Empty user directories
-          mkdir -p "$DIST/models" "$DIST/adapters"
+          # Mutable data folders are initialized beside the app at first boot.
 
           # Build variant marker (so server knows whether CUDA runtime is needed)
           # Both CUDA variants are 'cuda' from the server's perspective
@@ -1494,7 +1493,8 @@ jobs:
           fi
 
           # Config and docs
-          cp .env.example "$DIST/.env.example"
+          cp release/.env.example "$DIST/.env.example"
+          cp release/profile-path.mjs "$DIST/profile-path.mjs"
           cp release/HOT-Step.sh "$DIST/HOT-Step.sh"
           chmod +x "$DIST/HOT-Step.sh"
           cp release/README.txt "$DIST/README.txt"

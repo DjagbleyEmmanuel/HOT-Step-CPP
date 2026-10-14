@@ -216,3 +216,7 @@ The Caption source control, in Lyric Studio and in Create, picks the style capti
 - [Backends](../backends.md)
 - [Getting higher quality output](../quality.md)
 - [Training internals](../../dev/training-internals.md)
+
+## Release storage
+
+Training defaults to `<data folder>/library/training`; models and adapters remain in the shared data folder across app upgrades. External folder overrides stay external. See [Data folder and upgrades](../data-folder.md).

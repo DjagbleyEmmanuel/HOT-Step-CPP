@@ -469,3 +469,7 @@ end
 - **Be careful with the loop range.** FloatArrays are 0-indexed: `for i = 0, n - 1 do ... end`.
 - **Guidance plugins: always use `apg()`.** Raw math without APG produces audio artifacts. Apply your custom logic as a delta on top.
 - **Stateful plugins** can use file-level `local` variables to carry state across steps (e.g., previous velocity buffers, error accumulators). These reset when the plugin is reloaded.
+
+## Release data paths
+
+In releases, install user Lua plugins under `<data folder>/plugins`, retaining category subdirectories. The engine scans shipped plugins first and the user overlay last, so matching plugin names in the overlay take precedence. Migration preserves plugins that the new build does not ship. See [Data folder and upgrades](../user/data-folder.md).

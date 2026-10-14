@@ -122,3 +122,7 @@ Write a full song's worth of lyrics even for a short render: MM3 plans the whole
 - [Backends](../backends.md)
 - [Getting higher quality output](../quality.md)
 - [Training internals](../../dev/training-internals.md)
+
+## Release storage
+
+Training defaults to `<data folder>/library/training`; models and adapters remain in the shared data folder across app upgrades. External folder overrides stay external. See [Data folder and upgrades](../data-folder.md).

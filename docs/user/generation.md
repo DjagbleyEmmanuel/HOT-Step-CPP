@@ -485,3 +485,7 @@ written. lego, extract and complete need a base or SFT DiT, not a turbo model.
 - [Getting higher quality output](quality.md)
 - [Models](models.md)
 - [Driving HOT-Step with an agent (MCP)](mcp.md)
+
+## Release data paths
+
+Release audio and references live under the shared data folder's `library/`. The `/audio` and `/references` URLs keep their existing meanings after a move or repoint. See [Data folder and upgrades](data-folder.md).

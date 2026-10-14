@@ -140,17 +140,17 @@ Everything stays inside the folder you extracted.
 
 | Path | Contents |
 |---|---|
-| `models/` | Model weights. ACE-Step 1.5 files sit directly in this folder; MiniMax-Music3 and YuE2 files go in `models/mm3/` and `models/yue2/`. |
-| `adapters/` | LoRA and LoKr adapters. |
-| `engine/` | The engine binaries, plus the CUDA runtime DLLs the first launch downloads. |
-| `server/data/` | The song library database (`hotstep.db`), the Lyric Studio database (`lireek.db`) and generated audio (`audio/`). |
-| `logs/` | One folder per app session. See [Troubleshooting](troubleshooting.md#where-the-logs-are). |
-| `.env` | Settings, created from `.env.example` on first launch. The Environment tab of Settings edits it. |
+| `HOT-Step-Data/models/` | Downloaded models, beside the app by default. |
+| `HOT-Step-Data/adapters/` | LoRA and LoKr adapters. |
+| `HOT-Step-Data/library/` | Databases, audio, references, training and MuScriptor data. |
+| `HOT-Step-Data/logs/` | One folder per app session. |
+| `HOT-Step-Data/settings/.env` | Saved settings and service credentials. |
+| App `engine/`, `server/data/` | Shipped binaries and immutable catalogues. Downloaded runtimes go in the data folder's `tools/runtime/`. |
 
-The models and adapters folders can be moved elsewhere with **Models directory** and
-**Adapters directory** on the Environment tab of Settings. Both need a restart.
+The saved location survives a fresh unzip. Change it through Settings with a move or
+repoint action. See [Data folder and upgrades](data-folder.md) for imports and recovery.
+Development checkouts keep their existing paths; see [Configuration](../dev/config.md).
 
-<!-- TODO(verify): the supported way to move to a new release while keeping the library: copy server/data/ and .env into the new folder, or keep one folder and overwrite? Database migrations run on startup, but no upgrade procedure is documented anywhere. -->
 
 ## Running from source
 
