@@ -18,6 +18,7 @@ import { stripThinkingBlocks, postprocessLyrics, fixSectionLabels, enforceLineCo
 import { INSTAGEN_LYRIC_SYSTEM_PROMPT, INSTAGEN_FULL_SYSTEM_PROMPT } from '../services/lireek/prompts.js';
 import { getSetting, setSetting } from '../db/lireekDb.js';
 import { registerInstaGenWorkflows, type InstaResult } from '../services/workflows/instaGenWorkflow.js';
+import { registerJobsBusyCheck } from '../dataroot/pointer.js';
 
 const router = Router();
 
@@ -44,6 +45,7 @@ interface InspireJob {
 }
 
 const inspireJobs = new Map<string, InspireJob>();
+registerJobsBusyCheck('inspire', inspireJobs);
 
 // Cleanup old jobs after 10 minutes
 setInterval(() => {

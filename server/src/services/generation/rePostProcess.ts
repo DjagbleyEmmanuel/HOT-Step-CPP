@@ -27,6 +27,7 @@ import {
 } from '../logger.js';
 import { runOnGpuLane, gpuLaneBusy, gpuLaneDepth } from './gpuLane.js';
 import { runPostProcessingChain, normalizePpParams, type PostProcessParams } from './postProcessing.js';
+import { registerJobsBusyCheck } from '../../dataroot/pointer.js';
 
 export interface RePostProcessJob {
   id: string;
@@ -40,6 +41,7 @@ export interface RePostProcessJob {
 }
 
 const jobs = new Map<string, RePostProcessJob>();
+registerJobsBusyCheck('post-processing', jobs);
 
 /** Songs with a re-run in flight, so a double-click cannot start two. */
 const inFlight = new Set<string>();

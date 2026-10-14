@@ -122,3 +122,14 @@ export function cancelPending(): boolean {
   writePointer(file, ptr);
   return true;
 }
+
+const FINISHED = new Set(['succeeded', 'done', 'failed', 'cancelled', 'interrupted']);
+
+/** Busy while any job in an in-memory job map has not finished. */
+export function registerJobsBusyCheck(name: string, jobs: { values(): Iterable<{ status: string }> }): void {
+  registerBusyCheck(name, () => {
+    let n = 0;
+    for (const j of jobs.values()) if (!FINISHED.has(j.status)) n++;
+    return n ? [`${n} ${name} job(s) running or queued`] : [];
+  });
+}

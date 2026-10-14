@@ -31,6 +31,7 @@ import {
   createWorkflowDocumentSchema, submitWorkflowJobSchema, updateWorkflowDocumentSchema,
   type WorkflowEvent, type WorkflowJobStatus,
 } from '../contracts/workflow.js';
+import { registerBusyCheck } from '../dataroot/pointer.js';
 
 const STATUSES = new Set(['pending', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']);
 const FINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
@@ -216,3 +217,11 @@ const lazy = Router();
 let inner: Router | null = null;
 lazy.use((req, res, next) => { (inner ??= createWorkflowRouter(workflowJobs(), workflowDocuments(), getUserId))(req, res, next); });
 export default lazy;
+
+// In-flight queue work; queued items simply resume after the restart.
+registerBusyCheck('queues', () => {
+  const db = getDb();
+  const audio = (db.prepare(`SELECT COUNT(*) AS n FROM audio_intents WHERE status IN ('submitting','submitted')`).get() as { n: number }).n;
+  const flows = (db.prepare(`SELECT COUNT(*) AS n FROM workflow_jobs WHERE status = 'running'`).get() as { n: number }).n;
+  return [...(audio ? [`${audio} audio queue item(s) generating`] : []), ...(flows ? [`${flows} workflow job(s) running`] : [])];
+});

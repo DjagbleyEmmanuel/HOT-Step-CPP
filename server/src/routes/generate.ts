@@ -46,12 +46,14 @@ import type {
 import { openStreamSession, type StreamSession } from '../services/streamSessions/index.js';
 import { getDb } from '../db/database.js';
 import { GenerationJobLedger, ledgerStatusBody, type LedgerEntry } from '../services/generation/jobLedger.js';
+import { registerJobsBusyCheck } from '../dataroot/pointer.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
 const router = Router();
 
 const jobs = new Map<string, GenerationJob>();
+registerJobsBusyCheck('generation', jobs);
 
 // Each job's outcome, kept in the database so /status can still answer after a
 // restart empties `jobs` (services/generation/jobLedger.ts). Best-effort: a

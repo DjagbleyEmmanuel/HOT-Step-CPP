@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import { getUserId } from './auth.js';
 import { generateCoverArt, getCoverArtReadiness, type CoverArtResult } from '../services/coverArt/coverArtService.js';
+import { registerJobsBusyCheck } from '../dataroot/pointer.js';
 import { buildCoverArtPrompt } from '../services/coverArt/promptBuilder.js';
 import { resolveCoverScene } from '../services/coverArt/sceneLlm.js';
 import { coverArtDownloader } from '../services/coverArt/coverArtDownloader.js';
@@ -28,6 +29,7 @@ interface CoverArtJob {
 }
 
 const jobs = new Map<string, CoverArtJob>();
+registerJobsBusyCheck('cover art', jobs);
 
 // Clean up old jobs periodically (keep last 100)
 function cleanupJobs(): void {

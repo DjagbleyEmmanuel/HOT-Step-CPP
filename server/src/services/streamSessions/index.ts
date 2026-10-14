@@ -30,6 +30,7 @@ import type { StreamChunkAnalysis, StreamExportFormat, StreamSessionSummary } fr
 import { config, getFFmpegPath } from '../../config.js';
 import { detectBpm, detectKey } from './analysis.js';
 import { channel0, parseWav, sameFormat, WavSplitter, wavHeader, type WavFormat } from './wav.js';
+import { registerBusyCheck } from '../../dataroot/pointer.js';
 
 export const LIMITS = {
   maxSessions: 16,
@@ -308,3 +309,9 @@ export function openStreamSession(kind: 'storm' | 'mm3', source: StreamSessionSu
     return null;
   }
 }
+
+// Live streams are still writing audio into the library.
+registerBusyCheck('streams', () => {
+  const n = instance ? instance.list().filter(x => x.status === 'live').length : 0;
+  return n ? [`${n} live stream(s)`] : [];
+});

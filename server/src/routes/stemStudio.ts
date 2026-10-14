@@ -17,6 +17,7 @@ import { ensureEngineFormat } from '../services/audioConvert.js';
 import { config } from '../config.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { STEM_TRACK_NAMES, stemExtractRequestSchema, stemSupersepRequestSchema } from '../contracts/stemSeparation.js';
+import { registerJobsBusyCheck } from '../dataroot/pointer.js';
 
 const router = Router();
 const ACE_URL = config.aceServer.url;
@@ -54,6 +55,7 @@ interface StemJob {
 }
 
 const jobs = new Map<string, StemJob>();
+registerJobsBusyCheck('stem', jobs);
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 

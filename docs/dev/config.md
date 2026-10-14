@@ -130,7 +130,12 @@ install's settings; a `.env` the data folder already had is kept as
 `settings/.env.before-import-<id>`.
 
 Settings schedules a move, repoint, new folder or import from an older install into
-`data-location.json`; the next start carries it out before the DB opens. If the folder is
+`data-location.json`; the next start carries it out before the DB opens. Scheduling is
+refused while any busy check registered with `registerBusyCheck` (`dataroot/pointer.ts`)
+reports work: generation, post-processing, stem, MIDI, cover-art and Inspire jobs
+(`registerJobsBusyCheck` on each job map), live streams, in-flight audio-queue items and
+workflow jobs, model, MuScriptor and cover-art downloads, training and the GPU lane. A new
+long-running job type registers its own check. If the folder is
 missing, the pointer is unreadable or a move stops part way, the server prints the reason
 and serves one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
 

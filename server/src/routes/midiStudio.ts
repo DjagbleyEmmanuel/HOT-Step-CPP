@@ -34,6 +34,7 @@ import {
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
 import { addMidiLyrics } from '../services/midiLyrics.js';
+import { registerJobsBusyCheck } from '../dataroot/pointer.js';
 
 const router = Router();
 
@@ -62,6 +63,7 @@ interface MidiJob {
 }
 
 const jobs = new Map<string, MidiJob>();
+registerJobsBusyCheck('MIDI', jobs);
 let queueTail: Promise<void> = Promise.resolve();
 
 /** Resolve a URL-style audio path to an absolute filesystem path */

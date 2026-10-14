@@ -483,3 +483,12 @@ test('a copy cut short whose source then goes missing keeps pending and stops', 
   assert.equal(kept.pending!.mappings[0].state, 'pending');
   assert.ok(fs.existsSync(path.join(oldRoot + '-unplugged', 'library', 'b.wav')));
 });
+
+test('job-map busy checks block until every job has finished', async () => {
+  const { registerJobsBusyCheck, getBusyBlockers } = await import('./pointer.js');
+  const jobs = new Map([['a', { status: 'running' }], ['b', { status: 'done' }]]);
+  registerJobsBusyCheck('fixture', jobs);
+  assert.ok(getBusyBlockers().includes('1 fixture job(s) running or queued'));
+  jobs.get('a')!.status = 'succeeded';
+  assert.ok(!getBusyBlockers().some(b => b.includes('fixture')));
+});
