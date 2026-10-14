@@ -25,6 +25,9 @@ submodule at configure time.
 | zz-yue2-convrot8 | `CONVROT8` / `_BACK`, CUDA int8 rotated-linear training op | 15 |
 | zzz-yue2-bf16-round | `BF16_ROUND` unary op (CPU + CUDA) | 16 |
 | cuda-bf16-round-fuse | CUDA runs an F32 `ADD`/`SUB`/`MUL` and its single-consumer `BF16_ROUND` as one launch; `GGML_CUDA_NO_BF16_ROUND_FUSION=1` turns it off | — |
+| bf16-round-elide | `BF16_ROUND`'s backward passes a gradient that is already a round output straight through; `GGML_NO_BF16_ROUND_ELIDE=1` turns it off | — |
+| bf16-round-inplace | a `BF16_ROUND` of an already-rounded value is built in place and CUDA skips its launch (the backward rule stays); `GGML_NO_BF16_ROUND_INPLACE=1` turns it off | — |
+| fa-train-cuda-hints | the BF16 `FLASH_ATTN_TRAIN` kernels use the causal hint instead of reading the mask, and skip dK/dV below `kv_grad_start`; `GGML_CUDA_FA_TRAIN_NO_HINTS=1` turns it off | — |
 | zzzz-vulkan-train-ops | Vulkan `BF16_ROUND` and fused training attention | 14 |
 | ggml-rpc patch-level check | refuse an RPC server that lacks the fork's ops | — |
 
