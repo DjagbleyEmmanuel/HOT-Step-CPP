@@ -65,15 +65,25 @@ for (const dir of fs.readdirSync(path.join(ROOT, 'ui/src/components'), { withFil
 // 3. skills index
 const skillsReadme = fs.readFileSync(path.join(ROOT, '.claude/skills/README.md'), 'utf8');
 for (const s of fs.readdirSync(path.join(ROOT, '.claude/skills'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
+  // Local integrations can install gitignored skills that are not part of the release.
+  if (spawnSync('git', ['check-ignore', '-q', '--', `.claude/skills/${s}/`], { cwd: ROOT }).status === 0) continue;
   if (!skillsReadme.includes(`${s}/SKILL.md`)) fail.push(`.claude/skills/${s} is not listed in .claude/skills/README.md`);
 }
 
 // 4. links
 const tracked = execFileSync('git', ['ls-files', '*.md', '**/*.md'], { cwd: ROOT, encoding: 'utf8' }).split(/\r?\n/).filter((f) => f && !f.startsWith('node_modules/'));
 const untrackedNew = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '*.md', '**/*.md'], { cwd: ROOT, encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
+// A skip-worktree file may contain local injected links absent from the committed copy.
+let skipWorktree = new Set();
+try {
+  skipWorktree = new Set(execFileSync('git', ['ls-files', '-v', '*.md', '**/*.md'], { cwd: ROOT, encoding: 'utf8' })
+    .split(/\r?\n/).filter((line) => line.startsWith('S ')).map((line) => line.slice(2)));
+} catch { /* Without git metadata, read the working files as before. */ }
 const linkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 for (const file of [...tracked, ...untrackedNew]) {
-  const raw = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const raw = skipWorktree.has(file)
+    ? execFileSync('git', ['show', `:${file}`], { cwd: ROOT, encoding: 'utf8' })
+    : fs.readFileSync(path.join(ROOT, file), 'utf8');
   const text = raw.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
   for (const m of text.matchAll(linkRe)) {
     let target = m[1];
