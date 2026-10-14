@@ -167,10 +167,6 @@ private:
     std::unordered_map<std::string, LuaPlugin> guidance_;
     std::unordered_map<std::string, LuaPlugin> postprocess_;
 
-    // Names loaded from the user root, so a second user file of the same name
-    // keeps the first instead of replacing the first user override.
-    std::set<std::string> user_names_;
-
     // Runs once from init(), before any lookup hands out a LuaPlugin pointer,
     // so erasing a shipped entry leaves nothing dangling.
     void scan_dir(const std::string & dir_path, PluginType expected_type, bool user_root = false) {
@@ -211,6 +207,11 @@ private:
         }
         std::sort(files.begin(), files.end());
 
+        // Names this call loaded from the user root, so a second user file of
+        // the same name keeps the first instead of replacing the first override.
+        // Per call, so it is per category like the maps.
+        std::set<std::string> user_names;
+
         for (auto & fpath : files) {
             LuaPlugin plugin;
             std::string path_str = fpath.string();
@@ -229,7 +230,7 @@ private:
 
                 auto existing = map.find(plugin.name);
                 if (existing != map.end()) {
-                    if (!user_root || user_names_.count(plugin.name)) {
+                    if (!user_root || user_names.count(plugin.name)) {
                         fprintf(stderr, "[Plugins] WARNING: duplicate plugin '%s' from %s (keeping first: %s)\n",
                                 plugin.name.c_str(), path_str.c_str(), existing->second.filepath.c_str());
                         continue;
@@ -238,7 +239,7 @@ private:
                             plugin.name.c_str(), path_str.c_str(), existing->second.filepath.c_str());
                     map.erase(existing);  // closes the shipped plugin's lua_State
                 }
-                if (user_root) user_names_.insert(plugin.name);
+                if (user_root) user_names.insert(plugin.name);
 
                 fprintf(stderr, "[Plugins]   %-12s %-24s (%s)\n",
                         expected_type == PluginType::Solver ? "solver" :
