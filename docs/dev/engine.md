@@ -301,8 +301,10 @@ from about 135 ms to about 2 ms), while bounds and read-only checks stay and the
 pointer itself is never reachable. `math.random` is a port of Lua 5.4's
 xoshiro256** generator, so seeded plugins draw the same numbers as before. `PluginRegistry::init` (`lua-plugin-registry.h`) scans
 `engine/plugins/{solvers,schedulers,guidance,postprocess}/` and then the same four
-folders under the project root `plugins/`, once at startup. `ace-server` and
-`ace-synth` both call it. `lua-plugin.h` runs each file in its own sandboxed VM,
+folders under the project root `plugins/`, once at startup. `ace-server` then
+scans the root given by `--user-plugins`, which the release app sets to
+`<data folder>/plugins`. Duplicate names keep the first one loaded, so shipped
+plugins win. `ace-server` and `ace-synth` both call it. `lua-plugin.h` runs each file in its own sandboxed VM,
 passes float arrays without copying, reads each plugin's metadata and parameter
 schema, and exposes the native `apg()` helper and the optional `post_step()` hook
 to guidance plugins.

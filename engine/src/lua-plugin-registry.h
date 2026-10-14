@@ -1,7 +1,8 @@
 #pragma once
 // lua-plugin-registry.h: Runtime plugin registry replacing static C++ registries
 //
-// Scans engine/plugins/ and project-root/plugins/ for .lua files.
+// Scans engine/plugins/, project-root/plugins/ and an optional user plugin
+// root (ace-server --user-plugins) for .lua files.
 // Provides lookup functions matching the old solver-registry.h / scheduler-registry.h
 // / guidance-registry.h interfaces, plus JSON serialization for the API.
 
@@ -32,7 +33,10 @@ public:
     }
 
     // Scan directories and load all plugins. Call once at startup.
-    void init(const std::string & engine_dir, const std::string & project_dir) {
+    // user_plugins_dir is a plugins root itself (holds solvers/, schedulers/...).
+    // It is scanned last, so a shipped plugin wins a name clash.
+    void init(const std::string & engine_dir, const std::string & project_dir,
+              const std::string & user_plugins_dir = "") {
         fprintf(stderr, "[Plugins] Initializing plugin system...\n");
 
         // Scan engine/plugins/{solvers,schedulers,guidance,postprocess}/
@@ -47,6 +51,14 @@ public:
             scan_dir(project_dir + "/plugins/schedulers",   PluginType::Scheduler);
             scan_dir(project_dir + "/plugins/guidance",     PluginType::Guidance);
             scan_dir(project_dir + "/plugins/postprocess",  PluginType::Postprocess);
+        }
+
+        if (!user_plugins_dir.empty()) {
+            fprintf(stderr, "[Plugins] User plugins: %s\n",user_plugins_dir.c_str());
+            scan_dir(user_plugins_dir + "/solvers",      PluginType::Solver);
+            scan_dir(user_plugins_dir + "/schedulers",   PluginType::Scheduler);
+            scan_dir(user_plugins_dir + "/guidance",     PluginType::Guidance);
+            scan_dir(user_plugins_dir + "/postprocess",  PluginType::Postprocess);
         }
 
         fprintf(stderr, "[Plugins] Loaded %d solvers, %d schedulers, %d guidance, %d postprocess\n",

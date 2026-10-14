@@ -15,7 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn, execSync, ChildProcess } from 'child_process';
 
-import { config } from '../config.js';
+import { config, USER_PLUGINS_DIR } from '../config.js';
 import { logEngine } from './logger.js';
 import { pushLog } from '../routes/logs.js';
 import { setEngineReady } from '../engineState.js';
@@ -127,6 +127,9 @@ export function startAceServer(): ChildProcess | null {
   if (config.aceServer.adapters && fs.existsSync(config.aceServer.adapters)) {
     args.push('--adapters', config.aceServer.adapters);
   }
+
+  // Release only: the data folder's plugins/ overlay, scanned after the shipped plugins.
+  if (USER_PLUGINS_DIR) args.push('--user-plugins', USER_PLUGINS_DIR);
 
   // --keep-loaded: flips the engine's ModelStore to EVICT_NEVER so the ~17 s
   // LoKr precompute (and the DiT/VAE load) only happens once per combo instead

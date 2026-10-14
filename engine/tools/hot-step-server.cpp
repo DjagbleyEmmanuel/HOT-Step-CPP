@@ -3086,6 +3086,9 @@ static void usage(const char * prog) {
             "Adapter:\n"
             "  --adapters <dir>        Directory of adapters\n"
             "\n"
+            "Plugins:\n"
+            "  --user-plugins <dir>    Extra plugin root, scanned after the shipped plugins\n"
+            "\n"
             "Memory control:\n"
             "  --keep-loaded           Keep models in VRAM between requests\n"
             "  --vae-chunk <N>         Latent frames per tile (default: %d)\n"
@@ -3121,6 +3124,7 @@ int main(int argc, char ** argv) {
     const char * models_dir         = nullptr;
     const char * adapters_dir       = nullptr;
     const char * noise_profile_path = nullptr;
+    const char * user_plugins_dir   = nullptr;
 
     if (argc < 2) {
         usage(argv[0]);
@@ -3132,6 +3136,8 @@ int main(int argc, char ** argv) {
             models_dir = argv[++i];
         } else if (!strcmp(argv[i], "--adapters") && i + 1 < argc) {
             adapters_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--user-plugins") && i + 1 < argc) {
+            user_plugins_dir = argv[++i];
         } else if (!strcmp(argv[i], "--noise-profile") && i + 1 < argc) {
             noise_profile_path = argv[++i];
         } else if (!strcmp(argv[i], "--max-seq") && i + 1 < argc) {
@@ -3340,7 +3346,8 @@ int main(int argc, char ** argv) {
     //   - Visual Studio (multi-config): engine/build/Release/ace-server.exe  (3 levels up)
     //   - Ninja / Makefiles / macOS:    engine/build/ace-server              (2 levels up)
     //   - Portable release:             engine/ace-server                    (1 level up)
-    // Scans both engine/plugins/ (native) and <project-root>/plugins/ (community)
+    // Scans engine/plugins/ (native), <project-root>/plugins/ (community), then
+    // --user-plugins (the release data folder's plugins/) if given.
     {
         std::filesystem::path exe_path = std::filesystem::canonical(argv[0]);
         std::filesystem::path exe_dir = exe_path.parent_path();
@@ -3360,7 +3367,8 @@ int main(int argc, char ** argv) {
         }
         // Project root is one more level up from engine/
         std::filesystem::path project_dir = engine_dir.parent_path();
-        PluginRegistry::instance().init(engine_dir.string(), project_dir.string());
+        PluginRegistry::instance().init(engine_dir.string(), project_dir.string(),
+                                        user_plugins_dir ? user_plugins_dir : "");
     }
 
     // setup HTTP server

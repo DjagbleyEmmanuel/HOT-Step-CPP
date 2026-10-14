@@ -624,6 +624,9 @@ Required:
 Adapter:
   --adapters <dir>        Directory of adapters
 
+Plugins:
+  --user-plugins <dir>    Extra plugin root, scanned after the shipped plugins
+
 Memory control:
   --keep-loaded           Keep models in VRAM between requests
   --vae-chunk <N>         Latent frames per tile (default: 256)
@@ -658,6 +661,10 @@ Notes the usage text does not cover:
 - `--max-batch` is clamped to 1..9.
 - `--models` is scanned at startup, and its `onnx/` subfolder too. `--adapters` is
   scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
+- `--user-plugins <dir>` is a plugin root with the same `solvers/`, `schedulers/`,
+  `guidance/` and `postprocess/` subfolders as `engine/plugins/`. It is scanned last,
+  so a shipped plugin keeps its name if a user file declares the same one. The release
+  app passes `<data folder>/plugins`; dev passes nothing.
 - The app starts ace-server on port 8085.
 
 | Pipeline | Needs | Enables |

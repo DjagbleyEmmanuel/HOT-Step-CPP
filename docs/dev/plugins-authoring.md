@@ -14,6 +14,11 @@ How to create custom solvers, schedulers, and guidance modes for the HOT-Step CP
 3. Implement the required function (`step`, `schedule`, or `guide`)
 4. Restart the app — your plugin appears in the UI automatically
 
+In a release, put your own plugins in the data folder's `plugins/` (same
+`solvers/`, `schedulers/`, `guidance/` and `postprocess/` subfolders), so they
+survive an update. The engine scans it after the shipped plugins; a plugin
+whose name matches a shipped one is skipped with a warning in the engine log.
+
 No C++ rebuild required. The engine hot-loads all `.lua` files at startup.
 
 ---
