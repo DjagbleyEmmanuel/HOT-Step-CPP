@@ -26,6 +26,7 @@ submodule at configure time.
 | zzz-yue2-bf16-round | `BF16_ROUND` unary op (CPU + CUDA) | 16 |
 | cuda-bf16-round-fuse | CUDA runs an F32 `ADD`/`SUB`/`MUL` and its single-consumer `BF16_ROUND` as one launch; `GGML_CUDA_NO_BF16_ROUND_FUSION=1` turns it off | — |
 | cuda-bf16-round-defer | CUDA skips an in-place `BF16_ROUND` whose only reader is an F32 `ADD`/`SUB`/`MUL`, and that reader rounds the input as it loads it (bit-identical); `GGML_CUDA_NO_BF16_ROUND_DEFER=1` turns it off | — |
+| cuda-bf16-storage | BF16 sources with F32 results for `ADD`/`SUB`/`MUL`, `REPEAT`, `SCALE`, `SILU`/`NEG`, `SILU_BACK`, `RMS_NORM`(`_BACK`), `ACC`, `SET` and `OUT_PROD`, plus `BF16_ROUND` as an F32 → BF16 store, for the YuE2 trainer's BF16 activation storage. An F32 `ADD`/`SUB`/`MUL` and its single-consumer BF16 round store run as one launch (`GGML_CUDA_NO_BF16_STORE_FUSION=1` turns it off); a deferred round's reader may have a BF16 other input; the other fusions skip a 32-node window around BF16 activations. Bit-identical: each load widens exactly and the arithmetic is the F32 path's | — |
 | bf16-round-elide | `BF16_ROUND`'s backward passes a gradient that is already a round output straight through; `GGML_NO_BF16_ROUND_ELIDE=1` turns it off | — |
 | bf16-round-inplace | a `BF16_ROUND` of an already-rounded value is built in place and CUDA skips its launch (the backward rule stays); `GGML_NO_BF16_ROUND_INPLACE=1` turns it off | — |
 | fa-train-cuda-hints | the BF16 `FLASH_ATTN_TRAIN` kernels use the causal hint instead of reading the mask, and skip dK/dV below `kv_grad_start`; `GGML_CUDA_FA_TRAIN_NO_HINTS=1` turns it off. With the causal hint and 16-byte aligned rows they pipeline their tile loads with `cp.async` (bit-identical); `GGML_CUDA_FA_TRAIN_NO_PIPE=1` keeps the scalar kernels | — |
@@ -41,6 +42,7 @@ The YuE2 trainer's own speed changes sit outside the fork:
 | device-only stack blocks launch async, and each stack call synchronizes once at its end | `YUE2_AITK_SYNC_BLOCKS=1` waits after every block |
 | the block backward's loss seed points at a resident 1.0 instead of `ggml_graph_reset` uploading it per block | `YUE2_AITK_BLOCK_RESET=1` |
 | the AR head rows and the NAR final read the stack's final hidden and write dx as device tensors | `YUE2_AITK_HANDOFF_HOST=1` hands them over through host vectors |
+| `YUE2_AITK_BF16_STORAGE=1` stores every BF16_ROUND output (and the views and conts that reread it) as a BF16 tensor; every other op keeps its F32 result, so the values are the same. A round whose only reader is an `ADD`/`SUB`/`MUL` and whose source is not one stays F32 for the CUDA deferral (`YUE2_AITK_BF16_DEFER=0` retypes it too). About -40 ms/step on a 5090; a cuBLAS BF16 C for GEMM outputs is not bit-identical for every shape, so GEMM rounds stay separate | off by default; unset it |
 
 `cpy-q-occupancy` (the quant → F32 copy launch geometry) is upstream since ggml-org
 `b64fb805`; Hook 9 checks the launch shape itself. Hook 17 checks that `engine/ggml` is clean

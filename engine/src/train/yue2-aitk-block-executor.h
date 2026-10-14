@@ -6,6 +6,7 @@
 
 #include "yue2-aitk-graph.h"
 #include "yue2-aitk-host-profile.h"
+#include "yue2-aitk-bf16-storage.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -98,13 +99,14 @@ inline int64_t causal_hint(Yue2AitkMaskMode mode, int64_t prefix, int64_t sequen
 }
 inline bool supports_all(ggml_backend_t backend, ggml_cgraph * graph, std::string * error) {
     const int n = ggml_graph_n_nodes(graph); ggml_tensor ** nodes = ggml_graph_nodes(graph);
+    std::string what;
     for (int i = 0; i < n; ++i) if (!ggml_backend_supports_op(backend, nodes[i])) {
-        std::string what = "backend does not support block graph node " + std::to_string(i) + ": " + ggml_op_desc(nodes[i]) + " -> " + ggml_type_name(nodes[i]->type);
+        std::string one = std::string(ggml_op_desc(nodes[i])) + " -> " + ggml_type_name(nodes[i]->type);
         for (int s = 0; s < GGML_MAX_SRC && nodes[i]->src[s]; ++s)
-            what += std::string(s ? ", " : " from ") + ggml_type_name(nodes[i]->src[s]->type) + (ggml_is_contiguous(nodes[i]->src[s]) ? "" : " (non-contiguous)");
-        return fail(error, what);
+            one += std::string(s ? ", " : " from ") + ggml_type_name(nodes[i]->src[s]->type) + (ggml_is_contiguous(nodes[i]->src[s]) ? "" : " (non-contiguous)");
+        if (what.find(one) == std::string::npos) what += (what.empty() ? "" : "; ") + one;
     }
-    return true;
+    return what.empty() ? true : fail(error, "backend does not support block graph node(s): " + what);
 }
 inline bool validate_inputs(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
                             const float * x, const float * cosine, const float * sine,
@@ -230,6 +232,8 @@ public:
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.key, rows(capture_k)));
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.value, rows(capture_v)));
         }
+        if (yue2_aitk_bf16_storage::enabled())
+            yue2_aitk_bf16_storage::apply(graph, {hidden_copy ? nullptr : out.hidden, key_cont, value_cont});
         lap.mark("fwd: graph build");
         if (!supports_all(backend, graph, error)) return false;
         lap.mark("fwd: supports_op scan");
@@ -331,6 +335,8 @@ public:
                 ggml_set_output(store); ggml_build_forward_expand(graph, store);
             }
         }
+        if (yue2_aitk_bf16_storage::enabled())
+            yue2_aitk_bf16_storage::apply(graph, {device_dx ? nullptr : ggml_graph_get_grad(graph, h)});
         if(!supports_all(backend,graph,error)) return false;
         lap.mark("bwd: supports_op scan");
         if (workspace) {
