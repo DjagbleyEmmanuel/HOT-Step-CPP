@@ -361,3 +361,97 @@ test('config in a release puts every writable default under the data folder', ()
   assert.doesNotMatch(fs.readFileSync(l.envPath, 'utf-8'), /^DATA_DIR=/m, 'example DATA_DIR dropped');
   for (const p of [c.data, c.models, c.adapters, c.env, c.logs]) assert.ok(!isInside(f.app, p), `${p} outside the app`);
 });
+
+// ── Review regressions ───────────────────────────────────────────────
+
+test('an unreachable source stops the move; a finished rename with no source left still completes', () => {
+  const f = fixture();
+  const oldRoot = path.join(f.base, 'old-root');
+  const newRoot = path.join(f.base, 'new-root');
+  write(path.join(oldRoot, 'library', 'a.txt'));
+  const { op } = planOperation('move', newRoot, { appRoot: f.app, currentRoot: oldRoot, currentDb: null });
+  const ptr = { version: 1 as const, root: oldRoot, pending: op };
+  writePointer(f.ptrFile, ptr);
+  fs.renameSync(oldRoot, oldRoot + '-unplugged');
+  assert.throws(() => runPending(f.ptrFile, ptr, f.app, quiet), /not reachable/);
+  const kept = readPointer(f.ptrFile)!;
+  assert.equal(kept.root, oldRoot);
+  assert.ok(kept.pending && kept.pending.mappings[0].state === 'pending');
+
+  // The rename already happened and removed the emptied source: that is landed data.
+  fs.mkdirSync(newRoot, { recursive: true });
+  fs.renameSync(path.join(oldRoot + '-unplugged', 'library'), path.join(newRoot, 'library'));
+  runPending(f.ptrFile, kept, f.app, quiet);
+  assert.equal(readPointer(f.ptrFile)!.root, newRoot);
+});
+
+test('a target reached through a junction into the app or the source is refused, at plan time and again before moving', () => {
+  const f = fixture();
+  const cur = path.join(f.base, 'cur');
+  write(path.join(cur, 'library', 'a.txt'));
+  const ctx = { appRoot: f.app, currentRoot: cur, currentDb: null };
+  const intoApp = path.join(f.base, 'looks-outside');
+  fs.symlinkSync(f.app, intoApp, 'junction');
+  assert.ok(planOperation('move', path.join(intoApp, 'Data'), ctx).errors.some(e => /inside the app/.test(e)));
+  const intoSource = path.join(f.base, 'alias-of-cur');
+  fs.symlinkSync(cur, intoSource, 'junction');
+  assert.ok(planOperation('move', path.join(intoSource, 'Data'), ctx).errors.some(e => /overlap/.test(e)));
+
+  // Passes at plan time, then the parent is swapped for a junction into the app.
+  const parent = path.join(f.base, 'later');
+  fs.mkdirSync(parent);
+  const { op, errors } = planOperation('move', path.join(parent, 'Data'), ctx);
+  assert.deepEqual(errors, []);
+  const ptr = { version: 1 as const, root: cur, pending: op };
+  writePointer(f.ptrFile, ptr);
+  fs.rmdirSync(parent);
+  fs.symlinkSync(f.app, parent, 'junction');
+  assert.throws(() => runPending(f.ptrFile, ptr, f.app, quiet), /inside the app/);
+  assert.ok(fs.existsSync(path.join(cur, 'library', 'a.txt')));
+  assert.ok(!fs.existsSync(path.join(f.app, 'Data')));
+});
+
+test('import into a configured root: old settings win, current ones are kept as a backup', () => {
+  const f = fixture();
+  const cur = path.join(f.base, 'HOT-Step-Data');
+  initLayout(dataLayout(cur));
+  write(dataLayout(cur).envPath, 'GEMINI_API_KEY=new-install\n');
+  const oldApp = path.join(f.base, 'HOT-Step-v1');
+  write(path.join(oldApp, 'data', 'audio', 'old.wav'));
+  write(path.join(oldApp, '.env'), 'GEMINI_API_KEY=old-install\n');
+  const { op, errors } = planOperation('import', oldApp, { appRoot: f.app, currentRoot: cur, currentDb: null });
+  assert.deepEqual(errors, []);
+  const ptr = { version: 1 as const, root: cur, pending: op };
+  writePointer(f.ptrFile, ptr);
+  runPending(f.ptrFile, ptr, f.app, quiet);
+  const l = dataLayout(cur);
+  assert.match(fs.readFileSync(l.envPath, 'utf-8'), /old-install/);
+  const backup = fs.readdirSync(l.settingsDir).find(n => n.startsWith('.env.before-import-'))!;
+  assert.match(fs.readFileSync(path.join(l.settingsDir, backup), 'utf-8'), /new-install/);
+  assert.ok(fs.existsSync(path.join(l.library, 'audio', 'old.wav')));
+});
+
+test('migration that stops on a DB collision resumes once the collision is fixed', async () => {
+  const f = fixture();
+  const data = path.join(f.app, 'data');
+  const lib = dataLayout(f.sibling).library;
+  makeDb(path.join(data, 'hotstep.db'), [
+    { sourceDir: path.join(data, 'training', 'x') },
+    { sourceDir: path.join(lib, 'training', 'x') },
+  ]);
+  write(path.join(f.app, '.env'), 'GEMINI_API_KEY=secret123\n');
+  const first = await resolveRuntime({ env: f.env, log: quiet, skipEngineProbe: true });
+  assert.equal(first.ok, false);
+  assert.match((first as any).error, /collides/);
+  assert.ok(readPointer(f.ptrFile)!.pending, 'pending kept');
+
+  const db = new Database(path.join(lib, 'hotstep.db'));
+  db.prepare('DELETE FROM training_datasets WHERE source_dir = ?').run(path.join(lib, 'training', 'x'));
+  db.close();
+  const second = await resolveRuntime({ env: f.env, log: quiet, skipEngineProbe: true });
+  assert.ok(second.ok, !second.ok ? second.error : '');
+  assert.match(fs.readFileSync(dataLayout(f.sibling).envPath, 'utf-8'), /GEMINI_API_KEY=secret123/);
+  const conn = new Database(path.join(lib, 'hotstep.db'), { readonly: true });
+  assert.equal((conn.prepare('SELECT source_dir FROM training_datasets').get() as any).source_dir, path.join(lib, 'training', 'x'));
+  conn.close();
+});

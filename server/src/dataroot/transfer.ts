@@ -227,17 +227,37 @@ export function rewriteJsonFiles(root: string, pairs: PathPair[], depth = 6): nu
   return n;
 }
 
-function rewriteAll(op: PendingOperation, log: Log): void {
+/** Settings for the destination, written once per operation.
+ *  migrate/import: the old install's .env becomes settings/.env; a .env the
+ *  destination already had is kept as `.env.before-<kind>-<id>` (import
+ *  carries the old install's settings, the same way it carries its library).
+ *  move: the moved .env has its paths rewritten. The backup's existence marks
+ *  which file is ours, so a crash at any point resumes without losing either. */
+export function settleEnv(op: PendingOperation): void {
+  if (op.envDone) return;
   const l = dataLayout(op.destination);
   const pairs: PathPair[] = op.mappings.map(m => ({ from: m.from, to: m.to }));
   fs.mkdirSync(l.settingsDir, { recursive: true });
-  if (op.envSource && fs.existsSync(op.envSource)) {
-    if (fs.existsSync(l.envPath)) throw new TransferError(`${l.envPath} already exists; refusing to overwrite settings`);
-    const text = migrateEnvText(fs.readFileSync(op.envSource, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.source);
-    fs.writeFileSync(l.envPath, text, 'utf-8');
+  let text: string | null = null;
+  if (op.envSource) {
+    const src = fs.existsSync(op.envSource) ? op.envSource : `${op.envSource}.migrated`;
+    if (!fs.existsSync(src)) throw new TransferError(`the old settings file ${op.envSource} is gone`);
+    text = migrateEnvText(fs.readFileSync(src, 'utf-8'), op.envBase ?? path.dirname(op.envSource), pairs, l, op.source);
+    const backup = `${l.envPath}.before-${op.kind}-${op.id.slice(0, 8)}`;
+    if (fs.existsSync(l.envPath) && !fs.existsSync(backup)) fs.renameSync(l.envPath, backup);
   } else if (fs.existsSync(l.envPath)) {
-    fs.writeFileSync(l.envPath, rewriteEnvText(fs.readFileSync(l.envPath, 'utf-8'), pairs, l), 'utf-8');
+    text = rewriteEnvText(fs.readFileSync(l.envPath, 'utf-8'), pairs, l);
   }
+  if (text !== null) {
+    const tmp = `${l.envPath}.${op.id.slice(0, 8)}.tmp`;
+    fs.writeFileSync(tmp, text, 'utf-8');
+    fs.renameSync(tmp, l.envPath);
+  }
+  op.envDone = true;
+}
+
+function rewriteAll(op: PendingOperation, log: Log): void {
+  const pairs: PathPair[] = op.mappings.map(m => ({ from: m.from, to: m.to }));
   if (op.dbPath) {
     const db = rewritePath(op.dbPath, pairs) ?? op.dbPath;
     rewriteDb(db, pairs, op.id.slice(0, 8), log);
@@ -393,14 +413,31 @@ export function sizeOperation(op: PendingOperation): { bytes: number; crossVolum
 // ── Driver ───────────────────────────────────────────────────────────
 
 /** Validate a pending operation before anything moves. Returns error strings. */
+/** Resolve links and junctions on the part of `p` that exists, then re-add the rest. */
+export function canonical(p: string): string {
+  const abs = path.resolve(p);
+  const anc = existingAncestor(abs);
+  let real: string;
+  try { real = fs.realpathSync.native(anc); } catch { real = anc; }
+  return path.join(real, path.relative(anc, abs));
+}
+
+/** Boundaries are checked on real locations, so a junction that leads into
+ *  the app or the source folder counts as being there. */
 export function validateOperation(op: PendingOperation, appRoot: string): string[] {
   const errs: string[] = [];
-  if (isInside(appRoot, op.destination)) errs.push(`the data folder cannot be inside the app folder (${appRoot})`);
-  if (op.source && (isInside(op.source, op.destination) || isInside(op.destination, op.source))) {
-    errs.push(`${op.source} and ${op.destination} overlap`);
+  const app = canonical(appRoot);
+  const dest = canonical(op.destination);
+  if (isInside(app, dest)) errs.push(`the data folder cannot be inside the app folder (${appRoot})`);
+  if (op.source) {
+    const src = canonical(op.source);
+    if (isInside(src, dest) || isInside(dest, src)) errs.push(`${op.source} and ${op.destination} overlap`);
   }
   for (const m of op.mappings) {
-    if (isInside(m.from, m.to) || isInside(m.to, m.from)) errs.push(`${m.name}: ${m.from} and ${m.to} overlap`);
+    if (m.state !== 'pending') continue;
+    const from = canonical(m.from), to = canonical(m.to);
+    if (isInside(from, to) || isInside(to, from)) errs.push(`${m.name}: ${m.from} and ${m.to} overlap`);
+    if (isInside(app, to)) errs.push(`${m.name}: ${m.to} is inside the app folder`);
   }
   return errs;
 }
@@ -423,6 +460,12 @@ function abandon(ptrFile: string, ptr: Pointer, log: Log): void {
     } else if (m.state === 'copied') {
       for (const n of entriesOf(m)) fs.rmSync(path.join(m.to, n), { recursive: true, force: true });
     }
+  }
+  if (op.envDone && op.envSource) {
+    // Put back the destination's own settings, or drop the ones we wrote.
+    const l = dataLayout(op.destination);
+    const backup = `${l.envPath}.before-${op.kind}-${op.id.slice(0, 8)}`;
+    if (fs.existsSync(backup)) fs.renameSync(backup, l.envPath); else fs.rmSync(l.envPath, { force: true });
   }
   log(`[Data] Abandoned ${op.kind} to ${op.destination}`);
   ptr.pending = null;
@@ -457,9 +500,20 @@ export function runPending(ptrFile: string, ptr: Pointer, appRoot: string, log: 
       persist(ptrFile, ptr);
     }
 
+    // migrate/import: settle settings before any data moves, so a settings
+    // problem stops the operation while everything is still in place.
+    if (op.envSource && !op.envDone) { settleEnv(op); persist(ptrFile, ptr); }
+
     for (const m of op.mappings) {
       if (m.state !== 'pending') continue;
-      if (!fs.existsSync(m.from)) { m.state = 'cleaned'; persist(ptrFile, ptr); continue; }
+      if (!fs.existsSync(m.from)) {
+        // Only a rename that finished (and removed the emptied source) may
+        // leave no source; an unplugged drive must not activate an empty copy.
+        if (isEmptyDir(m.to)) throw new TransferError(`${m.name}: ${m.from} is not reachable and nothing has arrived at ${m.to}`);
+        m.state = 'moved';
+        persist(ptrFile, ptr);
+        continue;
+      }
       if (hooks.sameVolume(m.from, m.to)) { moveByRename(m, log); m.state = 'moved'; }
       else { copyMapping(m, log); m.state = 'copied'; }
       persist(ptrFile, ptr);
@@ -468,10 +522,9 @@ export function runPending(ptrFile: string, ptr: Pointer, appRoot: string, log: 
       if (fs.existsSync(c.from) && !fs.existsSync(c.to)) { fs.mkdirSync(path.dirname(c.to), { recursive: true }); fs.copyFileSync(c.from, c.to); }
     }
 
-    if (!op.rewritten && op.kind !== 'repoint' && op.kind !== 'create') {
-      rewriteAll(op, log);
-      op.rewritten = true;
-      persist(ptrFile, ptr);
+    if (op.kind !== 'repoint' && op.kind !== 'create') {
+      if (!op.envDone) { settleEnv(op); persist(ptrFile, ptr); } // move: the .env arrived with the data
+      if (!op.rewritten) { rewriteAll(op, log); op.rewritten = true; persist(ptrFile, ptr); }
     }
     if (op.envSource && fs.existsSync(op.envSource) && (op.kind === 'migrate' || op.kind === 'import')) {
       fs.renameSync(op.envSource, op.envSource + '.migrated');

@@ -177,6 +177,8 @@ export interface PendingOperation {
   /** Extra single files to copy (import: plugins, runtime DLLs). */
   copies: PathPair[];
   rewritten: boolean;
+  /** settings/.env is final for this operation (the step is not repeated). */
+  envDone?: boolean;
   /** Import only: a blank library (fresh install, no songs) renamed aside first. */
   setAside?: string[];
   setAsideDone?: boolean;

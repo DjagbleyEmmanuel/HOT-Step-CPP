@@ -124,6 +124,10 @@ on the same drive, and copies, checks sizes, then deletes the source when they a
 Stored absolute paths inside the moved folders (preset adapters and references, dataset
 folders, rung checkpoints, settings, JSON request columns, JSON files under the library)
 are rewritten after a backup of the DB. Paths outside the moved folders are left alone.
+Boundaries are checked on real locations (junctions and links resolved), so a target that
+leads back into the app or the folder being moved is refused. Import carries the old
+install's settings; a `.env` the data folder already had is kept as
+`settings/.env.before-import-<id>`.
 
 Settings schedules a move, repoint, new folder or import from an older install into
 `data-location.json`; the next start carries it out before the DB opens. If the folder is
