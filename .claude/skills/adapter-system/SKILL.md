@@ -5,6 +5,10 @@ description: Explains how HOT-Step's LoRA/LoKr adapter system loads, merges, cac
 
 # Adapter (LoRA/LoKR) System
 
+Resolve runtime paths first using [Finding the data folder](../../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 The deepest institutional-knowledge subsystem in HOT-Step CPP. Every rule below was
 paid for with a shipped bug or a failed research direction. Deeper detail (merge/runtime
 internals, cache-key construction, cross-arch research history) lives in
@@ -39,7 +43,7 @@ internals, cache-key construction, cross-arch research history) lives in
 7. **Never assume runtime deltas are BF16.** They may be Q4_0/Q8_0. `mul_mat` dequantizes transparently, but any code that reads delta bytes directly assuming BF16 crashes (a delta-L2 diagnostic did exactly this — removed in `46603bf`).
 8. **LM echo sideband gotcha: never whitelist synth-request fields.** Sideband/ServerFields-only params (`adapter_runtime_quant`, `adapter_section_align_at`, `rebase_*`, …) do NOT survive the engine `/lm` round trip. `server/src/routes/generate.ts` rebuilds synth requests as `{...aceReq, ...LM-generated-fields-only}` (lines 238 and 320). A field whitelist here once made the Adapter VRAM and Alignment Timing knobs silently dead on the default path (fixed in `8ea519b`/`168dcb5`).
 9. **Edit the right files.** The compiled server is `engine/tools/hot-step-server.cpp` — `engine/tools/ace-server.cpp` is upstream reference code, not compiled. The live sampler is `engine/src/hot-step-sampler.h` — `dit-sampler.h` is dead upstream code. `pipeline-synth-ops.cpp:9` includes `hot-step-sampler.h`; losing that include on an upstream sync is **silent** (compiles, all solvers/schedulers/guidance go dead). After any sync run `engine/verify-hooks.ps1`.
-10. **Build & git rules.** After ANY engine edit: `.\dev-rebuild.bat` from repo root, immediately — NEVER `engine/build.cmd` directly (you cannot reliably tell whether the app is running; Node auto-respawns ace-server → infinite respawn + file-lock loop), never `cmake --clean-first` (20+ min CUDA recompile). TypeScript changes: `npx tsc --noEmit`, not `npm run build`. Git: stage explicit paths only — never `git add -A` or `add -f` (re-adds gitignored models/checkpoints/local docs); commit locally often; push only with explicit user approval.
+10. **Build & git rules.** After ANY engine edit: `.\dev-rebuild.bat` from repo root, immediately — NEVER `engine/build.cmd` directly (you cannot reliably tell whether the app is running; Node auto-respawns ace-server → infinite respawn + file-lock loop), never `cmake --clean-first` (20+ min CUDA recompile). TypeScript changes: `npx tsc --noEmit`, not `npm run build`. Git: stage explicit paths only — never `git add -A` or `add -f` (re-adds gitignored <data root>/models/checkpoints/local docs); commit locally often; push only with explicit user approval.
 
 ## How an adapter reaches the GPU (request flow)
 
@@ -171,7 +175,7 @@ slices of the trajectory ("structure" expert early / "timbre" expert late — TD
 
 - `HOTSTEP_BCAST_TEST=1` then run `engine\build\Release\ace-synth.exe` — numeric self-test of mask broadcast ops on the real backend, no models needed (`engine/tools/ace-synth.cpp:160`).
 - `HOTSTEP_SECTION_NOMASK=1` — apply section deltas unmasked (`dit-graph.h:90`). Adapters audible ⇒ mask values are the problem; still silent ⇒ wiring/upload is the problem.
-- Logs: newest `logs\<session>\ace_engine.log` or `logs\<session>\generations\gen_*.log`. Useful greps: `[Adapter-RT] Loaded`, `[Adapter-RT] P2:`, `header-anchored`, `[Adapter] Basin re-base`, `Per-section masking`.
+- Logs: newest `<data root>/logs\<session>\ace_engine.log` or `<data root>/logs\<session>\generations\gen_*.log`. Useful greps: `[Adapter-RT] Loaded`, `[Adapter-RT] P2:`, `header-anchored`, `[Adapter] Basin re-base`, `Per-section masking`.
 - Audible validation is **by ear only** — ask the user to listen; do not use a browser agent for UI/audio verification. Do not delete experiment output files on your own prediction of their worth.
 
 ## Deeper reading

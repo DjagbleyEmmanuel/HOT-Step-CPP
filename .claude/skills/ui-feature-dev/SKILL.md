@@ -5,6 +5,10 @@ description: Guides adding or modifying UI features (React "studios") in HOT-Ste
 
 # UI Feature Development (React Studios)
 
+Resolve runtime paths first using [Finding the data folder](../../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 The UI tier of HOT-Step CPP is a single-page React 19 app in `ui/` (Vite 8, Tailwind 3.4, zustand 5, react-i18next, lucide-react icons). Every user-facing feature is a **"studio"** — a folder of components under `ui/src/components/` mounted as a top-level view. There is **no react-router**: routing is hand-rolled `history.pushState` in `App.tsx`. All server calls are plain `fetch()` against relative `/api/...` URLs (no axios, no react-query).
 
 Terms used below:
@@ -160,7 +164,7 @@ Poll every 1.5 s. Progress may arrive as 0–1 OR 0–100 — normalise both, as
 | Queue items stuck "generating" after reload | Expected behaviour: `_sanitizeItems` resets to `pending`+"Reconnecting…" and `resumeQueue()` re-submits (audioGenQueueStore.ts:142-156,610-621). |
 | UI shows a raw key like `stem.queue` | Key missing from `i18n/locales/en.json`. |
 | `npx tsc --noEmit` on a file passes but `npm run build` fails | `build` runs `tsc -b` across ALL project references — reproduce with `npx tsc -b` from `ui\`. |
-| Generation fails and the UI just shows "failed" | Debug server-side: newest `logs/YYYY-MM-DD_HH-MM-SS/` folder → `generations/gen_*.log`, then `ace_engine.log` / `node_console.log`. |
+| Generation fails and the UI just shows "failed" | Debug server-side: newest `<data root>/logs/YYYY-MM-DD_HH-MM-SS/` folder → `generations/gen_*.log`, then `ace_engine.log` / `node_console.log`. |
 
 ## Institutional knowledge
 

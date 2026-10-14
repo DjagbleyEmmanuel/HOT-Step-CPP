@@ -5,6 +5,10 @@ description: Safe edit-rebuild-test cycle for the HOT-Step C++ engine (dev-rebui
 
 # C++ Engine Development Loop
 
+Resolve runtime paths first using [Finding the data folder](../../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 How to safely edit, rebuild, and smoke-test the C++ engine (`ace-server.exe` and friends)
 without triggering the respawn/file-lock loop that this repo learned about the hard way.
 
@@ -242,7 +246,7 @@ Full endpoint surface, if you need deeper probes (`hot-step-server.cpp:2704-2852
 
 **Real smoke test:** kick a short generation from the UI — **ask the human user to do this
 and report back; do NOT use a browser agent for visual verification** (project rule).
-Watch the newest session folder under `logs/` (folders are named
+Watch the newest session folder under `<data root>/logs/` (folders are named
 `YYYY-MM-DD_HH-MM-SS`, so name-sorted = time-sorted): `ace_engine.log` (C++
 stdout/stderr), `node_console.log`, and `generations/gen_<uuid>_<task>.log`.
 **Never delete generated test audio or other generation outputs — even ones you predict
@@ -251,7 +255,7 @@ are bad.** The user verifies results by ear; leave all artifacts in place.
 **Standalone engine (without the Node server):** `engine/server.cmd` runs
 `ace-server.exe --host 0.0.0.0 --port 8085 --models .\models --adapters .\adapters --max-batch 1`.
 Caveat: its `--models .\models` is relative to `engine/`, but the real model directory is at
-repo root (`models/` — the Node server passes the absolute path at
+repo root (`<data root>/models/` — the Node server passes the absolute path at
 `server/src/index.ts:166-170`). Treat server.cmd as a template, not a turnkey smoke test.
 
 ## The build scripts — when each applies
@@ -312,7 +316,7 @@ check if the server seems to run old code.
 | `server/src/routes/shutdown.ts` | `/api/shutdown` (kills ace-server, Vite, self) and `/api/restart` |
 | `server/src/config.ts` | Exe discovery order (:46-52), `ACESTEPCPP_EXE` override |
 | `engine/server.cmd` | Standalone ace-server launcher (template — model paths need adjustment) |
-| `logs/<session>/ace_engine.log` | C++ engine output for the newest run |
+| `<data root>/logs/<session>/ace_engine.log` | C++ engine output for the newest run |
 
 ## Failure signatures
 
@@ -322,7 +326,7 @@ check if the server seems to run old code.
 | `unresolved external symbol hotstep_sampler_linked_` | Upstream sync clobbered the `hot-step-sampler.h` include in `pipeline-synth-ops.cpp` | Re-add the include; run `verify-hooks.ps1` |
 | Builds fine, but solver/scheduler/guidance selections have no effect | Silent hook loss predating the sentinel, or sentinel removed | Run `verify-hooks.ps1`; check `GET :8085/plugins` |
 | Compile error: missing `hot-step-params.h` / `adapter-merge.h` / `adapter-runtime.h` | Sync clobbered `model-store.h` / `dit.h` hooks (these fail loudly) | Re-add the includes; run `verify-hooks.ps1` |
-| `[ace-server] Crashed 3 times within 30s — giving up` in node_console.log | Missing DLL next to the exe (cuBLAS/cuDNN/ORT) or startup crash | Check `ace_engine.log` in the newest `logs/` session |
+| `[ace-server] Crashed 3 times within 30s — giving up` in node_console.log | Missing DLL next to the exe (cuBLAS/cuDNN/ORT) or startup crash | Check `ace_engine.log` in the newest `<data root>/logs/` session |
 | Engine respawns endlessly every ~3 s | Something external kills ace-server while Node lives (respawn handler fires); crashes spaced >30 s apart reset the limiter | Stop killing it externally; use `dev-rebuild.bat` / `/api/shutdown` |
 | Node runs an old binary despite a successful build | Stale flat `engine/ace-server.exe` shadowing `build/Release/` (config.ts:46-52), or `ACESTEPCPP_EXE` set in `.env` | Delete the flat exe / unset the override |
 | Header edit seemingly ignored | Stale .obj | Procedure 2 (surgical delete of `acestep-core.dir` + `acestep-core.lib`) |
@@ -347,7 +351,7 @@ check if the server seems to run old code.
   CUDA kernel recompilation. Duration is a doc claim, not independently timed.
 - **UNVERIFIED:** exact incremental build duration ("minutes-scale") — no timing data in repo.
 - **UNVERIFIED:** whether `engine/server.cmd` finds models when run standalone from
-  `engine/` — its `--models .\models` path likely needs adjusting to the repo-root `models/`.
+  `engine/` — its `--models .\models` path likely needs adjusting to the repo-root `<data root>/models/`.
 
 ## Deeper reading
 

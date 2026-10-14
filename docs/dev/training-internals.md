@@ -1,5 +1,9 @@
 # Training System — Architecture & Continuation Guide
 
+Resolve runtime paths first using [Finding the data folder](../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 *The complete map of HOT-Step's native training system (Training Studio). Written as the handoff/continuation doc: everything an agent or contributor needs to keep working on this subsystem in a fresh session. Built 2026-07-27/28; all measurements from an RTX 5090 (32 GB, sm_120).*
 
 ## YuE2 joint training
@@ -737,7 +741,7 @@ slices to the standard V4 GGUF).
 ## Key design facts (the ones that bite)
 
 **Data & labeling**
-- Sidecars (`<stem>.txt`) live **next to the audio**; `dataset.json` in the source folder — Side-Step-compatible on purpose. Studio-private state (audio_codes, provenance, raw analyzer results) lives in `server/data/training/datasets/<slug>/labels/`.
+- Sidecars (`<stem>.txt`) live **next to the audio**; `dataset.json` in the source folder — Side-Step-compatible on purpose. Studio-private state (audio_codes, provenance, raw analyzer results) lives in `<data root>/library/training/datasets/<slug>/labels/`.
 - Labeling is engine-free: Essentia (BPM/key, cached by size+mtime) ∥ Genius lyrics (relaxed collab matching — "Electric Callboy & BABYMETAL" broke exact primary-artist equality) → Gemini captions **with the audio attached** (96 kbps MP3 inline; the local caption is *omitted* from the prompt to avoid anchoring). `ace-understand` is out of the default flow (weak captions, hallucinated lyrics, J-pop prior); still reachable via API `useUnderstand:true`.
 - Optional `essentiaTempo.minTempo/maxTempo` values become `rhythm` keys in the extractor's YAML profile; no bounds means no profile and Essentia's defaults. The label cache also keys on these bounds. An embedded BPM tag replaces Essentia's estimate only when it is a half or double tempo match (within 2 BPM); without such a match, the Essentia value is kept. The Review grid's ½ and 2× buttons save a manual BPM correction before dataset build.
 - Dataset language is **declared, not detected** (`default_language`, forced-write on every label pass).
@@ -877,7 +881,7 @@ Usage (4B, low-VRAM by default):
 
 ```
 ace-train train-lm --stages train,export ^
-  --codes  server\data\training\tensors\president\<variant>\lm_codes.jsonl ^
+  --codes  <data root>/library\training\tensors\president\<variant>\lm_codes.jsonl ^
   --out    <run dir> --models models --lm acestep-5Hz-lm-4B-BF16.gguf ^
   --caption-dropout 0.25 ^
   --reg-every 3 --reg-codes <other artist>\lm_codes.jsonl,<another>\lm_codes.jsonl ^
@@ -959,7 +963,7 @@ Same again with the live teacher (drop `--reg-topk`, it does nothing here):
 - Legacy corpus: `server/scripts/stamp-adapter-triggers.mjs`, dry-run by default. Verified on a copy — 132 MB payload SHA-256 identical, header stays 8-byte aligned, `.bak` kept.
 
 **Adapter layout (per-base + per-run, 2026-07-28)**
-- `<adapters>/lm-06b|lm-17b|lm-4b/<artist>/<run>/` and `<adapters>/dit-<shorthand>/<artist>/<run>/`, where `<run>` = `YYYY-MM-DD_HH-MM-SS` (logs/ convention) — retraining an artist never overwrites an earlier adapter. Artist names carry **no** `-<size>` suffix; the parent folder says the base.
+- `<adapters>/lm-06b|lm-17b|lm-4b/<artist>/<run>/` and `<adapters>/dit-<shorthand>/<artist>/<run>/`, where `<run>` = `YYYY-MM-DD_HH-MM-SS` (<data root>/logs/ convention) — retraining an artist never overwrites an earlier adapter. Artist names carry **no** `-<size>` suffix; the parent folder says the base.
 - Single source of truth: `server/src/services/training/adapterLayout.ts` (size slugs, the confirmed DiT shorthand map `xl-thirds`/`xl-base-turbo`/`xl-sft-turbo`/…, run stamps, latest-run resolution). `migrate-adapter-layout.mjs` moves an old corpus; its shorthand map must stay in sync.
 - Writes go through `lmRunDirFor`/`ditRunDirFor` (fresh stamped dir); reads through `adapterDirFor`/`adapterDitDirFor` (newest run → unversioned artist dir → legacy flat `lm/<name>-4B` / root DiT dir). Two legacy forms are read-everywhere, written-never.
 - Scanners: `GET /api/adapters/lm` walks all lm-* roots + legacy `lm/` (entries carry `lmSize`, `run`, `trigger`) — this is what the global-bar planner list, Lyric Studio's preset picker and the Training Studio picker all consume. `POST /api/adapters/scan` descends into `dit-*` folders (and their run subdirs) only.

@@ -1,5 +1,9 @@
 # Building from source
 
+Resolve runtime paths first using [Finding the data folder](../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 Most users should download a release instead. This page is for contributors: how to build
 the engine, install the server and UI, run the dev loop, rebuild the engine safely, and
 package a portable release.
@@ -125,7 +129,7 @@ cd ../..
 
 ## Get the models
 
-Put GGUF files in `models/` at the repo root, or download them in the app from
+Put GGUF files in `<data root>/models/` at the repo root, or download them in the app from
 Models, Get More Models (the Model Manager). The minimum ACE-Step set is one file of each
 type from [Serveurperso/ACE-Step-1.5-GGUF](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/tree/main):
 
@@ -166,7 +170,7 @@ launchers below are the end-user path.
 | `dev.sh` | Development (macOS) | Vite HMR plus `tsx watch` |
 
 No `.env` is needed for a standard setup. The server finds the engine binary and
-`models/` on its own. [config.md](config.md) lists everything you can override.
+`<data root>/models/` on its own. [config.md](config.md) lists everything you can override.
 
 In dev mode, Vite serves the UI with hot module reload and proxies `/api`, `/audio` and
 `/references` to `127.0.0.1:3001`. `tsx watch` restarts the Node server whenever a file
@@ -201,7 +205,7 @@ respawn and file-lock loop.
   `ace-server.exe` to exit, force-killing it after 10 seconds and giving up after 15; then
   calls `engine\build.cmd`. It is safe when the app is not running.
 - **Work-channel reservations are optional.** The rebuild runs without joining a channel by
-  default, even when `data/collaboration.db` exists. If you are using the HOT-Step work
+  default, even when `<data root>/library/collaboration.db` exists. If you are using the HOT-Step work
   channel, set `HOTSTEP_WORK_CHANNEL=1` for the rebuild to reserve `app-server`, `gpu` and
   `engine-build` through `work-run.ps1`. See the [work-channel guide](../../tools/mcp-lyricstudio/README.md#resource-reservations-and-guarded-commands).
 - **It does not restart the app.** Start it again with `dev.bat`, detached (the shutdown also
@@ -311,7 +315,7 @@ Layout of a Windows package, as assembled by `release.yml`:
 | `runtime/node.exe` | Portable Node 24.18.0 |
 | `server/server.mjs` | The server bundled with esbuild (`release/esbuild.config.mjs`) |
 | `server/ffmpeg.exe` | From the `ffmpeg-static` package |
-| `server/data/` | Everything from `server/src/data/`, copied whole |
+| `<data root>/library/` | Everything from `server/src/data/`, copied whole |
 | `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, and `engine/plugins/` |
 | `plugins/` | The repo-root plugin overlay |
 | `VERSION` | The release version, shown by the app |
@@ -379,7 +383,7 @@ To build a package locally:
 
 ## Release assembly and data paths
 
-CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, with immutable resources copied wholesale from `server/src/data/` into app-owned `server/data/`. The local macOS `package-release.sh` uses the same bundle, flat `engine/` binaries and `runtime/bin/node` layout as CI. Both local packagers include `ace-train`, `ace-midi` and `ace-caption`.
+CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, with immutable resources copied wholesale from `server/src/data/` into app-owned `<data root>/library/`. The local macOS `package-release.sh` uses the same bundle, flat `engine/` binaries and `runtime/bin/node` layout as CI. Both local packagers include `ace-train`, `ace-midi` and `ace-caption`.
 
 Every package ships `release/.env.example` as `.env.example`, the shared launcher, `profile-path.mjs` and `README.txt`. No assembler precreates app-root models or adapters. Bootstrap creates the sibling data layout. The release template leaves managed paths unset; the checkout template retains its existing values. Launchers use `profile-path.mjs` to resolve the stable profile restart marker, matching `dataroot/paths.ts`, including `HOT_STEP_PROFILE_DIR` fixtures. Dev wrappers retain the checkout `.restart-requested` marker.
 

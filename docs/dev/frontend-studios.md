@@ -1,5 +1,9 @@
 # Studio workflows for frontend clients
 
+Resolve runtime paths first using [Finding the data folder](../../AGENTS.md#finding-the-data-folder).
+`<data root>/...` paths below describe the managed layout; environment overrides
+can place individual children elsewhere.
+
 Insta-Gen, Cover, Repaint, Lego (stem layer) and Lyric Studio batches are all
 `WorkflowKind`s on the one generic envelope at `/api/workflows`
 ([contracts/workflow.ts](../../server/src/contracts/workflow.ts),
@@ -163,7 +167,7 @@ both route files import the request schemas from there.
 ### Stem Studio (`/api/stem-studio`)
 
 Stem Studio runs its own pipeline and keeps every result on disk under
-`data/stems/<jobId>/`, independent of ace-server's job pool.
+`<data root>/library/stems/<jobId>/`, independent of ace-server's job pool.
 
 - `POST /extract` with `{ sourceAudioUrl, sourceFileName?, tracks, style?,
   lyrics?, ditSettings? }` — `tracks` is 1+ names from the twelve
@@ -194,7 +198,7 @@ Stem Studio runs its own pipeline and keeps every result on disk under
   stemCount }` for the Settings page.
 - `DELETE /:jobId` cancels it if still running and deletes its directory;
   404 if the job directory never existed. `DELETE /all` cancels every
-  running job and wipes `data/stems/` entirely — used by "Clear All Stems"
+  running job and wipes `<data root>/library/stems/` entirely — used by "Clear All Stems"
   in Settings. There is no per-item error list for either pipeline: a
   failure is the job's own `status: 'failed'` and `error` string.
 
