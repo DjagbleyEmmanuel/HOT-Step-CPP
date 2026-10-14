@@ -9,7 +9,8 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { resolveRuntime } from './bootstrap.js';
-import { dataLayout, devPointerFile, initLayout, isInside, otherPointerRoots, readPointer, rewritePath, writePointer, BUNDLED_DATA_NAMES, POINTER_FILE, LOCK_FILE } from './paths.js';
+import { dataLayout, devPointerFile, initLayout, isInside, otherPointerRoots, newPending, readPointer, rewritePath, writePointer, BUNDLED_DATA_NAMES, POINTER_FILE, LOCK_FILE } from './paths.js';
+import { locateData } from './locate.js';
 import { hooks, planOperation, rewriteDb, runPending, sharedRoot } from './transfer.js';
 
 const quiet = () => {};
@@ -722,3 +723,62 @@ test('a junction into another install\'s data folder counts as that folder, in S
 function isEmptyDirOrMissing(dir: string): boolean {
   try { return fs.readdirSync(dir).length === 0; } catch { return true; }
 }
+
+// ── locate.ts: read-only report ──────────────────────────────────────
+
+function snapshot(dir: string): string[] {
+  return fs.readdirSync(dir, { recursive: true, withFileTypes: true }).map(e => `${path.join(e.parentPath, e.name)}:${e.isFile() ? fs.statSync(path.join(e.parentPath, e.name)).mtimeMs : 'd'}`).sort();
+}
+
+test('locateData: dev with no pointer reports checkout paths and touches nothing', () => {
+  const f = fixture();
+  const checkout = path.join(f.base, 'co');
+  fs.mkdirSync(path.join(checkout, 'server'), { recursive: true });
+  const before = snapshot(f.base);
+  const r = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv, checkoutRoot: checkout });
+  assert.equal(r.mode, 'dev'); assert.equal(r.root, null); assert.equal(r.source, 'checkout');
+  assert.equal(r.children!.library, path.join(checkout, 'server', 'data'));
+  assert.equal(r.children!.models, path.join(checkout, 'models'));
+  assert.deepEqual(snapshot(f.base), before);
+});
+
+test('locateData: dev pointer, release pointer, HOT_STEP_DATA_ROOT and .env overrides', () => {
+  const f = fixture();
+  const checkout = path.join(f.base, 'co');
+  const dataDev = path.join(f.base, 'dev-data');
+  initLayout(dataLayout(dataDev));
+  writePointer(devPointerFile(f.prof, checkout), { version: 1, root: dataDev, pending: null });
+  const dev = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv, checkoutRoot: checkout });
+  assert.equal(dev.root, dataDev); assert.equal(dev.source, 'pointer');
+  assert.equal(dev.children!.db, path.join(dataDev, 'library', 'hotstep.db'));
+  assert.equal(dev.children!.plugins, path.join(dataDev, 'plugins'));
+  assert.deepEqual(dev.overrides, []);
+
+  fs.writeFileSync(dataLayout(dataDev).envPath, 'ACESTEPCPP_MODELS=D:\\elsewhere\\m\n');
+  const withEnv = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv, checkoutRoot: checkout });
+  assert.deepEqual(withEnv.overrides, ['ACESTEPCPP_MODELS']);
+  const viaProcess = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof, TRAINING_DIR: path.join(f.base, 'tr') } as NodeJS.ProcessEnv, checkoutRoot: checkout });
+  assert.equal(viaProcess.children!.training, path.join(f.base, 'tr'));
+
+  writePointer(f.ptrFile, { version: 1, root: path.join(f.base, 'rel'), pending: null });
+  assert.equal(locateData({ env: f.env }).root, path.join(f.base, 'rel'));
+  const o = locateData({ env: { ...f.env, HOT_STEP_DATA_ROOT: path.join(f.base, 'ov') } });
+  assert.equal(o.root, path.join(f.base, 'ov')); assert.equal(o.source, 'HOT_STEP_DATA_ROOT');
+});
+
+test('locateData: reports a pending move and a bad pointer without acting on them', () => {
+  const f = fixture();
+  const checkout = path.join(f.base, 'co');
+  const env = { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv;
+  const file = devPointerFile(f.prof, checkout);
+  const src = path.join(f.base, 'a'); const dest = path.join(f.base, 'b');
+  initLayout(dataLayout(src));
+  writePointer(file, { version: 1, root: src, pending: newPending('move', src, dest) });
+  const before = fs.readFileSync(file, 'utf-8');
+  const r = locateData({ env, checkoutRoot: checkout });
+  assert.equal(r.pendingMove!.kind, 'move'); assert.equal(r.pendingMove!.destination, dest);
+  assert.equal(fs.readFileSync(file, 'utf-8'), before); assert.equal(fs.existsSync(dest), false);
+  fs.writeFileSync(file, '{nope');
+  const bad = locateData({ env, checkoutRoot: checkout });
+  assert.match(bad.pointerError!, /not valid JSON/); assert.equal(bad.root, null);
+});

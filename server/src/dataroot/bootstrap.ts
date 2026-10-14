@@ -13,15 +13,15 @@ import fs from 'fs';
 import http from 'http';
 import net from 'net';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import {
   DEFAULT_DATA_FOLDER, LOCK_FILE, POINTER_FILE, RESTART_MARKER_FILE,
-  dataLayout, devPointerFile, initLayout, isDataLayout, isEmptyDir, legacyMappings, inspectLegacy,
-  profileDir, readPointer, writePointer,
+  dataLayout, initLayout, isDataLayout, isEmptyDir, legacyMappings, inspectLegacy,
+  readPointer, writePointer,
   type Pointer,
 } from './paths.js';
 import { planOperation, runPending, sharedRoot } from './transfer.js';
+import { CHECKOUT_ROOT, pointerLocation } from './locate.js';
 
 export interface Runtime {
   mode: 'dev' | 'release';
@@ -59,9 +59,6 @@ function dev(checkout: string, prof: string, ptrFile: string, root: string | nul
     adaptersDir: l.adapters, whisperDir: l.whisperDir, userPluginsDir: l.plugins,
   };
 }
-
-/** server/src/dataroot -> checkout root. */
-const CHECKOUT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 export type Resolution = { ok: true; runtime: Runtime } | { ok: false; error: string; pointerPath: string | null };
 
@@ -141,9 +138,7 @@ async function runPendingAtBoot(ptrFile: string, ptr: Pointer, appRoot: string, 
 /** Dev: no pointer (or one left with neither root nor work) keeps the
  *  checkout paths. Nothing is migrated unless Settings scheduled it. */
 async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m: string) => void): Promise<Resolution> {
-  const checkout = path.resolve(opts.checkoutRoot ?? CHECKOUT_ROOT);
-  const prof = profileDir(env);
-  const ptrFile = devPointerFile(prof, checkout);
+  const { appRoot: checkout, profileDir: prof, pointerPath: ptrFile } = pointerLocation(env, opts.checkoutRoot ?? CHECKOUT_ROOT);
   const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
   try {
     let ptr: Pointer | null;
@@ -172,9 +167,7 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
   const log = opts.log ?? (m => console.log(m));
   if (!env.HOT_STEP_ROOT) return resolveDev(opts, env, log);
 
-  const appRoot = path.resolve(env.HOT_STEP_ROOT);
-  const prof = profileDir(env);
-  const ptrFile = path.join(prof, POINTER_FILE);
+  const { appRoot, profileDir: prof, pointerPath: ptrFile } = pointerLocation(env);
   const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
 
   try {
