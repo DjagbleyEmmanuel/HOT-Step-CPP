@@ -40,6 +40,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <random>
@@ -164,8 +165,12 @@ static inline bool sa3_encode_tiled(Sa3Backend * be, const float * audio, int S,
 }
 
 // latents: [SA3_LAT_CH][L] -> audio_out planar [2][L*SA3_DS]
+// n_valid_samples >= 0: decoder chunks whose kept output range starts at or beyond n_valid_samples
+// are not computed (the input is padded to a latent bucket plus headroom, and the caller trims that
+// tail anyway). The result for [0, n_valid_samples) is bit-identical. SA3_DEC_SKIP=0 turns it off.
 static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int L,
-                                    std::vector<float> & audio_out) {
+                                    std::vector<float> & audio_out, int n_valid_samples = -1) {
+    static const bool skip_pad = getenv("SA3_DEC_SKIP") == NULL || atoi(getenv("SA3_DEC_SKIP")) != 0;
     int S = L * SA3_DS;
     audio_out.assign((size_t)2 * S, 0.0f);
     int hop = SA3_CHUNK_LAT - SA3_OVERLAP_LAT;
@@ -176,16 +181,17 @@ static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int 
     std::vector<float> aud_buf((size_t)2 * SA3_CHUNK_SAMPLES);
     for (size_t i = 0; i < starts.size(); i++) {
         int s = starts[i];
+        bool first = (i == 0), last = (i + 1 == starts.size());
+        int os = (last ? (L - SA3_CHUNK_LAT) : s) * SA3_DS;
+        int left  = first ? 0 : half_s;
+        int right = last ? SA3_CHUNK_SAMPLES : SA3_CHUNK_SAMPLES - half_s;
+        if (skip_pad && n_valid_samples >= 0 && os + left >= n_valid_samples) continue;
         for (int c = 0; c < SA3_LAT_CH; c++) {
             memcpy(chunk_buf.data() + (size_t)c * SA3_CHUNK_LAT,
                    latents + (size_t)c * L + s, sizeof(float) * SA3_CHUNK_LAT);
         }
         if (!be->same_decode_chunk(chunk_buf.data(), aud_buf.data())) return false;
         const float * aud = aud_buf.data();  // [2,524288]
-        bool first = (i == 0), last = (i + 1 == starts.size());
-        int os = (last ? (L - SA3_CHUNK_LAT) : s) * SA3_DS;
-        int left  = first ? 0 : half_s;
-        int right = last ? SA3_CHUNK_SAMPLES : SA3_CHUNK_SAMPLES - half_s;
         memcpy(audio_out.data() + os + left,     aud + left,                     sizeof(float) * (right - left));
         memcpy(audio_out.data() + S + os + left, aud + SA3_CHUNK_SAMPLES + left, sizeof(float) * (right - left));
     }
@@ -570,9 +576,9 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     // Decode, zero the padded region, trim to input length. No saturation —
     // see the note on `out` above.
     std::vector<float> decoded;
-    if (!sa3_decode_tiled(be, x.data(), L, decoded)) return false;
-    int S_dec = L * SA3_DS;
     int valid_samples = valid * SA3_DS;
+    if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples)) return false;
+    int S_dec = L * SA3_DS;
     out.assign((size_t)2 * T44, 0.0f);
     for (int chn = 0; chn < 2; chn++) {
         const float * src = decoded.data() + (size_t)chn * S_dec;
