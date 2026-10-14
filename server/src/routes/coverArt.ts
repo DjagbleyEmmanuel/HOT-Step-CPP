@@ -10,7 +10,7 @@
 import { Router } from 'express';
 import { getUserId } from './auth.js';
 import { generateCoverArt, getCoverArtReadiness, type CoverArtResult } from '../services/coverArt/coverArtService.js';
-import { registerJobsBusyCheck } from '../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 import { buildCoverArtPrompt } from '../services/coverArt/promptBuilder.js';
 import { resolveCoverScene } from '../services/coverArt/sceneLlm.js';
 import { coverArtDownloader } from '../services/coverArt/coverArtDownloader.js';
@@ -177,14 +177,14 @@ router.post('/generate', async (req, res) => {
   // Fire generation
   job.status = 'running';
   try {
-    const result = await generateCoverArt({
+    const result = await trackBusy('cover art', generateCoverArt({
       songId,
       title: title || '',
       style: style || '',
       lyrics: lyrics || '',
       subject: subject || '',
       prompt: prompt || '',
-    });
+    }));
     job.status = 'succeeded';
     job.result = result;
   } catch (err: any) {

@@ -18,7 +18,7 @@ import { stripThinkingBlocks, postprocessLyrics, fixSectionLabels, enforceLineCo
 import { INSTAGEN_LYRIC_SYSTEM_PROMPT, INSTAGEN_FULL_SYSTEM_PROMPT } from '../services/lireek/prompts.js';
 import { getSetting, setSetting } from '../db/lireekDb.js';
 import { registerInstaGenWorkflows, type InstaResult } from '../services/workflows/instaGenWorkflow.js';
-import { registerJobsBusyCheck } from '../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 
 const router = Router();
 
@@ -193,7 +193,7 @@ router.post('/', (req, res) => {
   };
 
   inspireJobs.set(job.id, job);
-  runInspire(job, req.body);
+  void trackBusy('inspire', runInspire(job, req.body));
 
   res.json({
     jobId: job.id,
@@ -547,7 +547,7 @@ registerInstaGenWorkflows({
     }, 500);
     try {
       if (signal.aborted) throw new Error('Cancelled');
-      await runInspire(job, params);
+      await trackBusy('inspire', runInspire(job, params));
       if (signal.aborted || job.status === 'cancelled') throw new Error('Cancelled');
       if (job.status !== 'succeeded' || !job.result) throw new Error(job.error || 'Inspire failed');
       return job.result;

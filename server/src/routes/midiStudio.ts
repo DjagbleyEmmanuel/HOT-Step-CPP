@@ -34,7 +34,7 @@ import {
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
 import { addMidiLyrics } from '../services/midiLyrics.js';
-import { registerJobsBusyCheck } from '../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 
 const router = Router();
 
@@ -299,7 +299,8 @@ router.post('/transcribe', (req: Request, res: Response) => {
     listeners: new Set(),
   };
   jobs.set(job.id, job);
-  queueTail = queueTail.then(() => runTranscription(job));
+  // Tracked from enqueue: a queued job deleted from the map still runs later.
+  queueTail = trackBusy('MIDI', queueTail.then(() => runTranscription(job)));
 
   console.log(`[MidiStudio] Job ${job.id} queued: ${job.sourceFileName} (model=${m})`);
   res.json({ id: job.id });

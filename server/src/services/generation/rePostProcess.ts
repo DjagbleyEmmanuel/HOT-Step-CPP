@@ -27,7 +27,7 @@ import {
 } from '../logger.js';
 import { runOnGpuLane, gpuLaneBusy, gpuLaneDepth } from './gpuLane.js';
 import { runPostProcessingChain, normalizePpParams, type PostProcessParams } from './postProcessing.js';
-import { registerJobsBusyCheck } from '../../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../../dataroot/pointer.js';
 
 export interface RePostProcessJob {
   id: string;
@@ -281,7 +281,7 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
   const lane = cpuOnly
     ? (fn: () => Promise<void>) => fn()
     : (fn: () => Promise<void>) => runOnGpuLane(fn, { label: 'postprocess:' + jobId });
-  void lane(async () => {
+  void trackBusy('post-processing', lane(async () => {
     job.status = 'running';
     job.stage = 'Starting...';
 
@@ -328,7 +328,7 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
     console.error(`[PostProcess] Song ${song.id} failed: ${msg}`);
   }).finally(() => {
     inFlight.delete(song.id);
-  });
+  }));
 
   return job;
 }

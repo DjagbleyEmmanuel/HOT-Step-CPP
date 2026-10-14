@@ -279,3 +279,32 @@ test('export cleanup that cannot delete its temp file never throws and frees the
     fs.rmSync(first.file, { force: true });
   } finally { done(); }
 });
+
+test('recording writes and exports count as busy for a data-folder move until cleanup', async () => {
+  const { getBusyBlockers } = await import('../../dataroot/pointer.js');
+  const busy = (what: string) => getBusyBlockers().some(b => b.includes(what));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stream-busy-'));
+  let release!: () => void;
+  const sessions = new StreamSessions(dir, async (wav, _format, _bitrate, out) => {
+    await new Promise<void>(r => { release = r; });
+    fs.copyFileSync(wav, out);
+  }, LIMITS, () => 0);
+  try {
+    const s = sessions.open('mm3', { jobId: 'j', take: 0 })!;
+    s.record('start');
+    s.chunk(fixture(0.1, 120));
+    assert.ok(busy('recording write'), 'pending append counts');
+    s.record('stop');
+    s.end();
+    const exporting = s.exportTo('flac');
+    assert.ok(busy('stream export'), 'export counts from the call');
+    while (!release) await new Promise(r => setImmediate(r));
+    assert.ok(busy('stream export'), 'still counted while the transcoder runs');
+    release();
+    const { cleanup } = await exporting;
+    assert.ok(!busy('recording write'));
+    assert.ok(busy('stream export'), 'counted until the download cleans up');
+    cleanup();
+    assert.ok(!busy('stream export'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -133,7 +133,8 @@ Settings schedules a move, repoint, new folder or import from an older install i
 `data-location.json`; the next start carries it out before the DB opens. Scheduling is
 refused while any busy check registered with `registerBusyCheck` (`dataroot/pointer.ts`)
 reports work: generation, post-processing, stem, MIDI, cover-art and Inspire jobs
-(`registerJobsBusyCheck` on each job map), live streams, in-flight audio-queue items and
+(`registerJobsBusyCheck` on each job map for queued work, `trackBusy` on each runner until
+it settles), live streams with pending recording writes and exports, in-flight audio-queue items and
 workflow jobs, model, MuScriptor and cover-art downloads, training and the GPU lane. A new
 long-running job type registers its own check. If the folder is
 missing, the pointer is unreadable or a move stops part way, the server prints the reason

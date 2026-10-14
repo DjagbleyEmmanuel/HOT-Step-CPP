@@ -46,7 +46,7 @@ import type {
 import { openStreamSession, type StreamSession } from '../services/streamSessions/index.js';
 import { getDb } from '../db/database.js';
 import { GenerationJobLedger, ledgerStatusBody, type LedgerEntry } from '../services/generation/jobLedger.js';
-import { registerJobsBusyCheck } from '../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
@@ -190,7 +190,7 @@ function enqueueGeneration(job: GenerationJob): void {
     console.log(`[Generate] Job ${job.id} queued (${gpuLaneDepth() + 1} waiting)`);
   }
 
-  void runOnGpuLane(async (lease) => {
+  void trackBusy('generation', runOnGpuLane(async (lease) => {
     const retryPolicy = job.envelope.policy.retry;
     let attemptNumber = 0;
     let reseededForAttempt = false;
@@ -264,7 +264,7 @@ function enqueueGeneration(job: GenerationJob): void {
   }).finally(() => {
     noteFinished(family);
     withLedger('finish', ledger => ledger.finished(job));
-  });
+  }));
 }
 
 // POST /api/generate — start a generation job

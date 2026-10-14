@@ -492,3 +492,19 @@ test('job-map busy checks block until every job has finished', async () => {
   jobs.get('a')!.status = 'succeeded';
   assert.ok(!getBusyBlockers().some(b => b.includes('fixture')));
 });
+
+test('trackBusy keeps work busy after its map entry is deleted, until it settles, without leaking rejections', async () => {
+  const { registerJobsBusyCheck, trackBusy, getBusyBlockers } = await import('./pointer.js');
+  const jobs = new Map([['s', { status: 'separating' }]]);
+  registerJobsBusyCheck('fixture-stem', jobs);
+  let finish!: (v: unknown) => void, fail!: (e: Error) => void;
+  void trackBusy('fixture-stem', new Promise(r => { finish = r; }));
+  const failing = trackBusy('fixture-stem', new Promise((_r, j) => { fail = j; }));
+  jobs.delete('s'); // DELETE /api/stem-studio/jobs/:id while the engine call is pending
+  assert.ok(getBusyBlockers().includes('2 fixture-stem job(s) still running'));
+  finish(undefined);
+  fail(new Error('engine gone'));
+  await assert.rejects(failing, /engine gone/);
+  await new Promise(r => setImmediate(r));
+  assert.ok(!getBusyBlockers().some(b => b.includes('fixture-stem')));
+});

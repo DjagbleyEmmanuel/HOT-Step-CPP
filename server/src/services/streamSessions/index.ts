@@ -32,6 +32,10 @@ import { detectBpm, detectKey } from './analysis.js';
 import { channel0, parseWav, sameFormat, WavSplitter, wavHeader, type WavFormat } from './wav.js';
 import { registerBusyCheck } from '../../dataroot/pointer.js';
 
+/** Recording appends and exports still touching files (the data-folder busy check). */
+let writesInFlight = 0;
+let exportsInFlight = 0;
+
 export const LIMITS = {
   maxSessions: 16,
   maxRecordingBytes: 2 * 1024 ** 3,
@@ -118,9 +122,10 @@ export class StreamSession {
     const data = Buffer.from(wav.data);
     // A write can fail after stop, end or the cap: it still loses bytes the
     // header would claim, so it fails this recording whatever its status.
+    writesInFlight++;
     r.writes = r.writes.then(() => fs.promises.appendFile(r.file, data)).catch(err => {
       StreamSession.failRecording(r, `Recording write failed: ${(err as Error).message}`);
-    });
+    }).finally(() => { writesInFlight--; });
   }
 
   end(): void {
@@ -156,6 +161,17 @@ export class StreamSession {
 
   /** A finished recording as WAV/FLAC/MP3/Opus in a temporary file the caller deletes. */
   async exportTo(format: StreamExportFormat, bitrate?: number): Promise<{ file: string; cleanup: () => void }> {
+    // Counted from the call until cleanup (or failure), so a move cannot start under an export.
+    exportsInFlight++;
+    let counted = true;
+    const uncount = () => { if (counted) { counted = false; exportsInFlight--; } };
+    try {
+      const out = await this.exportFiles(format, bitrate, uncount);
+      return out;
+    } catch (err) { uncount(); throw err; }
+  }
+
+  private async exportFiles(format: StreamExportFormat, bitrate: number | undefined, uncount: () => void): Promise<{ file: string; cleanup: () => void }> {
     const r = this.recording;
     if (r.status === 'recording') throw new StreamSessionError(409, 'Stop the recording before exporting it');
     if (!r.format || r.bytes === 0) throw new StreamSessionError(409, 'Nothing has been recorded');
@@ -171,7 +187,7 @@ export class StreamSession {
       cleaned = true;
       // Never throws: it runs in the route's download/close callbacks, and a
       // locked temp file must not keep the export slot taken.
-      try { for (const f of cleanups) removeQuietly(f); } finally { release(); }
+      try { for (const f of cleanups) removeQuietly(f); } finally { release(); uncount(); }
     };
     try {
       fs.writeFileSync(wavFile, wavHeader(r.format, r.bytes));
@@ -310,8 +326,12 @@ export function openStreamSession(kind: 'storm' | 'mm3', source: StreamSessionSu
   }
 }
 
-// Live streams are still writing audio into the library.
+// Live streams, pending recording writes and exports still use the library's files.
 registerBusyCheck('streams', () => {
-  const n = instance ? instance.list().filter(x => x.status === 'live').length : 0;
-  return n ? [`${n} live stream(s)`] : [];
+  const live = instance ? instance.list().filter(x => x.status === 'live').length : 0;
+  return [
+    ...(live ? [`${live} live stream(s)`] : []),
+    ...(writesInFlight ? [`${writesInFlight} stream recording write(s) pending`] : []),
+    ...(exportsInFlight ? [`${exportsInFlight} stream export(s) in progress`] : []),
+  ];
 });

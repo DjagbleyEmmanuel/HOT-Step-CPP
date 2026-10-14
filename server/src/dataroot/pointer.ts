@@ -133,3 +133,16 @@ export function registerJobsBusyCheck(name: string, jobs: { values(): Iterable<{
     return n ? [`${n} ${name} job(s) running or queued`] : [];
   });
 }
+
+const running = new Map<string, number>();
+registerBusyCheck('running-work', () => [...running].filter(([, n]) => n > 0).map(([name, n]) => `${n} ${name} job(s) still running`));
+
+/** Count `work` as running until it settles, whatever happens to the job's
+ *  map entry (deleted, cancelled). Returns `work` unchanged, so the caller's
+ *  own error handling is unaffected and no rejection is left unhandled. */
+export function trackBusy<T>(name: string, work: Promise<T>): Promise<T> {
+  running.set(name, (running.get(name) ?? 0) + 1);
+  const done = () => { running.set(name, running.get(name)! - 1); };
+  work.then(done, done);
+  return work;
+}

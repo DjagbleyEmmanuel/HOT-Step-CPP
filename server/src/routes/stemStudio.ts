@@ -17,7 +17,7 @@ import { ensureEngineFormat } from '../services/audioConvert.js';
 import { config } from '../config.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../services/logger.js';
 import { STEM_TRACK_NAMES, stemExtractRequestSchema, stemSupersepRequestSchema } from '../contracts/stemSeparation.js';
-import { registerJobsBusyCheck } from '../dataroot/pointer.js';
+import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 
 const router = Router();
 const ACE_URL = config.aceServer.url;
@@ -403,7 +403,7 @@ router.post('/extract', (req: Request, res: Response) => {
   jobs.set(job.id, job);
 
   // Start extraction async
-  runExtraction(job, ditSettings || {}, style || '', lyrics || '');
+  void trackBusy('stem', runExtraction(job, ditSettings || {}, style || '', lyrics || ''));
 
   console.log(`[StemStudio] Job ${job.id} created: ${tracks.length} tracks from ${sourceFileName || sourceAudioUrl}`);
   res.json({ id: job.id });
@@ -439,7 +439,7 @@ router.post('/supersep', (req: Request, res: Response) => {
   jobs.set(job.id, job);
 
   // Start separation async
-  runSupersep(job);
+  void trackBusy('stem', runSupersep(job));
 
   console.log(`[StemStudio] SuperSep job ${job.id} created: level=${sepLevel} from ${sourceFileName || sourceAudioUrl}`);
   res.json({ id: job.id });
