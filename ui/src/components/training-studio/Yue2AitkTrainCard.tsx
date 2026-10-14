@@ -593,10 +593,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setDefaultsAvailable(!!defaults);
       setMissingDefaults(result.missing ?? []);
       if (!defaults) return;
+      // A saved path with the default's file name in another folder is the same
+      // model from before a data-folder move, so the installed default wins.
+      const fileName = (file: string) => file.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+      const takeDefault = (saved: unknown, value: unknown) => typeof value === 'string'
+        && (!saved || (typeof saved === 'string' && saved !== value && fileName(saved) === fileName(value)));
       setPrepare(previous => ({
         ...previous,
-        ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => key !== 'models' && !previous[key as keyof PrepareForm] && typeof value === 'string')),
-        models: { ...previous.models, ...Object.fromEntries(Object.entries(defaults.models ?? {}).filter(([key, value]) => !previous.models[key as keyof PrepareForm['models']] && typeof value === 'string')) },
+        ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => key !== 'models' && takeDefault(previous[key as keyof PrepareForm], value))),
+        models: { ...previous.models, ...Object.fromEntries(Object.entries(defaults.models ?? {}).filter(([key, value]) => takeDefault(previous.models[key as keyof PrepareForm['models']], value))) },
       }));
     }).catch(() => { /* Defaults are advisory; manual paths remain available. */ });
     return () => { cancelled = true; };
