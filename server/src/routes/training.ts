@@ -1,4 +1,5 @@
 import { yue2OptimRequest } from '../services/training/yue2Optim.js';
+import { selectYue2Audio, YUE2_AUDIO_EXTS } from '../services/training/yue2AudioStaging.js';
 // training.ts — Dataset Studio HTTP surface (Training Studio phase 1)
 //
 // Import audio → local label (/understand + Essentia) → optional cloud enhance
@@ -2998,11 +2999,9 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
 // The MM3 routes above are untouched. Three things differ here and all three
 // are engine-CLI facts, not choices (survey: docs/plans/yue2/11-training-studio-notes.md):
 //
-//   * `yue2-preprocess` takes --audio <folder> and scans it FLAT. The
-//     dataset's `recursive` flag and its excluded rows cannot reach it, so the
-//     status endpoint reports the flat audio count BESIDE the dataset's own
-//     count and the preprocess route warns when they disagree. Hiding that
-//     would mean a user training on tracks they excluded and never knowing.
+//   * `yue2-preprocess` takes --audio <folder> and scans it flat. The runner
+//     stages included dataset rows into persistent <output>/_staged_audio,
+//     keeping sidecars paired and nested files reachable by later stages.
 //   * There is no `--captions <dir>`. `--caption-mode txt` would read the ACE
 //     Option-A sidecar raw, field syntax and lyrics included, so the default
 //     is `none` (style = the trigger word alone) and `txt` is refused unless
@@ -3018,8 +3017,8 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
  *  Deliberately NOT mm3Preflight: MM3 requires a BUILT dataset because
  *  `mm3-lm-train --manifest` reads `dataset.json`. Neither YuE2 tool reads it,
  *  so demanding a build would refuse a run that would have worked. The build
- *  state is reported by the status route instead, because the count it gives
- *  is the only cross-check on the flat scan. */
+ *  state is reported by the status route instead. Preprocess selection comes
+ *  from the current dataset scan and labels, without requiring a build. */
 function yue2Preflight(req: Request, res: Response): TrainingDatasetRow | null {
   const ds = repo.getDataset(req.params.id as string);
   if (!ds) {
@@ -3037,14 +3036,12 @@ function yue2Preflight(req: Request, res: Response): TrainingDatasetRow | null {
   return ds;
 }
 
-/** Audio files `yue2-preprocess` will actually see: a FLAT, non-recursive scan
+/** Legacy status-card source count: a flat, non-recursive scan
  *  of the source folder filtered to the five extensions the engine accepts
  *  (yue2-preprocess-run.h's list — note .opus and .aac are NOT among them,
  *  though the dataset scanner accepts both).
  *
- *  This is the number the tool works from, and it is reported so the card can
- *  set it against `sampleCount`. Never throws. */
-const YUE2_AUDIO_EXTS = new Set(['.wav', '.flac', '.mp3', '.ogg', '.m4a']);
+ *  Preparation itself uses selectYue2Audio instead. Never throws. */
 function countYue2ScannableAudio(dir: string): { files: number; unsupported: number; needFfmpeg: number } {
   let files = 0, unsupported = 0, needFfmpeg = 0;
   try {
@@ -3076,18 +3073,19 @@ function countYue2ScannableAudio(dir: string): { files: number; unsupported: num
  *  reports zeroes, which reads as "no sidecars" and keeps the old default.
  */
 const SIDECAR_HEAD_BYTES = 4096;
-function countYue2Sidecars(dir: string): { withCaption: number; withLyrics: number; withYue2: number } {
+function countYue2Sidecars(dir: string, audioPaths?: string[]): { withCaption: number; withLyrics: number; withYue2: number } {
   let withCaption = 0, withLyrics = 0, withYue2 = 0;
   try {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!e.isFile()) continue;
-      if (!YUE2_AUDIO_EXTS.has(path.extname(e.name).toLowerCase())) continue;
-      const stem = path.parse(e.name).name;
+    const files = audioPaths ?? fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isFile() && YUE2_AUDIO_EXTS.has(path.extname(e.name).toLowerCase()))
+      .map(e => path.join(dir, e.name));
+    for (const audio of files) {
+      const stem = audio.slice(0, -path.extname(audio).length);
       // The planner caption is its own file and is what `--caption-mode yue2`
       // reads. Counted separately so the card can say a cache cut in another
       // mode is ignoring N of them.
-      if (fs.existsSync(path.join(dir, `${stem}.yue2.txt`))) withYue2++;
-      const sidecar = path.join(dir, `${stem}.txt`);
+      if (fs.existsSync(`${stem}.yue2.txt`)) withYue2++;
+      const sidecar = `${stem}.txt`;
       let head = '';
       try {
         const fd = fs.openSync(sidecar, 'r');
@@ -3200,7 +3198,7 @@ router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
 });
 
 /** POST /datasets/:id/yue2-preprocess */
-router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
+router.post('/datasets/:id/yue2-preprocess', async (req: Request, res: Response) => {
   try {
     const ds = yue2Preflight(req, res);
     if (!ds) return;
@@ -3223,11 +3221,16 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
       return;
     }
 
-    const scan = countYue2ScannableAudio(ds.sourceDir);
+    const selected = selectYue2Audio(await buildSamples(ds));
+    // buildSamples yields; another request can enqueue while it is reading.
+    if (queue.activeJobForDataset(ds.id)) {
+      res.status(409).json({ error: 'A job is already running for this dataset' });
+      return;
+    }
+    const scan = { ...selected, files: selected.files.length };
     if (scan.files === 0) {
       res.status(400).json({
-        error: `No .wav/.flac/.mp3/.ogg/.m4a files directly in ${ds.sourceDir}. yue2-preprocess scans that `
-             + 'folder flat — it does not search subfolders, whatever the dataset\'s recursive setting says.',
+        error: 'Dataset has no included .wav/.flac/.mp3/.ogg/.m4a files. Check excluded rows and the recursive setting.',
       });
       return;
     }
@@ -3261,7 +3264,8 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
     // form's defaults above — a corpus that ships captions or lyrics reads
     // them. Falling back to `none` here built a cache with neither, and the
     // align stage then skipped every source of a bulk run.
-    const sidecarsForMode = isYue2CaptionMode(b.captionMode) ? undefined : countYue2Sidecars(ds.sourceDir);
+    const sidecarsForMode = isYue2CaptionMode(b.captionMode) ? undefined
+      : countYue2Sidecars(ds.sourceDir, selected.files.map(s => s.audioPath));
     const captionMode = isYue2CaptionMode(b.captionMode) ? b.captionMode
       : sidecarsForMode && (sidecarsForMode.withLyrics > 0 || sidecarsForMode.withCaption > 0) ? 'yue2' : D.captionMode;
     const defaultCaption = typeof b.defaultCaption === 'string' ? b.defaultCaption.trim() : '';
@@ -3314,8 +3318,7 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
     });
     res.json({
       jobId: job.id, kind: job.kind, outDir,
-      // Echoed so the card can show the mismatch the engine cannot see. Not a
-      // warning string: the card decides how loudly to say it.
+      // Eligible dataset rows, before the optional --only/--limit filters.
       scannableFiles: scan.files,
       datasetSamples: ds.sampleCount,
       datasetExcluded: ds.excludedCount,
