@@ -199,8 +199,21 @@ inline ggml_tensor * join_halves(ggml_context * ctx, ggml_tensor * a, ggml_tenso
                                   size_t(a->ne[0]) * sizeof(float));
     return ggml_reshape_4d(ctx, both, shape->ne[0], shape->ne[1], shape->ne[2], shape->ne[3]);
 }
+// YUE2_AITK_ROPE_TABLE=1 keeps the BF16 table RoPE below in bf16 mode too.
+inline bool rope_table() {
+    static const bool on = [] { const char * v = std::getenv("YUE2_AITK_ROPE_TABLE"); return v && *v && *v != '0'; }();
+    return on;
+}
 inline ggml_tensor * rope(ggml_context * ctx, ggml_tensor * x,
-                          ggml_tensor * cosine, ggml_tensor * sine) {
+                          ggml_tensor * cosine, ggml_tensor * sine, ggml_tensor * positions = nullptr) {
+    if (positions && !strict_f32() && !rope_table()) {
+        // One NeoX RoPE op with F32 trig and one BF16 round of its output, the
+        // op the YuE2 inference graph runs (theta 1e6, as trig() below). The
+        // table path's per-product rounds go, and with them a dozen launches
+        // per call and their backward.
+        return round(ctx, ggml_rope_ext(ctx, x, positions, nullptr, int(x->ne[0]), GGML_ROPE_TYPE_NEOX, 0,
+                                        1000000.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f));
+    }
     // x [D,heads,S,1], trig [D/2,1,S,1], already BF16-rounded constants.
     const int64_t half = x->ne[0] / 2;
     GGML_ASSERT(x->ne[0] % 2 == 0 && cosine->ne[0] == half && sine->ne[0] == half);
@@ -222,7 +235,7 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
                                  ggml_tensor * cosine, ggml_tensor * sine, ggml_tensor * mask,
                                  ggml_tensor * prefix_k_canvas = nullptr,
                                  ggml_tensor * prefix_v_canvas = nullptr, int64_t prefix_length = 0,
-                                 int64_t causal_hint = -1) {
+                                 int64_t causal_hint = -1, ggml_tensor * positions = nullptr) {
     const int64_t S = h->ne[1], D = c.head_dim, Q = D*c.heads, KV = D*c.kv_heads;
     GGML_ASSERT(c.hidden == Q && h->ne[0] == c.hidden && prefix_length >= 0);
     GGML_ASSERT((prefix_k_canvas == nullptr) == (prefix_v_canvas == nullptr));
@@ -232,8 +245,8 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     ggml_tensor * q = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, 0, Q), D, c.heads, S, 1);
     ggml_tensor * k = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, Q, KV), D, c.kv_heads, S, 1);
     ggml_tensor * v = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, Q+KV, KV), D, c.kv_heads, S, 1);
-    q = rope(ctx, rms(ctx, q, norms.q, c.rms_eps), cosine, sine);
-    k = rope(ctx, rms(ctx, k, norms.k, c.rms_eps), cosine, sine);
+    q = rope(ctx, rms(ctx, q, norms.q, c.rms_eps), cosine, sine, positions);
+    k = rope(ctx, rms(ctx, k, norms.k, c.rms_eps), cosine, sine, positions);
     q = ggml_permute(ctx, q, 0, 2, 1, 3);
     k = ggml_permute(ctx, k, 0, 2, 1, 3);
     v = ggml_permute(ctx, v, 0, 2, 1, 3);

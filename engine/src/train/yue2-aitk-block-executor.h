@@ -154,6 +154,8 @@ struct Yue2AitkBlockWorkspace {
 struct Yue2AitkBlockConstants {
     yue2_aitk_executor_detail::Runtime runtime;
     ggml_tensor * cosine = nullptr, * sine = nullptr, * mask = nullptr;
+    // Absolute RoPE positions prefix..prefix+count-1, for ggml_rope_ext.
+    ggml_tensor * positions = nullptr;
     // The backward graphs' loss seed: dL/dL = 1. Their loss gradient
     // accumulator points here instead of being set by ggml_graph_reset, a
     // blocking 4-byte upload per block (YUE2_AITK_BLOCK_RESET=1 restores it).
@@ -163,13 +165,17 @@ struct Yue2AitkBlockConstants {
               const float * cos_data, const float * sin_data, std::string * error) {
         using namespace yue2_aitk_executor_detail;
         YUE2_PROF("constants: mask build + upload");
-        if (!make_runtime(backend, 5*ggml_tensor_overhead()+1024, &runtime, error)) return false;
+        if (!make_runtime(backend, 6*ggml_tensor_overhead()+1024, &runtime, error)) return false;
         cosine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
         sine = ggml_new_tensor_4d(runtime.ctx, GGML_TYPE_F32, c.head_dim/2, 1, count, 1);
         std::vector<uint16_t> host;
         mask = make_mask(runtime.ctx, count, prefix, mode, &host, error);
         one = ggml_new_tensor_1d(runtime.ctx, GGML_TYPE_F32, 1);
-        if (!mask || !cosine || !sine || !one || !allocate(&runtime, backend, error)) return false;
+        positions = ggml_new_tensor_1d(runtime.ctx, GGML_TYPE_I32, count);
+        if (!mask || !cosine || !sine || !one || !positions || !allocate(&runtime, backend, error)) return false;
+        std::vector<int32_t> pos(static_cast<size_t>(count));
+        for (int64_t t = 0; t < count; ++t) pos[size_t(t)] = int32_t(prefix + t);
+        ggml_backend_tensor_set(positions, pos.data(), 0, ggml_nbytes(positions));
         const float onef = 1.0f;
         ggml_backend_tensor_set(one, &onef, 0, sizeof(onef));
         ggml_backend_tensor_set(cosine, cos_data, 0, ggml_nbytes(cosine));
@@ -215,7 +221,7 @@ public:
         ggml_tensor * sin_t = constants ? constants->sine : ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
         std::vector<uint16_t> mask_data; ggml_tensor * mask = constants ? constants->mask : make_mask(r.ctx, sequence, prefix_length, mask_mode, &mask_data, error);
         if (!h || !cos_t || !sin_t || !mask) return fail(error, "forward tensor allocation failed");
-        Yue2AitkBlockResult out = yue2_aitk_graph::block(r.ctx, config, weights, norms, adapters, h, cos_t, sin_t, mask, prefix_k_canvas, prefix_v_canvas, prefix_length, causal_hint(mask_mode, prefix_length, sequence));
+        Yue2AitkBlockResult out = yue2_aitk_graph::block(r.ctx, config, weights, norms, adapters, h, cos_t, sin_t, mask, prefix_k_canvas, prefix_v_canvas, prefix_length, causal_hint(mask_mode, prefix_length, sequence), constants ? constants->positions : nullptr);
         ggml_cgraph * graph = ggml_new_graph_custom(r.ctx, 32768, true); if (!graph) return fail(error, "forward graph allocation failed");
         ggml_tensor * key_cont = capture_kv && out.key ? ggml_cont(r.ctx, out.key) : nullptr;
         ggml_tensor * value_cont = capture_kv && out.value ? ggml_cont(r.ctx, out.value) : nullptr;
@@ -305,7 +311,7 @@ public:
         if(!h||!upstream||!cos_t||!sin_t||!mask) return fail(error,"backward tensor allocation failed");
         TensorFlagsGuard input_flags(device_input);
         ggml_set_param(h);
-        Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length,causal_hint(mask_mode,prefix_length,sequence));
+        Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length,causal_hint(mask_mode,prefix_length,sequence),constants ? constants->positions : nullptr);
         ggml_tensor * loss=ggml_sum(r.ctx,ggml_mul(r.ctx,out.hidden,upstream)); ggml_cgraph * graph=ggml_new_graph_custom(r.ctx,65536,true); if(!loss||!graph) return fail(error,"backward graph allocation failed");
         ggml_build_forward_expand(graph,loss); ggml_set_loss(loss);
         lap.mark("bwd: graph build");
