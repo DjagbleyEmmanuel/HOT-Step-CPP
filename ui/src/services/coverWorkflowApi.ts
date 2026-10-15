@@ -1,4 +1,4 @@
-import { changed } from '../queries/cover-lyrics/reads';
+import { changed, songsChanged } from '../queries/cover-lyrics/reads';
 import { waitForSnapshot } from '../queries/cover-lyrics/wait';
 import { workflowOptions } from '../queries/cover-lyrics/workflows';
 import { apiClient } from './httpClient';
@@ -31,6 +31,7 @@ export async function waitForCoverJob(token: string, jobId: string, cancelled: (
       progress?.(data.job);
     });
   if (result.job.status !== 'succeeded') throw new Error(result.job.error || `Cover operation ${result.job.status}`);
+  if (result.job.kind === 'cover-render') await songsChanged();
   return result.job;
 }
 

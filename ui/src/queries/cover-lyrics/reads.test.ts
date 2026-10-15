@@ -2,19 +2,58 @@ import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { QueryObserver } from '@tanstack/react-query';
 import { queryClient, createQueryClient } from '../client';
-import { startAuthSession } from '../keys';
+import { sharedKeys, startAuthSession, serverKey } from '../keys';
 import { pollWhile } from '../contract';
-import { snapshotOptions } from './reads';
+import { snapshotOptions, songsChanged } from './reads';
 import { lireekApi } from '../../services/lireekApi';
 import { studioDraftsApi } from '../../services/studioDraftsApi';
 import { yue2CoverApi } from '../../services/yue2CoverApi';
 import { waitForSnapshot } from './wait';
 import { coverSongsOptions, deleteCovers } from './songs';
+import { waitForCoverJob } from '../../services/coverWorkflowApi';
 
 const originalFetch = globalThis.fetch;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 afterEach(() => { globalThis.fetch = originalFetch; queryClient.clear(); });
+
+test('Cover writes, deletes and render completion refresh every cached song view', async () => {
+  startAuthSession(queryClient, 'cover-writes');
+  let revision = 0;
+  let deleted = false;
+  const options = [
+    { queryKey: sharedKeys.songs(), path: '/api/songs' },
+    { queryKey: sharedKeys.song('keep'), path: '/api/songs/keep' },
+    { queryKey: serverKey('shell-queue/recent-songs', { auth: true }), path: '/api/songs/recent' },
+    { queryKey: serverKey('studios/recent-songs', { auth: true }), path: '/api/songs/recent?source=studio' },
+    { queryKey: coverSongsOptions('cover-writes').queryKey, path: '/api/songs?source=cover-studio' },
+  ].map(({ queryKey, path }) => ({ queryKey, queryFn: async () => (await fetch(path)).json() }));
+  const reads = new Map<string, number>();
+  globalThis.fetch = async (url, opts) => {
+    const path = String(url);
+    if (opts?.method === 'POST') { deleted = true; revision++; return json({ success: true }); }
+    if (path.includes('/workflows/jobs/')) return json({ job: { id: 'render', kind: 'cover-render', status: 'succeeded' }, events: [] });
+    reads.set(path, (reads.get(path) ?? 0) + 1);
+    return json({ songs: deleted ? [{ id: 'keep' }] : [{ id: 'keep' }, { id: 'remove' }], revision });
+  };
+  const observers = options.map(option => new QueryObserver(queryClient, option));
+  const off = observers.map(observer => observer.subscribe(() => {}));
+  try {
+    await Promise.all(options.map(option => queryClient.fetchQuery(option)));
+    revision++;
+    await songsChanged();
+    for (const option of options) assert.equal(queryClient.getQueryData(option.queryKey).revision, 1);
+    await deleteCovers('cover-writes', ['remove']);
+    for (const option of options) assert.equal(queryClient.getQueryData(option.queryKey).revision, 2);
+    revision++;
+    await waitForCoverJob('cover-writes', 'render', () => false);
+    for (const option of options) {
+      assert.equal(queryClient.getQueryData(option.queryKey).revision, 3);
+      assert.deepEqual(queryClient.getQueryData(option.queryKey).songs.map((song: { id: string }) => song.id), ['keep']);
+    }
+    for (const count of reads.values()) assert.ok(count >= 4, 'each view refetched after all three changes');
+  } finally { off.forEach(unsubscribe => unsubscribe()); }
+});
 
 test('690 simultaneous catalogue consumers and a fresh return use one list and one bulk preset read', async () => {
   const calls: string[] = [];

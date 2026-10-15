@@ -3,18 +3,18 @@ import { apiClient, type ReadOptions } from '../../services/httpClient';
 import { followJob, workflowApi } from '../../services/workflowApi';
 import type { WorkflowDocument, WorkflowReplay } from '../../../../server/src/contracts/workflow';
 import { queryClient } from '../client';
-import { serverKey, resourceKey, sharedKeys, getSessionEpoch } from '../keys';
+import { resourceKey, sharedKeys, SHARED, getSessionEpoch, invalidateSongViews } from '../keys';
 
 export const workflowOptions = (token: string, id: string, after = 0, options: ReadOptions = {}) => {
   return queryOptions({
-  queryKey: serverKey('cover-lyrics/workflow-job', { auth: true, id, filters: { after } }),
+  queryKey: sharedKeys.workflowJob(id, after),
   queryFn: ({ signal }) => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(id)}?after=${after}`, { token, signal: options.signal ? AbortSignal.any([signal, options.signal]) : signal }),
   staleTime: 0,
   });
 };
 export const documentOptions = (token: string, id: string, options: ReadOptions = {}) => {
   return queryOptions({
-  queryKey: serverKey('cover-lyrics/workflow-document', { auth: true, id }),
+  queryKey: sharedKeys.workflowDocument(id),
   queryFn: ({ signal }) => apiClient.get<{ document: WorkflowDocument }>(`/workflows/documents/${encodeURIComponent(id)}`, { token, signal: options.signal ? AbortSignal.any([signal, options.signal]) : signal }),
   staleTime: 0,
   });
@@ -37,7 +37,8 @@ export const coverLyricWorkflowApi = {
 /** Streaming reducers retain sequencing; events invalidate captured snapshots.
  *  Reconnects always reconcile, including when the replay history has a gap. */
 export const followCoverLyricJob: typeof followJob = (token, id, handlers, opts) => {
-  const jobKey = workflowOptions(token, id).queryKey;
+  const jobScope = sharedKeys.workflowJob(id)[2];
+  const jobKey = resourceKey(SHARED.workflowJob, jobScope, id);
   const epoch = getSessionEpoch();
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -48,8 +49,7 @@ export const followCoverLyricJob: typeof followJob = (token, id, handlers, opts)
     controller.abort();
     return false;
   };
-  const songsKey = sharedKeys.songs();
-  const documentsKey = resourceKey('cover-lyrics/workflow-document', jobKey[2]);
+  const documentsKey = resourceKey(SHARED.workflowDocument, jobScope);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const flush = () => {
     clearTimeout(timer);
@@ -57,11 +57,9 @@ export const followCoverLyricJob: typeof followJob = (token, id, handlers, opts)
     if (getSessionEpoch() !== epoch) return;
     void queryClient.invalidateQueries({ queryKey: jobKey });
     void queryClient.invalidateQueries({ queryKey: documentsKey });
-    void queryClient.invalidateQueries({ queryKey: songsKey });
-    void queryClient.invalidateQueries({ queryKey: resourceKey('cover-lyrics/cover-songs', jobKey[2]) });
-    void queryClient.invalidateQueries({ queryKey: resourceKey('studios/recent-songs') });
+    void invalidateSongViews(queryClient);
     void queryClient.invalidateQueries({ queryKey: resourceKey('cover-lyrics/lireek') });
-    void queryClient.invalidateQueries({ queryKey: resourceKey('cover-lyrics/drafts', jobKey[2]) });
+    void queryClient.invalidateQueries({ queryKey: resourceKey('cover-lyrics/drafts', jobScope) });
   };
   const invalidate = () => { timer ??= setTimeout(flush, 50); };
   return followJob(token, id, {

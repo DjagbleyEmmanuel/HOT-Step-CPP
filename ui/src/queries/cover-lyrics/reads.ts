@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiClient, type ReadOptions } from '../../services/httpClient';
 import { queryClient } from '../client';
-import { serverKey, resourceKey, type Resource } from '../keys';
+import { serverKey, resourceKey, invalidateSongViews, type Resource } from '../keys';
 
 export type Domain = 'lireek' | 'drafts' | 'cover' | 'workflow';
 const resource = (domain: Domain): Resource => `cover-lyrics/${domain}`;
@@ -32,6 +32,5 @@ export async function changed(domain: Domain, scope?: { session?: number; api?: 
 }
 
 export async function songsChanged() {
-  await Promise.all(['songs', 'song', 'studios/recent-songs', 'cover-lyrics/cover-songs'].map(resource =>
-    queryClient.invalidateQueries({ queryKey: resourceKey(resource as Resource) })));
+  await invalidateSongViews(queryClient);
 }

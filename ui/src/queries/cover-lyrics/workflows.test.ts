@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { queryClient } from '../client';
-import { sharedKeys, startAuthSession } from '../keys';
+import { sharedKeys, startAuthSession, resourceKey } from '../keys';
 import { followCoverLyricJob, workflowOptions, documentOptions } from './workflows';
 
 const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
@@ -11,7 +11,9 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   const original = globalThis.fetch;
   queryClient.clear();
   startAuthSession(queryClient, 'test-A');
-  const keys = [workflowOptions('test-A', 'job').queryKey, documentOptions('test-A', 'doc').queryKey, sharedKeys.songs()];
+  const keys = [workflowOptions('test-A', 'job').queryKey, sharedKeys.workflowJob('job', 7), documentOptions('test-A', 'doc').queryKey, sharedKeys.songs()];
+  const otherJob = sharedKeys.workflowJob('other', 7);
+  queryClient.setQueryData(otherJob, {});
   for (const key of keys) queryClient.setQueryData(key, {});
   let invalidations = 0;
   const unsubscribe = queryClient.getQueryCache().subscribe(event => {
@@ -23,11 +25,44 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   try {
     assert.equal(await followCoverLyricJob('test-A', 'job', { onEvent: () => { effects++; } }), 'succeeded');
     assert.equal(effects, 1);
-    assert.equal(invalidations, 3);
+    assert.equal(invalidations, 4);
     for (const key of keys) assert.equal(queryClient.getQueryState(key)?.isInvalidated, true);
     await new Promise(resolve => setTimeout(resolve, 60));
-    assert.equal(invalidations, 3, 'terminal cleanup removed the pending coalescing timer');
+    assert.equal(queryClient.getQueryState(otherJob)?.isInvalidated, false);
+    assert.equal(invalidations, 4, 'terminal cleanup removed the pending coalescing timer');
   } finally { unsubscribe(); globalThis.fetch = original; queryClient.clear(); }
+});
+
+test('Cover and canonical workflow consumers deduplicate raw job and document reads', async () => {
+  const original = globalThis.fetch;
+  queryClient.clear();
+  startAuthSession(queryClient, 'shared-workflow');
+  const replay = { job: { id: 'job', status: 'running' }, events: [{ seq: 1 }] };
+  const document = { document: { id: 'doc', revision: 2 } };
+  let calls = 0;
+  globalThis.fetch = async url => {
+    calls++;
+    await new Promise(resolve => setImmediate(resolve));
+    return new Response(JSON.stringify(String(url).includes('/documents/') ? document : replay));
+  };
+  try {
+    const job = workflowOptions('shared-workflow', 'job');
+    const doc = documentOptions('shared-workflow', 'doc');
+    assert.deepEqual(job.queryKey, sharedKeys.workflowJob('job', 0));
+    assert.deepEqual(doc.queryKey, sharedKeys.workflowDocument('doc'));
+    const [cover, canonical, coverDoc, canonicalDoc] = await Promise.all([
+      queryClient.fetchQuery(job),
+      queryClient.fetchQuery({ ...job, queryKey: sharedKeys.workflowJob('job', 0) }),
+      queryClient.fetchQuery(doc),
+      queryClient.fetchQuery({ ...doc, queryKey: sharedKeys.workflowDocument('doc') }),
+    ]);
+    assert.equal(calls, 2);
+    assert.deepEqual(cover, replay);
+    assert.deepEqual(canonical, replay);
+    assert.deepEqual(coverDoc, document);
+    assert.deepEqual(canonicalDoc, document);
+    assert.equal(queryClient.getQueriesData({ queryKey: resourceKey('cover-lyrics/workflow-job') }).length, 0);
+  } finally { globalThis.fetch = original; queryClient.clear(); }
 });
 
 test('a delayed old-session stream cannot deliver effects or invalidate the new session', async () => {

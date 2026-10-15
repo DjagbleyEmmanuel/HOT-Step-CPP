@@ -25,7 +25,10 @@ Cover's filtered `/songs?source=cover-studio` response has a separate normalized
 `cover-lyrics/cover-songs` key. It is not the full-library wire shape. Successful
 song deletion cancels the old list, changes cached rows only after the server
 accepts deletion, cancels again and invalidates. Completion and song writers
-also invalidate canonical `songs`, `song` and `studios/recent-songs` resources.
+also call foundation's `invalidateSongViews`, refreshing canonical `songs`,
+`song`, `shell-queue/recent-songs`, `studios/recent-songs` and the Cover feed.
+The render waiter invalidates these views when a `cover-render` job succeeds,
+including renders completed without a stream subscriber.
 The reference browser uses `global-models/references`; the LM adapter picker
 uses `global-models/lm-adapters` with the same folder filter as the global bar.
 Legacy generation snapshots use `shell-queue/generation-status` and the captured
@@ -48,6 +51,19 @@ replayed event sequences. Old-session streams cannot deliver effects into a
 new session. The streaming queue remains a client execution reducer, not a
 second HTTP snapshot cache. Cover stems use the studios-owned Query separation
 waiter; a local epoch also rejects a late start response after clear/replace.
+
+Workflow jobs use `sharedKeys.workflowJob(id, after)` with an auth epoch and
+an explicit `after`, including zero. Their cached shape is raw `WorkflowReplay`.
+Documents use `sharedKeys.workflowDocument(id)` and cache `{ document }`.
+Events invalidate every `after` variant for the captured job and all documents
+in its auth scope. No `cover-lyrics/workflow-job` or `workflow-document` cache
+remains. The workflow list keeps its area key and `kind` filter.
+
+This area has no audio lyric-sidecar reader or cache. Its editable lyrics and
+dataset metadata are different resources. Audio sidecars use foundation's
+`sharedKeys.lrc(sidecarUrl(audio, '.lrc'))` and `sharedKeys.lyricsJson(...)`:
+raw text or word timings, with null for a missing sidecar. Crop/retranscription
+invalidation is owned by the shared sidecar contract, not the editable lyrics.
 
 ## Consumer manifest
 
