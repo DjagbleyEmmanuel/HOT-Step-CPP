@@ -881,6 +881,26 @@ mp3-codec -i song.wav -o song.mp3 -b 192
 mp3-codec -i song.mp3 -o song.wav --format wav32
 ```
 
+## ace-train YuE2 preparation reference
+
+`ace-train yue2-prepare-aitk` builds native joint-training caches from a Legacy
+manifest. See [training internals](../../docs/dev/training-internals.md) for the
+full preparation command and workflow.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--trigger <text>` | empty | Inject a trigger into full captions. With a non-empty caption, the style becomes `<text>, in the style of <text>. <caption>`; with an empty caption, it is just `<text>` |
+| `--caption-dropout-trigger <text>` | `--trigger`, or empty | Exact style text for the caption-dropout prefixes, with no wrapper. One line, at most 128 bytes; CR, LF and NUL are rejected |
+
+The fallback dropout style is also bare trigger text. Preparation tokenizes the
+dropout prefixes with the same lyrics and sheet conditioning as the full-caption
+prefixes. `ace-train yue2-joint-train --caption-dropout <p>` selects them during
+training; `--caption-dropout-trigger` belongs on the preparation command.
+
+HOT-Approved, the Fixed recipe preset, passes `--caption-dropout-trigger` with
+the trigger, or the dataset slug if no trigger is set. Older prepared datasets
+need re-preparing; the server invalidates the old Fixed recipe preparation cache.
+
 ## fattn-train-test reference
 
 Parity harness for `GGML_OP_FLASH_ATTN_TRAIN{,_BACK}`: compares the fused op

@@ -437,6 +437,15 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-optim-check` | Optimizer self-check |
 | `spike` | Phase-0 evidence runs |
 
+`yue2-prepare-aitk --caption-dropout-trigger <text>` sets the exact style text
+for caption-dropout prefixes, without an "in the style of" wrapper. The value
+must be one line, at most 128 bytes; CR, LF and NUL are rejected. If omitted,
+the dropout style is the bare `--trigger` value, or empty when neither is set.
+Preparation tokenizes these prefixes; `yue2-joint-train --caption-dropout <p>`
+selects them during training. HOT-Approved uses this preparation flag with the
+trigger, falling back to the dataset slug. Older prepared datasets need
+re-preparing; the server invalidates the old Fixed recipe preparation cache.
+
 The flash-attention training ops these trainers use come from the HOT-ggml fork
 below. How the Training Studio drives these subcommands, and the design decisions
 behind them, are in [training-internals.md](training-internals.md).

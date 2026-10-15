@@ -202,6 +202,22 @@ Preparation validates geometry, payloads and captions, records model hashes,
 and publishes a new manifest without changing the source cache. For caches
 prepared by other YuE2 training tools, use `yue2-import-aitk-cache --help`.
 
+`yue2-prepare-aitk --caption-dropout-trigger <text>` sets each item's dropout
+style to exactly `<text>`, with no "in the style of" wrapper. It accepts one
+line of at most 128 bytes and rejects CR, LF and NUL. Without this flag,
+dropout uses the bare `--trigger` value, or an empty style if there is no trigger.
+The Legacy `--trigger` injection still wraps non-empty full captions as before;
+the dropout style does not use that wrapper. Lyrics and sheet conditioning stay
+the same when caption dropout fires.
+
+Set this flag during preparation, where the trigger-only prefixes are tokenized.
+`yue2-joint-train --caption-dropout <p>` selects those prepared prefixes with
+probability `p`; the trainer does not accept `--caption-dropout-trigger`.
+HOT-Approved, the Fixed recipe preset, passes the trigger or, when none is set,
+the dataset slug. Re-prepare datasets made before this change to populate those
+prefixes correctly. The server invalidates the old Fixed recipe preparation
+cache and re-prepares it automatically.
+
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch
 calculations have documented rounding differences; audio quality still needs
