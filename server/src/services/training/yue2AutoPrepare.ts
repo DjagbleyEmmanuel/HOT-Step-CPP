@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'crypto';
 import { isCancelled, emitProgress, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
 import { refreshYue2ManifestCaptions, runYue2AitkPrepareJob, type ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
+import { FIXED_RECIPE_CAPTION_GRAMMAR } from './fixedRecipeCaption.js';
 
 function stamp(file: string): unknown {
   const st = fs.statSync(file);
@@ -28,7 +29,7 @@ export function preparationFingerprint(o: ResolvedYue2AitkPrepareOptions): strin
   // version 4 (2026-09-27): the importer emits the condition-dropout prefix
   // variants the base-matched method trains on.
   return createHash('sha256').update(JSON.stringify({ version: 4, text, timing: o.lyricTiming !== false, trigger: o.trigger || '',
-    files: [...new Set(files)].sort().map(stamp), ...(o.captionGrammar ? { captionGrammar: o.captionGrammar } : {}) })).digest('hex');
+    files: [...new Set(files)].sort().map(stamp), ...(o.captionGrammar ? { captionGrammar: FIXED_RECIPE_CAPTION_GRAMMAR } : {}) })).digest('hex');
 }
 
 function outputFingerprint(manifest: string, captionGrammar?: 'fixed-recipe'): string {
@@ -38,7 +39,7 @@ function outputFingerprint(manifest: string, captionGrammar?: 'fixed-recipe'): s
   if (data.schema_version !== 1 || data.recipe_version !== 'aitk-yue2-2026-09-16' || !Array.isArray(data.items) || !data.items.length) {
     throw new Error('Invalid prepared dataset');
   }
-  if (captionGrammar === 'fixed-recipe' && (data.caption_grammar !== 'fixed-recipe' || data.loudness_lufs !== 0)) {
+  if (captionGrammar === 'fixed-recipe' && (data.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR || data.loudness_lufs !== 0)) {
     throw new Error('Prepared dataset has no Fixed recipe caption and loudness markers');
   }
   // Prepared before 2026-09-20: no trigger-only prefixes, so caption dropout

@@ -14,6 +14,7 @@ import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError 
 import { yue2Unload } from '../backends/yue2/client.js';
 import { yue2StyleNormsForRun } from '../backends/yue2/scoreHealth.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
+import { FIXED_RECIPE_CAPTION_GRAMMAR } from './fixedRecipeCaption.js';
 import { getDataset } from './datasetsRepo.js';
 import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
@@ -459,7 +460,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (manifestError) return `${manifestError}: ${o.dataset || '(empty)'}`;
   if (o.method === 'fixed-recipe') {
     const prepared = JSON.parse(fs.readFileSync(o.dataset, 'utf8')) as Record<string, unknown>;
-    if (prepared.caption_grammar !== 'fixed-recipe' || prepared.loudness_lufs !== 0)
+    if (prepared.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR || prepared.loudness_lufs !== 0)
       return 'Fixed recipe needs a dataset prepared with its caption grammar and loudness off.';
   }
   if (!o.outDir) return 'Joint training requires a new output directory';

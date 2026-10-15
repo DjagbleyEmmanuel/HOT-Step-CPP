@@ -166,6 +166,7 @@ import {
   type ResolvedYue2AitkPrepareOptions,
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
+import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
 import { parseYue2JointStopMode, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
@@ -3600,7 +3601,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       preparation = { ...prepDefaults, checkpoint, models,
         legacyManifest: prepString('legacyManifest', prepDefaults.legacyManifest),
         tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
-        trigger: method === 'fixed-recipe' ? undefined : ds.customTag || ds.slug,
+        trigger: method === 'fixed-recipe' ? fixedRecipeTrigger(ds.customTag, ds.slug) : ds.customTag || ds.slug,
         ...(method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}),
         lyricTiming: b.lyricTiming === undefined ? b.alignmentEnabled !== false : b.lyricTiming === true };
       const prepError = foreignYue2Manifest(ds, preparation.legacyManifest) || validateYue2AitkPrepareOptions(preparation);
@@ -3623,7 +3624,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         return;
       }
       const trigger = ds.customTag || ds.slug;
-      if (method === 'fixed-recipe' ? manifest.caption_grammar !== 'fixed-recipe' || manifest.loudness_lufs !== 0
+      if (method === 'fixed-recipe' ? manifest.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR || manifest.loudness_lufs !== 0
         : manifest.style_template !== 'upstream' || manifest.trigger !== trigger || !manifest.items.every((item: unknown) => {
           const style = item && typeof item === 'object' ? (item as Record<string, unknown>).style : undefined;
           return typeof style === 'string' && (style === trigger || style.startsWith(`${trigger}, in the style of ${trigger}. `));
@@ -4035,7 +4036,7 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       tokenizer: str('tokenizer') || defaults.options.tokenizer,
       output: str('output') || defaults.options.output,
       models,
-      trigger: b.captionGrammar === 'fixed-recipe' ? undefined : ds.customTag || ds.slug,
+      trigger: b.captionGrammar === 'fixed-recipe' ? fixedRecipeTrigger(ds.customTag, ds.slug) : ds.customTag || ds.slug,
       ...(b.captionGrammar === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}),
       lyricTiming: b.captionGrammar === 'fixed-recipe' ? false : b.lyricTiming !== false,
     };

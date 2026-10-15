@@ -9,6 +9,12 @@ const SONG_SECTION = /^\s*\[[^\]]+\]\s*$/;
 const CUE = /^\s*\([^()]*\)\s*$/;
 const HEADER = /^\s*\[(Tags|Lyrics|Duration)\]\s*$/i;
 
+export const FIXED_RECIPE_CAPTION_GRAMMAR = 'fixed-recipe-v2';
+
+export function fixedRecipeTrigger(trigger: string | undefined, slug: string): string {
+  return trigger?.trim() || slug;
+}
+
 // Unknown tags (e.g. [Breakdown]) are kept in Ruach's Title case, not dropped.
 const titleCase = (key: string) => key.replace(/(^|[\s-])([a-z])/g, (_, lead: string, letter: string) => lead + letter.toUpperCase());
 
@@ -69,8 +75,14 @@ export function parseFixedRecipeCaption(text: string): { style: string; lyrics: 
   return { style: sections.tags.join('\n').trim(), lyrics: (sections.lyrics ?? []).join('\n').trim() };
 }
 
-export function prepareFixedRecipeCaption(caption: string, lyrics: string): { style: string; lyrics: string } {
+export function prepareFixedRecipeCaption(caption: string, lyrics: string, trigger = ''): { style: string; lyrics: string } {
   const parsed = parseFixedRecipeCaption(caption);
-  return { style: parsed.style.split(/\s+/).join(' ').normalize('NFC'),
+  let style = parsed.style.split(/\s+/).join(' ').normalize('NFC');
+  const prefix = trigger.trim().normalize('NFC');
+  const suffix = style.slice(prefix.length);
+  if (prefix && !(style.startsWith(prefix) && (!suffix || /^[\s,.;:!?]/.test(suffix)))) {
+    style = style ? `${prefix}, ${style}` : prefix;
+  }
+  return { style,
     lyrics: cleanFixedRecipeLyrics(lyrics || parsed.lyrics).lyrics.normalize('NFC') };
 }

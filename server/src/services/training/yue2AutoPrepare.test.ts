@@ -3,9 +3,11 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { ensureYue2PreparedDataset, preparationFingerprint } from './yue2AutoPrepare.js';
 import type { TrainingJob } from './labelingQueue.js';
 import type { ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
+import { FIXED_RECIPE_CAPTION_GRAMMAR } from './fixedRecipeCaption.js';
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-auto-prepare-'));
@@ -25,6 +27,7 @@ function fixture() {
     fs.mkdirSync(opts.output);
     fs.writeFileSync(path.join(opts.output, 'latent.bin'), 'prepared');
     fs.writeFileSync(path.join(opts.output, 'dataset.json'), JSON.stringify({ schema_version: 1,
+      ...(opts.captionGrammar ? { caption_grammar: FIXED_RECIPE_CAPTION_GRAMMAR, loudness_lufs: 0 } : {}),
       recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin', prefix_full_nocap_ids: [1], prefix_full_uncond_ids: [1] }] }));
   };
   return { dir, o, job, prepare, calls: () => calls };
@@ -60,6 +63,32 @@ test('missing prepared payload is regenerated instead of reused', async () => {
   fs.unlinkSync(path.join(path.dirname(first), 'latent.bin'));
   assert.notEqual(await ensureYue2PreparedDataset(f.job(), f.o, f.prepare), first);
   assert.equal(f.calls(), 2);
+});
+
+test('Fixed recipe automatically replaces the old grammar cache and then reuses the new one', async () => {
+  const f = fixture();
+  const options = { ...f.o, captionGrammar: 'fixed-recipe' as const, trigger: 'sample_slug', lyricTiming: false };
+  const first = await ensureYue2PreparedDataset(f.job(), options, f.prepare);
+  assert.ok(first);
+  const manifest = JSON.parse(fs.readFileSync(first, 'utf8'));
+  assert.equal(manifest.caption_grammar, 'fixed-recipe-v2');
+  manifest.caption_grammar = 'fixed-recipe';
+  const oldText = JSON.stringify(manifest);
+  fs.writeFileSync(first, oldText);
+  // Give the old output a matching hash so the grammar check must reject it.
+  const indexPath = path.join(f.dir, 'aitk-auto-prepare-fixed-recipe-v1.json');
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  const latent = path.join(path.dirname(first), 'latent.bin');
+  const st = fs.statSync(latent);
+  index.outputFingerprint = createHash('sha256').update(oldText)
+    .update(JSON.stringify([[path.resolve(latent), st.size, st.mtimeMs, st.ctimeMs]])).digest('hex');
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  const second = await ensureYue2PreparedDataset(f.job(), options, f.prepare);
+  assert.notEqual(second, first);
+  assert.equal(await ensureYue2PreparedDataset(f.job(), options, f.prepare), second);
+  assert.equal(f.calls(), 2);
+  assert.notEqual(await ensureYue2PreparedDataset(f.job(), { ...options, trigger: 'changed_tag' }, f.prepare), second);
+  assert.equal(f.calls(), 3);
 });
 
 test('a dataset prepared before trigger-only prefixes is regenerated, not reused', async () => {

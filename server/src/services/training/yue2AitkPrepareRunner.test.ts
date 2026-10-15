@@ -28,6 +28,12 @@ test('AITK preparation passes the dataset trigger before native tokenization', (
     ['--lyric-timing', '1', '--trigger', 'artist_album']);
 });
 
+test('Fixed recipe leaves native wrapper injection off even with a trigger', () => {
+  const args = buildYue2AitkPrepareArgs({ ...options, trigger: 'sample_style', captionGrammar: 'fixed-recipe', lyricTiming: false });
+  assert.equal(args.includes('--trigger'), false);
+  assert.deepEqual(args.slice(-2), ['--lyric-timing', '0']);
+});
+
 test('request parser accepts concrete model map and repeatable model fields', () => {
   assert.deepEqual(parseYue2AitkModels({
     vae: 'v', semantic: 's', sheetsage: 'h',

@@ -11,7 +11,7 @@ import { withFfmpegOnPath } from '../../config.js';
 import { aceTrainExe } from './aceTrain.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, trainerLine, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
-import { prepareFixedRecipeCaption } from './fixedRecipeCaption.js';
+import { FIXED_RECIPE_CAPTION_GRAMMAR, prepareFixedRecipeCaption } from './fixedRecipeCaption.js';
 import { randomUUID } from 'crypto';
 
 export type AitkPrepareModelName = 'vae' | 'semantic' | 'sheetsage';
@@ -27,13 +27,13 @@ export interface ResolvedYue2AitkPrepareOptions {
   captionGrammar?: 'fixed-recipe';
 }
 
-export function fixedRecipeLegacyManifest(text: string): string {
+export function fixedRecipeLegacyManifest(text: string, trigger = ''): string {
   const manifest = JSON.parse(text) as { sources?: Array<Record<string, unknown>>; caption_format?: string };
   if (!Array.isArray(manifest.sources)) throw new Error('Fixed-recipe caption preparation needs legacy manifest sources');
   for (const source of manifest.sources) {
     const caption = String(source.caption ?? '');
     const lyrics = String(source.lyrics ?? '');
-    const cleaned = prepareFixedRecipeCaption(caption, lyrics);
+    const cleaned = prepareFixedRecipeCaption(caption, lyrics, trigger);
     source.caption = cleaned.style;
     source.lyrics = cleaned.lyrics;
   }
@@ -102,7 +102,8 @@ export function buildYue2AitkPrepareArgs(o: ResolvedYue2AitkPrepareOptions): str
   ];
   for (const name of MODEL_NAMES) args.push('--model', `${name}=${o.models[name]}`);
   args.push('--lyric-timing', o.lyricTiming === false ? '0' : '1');
-  if (o.trigger) args.push('--trigger', o.trigger);
+  // Fixed recipe prefixes the source caption in TS; native injection adds a wrapper.
+  if (o.trigger && o.captionGrammar !== 'fixed-recipe') args.push('--trigger', o.trigger);
   return args;
 }
 
@@ -196,7 +197,7 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
   if (o.captionGrammar === 'fixed-recipe') {
     try {
       temporaryManifest = path.join(path.dirname(o.legacyManifest), `.fixed-recipe-caption-${randomUUID()}.json`);
-      fs.writeFileSync(temporaryManifest, fixedRecipeLegacyManifest(fs.readFileSync(o.legacyManifest, 'utf8')));
+      fs.writeFileSync(temporaryManifest, fixedRecipeLegacyManifest(fs.readFileSync(o.legacyManifest, 'utf8'), o.trigger));
     } catch (err) {
       if (temporaryManifest) fs.rmSync(temporaryManifest, { force: true });
       finishJob(job, 'failed', `Fixed-recipe caption preparation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -236,7 +237,7 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
     const value = JSON.parse(fs.readFileSync(manifest, 'utf8')) as Record<string, unknown>;
     if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Preparation wrote an invalid schema-1 dataset manifest');
     if (o.captionGrammar === 'fixed-recipe') {
-      value.caption_grammar = 'fixed-recipe';
+      value.caption_grammar = FIXED_RECIPE_CAPTION_GRAMMAR;
       value.loudness_lufs = 0;
       fs.writeFileSync(manifest, JSON.stringify(value));
     }
