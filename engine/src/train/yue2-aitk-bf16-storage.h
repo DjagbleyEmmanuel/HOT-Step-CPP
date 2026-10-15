@@ -32,6 +32,14 @@ inline bool defer_rounds() {
     return on;
 }
 
+// CUDA writes a BF16 GEMM's result straight into its BF16 round store, so such
+// a round is stored rather than deferred. GGML_CUDA_NO_GEMM_BF16_STORE=1 turns
+// both off.
+inline bool gemm_store() {
+    static const bool on = std::getenv("GGML_CUDA_NO_GEMM_BF16_STORE") == nullptr;
+    return on;
+}
+
 inline const ggml_tensor * owner(const ggml_tensor * t) { return t->view_src ? t->view_src : t; }
 
 inline void retype(ggml_tensor * t, ggml_type type) {
@@ -101,6 +109,7 @@ inline int apply(ggml_cgraph * graph, const std::vector<const ggml_tensor *> & k
     auto deferrable = [&](const ggml_tensor * r) {
         const ggml_tensor * x = r->src[0];
         if (x->view_src || x->op == GGML_OP_NONE || x->op == GGML_OP_ADD || x->op == GGML_OP_SUB || x->op == GGML_OP_MUL) return false;
+        if (gemm_store() && x->op == GGML_OP_MUL_MAT && x->src[0]->type == GGML_TYPE_BF16 && x->op_params[0] != GGML_PREC_F32) return false;
         if (uses[x] != 1 || uses[r] != 1) return false;
         const ggml_tensor * u = reader[r];
         return u->op == GGML_OP_ADD || u->op == GGML_OP_SUB || u->op == GGML_OP_MUL;
