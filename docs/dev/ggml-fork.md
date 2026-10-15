@@ -42,7 +42,7 @@ The YuE2 trainer's own speed changes sit outside the fork:
 | device-only stack blocks launch async, and each stack call synchronizes once at its end | `YUE2_AITK_SYNC_BLOCKS=1` waits after every block |
 | the block backward's loss seed points at a resident 1.0 instead of `ggml_graph_reset` uploading it per block | `YUE2_AITK_BLOCK_RESET=1` |
 | the AR head rows and the NAR final read the stack's final hidden and write dx as device tensors | `YUE2_AITK_HANDOFF_HOST=1` hands them over through host vectors |
-| `YUE2_AITK_BF16_STORAGE=1` stores every BF16_ROUND output (and the views and conts that reread it) as a BF16 tensor; every other op keeps its F32 result, so the values are the same. A round whose only reader is an `ADD`/`SUB`/`MUL` and whose source is not one stays F32 for the CUDA deferral (`YUE2_AITK_BF16_DEFER=0` retypes it too). About -40 ms/step on a 5090; a cuBLAS BF16 C for GEMM outputs is not bit-identical for every shape, so GEMM rounds stay separate | off by default; unset it |
+| BF16 activation storage stores every BF16_ROUND output (and the views and conts that reread it) as a BF16 tensor; every other op keeps its F32 result, so the values are the same. A round whose only reader is an `ADD`/`SUB`/`MUL` and whose source is not one stays F32 for the CUDA deferral (`YUE2_AITK_BF16_DEFER=0` retypes it too). About -40 ms/step on a 5090; a cuBLAS BF16 C for GEMM outputs is not bit-identical for every shape, so GEMM rounds stay separate | `YUE2_AITK_BF16_STORAGE=0` |
 
 `cpy-q-occupancy` (the quant → F32 copy launch geometry) is upstream since ggml-org
 `b64fb805`; Hook 9 checks the launch shape itself. Hook 17 checks that `engine/ggml` is clean
