@@ -1,3 +1,9 @@
+import { projectQuery } from '../queries/global-models/projection';
+import { vstPresetsApi } from '../queries/global-models/presets';
+import type { MonitorStatus } from '../queries/global-models/options';
+import { queryClient } from '../queries/client';
+import { localOptions, monitorOptions } from '../queries/global-models/options';
+import { apiClient } from '../services/httpClient';
 // vstChainStore.ts — Zustand store for VST3 post-processing chain
 //
 // Manages the global VST3 plugin chain: scanning, ordering, enable/disable,
@@ -28,6 +34,7 @@ function loadLegacyPresetsFromStorage(): Record<string, VstChainEntry[]> {
 
 export function createVstPresetCollection(): PresetCollection<VstChainPresetBody> {
   return new PresetCollection<VstChainPresetBody>({
+    api: vstPresetsApi,
     family: 'vst-chain',
     migratedFlag: MIGRATED_FLAG,
     legacyItems: () => Promise.all(Object.entries(loadLegacyPresetsFromStorage()).map(async ([name, entries]) => {
@@ -120,8 +127,9 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   scanPlugins: async () => {
     set({ scanning: true, scanError: null });
     try {
-      const { plugins } = await vstApi.scan();
-      set({ plugins, scanning: false });
+      await queryClient.invalidateQueries({ queryKey: localOptions('vst-scan', '/vst/scan').queryKey });
+      await queryClient.fetchQuery(localOptions<{ plugins: VstPlugin[] }>('vst-scan', '/vst/scan'));
+      set({ scanning: false });
     } catch (err: any) {
       set({ scanning: false, scanError: err.message });
     }
@@ -129,10 +137,9 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
   loadChain: async () => {
     try {
-      const { plugins } = await vstApi.getChain();
-      set({ chain: plugins || [], chainLoaded: true });
+      await queryClient.fetchQuery(localOptions<{ plugins: VstChainEntry[] }>('vst-chain', '/vst/chain'));
     } catch {
-      set({ chain: [], chainLoaded: true });
+      set({ chainLoaded: true });
     }
   },
 
@@ -153,8 +160,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ chain: newChain });
 
     try {
-      const result = await vstApi.updateChain(newChain);
-      set({ chain: result.plugins });
+      await updateCachedChain(newChain);
     } catch (err) {
       console.error('[VST] Failed to update chain:', err);
     }
@@ -166,8 +172,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ chain: newChain });
 
     try {
-      const result = await vstApi.updateChain(newChain);
-      set({ chain: result.plugins });
+      await updateCachedChain(newChain);
     } catch (err) {
       console.error('[VST] Failed to update chain:', err);
     }
@@ -181,8 +186,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ chain: newChain });
 
     try {
-      const result = await vstApi.updateChain(newChain);
-      set({ chain: result.plugins });
+      await updateCachedChain(newChain);
     } catch (err) {
       console.error('[VST] Failed to update chain:', err);
     }
@@ -196,8 +200,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ chain: newChain });
 
     try {
-      const result = await vstApi.updateChain(newChain);
-      set({ chain: result.plugins });
+      await updateCachedChain(newChain);
     } catch (err) {
       console.error('[VST] Failed to update chain:', err);
     }
@@ -227,6 +230,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   startMonitor: async (trackPath: string) => {
     try {
       await vstApi.monitorStart(trackPath);
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
       set({ monitoring: true, monitorPaused: false, monitorTrackPath: trackPath, pendingGuiChanges: false });
     } catch (err) {
       console.error('[VST] Failed to start monitor:', err);
@@ -236,6 +240,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   stopMonitor: async () => {
     try {
       await vstApi.monitorStop();
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
       set({ monitoring: false, monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
     } catch (err) {
       console.error('[VST] Failed to stop monitor:', err);
@@ -247,14 +252,17 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     if (!monitorTrackPath) return;
     try {
       // Stop first, then restart with the same track
-      await fetch('/api/vst/monitor/restart', { method: 'POST' });
+      await apiClient.post('/vst/monitor/restart');
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
       set({ monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
     } catch (err) {
       console.error('[VST] Failed to restart monitor:', err);
       // Fallback: manual stop + start
       try {
         await vstApi.monitorStop();
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
         await vstApi.monitorStart(monitorTrackPath);
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
         set({ monitoring: true, monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
       } catch (e) {
         console.error('[VST] Restart fallback also failed:', e);
@@ -264,8 +272,9 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
   pauseMonitor: async () => {
     try {
-      const res = await fetch('/api/vst/monitor/pause', { method: 'POST' });
-      if (res.ok) set({ monitorPaused: true });
+      await apiClient.post('/vst/monitor/pause');
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      set({ monitorPaused: true });
     } catch (err) {
       console.error('[VST] Failed to pause monitor:', err);
     }
@@ -273,8 +282,9 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
   resumeMonitor: async () => {
     try {
-      const res = await fetch('/api/vst/monitor/resume', { method: 'POST' });
-      if (res.ok) set({ monitorPaused: false });
+      await apiClient.post('/vst/monitor/resume');
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      set({ monitorPaused: false });
     } catch (err) {
       console.error('[VST] Failed to resume monitor:', err);
     }
@@ -283,6 +293,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   switchMonitorTrack: async (trackPath: string) => {
     try {
       await vstApi.monitorSwitch(trackPath);
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
       set({ monitorTrackPath: trackPath });
     } catch (err) {
       console.error('[VST] Failed to switch monitor track:', err);
@@ -292,25 +303,15 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   seekMonitor: async (position: number) => {
     try {
       await vstApi.monitorSeek(position);
+      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
     } catch (err) {
       console.error('[VST] Failed to seek monitor:', err);
     }
   },
 
   pollMonitorStatus: async () => {
-    // Hit the endpoint directly (not via vstApi) to read the raw paused field.
-    try {
-      const res = await fetch("/api/vst/monitor/status");
-      const data = await res.json();
-      set({
-        monitoring: data.running ?? false,
-        monitorPaused: data.paused ?? false,
-        monitorPosition: data.position ?? 0,
-        monitorDuration: data.duration ?? 0,
-      });
-    } catch {
-      set({ monitoring: false, monitorPaused: false, monitorPosition: 0, monitorDuration: 0 });
-    }
+    try { await queryClient.fetchQuery(monitorOptions()); }
+    catch { /* Keep the last successful scoped projection. */ }
   },
 
   savePreset: async (name: string) => {
@@ -326,8 +327,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     if (!preset) return;
     set({ chain: preset });
     try {
-      const result = await vstApi.updateChain(preset);
-      set({ chain: result.plugins });
+      await updateCachedChain(preset);
     } catch (err) {
       console.error('[VST] Failed to apply preset chain:', err);
     }
@@ -341,3 +341,24 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 export function _resetVstPresetsForTests(): void {
   useVstChainStore.setState(attachPresets(useVstChainStore.setState));
 }
+
+async function updateCachedChain(plugins: VstChainEntry[]) {
+  const key = localOptions<{ plugins: VstChainEntry[] }>('vst-chain', '/vst/chain').queryKey;
+  await queryClient.cancelQueries({ queryKey: key });
+  const result = await apiClient.put<{ plugins: VstChainEntry[] }>('/vst/chain', { plugins });
+  queryClient.setQueryData(key, result);
+  await queryClient.invalidateQueries({ queryKey: key });
+  return result;
+}
+
+const detachVstProjections = [
+  projectQuery<{ plugins: VstPlugin[] }>(queryClient,
+    localOptions('vst-scan', '/vst/scan').queryKey, data => useVstChainStore.setState({ plugins: data.plugins })),
+  projectQuery<{ plugins: VstChainEntry[] }>(queryClient,
+    localOptions('vst-chain', '/vst/chain').queryKey, data => useVstChainStore.setState({ chain: data.plugins ?? [], chainLoaded: true })),
+  projectQuery<MonitorStatus>(queryClient, monitorOptions().queryKey, data => useVstChainStore.setState({
+    monitoring: data.running ?? false, monitorPaused: data.paused ?? false,
+    monitorPosition: data.position ?? 0, monitorDuration: data.duration ?? 0,
+  })),
+];
+if (import.meta.hot) import.meta.hot.dispose(() => detachVstProjections.forEach(stop => stop()));

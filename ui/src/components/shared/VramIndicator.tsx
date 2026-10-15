@@ -1,6 +1,11 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useVram } from '../../queries/global-models/hooks';
+import { loadedModelsOptions } from '../../queries/global-models/options';
+import { apiClient } from '../../services/httpClient';
+import { sharedKeys } from '../../queries/keys';
 // VramIndicator.tsx — GPU VRAM usage display + manual model-unload dropdown
 //
-// Polls /api/logs/vram every 5 seconds for the used/total bar. On hover it
+// Polls the shared /api/logs/vram query every 1.5 seconds for the used/total bar. On hover it
 // opens a dropdown listing the GPU modules currently resident in the engine
 // (LM / DiT / VAE / encoders …) with a per-module unload button — a manual
 // fallback to free VRAM at any time. In-use modules are disabled; under
@@ -13,69 +18,25 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Cpu, X, Loader2 } from 'lucide-react';
 
-interface VramInfo {
-  used_mb: number;
-  total_mb: number;
-  free_mb: number;
-}
-
-interface LoadedModel {
-  label: string;
-  mb: number;
-  in_use: boolean;
-}
-
 interface VramIndicatorProps {
-  /** Polling interval in ms (default 5000) */
+  /** @deprecated All consumers share the canonical 1500 ms cadence. */
   pollInterval?: number;
   /** Compact mode — hides the label and uses smaller text */
   compact?: boolean;
 }
 
 export const VramIndicator: React.FC<VramIndicatorProps> = ({
-  pollInterval = 5000,
   compact = false,
 }) => {
-  const [vram, setVram] = useState<VramInfo | null>(null);
+  const { data: vram } = useVram();
+  const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const [loaded, setLoaded] = useState<LoadedModel[] | null>(null);
+  const loadedQuery = useQuery({ ...loadedModelsOptions(), enabled: open });
+  const loaded = loadedQuery.data?.loaded ?? null;
   const [unloading, setUnloading] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    const fetchVram = async () => {
-      try {
-        const res = await fetch('/api/logs/vram');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.total_mb > 0) setVram(data);
-        }
-      } catch { /* ignore */ }
-    };
-    fetchVram();
-    const interval = setInterval(fetchVram, pollInterval);
-    return () => clearInterval(interval);
-  }, [pollInterval]);
-
-  const fetchLoaded = useCallback(async () => {
-    try {
-      const res = await fetch('/api/logs/models-loaded');
-      if (res.ok) {
-        const d = await res.json();
-        setLoaded(Array.isArray(d.loaded) ? d.loaded : []);
-      } else setLoaded([]);
-    } catch { setLoaded([]); }
-  }, []);
-
-  // While the dropdown is open, fetch the resident-model list and refresh it.
-  useEffect(() => {
-    if (!open) return;
-    fetchLoaded();
-    const iv = setInterval(fetchLoaded, 2000);
-    return () => clearInterval(iv);
-  }, [open, fetchLoaded]);
 
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
 
@@ -96,16 +57,15 @@ export const VramIndicator: React.FC<VramIndicatorProps> = ({
   const unload = useCallback(async (label: string) => {
     setUnloading(label);
     try {
-      await fetch('/api/logs/models-unload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label }),
-      });
-      await fetchLoaded();
+      await apiClient.post('/logs/models-unload', { label });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: sharedKeys.loadedModels() }),
+        client.invalidateQueries({ queryKey: sharedKeys.vram() }),
+      ]);
     } catch { /* ignore */ } finally {
       setUnloading(null);
     }
-  }, [fetchLoaded]);
+  }, [client]);
 
   if (!vram || vram.total_mb <= 0) return null;
 

@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { aceModelsOptions } from '../../queries/global-models/options';
 // GlobalParamBar.tsx — Horizontal top bar with hover-to-expand engine config sections
 //
 // Renders 5 sections: Models, Adapters, Generation, LM/Thinking, Post-Processing.
@@ -8,10 +10,9 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark, AlertTriangle, Download, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarSection, ToggleSwitch } from './BarSection';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { useBackendStore } from '../../stores/backendStore';
-import { modelApi } from '../../services/api';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { BackendModelsDropdown, BackendModelsBadge } from './BackendModelsDropdown';
@@ -160,47 +161,17 @@ export const GlobalParamBar: React.FC = () => {
   const [showModelManager, setShowModelManager] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
 
+  const modelsQuery = useQuery(aceModelsOptions());
+  const availableModels = modelsQuery.data;
   useEffect(() => {
-    let cancelled = false;
-    let retries = 0;
-    const MAX_RETRIES = 20; // ~60 seconds of polling
-
-    const tryAutoSelect = () => {
-      if (cancelled) return;
-      modelApi.list()
-        .then((data) => {
-          if (cancelled) return;
-          const dit = data?.models?.dit || [];
-          const lm = data?.models?.lm || [];
-          const vae = data?.models?.vae || [];
-          const emb = data?.models?.embedding || [];
-
-          // Auto-select first available model for any empty slot
-          if (dit.length > 0 && !gp.ditModel) gp.setDitModel(dit[0]);
-          if (lm.length > 0 && !gp.lmModel) gp.setLmModel(lm[0]);
-          if (vae.length > 0 && !gp.vaeModel) gp.setVaeModel(vae[0]);
-          if (emb.length > 0 && !gp.embeddingModel) gp.setEmbeddingModel(emb[0]);
-
-          // If we got models, we're done. If empty, keep polling
-          // (user might be downloading via Model Manager right now)
-          if (dit.length === 0 && retries < MAX_RETRIES) {
-            retries++;
-            setTimeout(tryAutoSelect, 3000);
-          }
-        })
-        .catch(() => {
-          // Engine not ready yet — retry
-          if (!cancelled && retries < MAX_RETRIES) {
-            retries++;
-            setTimeout(tryAutoSelect, 3000);
-          }
-        });
-    };
-
-    // Initial check after a short delay (let engine boot)
-    setTimeout(tryAutoSelect, 1500);
-    return () => { cancelled = true; };
-  }, []);
+    const models = availableModels?.models;
+    if (!models) return;
+    const params = useGlobalParamsStore.getState();
+    if (models.dit?.length && !params.ditModel) params.setDitModel(models.dit[0]);
+    if (models.lm?.length && !params.lmModel) params.setLmModel(models.lm[0]);
+    if (models.vae?.length && !params.vaeModel) params.setVaeModel(models.vae[0]);
+    if (models.embedding?.length && !params.embeddingModel) params.setEmbeddingModel(models.embedding[0]);
+  }, [availableModels]);
 
   // ── Auto-open Model Manager on first launch ──────────────────────
   // Separate from auto-select — only opens the modal if, after giving
@@ -209,25 +180,15 @@ export const GlobalParamBar: React.FC = () => {
     if (sessionStorage.getItem('mm-auto-dismissed')) return;
 
     const timer = setTimeout(() => {
-      modelApi.list()
-        .then((data) => {
-          const allModels = [
-            ...(data?.models?.dit || []),
-            ...(data?.models?.lm || []),
-            ...(data?.models?.vae || []),
-          ];
-          if (allModels.length === 0) {
-            setShowModelManager(true);
-          }
-        })
-        .catch(() => {
-          // Engine still not running after 8s — likely no models at all
-          setShowModelManager(true);
-        });
-    }, 8000); // 8s delay: engine needs time to scan models + cuBLAS download
-
+      if (modelsQuery.isPending) return;
+      const allModels = [
+        ...(availableModels?.models?.dit ?? []), ...(availableModels?.models?.lm ?? []),
+        ...(availableModels?.models?.vae ?? []),
+      ];
+      if (!allModels.length) setShowModelManager(true);
+    }, 8000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [availableModels, modelsQuery.isPending]);
 
   // ── "Models missing" banner (generic — any backend) ─────────────────
   // capabilities().core.modelsMissing is true only when the ACTIVE backend is

@@ -1,10 +1,13 @@
 // vstChainStore.test.ts — the VST preset paths the global bar uses, through
 // the real store against an in-memory /api/preferences:
 //   (cd server && node --import tsx --test ../ui/src/stores/vstChainStore.test.ts)
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { useVstChainStore, _resetVstPresetsForTests, PRESETS_KEY, MIGRATED_FLAG } from './vstChainStore';
 import { tick, withBrowser } from '../services/preferencesTestFake';
+import { queryClient } from '../queries/client';
+
+after(() => queryClient.clear());
 
 const plugin = (uid: string) => ({ uid, name: `Plugin ${uid}`, vendor: 'V', path: `/p/${uid}`, enabled: true, statePath: `/s/${uid}` });
 const store = () => useVstChainStore.getState();

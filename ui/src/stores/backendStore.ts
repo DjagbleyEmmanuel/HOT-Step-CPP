@@ -10,6 +10,12 @@
 // mount / on backend switch) rather than the store running an interval loop.
 
 import { create } from 'zustand';
+import { queryClient } from '../queries/client';
+import { backendsOptions, backendModelsOptions, capabilitiesOptions, usableCapabilities } from '../queries/global-models/options';
+import { scopeOf } from '../queries/keys';
+import { apiClient } from '../services/httpClient';
+import { projectQuery } from '../queries/global-models/projection';
+import type { Query } from '@tanstack/react-query';
 
 // ── Active-backend mirror ──
 //
@@ -256,9 +262,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
   fetchBackends: async () => {
     set({ loading: true, error: null });
     try {
-      const res = await fetch('/api/backends');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: { backends: BackendInfo[]; activeId: string } = await res.json();
+      const data = await queryClient.fetchQuery(backendsOptions());
       const activeId = data.activeId || 'ace';
       writeActiveMirror(activeId);
       set({
@@ -279,31 +283,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const backendId = id || get().activeBackendId;
     if (!backendId) return;
     try {
-      const res = await fetch(`/api/capabilities?backend=${encodeURIComponent(backendId)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: BackendCapabilities = await res.json();
-      // A probe that could not reach the engine answers with an all-false
-      // "down" manifest. Caching that is worse than having no manifest at all:
-      // consumers read `!capabilities` as "still loading, show everything",
-      // but an `up: false` manifest reads as "this backend can do nothing" —
-      // which is how restarting the engine emptied the post-processing menu
-      // and left it empty until the page was reloaded (issue #153).
-      //
-      // But only when there is something better to fall back TO. Discarding
-      // the FIRST manifest a backend ever reports leaves the UI with no
-      // manifest at all, which every consumer reads as "still loading" and
-      // renders the generic ACE-shaped controls — so switching to a YuE2 whose
-      // weights are missing showed ACE's model list and no Chain of Thought
-      // control, with nothing on screen saying why (#157, #159). The down
-      // manifest carries core.modelsMissing / modelsMissingHint, which is
-      // exactly the diagnosis the user needed and which this branch threw
-      // away. Keep a cached manifest over a down one; cache a down one when
-      // that is all we have.
-      if (data && data.up === false && get().capabilities[backendId]) {
-        console.warn(`[Backends] capabilities for "${backendId}" report the engine down — keeping the cached manifest`);
-        return;
-      }
-      set({ capabilities: { ...get().capabilities, [backendId]: data } });
+      await queryClient.fetchQuery(capabilitiesOptions(backendId));
     } catch (err) {
       console.warn(`[Backends] capabilities fetch failed for "${backendId}":`, err instanceof Error ? err.message : String(err));
     }
@@ -313,10 +293,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const backendId = id || get().activeBackendId;
     if (!backendId) return;
     try {
-      const res = await fetch(`/api/backends/models?backend=${encodeURIComponent(backendId)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: BackendModelCatalogue = await res.json();
-      set({ models: { ...get().models, [backendId]: data } });
+      await queryClient.fetchQuery(backendModelsOptions(backendId));
     } catch (err) {
       // Advisory, like fetchCapabilities: an empty catalogue renders as
       // "no models found", which is the honest degrade.
@@ -328,6 +305,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const backendId = id || get().activeBackendId;
     if (!backendId) return false;
     try {
+      await queryClient.cancelQueries({ queryKey: backendModelsOptions(backendId).queryKey });
       const res = await fetch('/api/backends/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -339,6 +317,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       }
       // Re-read rather than trusting the request: the engine may fall back to
       // a different quant if the requested file vanished.
+      await queryClient.invalidateQueries({ queryKey: backendModelsOptions(backendId).queryKey });
       await get().fetchModels(backendId);
       return true;
     } catch (err) {
@@ -351,6 +330,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
   switchBackend: async (id) => {
     set({ error: null });
     try {
+      await queryClient.cancelQueries({ queryKey: backendsOptions().queryKey });
       const res = await fetch('/api/backends/active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -358,6 +338,10 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { activeId: string } = await res.json();
+      queryClient.setQueryData(backendsOptions().queryKey, old => old && ({
+        ...old, activeId: data.activeId,
+        backends: old.backends.map(b => ({ ...b, active: b.id === data.activeId })),
+      }));
       writeActiveMirror(data.activeId);
       set({
         activeBackendId: data.activeId,
@@ -365,6 +349,11 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       });
       // Refetch on success — the new active backend's manifest may not be
       // cached yet (or may be stale from a previous session).
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: backendsOptions().queryKey }),
+        queryClient.invalidateQueries({ queryKey: capabilitiesOptions(data.activeId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: backendModelsOptions(data.activeId).queryKey }),
+      ]);
       await get().fetchCapabilities(data.activeId);
       await get().fetchModels(data.activeId);
     } catch (err) {
@@ -373,3 +362,43 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     }
   },
 }));
+
+// Legacy selectors remain projections of canonical, backend-scoped cache data.
+// This listener never fetches and is removed before HMR replaces the module.
+function applyBackendProjection(query: Query) {
+  const { queryKey, state } = query;
+  if (scopeOf(queryKey)?.api !== apiClient.baseUrl || state.data === undefined) return;
+  const backend = scopeOf(queryKey)?.backend;
+  if (queryKey[1] === 'capabilities' && backend) {
+    const data = state.data as BackendCapabilities;
+    const previous = useBackendStore.getState().capabilities;
+    const usable = usableCapabilities(previous[backend], data);
+    if (usable === previous[backend]) return;
+    useBackendStore.setState({ capabilities: { ...previous, [backend]: usable } });
+  }
+  if (queryKey[1] === 'global-models/backend-models' && backend) {
+    useBackendStore.setState(s => ({ models: { ...s.models, [backend]: state.data as BackendModelCatalogue } }));
+  }
+}
+queryClient.getQueryCache().getAll().forEach(applyBackendProjection);
+const detachQueryProjection = queryClient.getQueryCache().subscribe(event => {
+  if (event.type === 'updated' && event.action.type === 'success') applyBackendProjection(event.query);
+  if (event.type === 'removed' && scopeOf(event.query.queryKey)?.api === apiClient.baseUrl) {
+    const backend = scopeOf(event.query.queryKey)?.backend;
+    if (!backend) return;
+    const field = event.query.queryKey[1] === 'capabilities' ? 'capabilities'
+      : event.query.queryKey[1] === 'global-models/backend-models' ? 'models' : null;
+    if (field) {
+      const next = { ...useBackendStore.getState()[field] };
+      delete next[backend];
+      useBackendStore.setState({ [field]: next });
+    }
+  }
+});
+const detachBackends = projectQuery<{ backends: BackendInfo[]; activeId: string }>(queryClient,
+  backendsOptions().queryKey, data => {
+    const activeId = data.activeId || 'ace';
+    writeActiveMirror(activeId);
+    useBackendStore.setState({ backends: data.backends, activeBackendId: activeId });
+  });
+if (import.meta.hot) import.meta.hot.dispose(() => { detachQueryProjection(); detachBackends(); });

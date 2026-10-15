@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { backendsOptions } from '../../queries/global-models/options';
 // BackendToggle.tsx — compact backend picker for the global param bar
 //
 // Lists registered engine backends (GET /api/backends) and switches the
@@ -21,13 +23,12 @@ export const BackendToggle: React.FC = () => {
   const { t } = useTranslation();
   const backends = useBackendStore(s => s.backends);
   const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const fetchBackends = useBackendStore(s => s.fetchBackends);
   const switchBackend = useBackendStore(s => s.switchBackend);
   const { capabilities } = useCapabilities();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { void fetchBackends(); }, [fetchBackends]);
+  useQuery(backendsOptions());
 
   useEffect(() => {
     if (!open) return;

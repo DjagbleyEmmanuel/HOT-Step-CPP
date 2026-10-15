@@ -1,3 +1,4 @@
+import { useVram } from '../../queries/global-models/hooks';
 // TerminalPanel.tsx — Live engine log viewer with search and VRAM display
 //
 // Mirrors ace-server stderr output in the app. Supports search filtering,
@@ -11,11 +12,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMe
 import { Search, X, Trash2, Cpu, ArrowDown, Pin, PinOff, Wifi, WifiOff } from 'lucide-react';
 import { useEventSource, type LogLine } from '../../hooks/useEventSource';
 
-interface VramInfo {
-  used_mb: number;
-  total_mb: number;
-  free_mb: number;
-}
+
 
 interface TerminalPanelProps {
   /** Omitted when embedded in the activity column — no close button is shown. */
@@ -105,7 +102,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded 
   const { lines, connected, clear } = useEventSource('/api/logs', true);
   const [search, setSearch] = useState('');
   const [streamTab, setStreamTab] = useState('all');
-  const [vram, setVram] = useState<VramInfo | null>(null);
+  const { data: vram } = useVram();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -220,24 +217,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded 
     };
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
-  }, []);
-
-  // Poll VRAM every 5 seconds
-  useEffect(() => {
-    const fetchVram = async () => {
-      try {
-        const res = await fetch('/api/logs/vram');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.total_mb > 0) {
-            setVram(data);
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    fetchVram();
-    const interval = setInterval(fetchVram, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const vramPercent = vram && vram.total_mb > 0

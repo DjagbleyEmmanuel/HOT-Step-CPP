@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { backendModelsOptions } from '../../queries/global-models/options';
 // Yue2LmAdapterDropdown.tsx — Adapters cluster for a backend whose LM adapters
 // are ENGINE STATE rather than per-request parameters.
 //
@@ -106,13 +108,8 @@ function sameDials(a: Dials, b: Dials): boolean {
  *  the store refetches after every successful selection. */
 function useYue2Adapters() {
   const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const catalogue = useBackendStore(s => s.models[s.activeBackendId] ?? null);
-  const fetchModels = useBackendStore(s => s.fetchModels);
+  const { data: catalogue } = useQuery(backendModelsOptions(activeBackendId));
 
-  useEffect(() => {
-    if (!activeBackendId) return;
-    void fetchModels(activeBackendId);
-  }, [activeBackendId, fetchModels]);
 
   const meta = catalogue?.lmAdapterMeta ?? {};
   const paths = useMemo(() => catalogue?.lmAdapters ?? [], [catalogue]);

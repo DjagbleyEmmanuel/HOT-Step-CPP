@@ -1,3 +1,5 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { localOptions } from '../../queries/global-models/options';
 // ProfilesModal.tsx — named parameter-profile manager
 //
 // Lists server-stored profiles (every generation parameter as a raw
@@ -23,8 +25,11 @@ interface ProfilesModalProps {
 export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
-  const [profiles, setProfiles] = useState<ParamProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const client = useQueryClient();
+  const options = localOptions<{ profiles: ParamProfile[] }>('profiles', '/profiles');
+  const query = useQuery(options);
+  const profiles = query.data?.profiles ?? [];
+  const loading = query.isPending;
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
   const [includeContent, setIncludeContent] = useState(true);
@@ -35,14 +40,8 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(() => {
-    profileApi.list()
-      .then(r => { setProfiles(r.profiles); setError(''); })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
+  const refresh = useCallback(() => client.invalidateQueries({ queryKey: options.queryKey }), [client]);
+  useEffect(() => { if (query.error) setError(query.error.message); }, [query.error]);
 
   const saveAs = useCallback((name: string) => {
     profileApi.save(name, collectProfileData(includeContent))

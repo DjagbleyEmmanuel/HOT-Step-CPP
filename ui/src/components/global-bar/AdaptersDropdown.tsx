@@ -1,14 +1,17 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { aceModelsOptions, localOptions } from '../../queries/global-models/options';
+import { serverKey } from '../../queries/keys';
 // AdaptersDropdown.tsx — Adapter configuration UI for the global param bar
 //
 // Adapted from create/AdaptersAccordion.tsx to read from GlobalParamsContext.
 // Self-contained with Simple and Advanced modes, file browser, group scales.
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, X, Tag, Search, Circle, ChevronDown, RotateCcw } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { adapterApi, modelApi } from '../../services/api';
+import { adapterApi } from '../../services/api';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { Slider } from '../shared/Slider';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -47,27 +50,24 @@ export const AdaptersDropdown: React.FC = () => {
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
   // Internal state
-  const [adapterFiles, setAdapterFiles] = useState<AdapterFile[]>([]);
+  const client = useQueryClient();
+  const [scanFolder, setScanFolder] = useState('');
+  const scanKey = serverKey('global-models/adapter-scan', { filters: { folder: scanFolder } });
+  const { data: scan } = useQuery({ queryKey: scanKey,
+    queryFn: ({ signal }) => adapterApi.scan(scanFolder, { signal }), enabled: false });
+  const adapterFiles: AdapterFile[] = scan?.files ?? [];
   const [showGroupScales, setShowGroupScales] = usePersistedState('hs-adapterAccordion-groupScales', false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [ditModels, setDitModels] = useState<string[]>([]);
-
-  // DiT model list for the basin re-base "home base" selector.
-  useEffect(() => {
-    modelApi.list().then(m => setDitModels(m?.models?.dit || [])).catch(() => {});
-  }, []);
-
-  // Planner-LM adapters (runtime LoRA on the 5Hz LM). Filesystem-scanned via
-  // the Node route so freshly trained adapters appear WITHOUT an engine
-  // restart — selection sends the absolute path, which the engine's
-  // path-fallback resolver loads directly.
-  const [lmAdapters, setLmAdapters] = useState<{ name: string; path: string; kind: string; size: number; lmSize?: string; run?: string; evalScore?: number | null; evalVerdict?: string }[]>([]);
-  const refreshLmAdapters = useCallback(() => {
-    adapterApi.lmList(gp.lmAdapterFolder || undefined).then(r => setLmAdapters(r?.adapters || [])).catch(() => {});
-  }, [gp.lmAdapterFolder]);
-  useEffect(() => { refreshLmAdapters(); }, [refreshLmAdapters]);
+  const { data: models } = useQuery(aceModelsOptions());
+  const ditModels = models?.models?.dit ?? [];
+  const folder = gp.lmAdapterFolder || '';
+  const lmOptions = localOptions<Awaited<ReturnType<typeof adapterApi.lmList>>>(
+    'lm-adapters', `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`, { folder });
+  const lmQuery = useQuery(lmOptions);
+  const lmAdapters = lmQuery.data?.adapters ?? [];
+  const refreshLmAdapters = useCallback(() => client.invalidateQueries({ queryKey: lmOptions.queryKey }), [client, folder]);
 
   const fileBrowserMode = gp.advancedAdapters ? 'folder' as const : 'file' as const;
   // In advanced mode the stack drives everything; in simple mode the single adapter does.
@@ -122,8 +122,10 @@ export const AdaptersDropdown: React.FC = () => {
     setScanning(true);
     setScanError(null);
     try {
-      const result = await adapterApi.scan(dir);
-      setAdapterFiles(result.files);
+      setScanFolder(dir);
+      const key = serverKey('global-models/adapter-scan', { filters: { folder: dir } });
+      await client.invalidateQueries({ queryKey: key });
+      const result = await client.fetchQuery({ queryKey: key, queryFn: ({ signal }) => adapterApi.scan(dir, { signal }) });
       if (result.files.length === 0) {
         setScanError('No .safetensors files found in this folder');
       }
@@ -132,7 +134,7 @@ export const AdaptersDropdown: React.FC = () => {
     } finally {
       setScanning(false);
     }
-  }, [gp.adapterFolder]);
+  }, [gp.adapterFolder, client]);
 
   const handleBrowseSelect = (path: string) => {
     setFileBrowserOpen(false);
