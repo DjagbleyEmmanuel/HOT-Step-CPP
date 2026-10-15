@@ -16,13 +16,22 @@ const freePort = () => new Promise((res, rej) => {
 });
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-smoke-'));
-const root = path.join(tmp, 'app'); // the server puts its data folder beside the root, so nest the root
-fs.mkdirSync(root);
+// The release root holds server/data, so boot from it; data and profile go to tmp.
+const root = path.dirname(path.dirname(bundle));
+const dataRoot = path.join(tmp, 'data');
+// No engine: a missing exe is skipped, and a cpu marker beside it skips the CUDA runtime download.
+const engineDir = path.join(tmp, 'engine');
+fs.mkdirSync(dataRoot);
+fs.mkdirSync(engineDir);
+fs.writeFileSync(path.join(engineDir, '.variant'), 'cpu');
 const [port, enginePort] = [await freePort(), await freePort()];
 const child = spawn(process.execPath, [bundle], {
   cwd: root,
   stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, HOT_STEP_ROOT: root + path.sep, HOT_STEP_PROFILE_DIR: path.join(tmp, 'profile'), SERVER_PORT: String(port), ACESTEPCPP_PORT: String(enginePort) },
+  env: {
+    ...process.env, HOT_STEP_ROOT: root, HOT_STEP_DATA_ROOT: dataRoot, HOT_STEP_PROFILE_DIR: path.join(tmp, 'profile'),
+    ACESTEPCPP_EXE: path.join(engineDir, 'ace-server-absent'), SERVER_PORT: String(port), ACESTEPCPP_PORT: String(enginePort),
+  },
 });
 let log = '';
 for (const s of [child.stdout, child.stderr]) s.on('data', d => { log += d; });
