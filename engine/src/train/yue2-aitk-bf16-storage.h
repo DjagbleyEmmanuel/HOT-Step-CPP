@@ -40,6 +40,12 @@ inline bool gemm_store() {
     return on;
 }
 
+// YUE2_AITK_ATTENTION_COPY=1 keeps flash attention's BF16 q/k/v copies.
+inline bool attention_views() {
+    static const bool on = std::getenv("YUE2_AITK_ATTENTION_COPY") == nullptr;
+    return on;
+}
+
 inline const ggml_tensor * owner(const ggml_tensor * t) { return t->view_src ? t->view_src : t; }
 
 inline void retype(ggml_tensor * t, ggml_type type) {
@@ -138,6 +144,32 @@ inline int apply(ggml_cgraph * graph, const std::vector<const ggml_tensor *> & k
         retype(t, GGML_TYPE_BF16);
         if (!t->view_src) bf16.insert(t);
         ++changed;
+    }
+    // A cast of a now-BF16 tensor into BF16 that only flash attention reads
+    // is the same bytes in another layout, and the BF16 attention kernels
+    // take strided q/k/v: make it a view instead of a copy.
+    if (attention_views()) {
+        std::unordered_set<const ggml_tensor *> other_reader;
+        for (int i = 0; i < n; ++i) {
+            const ggml_tensor * t = ggml_graph_node(graph, i);
+            if (t->op == GGML_OP_FLASH_ATTN_TRAIN || t->op == GGML_OP_FLASH_ATTN_TRAIN_BACK) continue;
+            for (int j = 0; j < GGML_MAX_SRC; ++j) if (t->src[j] && t->src[j] != t) other_reader.insert(t->src[j]);
+        }
+        for (int i = 0; i < n; ++i) {
+            ggml_tensor * t = ggml_graph_node(graph, i);
+            ggml_tensor * s = t->src[0];
+            if (t->op != GGML_OP_CPY || t->src[1] != t || t->type != GGML_TYPE_BF16 || !s || s->type != GGML_TYPE_BF16 ||
+                !uses.count(t) || other_reader.count(t) || (t->flags & GGML_TENSOR_FLAG_OUTPUT) || t->view_src ||
+                !ggml_are_same_shape(t, s) || s->nb[0] != ggml_type_size(GGML_TYPE_BF16)) continue;
+            const size_t offset = s->view_offs;
+            t->op = GGML_OP_VIEW;
+            t->src[1] = nullptr;
+            t->view_src = const_cast<ggml_tensor *>(owner(s));
+            t->view_offs = offset;
+            std::memcpy(t->op_params, &offset, sizeof(offset));
+            for (int k = 0; k < GGML_MAX_DIMS; ++k) t->nb[k] = s->nb[k];
+            ++changed;
+        }
     }
     return changed;
 }
