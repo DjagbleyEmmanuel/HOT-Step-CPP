@@ -130,6 +130,31 @@ When to move off them:
 
 "Train multiple" runs the whole chain (cache, codes, lead sheets, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases, shown only while a batch is running or paused, lists the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 
+## Reading the training charts
+
+Joint training, the separate AR and NAR trainers, and the older Refine view share two panels. They sit side by side on a wide screen and stack in a narrow window. Progress is counted in steps; these runners do not report epochs.
+
+- **AR (stage 1)**: "Stage 1 writes the song's coarse token plan from lyrics and tags."
+- **NAR (stage 2)**: "Stage 2 turns stage 1's tokens into fine audio detail."
+
+For joint runs, the AR panel starts with **AR CE**, **KL vs base** and the configured KL stop reading selected. AR CE is the planner's cross-entropy, separate from the combined training loss. The NAR panel starts with **Decoder loss** and **Reconstruction** selected. Reconstruction is recorded at checkpoints, so its points are sparse. **More** reveals **Cursor CE** and **Learning rate** on the AR side, and **Drift** and **Learning rate** on the NAR side.
+
+| Metric | How to read it |
+|---|---|
+| KL vs base | How far the planner's token predictions moved from the frozen base. Higher means more change, not better. |
+| Drift | How much the decoder's predictions changed from its starting adapter on fixed probes. |
+| Reconstruction | How closely one denoising step rebuilds the training latents on fixed probes. Lower is better on those probes, not a listening score. |
+| Grad norm | Overall gradient size before clipping. Spikes flag an unstable update. |
+| Token-grammar check | Validation on the minted token pack. It should stay roughly flat; rising means token-grammar damage. |
+
+An AR-only run starts with **CE**, **Token-grammar check** and **Grad norm** selected. A NAR-only run starts with **Decoder loss** and **Grad norm** selected. Learning rate is under More for both. In joint runs, Grad norm is one global value for both sides and appears once below the pair. The stats line also shows the step count, **Pace** in seconds per step and **VRAM** when recorded.
+
+The KL stop curve uses the saved run's settings. Its label is **KL mean (N readings)** for the configured mean window, or **KL trend (30 readings)** for the fitted trend. Refine can show a partial mean after five readings while that window fills. A KL target line appears for KL stop mode. Loss stop mode instead shows **Composite loss stop mean** and its target below the pair; that combined loss is separate from AR CE.
+
+In an AR-only run the NAR panel says "Stage 2 not trained in this run"; a NAR-only run shows the reverse. When the planner freezes, **Planner frozen** marks where its lines end while the NAR chart continues. Older runs missing a metric say "Not recorded for this run"; the chart does not invent earlier values.
+
+The separate AR and NAR cards' **Whole-run mean** averages the run's logged losses. Checkpoint loss labels still average up to 20 logged steps ending at that checkpoint. Use these diagnostics to spot changes during training, then listen to the checkpoint previews to choose an adapter.
+
 ## Training on another PC
 
 A second PC with its own GPU can train YuE2 batches while this one does something else, managed from this PC's Training Studio.
@@ -198,7 +223,7 @@ Adapters are saved in your adapters folder under `yue2-joint-adapters/<trigger>_
 
 The joint adapters folder decides whether a dataset counts as trained in "Train multiple". Copying a complete run folder from another computer makes its dataset disappear when **Show trained** is off; deleting that folder makes the dataset available again. New runs include `run.json` inside the folder, so their run details travel with them.
 
-Checkpoint loss labels for native AR, native NAR and joint runs show the mean of up to 20 logged steps ending at that checkpoint. A single step spike therefore has less weight in the checkpoint list. When an AR eval landed on the checkpoint's step, the adapter card in the top bar also shows its held-out val (minted_val), which should stay flat. Both are training diagnostics, not listening scores.
+Checkpoint loss labels for native AR, native NAR and joint runs show the mean of up to 20 logged steps ending at that checkpoint. A single step spike therefore has less weight in the checkpoint list. When an AR eval landed on the checkpoint's step, the adapter card in the top bar also shows its token-grammar check result (minted_val), which should stay flat. Both are training diagnostics, not listening scores.
 
 The Caption source control, in Lyric Studio and in Create, picks the style caption from the training dataset: "Automatic from dataset" uses the track nearest in tempo, "From dataset track" a specific one, and "Custom" the caption you typed. It is keyed by the dataset, not the adapter, so it survives a moved run folder and a cleared cache: Lyric Studio resolves the dataset from the album, Send to Custom-Gen carries it over, and Create has a Dataset dropdown for renders with no album behind them. Automatic is the default only while an adapter is in force; a base-model render keeps the caption you wrote. Every training caption is an in-distribution prompt for the adapter, so picking one steers the render towards that track's character. The trigger opener is not added twice. See [Backends](../backends.md) for YuE2 generation settings and [Adapters](../adapters.md) for adapter handling in general.
 

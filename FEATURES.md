@@ -317,6 +317,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Flash-attention training | Fused attention that makes memory linear in sequence length; on by default for the DiT, opt-in for the LM trainers. |
 | Target-loss stopping | Stop on a loss target instead of a step count, and continue a stopped run. |
 | Live monitoring | Loss chart, stats and milestone checkpoint badges. |
+| YuE2 training charts | Separate AR planner and NAR decoder panels, metric explanations, More series controls and run-configured stop readings across joint, separate and Refine runs. [Details](docs/user/training/yue2.md#reading-the-training-charts) |
 | Audition | Same-seed A/B of base and adapter planner, optionally rendered through the DiT. |
 | Adapter scoring | Evaluation passes put an artist-match score in the planner adapter picker. |
 | YuE2 Refine and Review | Push a planner adapter up KL rungs with a preview per rung, score the ladders by ear, and let a scoreboard rank the rungs by likeness, corruption and re-plans. |
