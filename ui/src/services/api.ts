@@ -23,7 +23,7 @@ import type {
   ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
 } from '../../../server/src/contracts/profiles';
 import { WorkflowRequestError } from './workflowApi';
-import { apiClient, ApiError } from './httpClient';
+import { apiClient, ApiError, type ReadOptions } from './httpClient';
 
 const BASE = '/api';
 
@@ -31,15 +31,18 @@ const BASE = '/api';
 // signatures and error text ("<server error> | API error: <status>") every
 // caller in this file already expects. ApiError is a plain Error subclass,
 // so existing `catch (e) { ... e.message }` call sites need no change.
-const get = <T>(path: string, token?: string | null): Promise<T> => apiClient.get<T>(path, { token });
+// Every read takes a trailing `opts?: ReadOptions` so a query function can
+// pass its AbortSignal; positional callers are unchanged.
+const get = <T>(path: string, token?: string | null, opts?: ReadOptions): Promise<T> =>
+  apiClient.get<T>(path, { token, signal: opts?.signal });
 const post = <T>(path: string, body?: unknown, token?: string | null): Promise<T> => apiClient.post<T>(path, body, { token });
 const patch = <T>(path: string, body: unknown, token?: string | null): Promise<T> => apiClient.patch<T>(path, body, { token });
 const del = <T>(path: string, token?: string | null): Promise<T> => apiClient.delete<T>(path, { token });
 
 // ── Auth ────────────────────────────────────────────────────
 export const authApi = {
-  autoLogin: () => get<AuthState>('/auth/auto'),
-  getMe: (token: string) => get<{ user: AuthState['user'] }>('/auth/me', token),
+  autoLogin: (opts?: ReadOptions) => get<AuthState>('/auth/auto', undefined, opts),
+  getMe: (token: string, opts?: ReadOptions) => get<{ user: AuthState['user'] }>('/auth/me', token, opts),
   updateUsername: (username: string, token: string) =>
     patch<AuthState>('/auth/username', { username }, token),
 };
@@ -90,12 +93,12 @@ export function normalizeSong(s: any): Song {
 
 // ── Songs ────────────────────────────────────────────────────
 export const songApi = {
-  list: async (token: string) => {
-    const data = await get<{ songs: any[] }>('/songs', token);
+  list: async (token: string, opts?: ReadOptions) => {
+    const data = await get<{ songs: any[] }>('/songs', token, opts);
     return { songs: data.songs.map(normalizeSong) };
   },
-  get: async (id: string) => {
-    const data = await get<{ song: any }>(`/songs/${id}`);
+  get: async (id: string, opts?: ReadOptions) => {
+    const data = await get<{ song: any }>(`/songs/${id}`, undefined, opts);
     return { song: normalizeSong(data.song) };
   },
   create: (song: Partial<Song>, token: string) => post<{ song: Song }>('/songs', song, token),
@@ -113,10 +116,10 @@ export const songApi = {
     ),
   crop: (id: string, inPoint: number, outPoint: number, token: string, audioUrl?: string) =>
     post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint, audioUrl }, token),
-  listIds: (token: string) => get<{ ids: string[] }>('/songs/ids', token),
-  getRecentSongs: (token: string, source?: string, limit = 50) =>
+  listIds: (token: string, opts?: ReadOptions) => get<{ ids: string[] }>('/songs/ids', token, opts),
+  getRecentSongs: (token: string, source?: string, limit = 50, opts?: ReadOptions) =>
     get<{ songs: UnifiedRecentSong[] }>(
-      `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, token
+      `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, token, opts
     ),
   /**
    * Import audio files from disk into the library. Each becomes a song row
@@ -200,9 +203,9 @@ export const generateApi = {
   preview: (intent: ResolveIntent, token: string) =>
     post<ResolvePreviewResponse>('/resolve/preview', intent, token),
   /** A missing switch endpoint is an older server and keeps the legacy path. */
-  selectedPath: async (token: string): Promise<'old' | 'resolved'> => {
+  selectedPath: async (token: string, opts?: ReadOptions): Promise<'old' | 'resolved'> => {
     try {
-      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { token });
+      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { token, signal: opts?.signal });
       return path === 'resolved' ? 'resolved' : 'old';
     } catch (err) {
       if (err instanceof ApiError) {
@@ -223,10 +226,10 @@ export const generateApi = {
   yue2Plan: (params: Partial<GenerationParams>, token: string) =>
     post<{ abc: string; seed: number; end_reason: string; health: { verdict: string; reason: string; bars: number; estSeconds?: number; sections: string[] } }>(
       '/generate/yue2/plan', params, token),
-  status: (jobId: string) => get<GenerationJob>(`/generate/status/${jobId}`),
+  status: (jobId: string, opts?: ReadOptions) => get<GenerationJob>(`/generate/status/${jobId}`, undefined, opts),
   cancel: (jobId: string) => post<{ success: boolean }>(`/generate/cancel/${jobId}`),
   cancelAll: () => post<{ success: boolean; cancelled: number }>('/generate/cancel-all'),
-  queueStatus: () => get<{
+  queueStatus: (opts?: ReadOptions) => get<{
     depth: number;
     running: boolean;
     current: {
@@ -238,7 +241,7 @@ export const generateApi = {
       aceJobId?: string;
     } | null;
     pending: number;
-  }>('/generate/queue'),
+  }>('/generate/queue', undefined, opts),
   resetQueue: () => post<{ success: boolean; cancelled: number; drained: number }>('/generate/reset-queue'),
 };
 
@@ -329,10 +332,10 @@ async function builderOp<T extends { project: BuilderProject; sections: any[] }>
 }
 
 export const builderApi = {
-  listProjects: (token: string) =>
-    get<{ projects: BuilderProject[] }>('/builder/projects', token),
-  getProject: async (id: string, token: string) => {
-    const data = await get<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, token);
+  listProjects: (token: string, opts?: ReadOptions) =>
+    get<{ projects: BuilderProject[] }>('/builder/projects', token, opts),
+  getProject: async (id: string, token: string, opts?: ReadOptions) => {
+    const data = await get<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, token, opts);
     return { project: data.project, sections: data.sections.map(normalizeSection) };
   },
   createProject: (body: Partial<BuilderProject> & { keyScale?: string; timeSignature?: string; vocalLanguage?: string; sectionLength?: number; variantCount?: number; genParams?: unknown }, token: string) =>
@@ -358,13 +361,13 @@ export const builderApi = {
 
 // ── Models ──────────────────────────────────────────────────
 export const modelApi = {
-  list: () => get<AceModels>('/models'),
-  health: () => get<{ aceServer: string }>('/models/health'),
+  list: (opts?: ReadOptions) => get<AceModels>('/models', undefined, opts),
+  health: (opts?: ReadOptions) => get<{ aceServer: string }>('/models/health', undefined, opts),
 };
 
 // ── Health ──────────────────────────────────────────────────
 export const healthApi = {
-  check: () => get<HealthResponse>('/health'),
+  check: (opts?: ReadOptions) => get<HealthResponse>('/health', undefined, opts),
 };
 
 // ── Shutdown ────────────────────────────────────────────────
@@ -389,7 +392,7 @@ export const masteringApi = {
     return res.json();
   },
   /** List uploaded reference tracks */
-  listReferences: () => get<ListReferencesResponse>('/mastering/references'),
+  listReferences: (opts?: ReadOptions) => get<ListReferencesResponse>('/mastering/references', undefined, opts),
   /** Delete a reference track */
   deleteReference: (name: string, token: string) => del<DeleteReferenceResponse>(`/mastering/references/${name}`, token),
   /** Run mastering on an existing song */
@@ -400,20 +403,21 @@ export const masteringApi = {
 // ── Adapters ────────────────────────────────────────────────
 export const adapterApi = {
   /** Browse directory — returns entries (dirs + filtered files) */
-  browse: (dirPath: string, filter?: string) =>
+  browse: (dirPath: string, filter?: string, opts?: ReadOptions) =>
     get<BrowseResponse>(
-      `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`
+      `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`,
+      undefined, opts,
     ),
-  /** Scan folder for .safetensors files */
-  scan: (folder: string) =>
-    post<ScanResponse>('/adapters/scan', { folder }),
+  /** Scan folder for .safetensors files. A POST, but a pure read. */
+  scan: (folder: string, opts?: ReadOptions) =>
+    apiClient.post<ScanResponse>('/adapters/scan', { folder }, { signal: opts?.signal }),
   /** Planner-LM adapters (local HOT-Step feature). Scans `folder` when given,
    *  else every per-size root (lm-06b/lm-17b/lm-4b) plus the legacy flat lm/.
    *  `lmSize` comes from the parent folder (new layout) or the legacy -<size>
    *  name suffix; `trigger` is the embedded trigger word when present. */
-  lmList: (folder?: string) =>
+  lmList: (folder?: string, opts?: ReadOptions) =>
     get<LmAdaptersResponse>(
-      `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`),
+      `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`, undefined, opts),
 };
 
 // ── VST3 Post-Processing ────────────────────────────────────
@@ -425,9 +429,9 @@ export type VstChainEntry = ChainEntry;
 
 export const vstApi = {
   /** Scan for installed VST3 plugins */
-  scan: () => get<ScanPluginsResponse>('/vst/scan'),
+  scan: (opts?: ReadOptions) => get<ScanPluginsResponse>('/vst/scan', undefined, opts),
   /** Get current chain config */
-  getChain: () => get<GetChainResponse>('/vst/chain'),
+  getChain: (opts?: ReadOptions) => get<GetChainResponse>('/vst/chain', undefined, opts),
   /** Update chain config */
   updateChain: (plugins: VstChainEntry[]) =>
     fetch(`${BASE}/vst/chain`, {
@@ -448,8 +452,8 @@ export const vstApi = {
   monitorSwitch: (trackPath: string) =>
     post<MonitorSwitchResponse>('/vst/monitor/switch', { trackPath }),
   /** Get monitor status */
-  monitorStatus: () =>
-    get<MonitorStatusResponse>('/vst/monitor/status'),
+  monitorStatus: (opts?: ReadOptions) =>
+    get<MonitorStatusResponse>('/vst/monitor/status', undefined, opts),
   /** Seek monitor to a position */
   monitorSeek: (position: number) =>
     post<MonitorSeekResponse>('/vst/monitor/seek', { position }),
@@ -458,14 +462,14 @@ export const vstApi = {
 // ── Settings / .env ─────────────────────────────────────────
 export const settingsApi = {
   /** Read current .env values for exposed keys */
-  getEnv: () => get<EnvResponse>('/settings/env'),
+  getEnv: (opts?: ReadOptions) => get<EnvResponse>('/settings/env', undefined, opts),
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
     post<EnvUpdateResponse>('/settings/env', { values }),
   /** Detect available GPUs via nvidia-smi. `uuid` is what the picker stores in
    *  CUDA_VISIBLE_DEVICES — the index is display-only, because nvidia-smi and
    *  CUDA number GPUs differently (issue #153). */
-  getGpus: () => get<GpusResponse>('/settings/gpus'),
+  getGpus: (opts?: ReadOptions) => get<GpusResponse>('/settings/gpus', undefined, opts),
 };
 
 // ── Parameter Profiles ──────────────────────────────────────
@@ -475,7 +479,7 @@ export type ParamProfile = ProfileFile;
 
 export const profileApi = {
   /** List all saved profiles (full data inline) */
-  list: () => get<ListProfilesResponse>('/profiles'),
+  list: (opts?: ReadOptions) => get<ListProfilesResponse>('/profiles', undefined, opts),
   /** Save or overwrite a named profile */
   save: (name: string, data: Record<string, unknown>) =>
     post<SaveProfileResponse>('/profiles', { name, data }),
@@ -490,7 +494,7 @@ export const profileApi = {
 // ── Model Manager ───────────────────────────────────────────
 export const modelManagerApi = {
   /** Get full model registry with installed status */
-  registry: () => get<ModelRegistry>('/model-manager/registry'),
+  registry: (opts?: ReadOptions) => get<ModelRegistry>('/model-manager/registry', undefined, opts),
   /** Start downloading a model file. Optional hfToken is forwarded to
    *  huggingface.co as a Bearer token (gated repos only). */
   download: (fileId: string, hfToken?: string) =>
@@ -555,14 +559,16 @@ export async function runSongPostProcessing(
  *  the song, which is how a reloaded tab re-attaches to a running pass. */
 export async function getSongPostProcessingStatus(
   songId: string,
-  jobId?: string
+  jobId?: string,
+  opts?: ReadOptions,
 ): Promise<PostProcessJobStatus | null> {
   const qs = jobId ? `?jobId=${encodeURIComponent(jobId)}` : '';
-  const res = await fetch(`/api/songs/${songId}/postprocess${qs}`);
+  const res = await fetch(`/api/songs/${songId}/postprocess${qs}`, { signal: opts?.signal });
   if (res.status === 404) return null;
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `HTTP ${res.status}`);
+    // ApiError (an Error subclass, same message) so retry policy can see the status.
+    throw new ApiError(res.status, data.error || `HTTP ${res.status}`, data);
   }
   return res.json();
 }

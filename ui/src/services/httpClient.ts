@@ -41,6 +41,12 @@ export interface ClientOptions {
   signal?: AbortSignal;
 }
 
+/** Trailing options every read entrypoint accepts, so a query function can
+ *  pass TanStack Query's AbortSignal without changing positional callers. */
+export interface ReadOptions {
+  signal?: AbortSignal;
+}
+
 export interface ApiClientConfig {
   baseUrl?: string;
   /** Root for `mediaUrl()` — `/audio` and `/references` src attributes.
@@ -71,6 +77,11 @@ export class ApiClient {
   constructor(opts: ApiClientConfig = {}) {
     this.base = opts.baseUrl ?? '/api';
     this.mediaRoot = opts.mediaRoot ?? '';
+  }
+
+  /** The JSON base this client talks to; query keys carry it as the API origin. */
+  get baseUrl(): string {
+    return this.base;
   }
 
   private url(path: string): string {

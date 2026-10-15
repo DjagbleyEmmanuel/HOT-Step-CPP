@@ -15,15 +15,30 @@
 // else: this PC's server mirrors each worker run's checkpoints and previews
 // into its own folders as they land (services/training/yue2Mirror.ts), so a
 // worker run is an ordinary local run here.
+//
+// Query reads and mutations capture their target instead of reading the
+// mutable selection after scheduling: every API_BASE function takes a
+// trailing `TrainingTarget` (mutations) or `TrainingReadOptions` (reads).
+// `worker: undefined` keeps the current selection, `null` is this PC, a name
+// is that worker. Mutations take no signal: aborting a read is fine, but a
+// cancelled request must never be mistaken for cancelling a server job.
+import { ApiError, type ReadOptions } from './httpClient';
+
+export interface TrainingTarget { worker?: string | null }
+export interface TrainingReadOptions extends TrainingTarget, ReadOptions {}
+
 const WORKER_KEY = 'hotstep.trainingWorker';
-let trainingWorker: string | null = (() => { try { return localStorage.getItem(WORKER_KEY) || null; } catch { return null; } })();
-let API_BASE = trainingWorker ? `/api/workers/${encodeURIComponent(trainingWorker)}/api/training` : '/api/training';
 const LOCAL_BASE = '/api/training';
+const workerBase = (name: string | null) => name ? `/api/workers/${encodeURIComponent(name)}/api/training` : LOCAL_BASE;
+let trainingWorker: string | null = (() => { try { return localStorage.getItem(WORKER_KEY) || null; } catch { return null; } })();
+let API_BASE = workerBase(trainingWorker);
+/** The base for a captured worker, or the current selection when undefined. */
+const trainingBase = (worker?: string | null) => worker === undefined ? API_BASE : workerBase(worker);
 
 export const getTrainingWorker = () => trainingWorker;
 export function setTrainingWorker(name: string | null): void {
   trainingWorker = name;
-  API_BASE = name ? `/api/workers/${encodeURIComponent(name)}/api/training` : '/api/training';
+  API_BASE = workerBase(name);
   try { if (name) localStorage.setItem(WORKER_KEY, name); else localStorage.removeItem(WORKER_KEY); } catch { /* per-viewer convenience only */ }
 }
 
@@ -1461,14 +1476,14 @@ export interface TrainingDatasetDetail extends TrainingDatasetSummary {
 }
 
 /** YuE2 planner caption (`<stem>.yue2.txt`) — same on-demand pair as MM3. */
-export async function getSampleYue2(id: string, sampleId: string): Promise<{ text: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/yue2`);
+export async function getSampleYue2(id: string, sampleId: string, reqOpts?: TrainingReadOptions): Promise<{ text: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/yue2`, undefined, reqOpts);
 }
 
-export async function saveSampleYue2(id: string, sampleId: string, text: string): Promise<{ text: string }> {
+export async function saveSampleYue2(id: string, sampleId: string, text: string, reqOpts?: TrainingTarget): Promise<{ text: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/yue2`,
-    { method: 'PUT', ...jsonBody({ text }) },
+    { method: 'PUT', ...jsonBody({ text }) }, reqOpts,
   );
 }
 
@@ -2301,25 +2316,25 @@ export const PIPELINE_STAGES: readonly PipelineStage[] =
 
 // ── fetch helpers ────────────────────────────────────────────────────────
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, init);
+// Errors are ApiError (an Error subclass with the same message as before), so
+// query retry policy can tell a 4xx from a 5xx.
+async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
+    throw new ApiError(res.status, err.error || `API error: ${res.status}`, err);
   }
   return res.json();
+}
+
+async function request<T>(path: string, init?: RequestInit, target?: TrainingReadOptions): Promise<T> {
+  return parse<T>(await fetch(`${trainingBase(target?.worker)}${path}`, { ...init, signal: target?.signal }));
 }
 
 /** Same as `request`, but always this machine — never "Train on". Use for
  *  run records, ladder review, finished-run previews, rung/album scores,
  *  cleanup and finish. See the API_BASE comment above. */
-async function localRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${LOCAL_BASE}${path}`, init);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  return res.json();
+async function localRequest<T>(path: string, init?: RequestInit, opts?: ReadOptions): Promise<T> {
+  return parse<T>(await fetch(`${LOCAL_BASE}${path}`, { ...init, signal: opts?.signal }));
 }
 
 function jsonBody(body: unknown): RequestInit {
@@ -2328,190 +2343,190 @@ function jsonBody(body: unknown): RequestInit {
 
 // ── Capabilities ─────────────────────────────────────────────────────────
 
-export async function getCapabilities(): Promise<TrainingCapabilities> {
-  return request<TrainingCapabilities>('/capabilities');
+export async function getCapabilities(reqOpts?: TrainingReadOptions): Promise<TrainingCapabilities> {
+  return request<TrainingCapabilities>('/capabilities', undefined, reqOpts);
 }
 
 // ── Scan preview ─────────────────────────────────────────────────────────
 
-export async function scanPreview(path: string, recursive = true): Promise<ScanPreview> {
-  return request<ScanPreview>(`/scan-preview?path=${encodeURIComponent(path)}&recursive=${recursive ? 1 : 0}`);
+export async function scanPreview(path: string, recursive = true, reqOpts?: TrainingReadOptions): Promise<ScanPreview> {
+  return request<ScanPreview>(`/scan-preview?path=${encodeURIComponent(path)}&recursive=${recursive ? 1 : 0}`, undefined, reqOpts);
 }
 
 // ── Dataset CRUD ─────────────────────────────────────────────────────────
 
-export async function listDatasets(): Promise<TrainingDatasetSummary[]> {
-  const data = await request<{ datasets: TrainingDatasetSummary[] }>('/datasets');
+export async function listDatasets(reqOpts?: TrainingReadOptions): Promise<TrainingDatasetSummary[]> {
+  const data = await request<{ datasets: TrainingDatasetSummary[] }>('/datasets', undefined, reqOpts);
   return data.datasets;
 }
 
-export async function createDataset(input: CreateDatasetInput): Promise<TrainingDatasetDetail> {
-  const data = await request<{ dataset: TrainingDatasetDetail }>('/datasets', { method: 'POST', ...jsonBody(input) });
+export async function createDataset(input: CreateDatasetInput, reqOpts?: TrainingTarget): Promise<TrainingDatasetDetail> {
+  const data = await request<{ dataset: TrainingDatasetDetail }>('/datasets', { method: 'POST', ...jsonBody(input) }, reqOpts);
   return data.dataset;
 }
 
-export async function getDataset(id: string): Promise<TrainingDatasetDetail> {
-  return request<TrainingDatasetDetail>(`/datasets/${encodeURIComponent(id)}`);
+export async function getDataset(id: string, reqOpts?: TrainingReadOptions): Promise<TrainingDatasetDetail> {
+  return request<TrainingDatasetDetail>(`/datasets/${encodeURIComponent(id)}`, undefined, reqOpts);
 }
 
-export async function patchDataset(id: string, patch: PatchDatasetInput): Promise<TrainingDatasetSummary> {
+export async function patchDataset(id: string, patch: PatchDatasetInput, reqOpts?: TrainingTarget): Promise<TrainingDatasetSummary> {
   const data = await request<{ dataset: TrainingDatasetSummary }>(
-    `/datasets/${encodeURIComponent(id)}`, { method: 'PATCH', ...jsonBody(patch) },
+    `/datasets/${encodeURIComponent(id)}`, { method: 'PATCH', ...jsonBody(patch) }, reqOpts,
   );
   return data.dataset;
 }
 
-export async function rescanDataset(id: string): Promise<TrainingDatasetDetail> {
-  return request<TrainingDatasetDetail>(`/datasets/${encodeURIComponent(id)}/rescan`, { method: 'POST' });
+export async function rescanDataset(id: string, reqOpts?: TrainingTarget): Promise<TrainingDatasetDetail> {
+  return request<TrainingDatasetDetail>(`/datasets/${encodeURIComponent(id)}/rescan`, { method: 'POST' }, reqOpts);
 }
 
-export async function deleteDataset(id: string): Promise<void> {
-  await request<{ ok: boolean }>(`/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export async function deleteDataset(id: string, reqOpts?: TrainingTarget): Promise<void> {
+  await request<{ ok: boolean }>(`/datasets/${encodeURIComponent(id)}`, { method: 'DELETE' }, reqOpts);
 }
 
 // ── Sample edits ─────────────────────────────────────────────────────────
 
-export async function patchSample(id: string, sampleId: string, patch: PatchSampleInput): Promise<TrainingSample> {
+export async function patchSample(id: string, sampleId: string, patch: PatchSampleInput, reqOpts?: TrainingTarget): Promise<TrainingSample> {
   const data = await request<{ sample: TrainingSample }>(
     `/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}`,
-    { method: 'PATCH', ...jsonBody(patch) },
+    { method: 'PATCH', ...jsonBody(patch) }, reqOpts,
   );
   return data.sample;
 }
 
-export async function bulkSetSamples(id: string, sampleIds: string[], set: BulkSetInput): Promise<BulkResult> {
+export async function bulkSetSamples(id: string, sampleIds: string[], set: BulkSetInput, reqOpts?: TrainingTarget): Promise<BulkResult> {
   return request<BulkResult>(
     `/datasets/${encodeURIComponent(id)}/samples/bulk`,
-    { method: 'POST', ...jsonBody({ sampleIds, set }) },
+    { method: 'POST', ...jsonBody({ sampleIds, set }) }, reqOpts,
   );
 }
 
 /** Direct audio URL for the preview player — never routed through the playback store. */
-export function sampleAudioUrl(id: string, sampleId: string): string {
-  return `${API_BASE}/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/audio`;
+export function sampleAudioUrl(id: string, sampleId: string, target?: TrainingTarget): string {
+  return `${trainingBase(target?.worker)}/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/audio`;
 }
 
 /** MM3 Structured Caption (`<stem>.mm3.txt`) — served on demand, not in the samples list. */
-export async function getSampleMm3(id: string, sampleId: string): Promise<{ text: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/mm3`);
+export async function getSampleMm3(id: string, sampleId: string, reqOpts?: TrainingReadOptions): Promise<{ text: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/mm3`, undefined, reqOpts);
 }
 
-export async function saveSampleMm3(id: string, sampleId: string, text: string): Promise<{ text: string }> {
+export async function saveSampleMm3(id: string, sampleId: string, text: string, reqOpts?: TrainingTarget): Promise<{ text: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/mm3`,
-    { method: 'PUT', ...jsonBody({ text }) },
+    { method: 'PUT', ...jsonBody({ text }) }, reqOpts,
   );
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────
 
-export async function startLabel(id: string, opts: LabelOptions): Promise<{ jobId: string }> {
-  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/label`, { method: 'POST', ...jsonBody(opts) });
+export async function startLabel(id: string, opts: LabelOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/label`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
-export async function startGenius(id: string, opts: GeniusOptions): Promise<{ jobId: string }> {
-  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/genius`, { method: 'POST', ...jsonBody(opts) });
+export async function startGenius(id: string, opts: GeniusOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/genius`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
-export async function startCaption(id: string, opts: CaptionOptions): Promise<{ jobId: string }> {
-  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/caption`, { method: 'POST', ...jsonBody(opts) });
+export async function startCaption(id: string, opts: CaptionOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/caption`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
 /** Write the one-sentence YuE2 planner caption (`<stem>.yue2.txt`) for each
  *  track from its existing label facts and ACE caption. Text-only: any chat
  *  provider, never MOSS. */
 export async function startYue2Caption(
-  id: string, opts: { sampleIds?: string[]; provider?: string; model?: string; temperature?: number },
+  id: string, opts: { sampleIds?: string[]; provider?: string; model?: string; temperature?: number }, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string }> {
-  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/yue2-caption`, { method: 'POST', ...jsonBody(opts) });
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/yue2-caption`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
-export async function startBuild(id: string, outputPath?: string): Promise<{ jobId: string }> {
+export async function startBuild(id: string, outputPath?: string, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/build`,
-    { method: 'POST', ...jsonBody(outputPath ? { outputPath } : {}) },
+    { method: 'POST', ...jsonBody(outputPath ? { outputPath } : {}) }, reqOpts,
   );
 }
 
-export async function startPreprocess(id: string, opts: PreprocessOptions): Promise<{ jobId: string }> {
+export async function startPreprocess(id: string, opts: PreprocessOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/preprocess`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
-export async function getPreprocessStatus(id: string): Promise<PreprocessStatus> {
-  return request<PreprocessStatus>(`/datasets/${encodeURIComponent(id)}/preprocess`);
+export async function getPreprocessStatus(id: string, reqOpts?: TrainingReadOptions): Promise<PreprocessStatus> {
+  return request<PreprocessStatus>(`/datasets/${encodeURIComponent(id)}/preprocess`, undefined, reqOpts);
 }
 
-export async function deletePreprocessVariant(id: string, variantKey: string): Promise<void> {
+export async function deletePreprocessVariant(id: string, variantKey: string, reqOpts?: TrainingTarget): Promise<void> {
   await request<{ ok: boolean }>(
     `/datasets/${encodeURIComponent(id)}/preprocess/${encodeURIComponent(variantKey)}`,
-    { method: 'DELETE' },
+    { method: 'DELETE' }, reqOpts,
   );
 }
 
 // ── MiniMax-Music3 training ──────────────────────────────────────────────
 
-export async function getMm3Status(id: string): Promise<Mm3Status> {
-  return request<Mm3Status>(`/datasets/${encodeURIComponent(id)}/mm3`);
+export async function getMm3Status(id: string, reqOpts?: TrainingReadOptions): Promise<Mm3Status> {
+  return request<Mm3Status>(`/datasets/${encodeURIComponent(id)}/mm3`, undefined, reqOpts);
 }
 
-export async function startMm3Codes(id: string, opts: Mm3CodesRequest = {}): Promise<{ jobId: string }> {
+export async function startMm3Codes(id: string, opts: Mm3CodesRequest = {}, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/mm3-codes`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 /** Checkpoints land in the MM3 adapter folder, so a finished run shows up in
  *  the generation panel's adapter picker with no install step. */
 export async function startMm3TrainLm(
-  id: string, opts: Mm3TrainLmRequest = {},
+  id: string, opts: Mm3TrainLmRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; runName: string; outDir: string }> {
   return request<{ jobId: string; runName: string; outDir: string }>(
     `/datasets/${encodeURIComponent(id)}/mm3-train-lm`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 /** Previous MM3 LM runs for a dataset, newest first. Read off disk each time —
  *  a run directory is the source of truth, not a database row. */
-export async function listMm3Runs(id: string): Promise<{ runs: Mm3RunSummary[]; busy: boolean }> {
+export async function listMm3Runs(id: string, reqOpts?: ReadOptions): Promise<{ runs: Mm3RunSummary[]; busy: boolean }> {
   return localRequest<{ runs: Mm3RunSummary[]; busy: boolean }>(
-    `/datasets/${encodeURIComponent(id)}/mm3-runs`,
+    `/datasets/${encodeURIComponent(id)}/mm3-runs`, undefined, reqOpts,
   );
 }
 
 /** Continue a previous run: same adapter directory, same recipe, more steps.
  *  Everything not named here comes from what that run was trained with. */
 export async function resumeMm3TrainLm(
-  id: string, opts: Mm3ResumeRequest,
+  id: string, opts: Mm3ResumeRequest, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; runName: string; outDir: string; from: number; steps: number;
              optionsSource: string }> {
   return request<{ jobId: string; runName: string; outDir: string; from: number; steps: number;
                    optionsSource: string }>(
     `/datasets/${encodeURIComponent(id)}/mm3-resume-lm`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 // ── YuE2 NAR LoRA training ───────────────────────────────────────────────
 
-export async function getYue2Status(id: string): Promise<Yue2Status> {
-  return request<Yue2Status>(`/datasets/${encodeURIComponent(id)}/yue2`);
+export async function getYue2Status(id: string, reqOpts?: TrainingReadOptions): Promise<Yue2Status> {
+  return request<Yue2Status>(`/datasets/${encodeURIComponent(id)}/yue2`, undefined, reqOpts);
 }
 
 /** Audio -> cached VAE latents. Scans the dataset's source folder FLAT: the
  *  engine takes `--audio <folder>` and no manifest, so subfolders and the
  *  dataset's exclusions do not reach it. */
 export async function startYue2Preprocess(
-  id: string, opts: Yue2PreprocessRequest = {},
+  id: string, opts: Yue2PreprocessRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; outDir: string; scannableFiles: number; datasetSamples: number;
              datasetExcluded: number; unsupportedFiles: number }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-preprocess`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
@@ -2519,47 +2534,47 @@ export async function startYue2Preprocess(
  *  root as plain safetensors files, which is what `/yue2/select-model`'s
  *  `lm_adapter` field takes. */
 export async function startYue2Train(
-  id: string, opts: Yue2TrainRequest = {},
+  id: string, opts: Yue2TrainRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; runName: string; outDir: string; clips: number; lmType: string;
              target: Yue2NarTarget; tensors: number; estimatedMs: number; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-train`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 /** POST /api/training/datasets/:id/yue2-joint-train */
 export async function startYue2JointTrain(
-  id: string, opts: Yue2JointTrainRequest,
+  id: string, opts: Yue2JointTrainRequest, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; trainingMethod: 'aitk'; recipeVersion: string; outDir: string; steps: number; saveEvery: number }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) });
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
 /** Re-caption (from the audio) only the tracks with no .yue2.txt. jobId is
  *  null, with `skipped`, when every track already has one. */
 export async function captionMissingYue2(
-  id: string, opts: { provider?: 'gemini' | 'moss'; model?: string; checkOnly?: boolean },
+  id: string, opts: { provider?: 'gemini' | 'moss'; model?: string; checkOnly?: boolean }, reqOpts?: TrainingTarget,
 ): Promise<{ jobId?: string | null; skipped?: string; missing?: number }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts) });
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
 /** Native AITK joint runs and their split AR/NAR checkpoint files. Always
  *  this machine's own index — a run record (and its blindLabels) is reviewed
  *  and scored from here, never from the worker that may have trained it. */
 export async function listYue2AitkRuns(
-  id: string,
+  id: string, reqOpts?: ReadOptions,
 ): Promise<{ runs: Yue2AitkRunRecord[]; activeJob: TrainingJobSummary | null }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`, undefined, reqOpts);
 }
 
 /** `core`: YuE2's latents, codes, lead sheets and prepared set, kept by every clear unless asked. */
 export interface PreparedCache { name: string; path: string; files: number; bytes: number; core?: boolean }
-export async function getPreparedData(id: string): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
-  return request(`/datasets/${encodeURIComponent(id)}/prepared-data`);
+export async function getPreparedData(id: string, reqOpts?: TrainingReadOptions): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
+  return request(`/datasets/${encodeURIComponent(id)}/prepared-data`, undefined, reqOpts);
 }
-export async function clearPreparedData(id: string, slug: string, includeYue2Core = false): Promise<{ cleared: PreparedCache[] }> {
+export async function clearPreparedData(id: string, slug: string, includeYue2Core = false, reqOpts?: TrainingTarget): Promise<{ cleared: PreparedCache[] }> {
   return request(`/datasets/${encodeURIComponent(id)}/prepared-data`,
-    { method: 'DELETE', ...jsonBody({ confirm: slug, includeYue2Core }) });
+    { method: 'DELETE', ...jsonBody({ confirm: slug, includeYue2Core }) }, reqOpts);
 }
 
 /** Link a saved joint checkpoint's AR/NAR pair to this dataset's album preset. */
@@ -2573,10 +2588,10 @@ export async function linkYue2JointCheckpointPreset(
 /** Previews of a run in this machine's own index (trained here, or mirrored
  *  down from a worker). */
 export async function listYue2JointPreviewsLocal(
-  id: string, run?: string,
+  id: string, run?: string, reqOpts?: ReadOptions,
 ): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
   const query = run ? `?run=${encodeURIComponent(run)}` : '';
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`, undefined, reqOpts);
 }
 
 /** Which run a ladder view shows: an explicit pick first, then the run
@@ -2596,16 +2611,16 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
 export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null }
-export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
-  return localRequest('/yue2-review');
+export async function listYue2Review(reqOpts?: ReadOptions): Promise<{ rows: Yue2ReviewRow[] }> {
+  return localRequest('/yue2-review', undefined, reqOpts);
 }
 
 /** Cleanup around a chosen refinement rung. */
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan { run: string; step: number; keep: string; caches: Yue2CleanupItem; otherCheckpoints: Yue2CleanupItem; otherRuns: Yue2CleanupItem; resume: Yue2CleanupItem; otherPreviews: Yue2CleanupItem }
 export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean };
-export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
+export async function getYue2CleanupPlan(id: string, run: string, step: number, reqOpts?: ReadOptions): Promise<Yue2CleanupPlan> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`, undefined, reqOpts);
 }
 export async function runYue2Cleanup(id: string, body: { run: string; step: number; blind?: boolean; blindLabel?: string } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; finishError?: string }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
@@ -2625,8 +2640,8 @@ export interface Yue2RungScore {
   likeness: number | null; corruption: number | null; notes: string; createdAt: string; updatedAt: string;
   blind: boolean; blindLabel: string;
 }
-export async function listYue2RungScores(id: string, run?: string): Promise<{ scores: Yue2RungScore[] }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`);
+export async function listYue2RungScores(id: string, run?: string, reqOpts?: ReadOptions): Promise<{ scores: Yue2RungScore[] }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, undefined, reqOpts);
 }
 export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string; blind?: boolean; blindLabel?: string }): Promise<{ score: Yue2RungScore }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
@@ -2636,18 +2651,18 @@ export interface Yue2BaseLossItem { file: string; frames: number; arTokens: numb
 export interface Yue2BaseLoss { measuredAt: string; base: string; companion: boolean; arTargets: string; narWindow: number; timesteps: number[]; seed: number;
   items: Yue2BaseLossItem[]; summary: { items: number; arCeMean: number; arCeTokenMean: number; narMseMean: number } }
 export interface Yue2OptimiseStatus { file: string; data: { version: 1; baseLoss?: Yue2BaseLoss } | null; stages: { cache: boolean; codes: boolean; sheets: boolean }; missing: string[] }
-export async function getYue2Optimise(id: string): Promise<Yue2OptimiseStatus> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise`);
+export async function getYue2Optimise(id: string, reqOpts?: TrainingReadOptions): Promise<Yue2OptimiseStatus> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise`, undefined, reqOpts);
 }
-export async function startYue2BaseLoss(id: string): Promise<{ jobId: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise/base-loss`, { method: 'POST', ...jsonBody({}) });
+export async function startYue2BaseLoss(id: string, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise/base-loss`, { method: 'POST', ...jsonBody({}) }, reqOpts);
 }
 /** A run's album verdict: how well the album trained overall, 1-5 (Dataset-Calibrated Training). */
 export type Yue2TrainedDirection = 'under' | 'right' | 'over';
 export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null;
   instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null; notes: string; updatedAt: string }
-export async function getYue2AlbumScore(id: string, run: string): Promise<{ score: Yue2AlbumScore | null }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`);
+export async function getYue2AlbumScore(id: string, run: string, reqOpts?: ReadOptions): Promise<{ score: Yue2AlbumScore | null }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`, undefined, reqOpts);
 }
 export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
@@ -2663,9 +2678,9 @@ export async function renderYue2JointPreviews(
 
 /** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */
 export async function startYue2AitkPrepare(
-  id: string, opts: Yue2AitkPrepareRequest,
+  id: string, opts: Yue2AitkPrepareRequest, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; status: TrainingJobStatus; output: string; manifest: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts) });
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
 /** A base the joint trainer can load: the ConvRot checkpoint or a yue2-lm GGUF.
@@ -2673,20 +2688,20 @@ export async function startYue2AitkPrepare(
 export interface Yue2JointBaseInfo { id: string; bytes: number; convrot: boolean; runnable: boolean }
 
 export async function getYue2AitkPrepare(
-  id: string, output?: string,
+  id: string, output?: string, reqOpts?: TrainingReadOptions,
 ): Promise<{ ready: boolean; manifest?: string; missing?: string[]; activeJob: TrainingJobSummary | null; jobs: TrainingJobSummary[]; defaults?: Partial<Yue2AitkPrepareRequest> & { models?: Partial<Yue2AitkPrepareRequest['models']> };
   bases?: Yue2JointBaseInfo[]; defaultBase?: string; defaultDevice?: string }> {
   const query = output ? `?output=${encodeURIComponent(output)}` : '';
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare${query}`);
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare${query}`, undefined, reqOpts);
 }
 
 /** Previous YuE2 runs and their checkpoint ladders, newest first. Read off disk
  *  each time — the run directory is the source of truth, not a database row. */
 export async function listYue2Runs(
-  id: string,
+  id: string, reqOpts?: ReadOptions,
 ): Promise<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }> {
   return localRequest<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }>(
-    `/datasets/${encodeURIComponent(id)}/yue2-runs`,
+    `/datasets/${encodeURIComponent(id)}/yue2-runs`, undefined, reqOpts,
   );
 }
 
@@ -2695,20 +2710,20 @@ export async function listYue2Runs(
 /** Per-stage cache state, per-stage model readiness and the defaults the form
  *  is a view of. Cheap and never throws server-side, so it is safe to poll for
  *  deciding what to enable. */
-export async function getYue2ArStatus(id: string): Promise<Yue2ArStatus> {
-  return request<Yue2ArStatus>(`/datasets/${encodeURIComponent(id)}/yue2-ar`);
+export async function getYue2ArStatus(id: string, reqOpts?: TrainingReadOptions): Promise<Yue2ArStatus> {
+  return request<Yue2ArStatus>(`/datasets/${encodeURIComponent(id)}/yue2-ar`, undefined, reqOpts);
 }
 
 /** Cache stage 2: the manifest's sources -> `codes/` (codec_ids), rewritten
  *  into the same manifest. Takes no audio folder — the sources are whatever
  *  preprocess already named. */
 export async function startYue2Tokenize(
-  id: string, opts: Yue2TokenizeRequest = {},
+  id: string, opts: Yue2TokenizeRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; sources: number;
              clips: number; tokenizer: string; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-tokenize`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
@@ -2716,12 +2731,12 @@ export async function startYue2Tokenize(
  *  `cursor/` (cursor_words). `stemsReady` is echoed because a source without a
  *  stem is skipped silently and trains with the cursor loss off. */
 export async function startYue2Align(
-  id: string, opts: Yue2AlignRequest = {},
+  id: string, opts: Yue2AlignRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; stemsDir: string;
              sources: number; stemsReady: number; aligner: string; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-align`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
@@ -2729,33 +2744,33 @@ export async function startYue2Align(
  *  rewritten into the same manifest. Independent of tokenize/align: reads a
  *  source's own audio, not its codes or cursor spans. */
 export async function startYue2Sheet(
-  id: string, opts: Yue2SheetRequest = {},
+  id: string, opts: Yue2SheetRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; manifest: string; sources: number;
              sheetModel: string; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-sheet`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 /** The Lead-sheet preview picker: every source the manifest names, and which
  *  ones have a lead sheet to show. */
-export async function listYue2SheetSources(id: string): Promise<{ sources: Yue2SheetSourceStatus[] }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet`);
+export async function listYue2SheetSources(id: string, reqOpts?: TrainingReadOptions): Promise<{ sources: Yue2SheetSourceStatus[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet`, undefined, reqOpts);
 }
 
 /** One source's rendered lead sheet (or its `abc_error`), for the preview. */
-export async function getYue2SheetSource(id: string, name: string): Promise<Yue2SheetSourceDetail> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet/${encodeURIComponent(name)}`);
+export async function getYue2SheetSource(id: string, name: string, reqOpts?: TrainingReadOptions): Promise<Yue2SheetSourceDetail> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-sheet/${encodeURIComponent(name)}`, undefined, reqOpts);
 }
 
 /** POST /datasets/:id/yue2-stems — separate vocals for the aligner. */
 export async function startYue2Stems(
-  id: string, opts: Yue2StemsRequest = {},
+  id: string, opts: Yue2StemsRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<Yue2StemsResponse> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-stems`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
@@ -2764,37 +2779,37 @@ export async function startYue2Stems(
  *  spans trains, it just trains on less. No estimated duration — nothing has
  *  been measured for this stage, and a plausible number would read as one. */
 export async function startYue2ArTrain(
-  id: string, opts: Yue2ArTrainRequest = {},
+  id: string, opts: Yue2ArTrainRequest = {}, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; runName: string; outDir: string;
              sources: number; clips: number; lmType: string; target: Yue2ArTarget;
              styleTemplate: Yue2StyleTemplate; steps: number; minted: string;
              ckptPickStep: number; warnings: string[]; license: string }> {
   return request(
     `/datasets/${encodeURIComponent(id)}/yue2-ar-train`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 /** Previous AR runs and their checkpoint ladders, newest first. A separate
  *  adapter root from the NAR runs', so a separate call. */
 export async function listYue2ArRuns(
-  id: string,
+  id: string, reqOpts?: ReadOptions,
 ): Promise<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }> {
   return localRequest<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }>(
-    `/datasets/${encodeURIComponent(id)}/yue2-ar-runs`,
+    `/datasets/${encodeURIComponent(id)}/yue2-ar-runs`, undefined, reqOpts,
   );
 }
 
-export async function startTrainLm(id: string, opts: TrainLmOptions): Promise<{ jobId: string }> {
+export async function startTrainLm(id: string, opts: TrainLmOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/train-lm`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 export async function getTrainLmStatus(
   id: string,
-  q?: { variantKey?: string; adapterName?: string; lmSize?: LmSize },
+  q?: { variantKey?: string; adapterName?: string; lmSize?: LmSize }, reqOpts?: TrainingReadOptions,
 ): Promise<TrainLmStatus> {
   const params = new URLSearchParams();
   if (q?.variantKey) params.set('variantKey', q.variantKey);
@@ -2802,63 +2817,63 @@ export async function getTrainLmStatus(
   if (q?.lmSize) params.set('lmSize', q.lmSize);
   const qs = params.toString();
   return request<TrainLmStatus>(
-    `/datasets/${encodeURIComponent(id)}/train-lm${qs ? `?${qs}` : ''}`,
+    `/datasets/${encodeURIComponent(id)}/train-lm${qs ? `?${qs}` : ''}`, undefined, reqOpts,
   );
 }
 
-export async function startTrainDit(id: string, opts: TrainDitOptions): Promise<{ jobId: string }> {
+export async function startTrainDit(id: string, opts: TrainDitOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/train-dit`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
 export async function getTrainDitStatus(
   id: string,
-  q?: { variantKey?: string; adapterName?: string },
+  q?: { variantKey?: string; adapterName?: string }, reqOpts?: TrainingReadOptions,
 ): Promise<TrainDitStatus> {
   const params = new URLSearchParams();
   if (q?.variantKey) params.set('variantKey', q.variantKey);
   if (q?.adapterName) params.set('adapterName', q.adapterName);
   const qs = params.toString();
   return request<TrainDitStatus>(
-    `/datasets/${encodeURIComponent(id)}/train-dit${qs ? `?${qs}` : ''}`,
+    `/datasets/${encodeURIComponent(id)}/train-dit${qs ? `?${qs}` : ''}`, undefined, reqOpts,
   );
 }
 
-export async function getJob(jobId: string): Promise<TrainingJobSummary> {
-  return request<TrainingJobSummary>(`/jobs/${encodeURIComponent(jobId)}`);
+export async function getJob(jobId: string, reqOpts?: TrainingReadOptions): Promise<TrainingJobSummary> {
+  return request<TrainingJobSummary>(`/jobs/${encodeURIComponent(jobId)}`, undefined, reqOpts);
 }
 
-export async function listJobs(datasetId?: string): Promise<TrainingJobSummary[]> {
+export async function listJobs(datasetId?: string, reqOpts?: TrainingReadOptions): Promise<TrainingJobSummary[]> {
   const qs = datasetId ? `?datasetId=${encodeURIComponent(datasetId)}` : '';
-  const data = await request<{ jobs: TrainingJobSummary[] }>(`/jobs${qs}`);
+  const data = await request<{ jobs: TrainingJobSummary[] }>(`/jobs${qs}`, undefined, reqOpts);
   return data.jobs;
 }
 
-export async function cancelJob(jobId: string): Promise<void> {
-  await request<{ ok: boolean }>(`/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+export async function cancelJob(jobId: string, reqOpts?: TrainingTarget): Promise<void> {
+  await request<{ ok: boolean }>(`/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' }, reqOpts);
 }
 
-export const jobStreamUrl = (jobId: string) => `${API_BASE}/jobs/${encodeURIComponent(jobId)}/stream`;
+export const jobStreamUrl = (jobId: string, target?: TrainingTarget) => `${trainingBase(target?.worker)}/jobs/${encodeURIComponent(jobId)}/stream`;
 
 /** Built dataset.json, parsed. */
-export async function getDatasetJson(id: string): Promise<{ path: string; builtAt: string; dataset: unknown }> {
-  return request<{ path: string; builtAt: string; dataset: unknown }>(`/datasets/${encodeURIComponent(id)}/dataset-json`);
+export async function getDatasetJson(id: string, reqOpts?: TrainingReadOptions): Promise<{ path: string; builtAt: string; dataset: unknown }> {
+  return request<{ path: string; builtAt: string; dataset: unknown }>(`/datasets/${encodeURIComponent(id)}/dataset-json`, undefined, reqOpts);
 }
 
 // ── Lyric Studio export ──────────────────────────────────────────────────
 
-export async function getLyricStudioPreview(id: string): Promise<LyricStudioExportPreview> {
-  return request<LyricStudioExportPreview>(`/datasets/${encodeURIComponent(id)}/lyric-studio`);
+export async function getLyricStudioPreview(id: string, reqOpts?: TrainingReadOptions): Promise<LyricStudioExportPreview> {
+  return request<LyricStudioExportPreview>(`/datasets/${encodeURIComponent(id)}/lyric-studio`, undefined, reqOpts);
 }
 
 export async function exportToLyricStudio(
-  id: string, input: LyricStudioExportInput,
+  id: string, input: LyricStudioExportInput, reqOpts?: TrainingTarget,
 ): Promise<LyricStudioExportResult> {
   return request<LyricStudioExportResult>(
     `/datasets/${encodeURIComponent(id)}/lyric-studio`,
-    { method: 'POST', ...jsonBody(input) },
+    { method: 'POST', ...jsonBody(input) }, reqOpts,
   );
 }
 
@@ -2991,10 +3006,10 @@ export interface SampleAuditionResponse {
 
 /** POST the A/B (or milestone) audition. Returns the training job id — the two
  *  `/lm` runs are far too slow for a synchronous response (C6). */
-export async function startAudition(id: string, opts: AuditionOptions): Promise<{ jobId: string }> {
+export async function startAudition(id: string, opts: AuditionOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(
     `/datasets/${encodeURIComponent(id)}/audition`,
-    { method: 'POST', ...jsonBody(opts) },
+    { method: 'POST', ...jsonBody(opts) }, reqOpts,
   );
 }
 
@@ -3019,16 +3034,16 @@ export interface LsGenerationsResponse {
 
 /** Generated lyrics of the dataset's linked Lyric Studio album (persisted
  *  link, falling back to artist/album detection which then persists). */
-export async function getLsGenerations(id: string): Promise<LsGenerationsResponse> {
+export async function getLsGenerations(id: string, reqOpts?: TrainingReadOptions): Promise<LsGenerationsResponse> {
   return request<LsGenerationsResponse>(
-    `/datasets/${encodeURIComponent(id)}/ls-generations`,
+    `/datasets/${encodeURIComponent(id)}/ls-generations`, undefined, reqOpts,
   );
 }
 
 /** Preview history for one dataset, newest first. */
-export async function getAuditions(id: string, limit = 20): Promise<AuditionListResponse> {
+export async function getAuditions(id: string, limit = 20, reqOpts?: TrainingReadOptions): Promise<AuditionListResponse> {
   return request<AuditionListResponse>(
-    `/datasets/${encodeURIComponent(id)}/audition?limit=${encodeURIComponent(String(limit))}`,
+    `/datasets/${encodeURIComponent(id)}/audition?limit=${encodeURIComponent(String(limit))}`, undefined, reqOpts,
   );
 }
 
@@ -3036,42 +3051,42 @@ export async function getAuditions(id: string, limit = 20): Promise<AuditionList
 export async function auditionSample(
   id: string,
   sampleId: string,
-  format?: 'wav16' | 'mp3',
+  format?: 'wav16' | 'mp3', reqOpts?: TrainingTarget,
 ): Promise<SampleAuditionResponse> {
   return request<SampleAuditionResponse>(
     `/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/audition`,
-    { method: 'POST', ...jsonBody(format ? { format } : {}) },
+    { method: 'POST', ...jsonBody(format ? { format } : {}) }, reqOpts,
   );
 }
 
 /** Range-served preview audio. `AuditionSideResult.audioUrl` already carries
  *  this string; this helper exists for callers that only hold id + slot. */
-export function previewAudioUrl(previewId: string, slot: AuditionSlot): string {
-  return `${API_BASE}/previews/${encodeURIComponent(previewId)}/${encodeURIComponent(slot)}`;
+export function previewAudioUrl(previewId: string, slot: AuditionSlot, target?: TrainingTarget): string {
+  return `${trainingBase(target?.worker)}/previews/${encodeURIComponent(previewId)}/${encodeURIComponent(slot)}`;
 }
 
 // ─── Batch pipeline ────────────────────────────────────────────────────────
 
-export async function startPipeline(input: StartPipelineInput): Promise<PipelineSummary> {
-  const data = await request<{ pipeline: PipelineSummary }>('/pipeline', { method: 'POST', ...jsonBody(input) });
+export async function startPipeline(input: StartPipelineInput, reqOpts?: TrainingTarget): Promise<PipelineSummary> {
+  const data = await request<{ pipeline: PipelineSummary }>('/pipeline', { method: 'POST', ...jsonBody(input) }, reqOpts);
   return data.pipeline;
 }
 
-export async function listPipelines(): Promise<PipelineSummary[]> {
-  const data = await request<{ pipelines: PipelineSummary[] }>('/pipeline');
+export async function listPipelines(reqOpts?: TrainingReadOptions): Promise<PipelineSummary[]> {
+  const data = await request<{ pipelines: PipelineSummary[] }>('/pipeline', undefined, reqOpts);
   return data.pipelines;
 }
 
-export async function getPipeline(id: string): Promise<PipelineSummary> {
-  return request<PipelineSummary>(`/pipeline/${encodeURIComponent(id)}`);
+export async function getPipeline(id: string, reqOpts?: TrainingReadOptions): Promise<PipelineSummary> {
+  return request<PipelineSummary>(`/pipeline/${encodeURIComponent(id)}`, undefined, reqOpts);
 }
 
-export async function pausePipeline(id: string): Promise<void> {
-  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}/pause`, { method: 'POST' });
+export async function pausePipeline(id: string, reqOpts?: TrainingTarget): Promise<void> {
+  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}/pause`, { method: 'POST' }, reqOpts);
 }
 
-export async function resumePipeline(id: string): Promise<void> {
-  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}/resume`, { method: 'POST' });
+export async function resumePipeline(id: string, reqOpts?: TrainingTarget): Promise<void> {
+  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}/resume`, { method: 'POST' }, reqOpts);
 }
 
 // ── YuE2 batch (server-owned, resumable) ───────────────────────────────
@@ -3090,12 +3105,12 @@ export interface Yue2BatchSummary {
   finishedAt: number | null;
   pauseRequested?: boolean;
 }
-export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<Yue2BatchSummary> {
-  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) });
+export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) }, reqOpts);
   return data.batch;
 }
-export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
-  const data = await request<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
+export async function listYue2Batches(reqOpts?: TrainingReadOptions): Promise<Yue2BatchSummary[]> {
+  const data = await request<{ batches: Yue2BatchSummary[] }>('/yue2-batch', undefined, reqOpts);
   return data.batches;
 }
 export async function setYue2ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
@@ -3110,14 +3125,14 @@ export async function finishYue2Ladders(entries: Array<{ datasetId: string; refi
  *  further training + link + cleanup run on this machine, never a worker),
  *  so it must be read back from the local base too — the worker-aware
  *  `listYue2Batches` below never sees it. */
-export async function listYue2BatchesLocal(): Promise<Yue2BatchSummary[]> {
-  const data = await localRequest<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
+export async function listYue2BatchesLocal(reqOpts?: ReadOptions): Promise<Yue2BatchSummary[]> {
+  const data = await localRequest<{ batches: Yue2BatchSummary[] }>('/yue2-batch', undefined, reqOpts);
   return data.batches;
 }
-export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }
-export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }
-export async function addToYue2Batch(id: string, datasetIds: string[]): Promise<void> { await request<{ batch: Yue2BatchSummary }>(`/yue2-batch/${encodeURIComponent(id)}/items`, { method: 'POST', ...jsonBody({ datasetIds }) }); }
-export async function cancelYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+export async function pauseYue2Batch(id: string, reqOpts?: TrainingTarget): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }, reqOpts); }
+export async function resumeYue2Batch(id: string, reqOpts?: TrainingTarget): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }, reqOpts); }
+export async function addToYue2Batch(id: string, datasetIds: string[], reqOpts?: TrainingTarget): Promise<void> { await request<{ batch: Yue2BatchSummary }>(`/yue2-batch/${encodeURIComponent(id)}/items`, { method: 'POST', ...jsonBody({ datasetIds }) }, reqOpts); }
+export async function cancelYue2Batch(id: string, reqOpts?: TrainingTarget): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}`, { method: 'DELETE' }, reqOpts); }
 
 // ── Training workers (/api/workers, always this PC's server) ───────────────
 
@@ -3130,21 +3145,21 @@ export interface TrainingWorkerStatus {
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
 export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
 
-async function workersRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api/workers${path}`, init);
+async function workersRequest<T>(path: string, init?: RequestInit, opts?: ReadOptions): Promise<T> {
+  const res = await fetch(`/api/workers${path}`, { ...init, signal: opts?.signal });
   const data = await res.json().catch(() => ({ error: res.statusText }));
-  if (!res.ok) throw new Error(data.error || `API error: ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, data.error || `API error: ${res.status}`, data);
   return data as T;
 }
-export async function listTrainingWorkers(): Promise<TrainingWorkerStatus[]> {
-  return (await workersRequest<{ workers: TrainingWorkerStatus[] }>('')).workers;
+export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<TrainingWorkerStatus[]> {
+  return (await workersRequest<{ workers: TrainingWorkerStatus[] }>('', undefined, reqOpts)).workers;
 }
 /** Caption here, push, and queue each dataset on the worker's YuE2 batch. */
 export async function dispatchYue2Batch(worker: string, input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<WorkerDispatch> {
   return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input) })).dispatch;
 }
-export async function getWorkerDispatch(worker: string): Promise<WorkerDispatch | null> {
-  return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`)).dispatch;
+export async function getWorkerDispatch(worker: string, reqOpts?: ReadOptions): Promise<WorkerDispatch | null> {
+  return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, undefined, reqOpts)).dispatch;
 }
 /** Fetch the worker's linked adapters and link them to this PC's presets. */
 export async function pullWorkerAdapters(worker: string): Promise<Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }>> {
@@ -3152,20 +3167,20 @@ export async function pullWorkerAdapters(worker: string): Promise<Array<{ slug: 
 }
 /** One worker's background mirror: runs it trains are copied down here file by file. */
 export interface MirrorStatus { worker: string; running: boolean; lastPassAt: number | null; lastError: string | null; online: boolean; pendingFiles: number; pendingBytes: number; runs: number }
-export async function getWorkerMirror(worker: string): Promise<MirrorStatus | null> {
-  return (await workersRequest<{ mirror: MirrorStatus | null }>(`/${encodeURIComponent(worker)}/mirror`)).mirror;
+export async function getWorkerMirror(worker: string, reqOpts?: ReadOptions): Promise<MirrorStatus | null> {
+  return (await workersRequest<{ mirror: MirrorStatus | null }>(`/${encodeURIComponent(worker)}/mirror`, undefined, reqOpts)).mirror;
 }
 /** Run one mirror pass now; resolves when the pass ends. */
 export async function syncWorkerMirror(worker: string): Promise<MirrorStatus> {
   return (await workersRequest<{ mirror: MirrorStatus }>(`/${encodeURIComponent(worker)}/mirror`, { method: 'POST' })).mirror;
 }
 
-export async function cancelPipeline(id: string): Promise<void> {
-  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export async function cancelPipeline(id: string, reqOpts?: TrainingTarget): Promise<void> {
+  await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}`, { method: 'DELETE' }, reqOpts);
 }
 
-export async function getTrainingDefaults(): Promise<TrainingDefaults> {
-  return request<TrainingDefaults>('/defaults');
+export async function getTrainingDefaults(reqOpts?: TrainingReadOptions): Promise<TrainingDefaults> {
+  return request<TrainingDefaults>('/defaults', undefined, reqOpts);
 }
 
 // Worker update jobs always live on this PC, even while Training Studio is
@@ -3173,8 +3188,8 @@ export async function getTrainingDefaults(): Promise<TrainingDefaults> {
 export interface WorkerUpdateStatus {
   id: string; worker: string; status: string; cancellable: boolean; lines: string[]; error?: string;
 }
-export async function getWorkerUpdate(worker: string): Promise<WorkerUpdateStatus | null> {
-  return (await workersRequest<{ update: WorkerUpdateStatus | null }>(`/${encodeURIComponent(worker)}/update`)).update;
+export async function getWorkerUpdate(worker: string, reqOpts?: ReadOptions): Promise<WorkerUpdateStatus | null> {
+  return (await workersRequest<{ update: WorkerUpdateStatus | null }>(`/${encodeURIComponent(worker)}/update`, undefined, reqOpts)).update;
 }
 export async function startWorkerUpdate(worker: string): Promise<WorkerUpdateStatus> {
   return (await workersRequest<{ update: WorkerUpdateStatus }>(`/${encodeURIComponent(worker)}/update`, { method: 'POST' })).update;
@@ -3183,6 +3198,6 @@ export async function cancelWorkerUpdate(worker: string): Promise<void> {
   await workersRequest(`/${encodeURIComponent(worker)}/update`, { method: 'DELETE' });
 }
 
-export async function putTrainingDefaults(patch: Partial<TrainingDefaults>): Promise<TrainingDefaults> {
-  return request<TrainingDefaults>('/defaults', { method: 'PUT', ...jsonBody(patch) });
+export async function putTrainingDefaults(patch: Partial<TrainingDefaults>, reqOpts?: TrainingTarget): Promise<TrainingDefaults> {
+  return request<TrainingDefaults>('/defaults', { method: 'PUT', ...jsonBody(patch) }, reqOpts);
 }
