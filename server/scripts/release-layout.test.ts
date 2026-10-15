@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { dataLayout, layoutDefaults, profileDir, RESTART_MARKER_FILE } from '../src/dataroot/paths.js';
+import { dataLayout, devPointerFile, layoutDefaults, profileDir, RESTART_MARKER_FILE } from '../src/dataroot/paths.js';
 import { resolveRuntime } from '../src/dataroot/bootstrap.js';
 // JS packaging helpers intentionally have no runtime TypeScript dependency.
 // @ts-expect-error packaging helper is plain JavaScript
@@ -61,10 +61,14 @@ test('fresh release from unrelated cwd reuses data across version folders', asyn
     assert.ok(second.ok);
     assert.equal(second.runtime.dataRoot, layout.root);
     assert.equal(second.runtime.restartMarkerPath, first.runtime.restartMarkerPath);
-    const dev = await resolveRuntime({ env: {}, log: () => {} });
+    const devProfile = path.join(base, 'dev profile');
+    const checkoutRoot = path.join(base, 'checkout');
+    const dev = await resolveRuntime({ env: { HOT_STEP_PROFILE_DIR: devProfile }, checkoutRoot, log: () => {} });
     assert.ok(dev.ok);
     assert.equal(dev.runtime.mode, 'dev');
-    assert.equal(dev.runtime.pointerPath, null);
+    assert.equal(dev.runtime.dataRoot, null);
+    assert.equal(dev.runtime.pointerPath, devPointerFile(devProfile, checkoutRoot));
+    assert.ok(!fs.existsSync(devProfile), 'dev profile untouched');
     assert.match(fs.readFileSync(path.join(repo, '.env.example'), 'utf8'), /^DATA_DIR=\.\/server\/data$/m);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
