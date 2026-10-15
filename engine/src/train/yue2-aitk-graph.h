@@ -250,6 +250,10 @@ inline bool rope_table() {
     static const bool on = [] { const char * v = std::getenv("YUE2_AITK_ROPE_TABLE"); return v && *v && *v != '0'; }();
     return on;
 }
+inline bool qk_prescale() {
+    static const bool on = [] { const char * v = std::getenv("YUE2_AITK_QK_PRESCALE"); return v && *v && *v != '0'; }();
+    return on;
+}
 inline ggml_tensor * rope(ggml_context * ctx, ggml_tensor * x,
                           ggml_tensor * cosine, ggml_tensor * sine, ggml_tensor * positions = nullptr) {
     if (positions && !strict_f32() && !rope_table()) {
@@ -316,8 +320,14 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     // Post-dot scaling differs at BF16 rounding boundaries and is amplified
     // by subsequent activation quantization. Keep these products in F32.
     const float root_scale = std::sqrt(1.0f/std::sqrt(float(D)));
-    q = ggml_scale(ctx, ggml_cont(ctx, q), root_scale);
-    k = ggml_scale(ctx, ggml_cont(ctx, k), root_scale);
+    // BF16 attention can instead take the BF16 q and k as they are and apply
+    // 1/sqrt(D) to the F32 scores (YUE2_AITK_QK_PRESCALE=1 keeps the above).
+    const bool fold_scale = !math_attention() && !strict_f32() && c.attention_precision == GGML_PREC_DEFAULT &&
+        bf16_attention_supported() && !qk_prescale();
+    if (!fold_scale) {
+        q = ggml_scale(ctx, ggml_cont(ctx, q), root_scale);
+        k = ggml_scale(ctx, ggml_cont(ctx, k), root_scale);
+    }
     ggml_tensor * attention;
 #ifndef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
     if (math_attention())
@@ -340,7 +350,7 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     ggml_tensor * attn_q = bf16_attention ? ggml_cast(ctx, q, GGML_TYPE_BF16) : q;
     ggml_tensor * attn_k = bf16_attention ? ggml_cast(ctx, k, GGML_TYPE_BF16) : k;
     ggml_tensor * attn_v = bf16_attention ? ggml_cast(ctx, v, GGML_TYPE_BF16) : v;
-    ggml_tensor * packed = ggml_flash_attn_train(ctx, attn_q, attn_k, attn_v, mask, 1.0f);
+    ggml_tensor * packed = ggml_flash_attn_train(ctx, attn_q, attn_k, attn_v, mask, fold_scale ? root_scale*root_scale : 1.0f);
     ggml_flash_attn_train_set_prec(packed, bf16_attention ? GGML_PREC_BF16 : c.attention_precision);
     // The mask is exactly "key j visible iff j <= causal_hint + row" (the
     // executor's make_mask), so CUDA skips reading it; the prefix rows' dK/dV
