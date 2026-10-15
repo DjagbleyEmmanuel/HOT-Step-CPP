@@ -9,6 +9,9 @@ const SONG_SECTION = /^\s*\[[^\]]+\]\s*$/;
 const CUE = /^\s*\([^()]*\)\s*$/;
 const HEADER = /^\s*\[(Tags|Lyrics|Duration)\]\s*$/i;
 
+// Unknown tags (e.g. [Breakdown]) are kept in Ruach's Title case, not dropped.
+const titleCase = (key: string) => key.replace(/(^|[\s-])([a-z])/g, (_, lead: string, letter: string) => lead + letter.toUpperCase());
+
 function splitLines(text: string): string[] {
   return text.split(/\r\n|\r|\n/).filter((_, i, lines) => i < lines.length - 1 || lines[i] !== '');
 }
@@ -23,7 +26,8 @@ export function cleanFixedRecipeLyrics(text: string): { lyrics: string; hints: s
         let key = match[1].trim().toLowerCase().split(/\s+-\s+|:/, 1)[0].trim().replace(/\s*\d+$/, '');
         if (key.includes('instrumental')) key = 'inst';
         else if (/(intro|outro|verse|chorus|bridge)$/.test(key) && KNOWN[key.split(' ').at(-1)!]) key = key.split(' ').at(-1)!;
-        const section = KNOWN[key] && `[${KNOWN[key]}]`;
+        const name = KNOWN[key] ?? titleCase(key);
+        const section = name && `[${name}]`;
         if (section && lines.at(-1) !== section) lines.push(section);
       }
       const rest = line.replace(/\[[^\]]*\]/g, '').trim();

@@ -3,11 +3,13 @@ import test from 'node:test';
 import { cleanFixedRecipeLyrics, parseFixedRecipeCaption, prepareFixedRecipeCaption } from './fixedRecipeCaption.js';
 import { fixedRecipeLegacyManifest } from './yue2AitkPrepareRunner.js';
 
-test('Fixed-recipe lyric cleaning keeps known sections and words, removes cues and unsupported headings', () => {
-  const input = '(quiet mood)\n[EXTENDED OUTRO]\n(wind)\nA word (whispered) stays\n[Unknown]\n[VERSE 2]\nNext line';
+test('Fixed-recipe lyric cleaning keeps known sections and words, removes cues, and keeps unknown headings in Title case', () => {
+  const input = '(quiet mood)\n[EXTENDED OUTRO]\n(wind)\nA word (whispered) stays\n[Unknown]\nHum\n[VERSE 2]\nNext line';
   assert.deepEqual(cleanFixedRecipeLyrics(input), {
-    lyrics: '[Outro]\nA word stays\n[Verse]\nNext line', hints: ['quiet mood'],
+    lyrics: '[Outro]\nA word stays\n[Unknown]\nHum\n[Verse]\nNext line', hints: ['quiet mood'],
   });
+  assert.equal(cleanFixedRecipeLyrics('[breakdown]\nHey\n[pre-chorus]\nGo\n[half time]\nYo').lyrics,
+    '[Breakdown]\nHey\n[Pre-Chorus]\nGo\n[Half Time]\nYo');
 });
 
 test('Fixed-recipe caption parser separates style and lyrics and normalizes section case', () => {

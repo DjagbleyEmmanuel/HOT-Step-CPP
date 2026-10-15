@@ -305,7 +305,7 @@ export function applyBaseMatchedRecipe(body: Record<string, unknown>): Record<st
 
 /** Fixed joint-training recipe: bf16 base, rank-32 LoRA, one song per update. */
 export function applyFixedRecipe(body: Record<string, unknown>): Record<string, unknown> {
-  return { ...body, method: 'fixed-recipe', base: 'bf16', adapterType: 'lora',
+  return { ...body, method: 'fixed-recipe', base: 'bf16', steps: 1500, seed: 42, saveEvery: 200, adapterType: 'lora',
     rank: 32, alpha: 32, optimizer: 'adamw-lm', cautious: false,
     lr: 1e-4, weightDecay: 0.01, beta1: 0.9, beta2: 0.999,
     lrSchedule: 'constant', warmup: 0, plannerLrScale: 0.5, narLrScale: 1,

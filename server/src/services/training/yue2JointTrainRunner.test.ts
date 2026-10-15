@@ -23,6 +23,7 @@ test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   assert.equal(recipe.lr, 1e-4);
   assert.equal(recipe.plannerLrScale, 0.5);
   assert.equal(recipe.abcDropout, 1);
+  assert.deepEqual([recipe.steps, recipe.seed, recipe.saveEvery], [1500, 42, 200]);
   assert.equal(recipe.arTargets, 'tuned');
   const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
     steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
