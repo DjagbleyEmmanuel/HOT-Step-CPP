@@ -61,7 +61,37 @@ Every assembler (the local `release/build-release.ps1` and each CI platform job)
 
 The server bundle is `server/server.mjs` plus `server/chunks/`. esbuild code splitting is on deliberately: without it, the top-level await in `dataroot/bootstrap.ts` plus the server's import cycles deadlock the bundle at startup (exit 13, the 1.4.1 bug).
 
-## 1. (Optional) Compile-test before releasing
+## 1. Windows preflight before releasing
+
+After the intended changes are committed and pushed to `master`, manually dispatch the
+Release workflow. Both the push and dispatch require the maintainer's approval:
+
+```bash
+gh workflow run release.yml --ref master
+```
+
+Manual dispatch uses the same five Windows build jobs and fresh `windows-2022` archive
+test jobs as a tag release. It derives `0.0.0-preflight-<12-character commit SHA>` from
+the dispatched commit for both the packaged `VERSION` and archive names. There is no
+version input or branch name in the archive path. It uploads artifacts only, creates no
+tag or release, and skips Linux, macOS, Essentia and all release notes/creation work.
+
+Inspect all five `test-windows-artifacts` results and their `windows-smoke-<variant>`
+evidence artifacts. Each job verifies the shipping zip's SHA256, extracts it under
+`HOT Step smoke` outside the checkout, boots the packaged server with its bundled Node,
+checks engine endpoints with stub models, and runs the model-free backend diagnostic.
+The fresh test VM installs no toolkit and receives no build tree. Child process `PATH`
+contains Windows system directories plus the isolated registry-provisioned CUDA runtime.
+Missing backend and runtime DLL negative checks must fail as expected. CUDA runtime
+downloads are cached by their registry entries; the logs record bytes and download time.
+See [Windows archive gate](building.md#windows-archive-gate) for acceptance and limits.
+
+A tag release depends on every Windows archive test passing before creating its draft.
+It collects the original checksummed `release-*` artifacts, excluding smoke evidence.
+The Windows preflight proves startup and backend loading on hosted runners; the local
+release gate and listening check above still cover model execution and audio quality.
+
+### Optional full-platform compile test
 
 To verify CI compiles without cutting a real release, push a throwaway
 **hyphenated** tag — it triggers the same build pipeline but is ignored by the
@@ -84,9 +114,10 @@ git tag -a vX.Y.Z -m "vX.Y.Z — <one-line summary>"
 git push origin vX.Y.Z
 ```
 
-This triggers `Release` → builds Windows (cuda13.1 / cuda12.8 / vulkan / cpu),
-Linux (same four), macOS (Metal) → creates a **draft** release with **22 assets**
-(11 archives + 11 `.sha256`).
+This triggers `Release`: builds Windows (`cuda13.1`, `cuda12.8`, `cuda12-volta`,
+`vulkan`, `cpu`), Linux (those five plus `rocm`) and macOS (Metal), then tests all
+five Windows archives before creating a **draft** release with **24 assets**
+(12 archives + 12 `.sha256`).
 
 To change the commit or re-run: delete + re-push the tag (it rebuilds).
 
@@ -122,7 +153,7 @@ Verify the asset count and notes, then leave the draft for the maintainer to
 publish. The maintainer uses:
 
 ```bash
-gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 22
+gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 24
 gh release edit vX.Y.Z --draft=false --latest
 ```
 

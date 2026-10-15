@@ -1,23 +1,23 @@
 # .github/workflows/release.yml — Automated multi-platform release pipeline
 #
-# Triggered by: pushing a version tag (e.g. git tag v1.1.0 && git push origin v1.1.0)
+# Triggered by: a v* tag push, or an artifact-only Windows manual preflight.
 #
 # Jobs:
-#   1. build-windows (matrix: cuda13.1/cuda12.8/vulkan/cpu) — parallel Windows builds
-#   2. build-macos — Apple Silicon Metal build
-#   3. release — collect all artifacts, generate notes, create draft GitHub Release
+#   build-windows -> test-windows-artifacts gates all five Windows archives.
+#   Tag pushes also build Linux/macOS and create a draft after every gate passes.
 #
 # Architecture: see docs/plans/2026-05-11-release-automation-design.md
 
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write   # Required for gh release create
+  contents: read
 
 env:
   NODE_VERSION: '24.18.0'
@@ -39,7 +39,29 @@ env:
 # Windows builds (CUDA / Vulkan / CPU) — run in parallel via matrix strategy
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
+  prepare:
+    runs-on: windows-2022
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Select archive version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = "0.0.0-preflight-$($env:GITHUB_SHA.Substring(0, 12))"
+          } else {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          if ($version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+            throw "Unsafe archive version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
   build-windows:
+    needs: [prepare]
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     # Pin to windows-2022 (VS 2022). windows-latest migrated to windows-2025,
     # whose newer MSVC (_MSC_VER >= 1950) is rejected by CUDA 12.8/13.1 nvcc
     # (host_config.h: "Only the versions between 2017 and 2022 are supported").
@@ -450,7 +472,7 @@ jobs:
       - name: Assemble release
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
+          $version = $env:RELEASE_VERSION
           $variant = "${{ matrix.variant }}"
           $dist = "release/staging"
 
@@ -691,7 +713,7 @@ jobs:
       - name: Package and checksum
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
+          $version = $env:RELEASE_VERSION
           $variant = "${{ matrix.variant }}"
           $zipName = "HOT-Step-CPP-v${version}-win-x64-${variant}.zip"
           $zipPath = "release/out/$zipName"
@@ -721,11 +743,98 @@ jobs:
           path: |
             release/out/*.zip
             release/out/*.sha256
+          if-no-files-found: error
+
+  # A separate hosted VM per archive: no build outputs or toolkit setup.
+  test-windows-artifacts:
+    needs: [prepare, build-windows]
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cuda13.1, cuda12.8, cuda12-volta, vulkan, cpu]
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_VARIANT: ${{ matrix.variant }}
+    steps:
+      - name: Checkout gate helpers
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup test driver Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download exact build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-win-${{ matrix.variant }}
+          path: ${{ runner.temp }}/windows-archive
+
+      - name: Verify shipping archive checksum
+        id: archive
+        shell: pwsh
+        run: |
+          $name = "HOT-Step-CPP-v$env:RELEASE_VERSION-win-x64-$env:RELEASE_VARIANT.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "windows-archive/$name"
+          $checksum = (Get-Content -LiteralPath "$archive.sha256" -Raw).Trim()
+          if ($checksum -notmatch ('^([0-9a-fA-F]{64})  ' + [regex]::Escape($name) + '$')) {
+            throw "Invalid checksum sidecar for $name"
+          }
+          $expected = $Matches[1]
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) {
+            throw "Shipping archive checksum mismatch: $name"
+          }
+          "path=$archive" >> $env:GITHUB_OUTPUT
+
+      - name: CUDA runtime cache key
+        if: startsWith(matrix.variant, 'cuda')
+        id: cuda-runtime
+        shell: pwsh
+        run: |
+          $major = if ($env:RELEASE_VARIANT -eq 'cuda13.1') { '13' } else { '12' }
+          "major=$major" >> $env:GITHUB_OUTPUT
+          $key = node release/smoke-artifact.mjs runtime-key $major
+          if ($LASTEXITCODE -ne 0) { throw "CUDA runtime cache key failed" }
+          "key=$key" >> $env:GITHUB_OUTPUT
+
+      - name: CUDA runtime cache
+        if: startsWith(matrix.variant, 'cuda')
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cuda-runtime-${{ steps.cuda-runtime.outputs.major }}
+          key: windows-2022-${{ steps.cuda-runtime.outputs.key }}
+
+      - name: Test extracted shipping archive
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          SMOKE_ARCHIVE: ${{ steps.archive.outputs.path }}
+          CUDA_MAJOR: ${{ steps.cuda-runtime.outputs.major }}
+        run: |
+          $smokeArgs = @($env:SMOKE_ARCHIVE, $env:RUNNER_TEMP, '60')
+          if ($env:CUDA_MAJOR) { $smokeArgs += (Join-Path $env:RUNNER_TEMP "cuda-runtime-$env:CUDA_MAJOR") }
+          node release/smoke-artifact.mjs @smokeArgs
+          if ($LASTEXITCODE -ne 0) { throw "Extracted archive gate failed" }
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-${{ matrix.variant }}
+          path: |
+            ${{ runner.temp }}/hotstep-artifact-*/*.log
+            ${{ runner.temp }}/hotstep-artifact-*/result.json
+          if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────────────────
   # macOS build (Apple Silicon / Metal)
   # ─────────────────────────────────────────────────────────────────────────
   build-macos:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [essentia]
     runs-on: macos-15  # Apple Silicon — needs Xcode 16+ for std::from_chars<float>
     steps:
@@ -1072,6 +1181,7 @@ jobs:
   # Linux builds (CUDA / Vulkan / CPU) — run in parallel via matrix strategy
   # ─────────────────────────────────────────────────────────────────────────
   build-linux:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [essentia]
     runs-on: ubuntu-22.04   # 22.04 for wider glibc compatibility across distros
     strategy:
@@ -1590,11 +1700,15 @@ jobs:
   # tab; both bundles are cached on the recipe hash and uploaded as tarballs
   # the packaging steps below unpack. See tools/essentia/ and #104 / #144.
   essentia:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/essentia.yml
 
   release:
-    needs: [build-windows, build-macos, build-linux]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build-windows, test-windows-artifacts, build-macos, build-linux]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Only tag releases can create a draft.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -1605,6 +1719,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: release-*
           merge-multiple: false
 
       - name: Collect release assets

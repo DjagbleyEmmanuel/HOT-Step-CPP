@@ -284,7 +284,7 @@ others). [ggml-fork.md](ggml-fork.md) lists each one and explains why it exists.
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `release.yml` | Push of any `v*` tag | Builds every platform, packages portable archives, smoke-tests the packaged engine (`/health`, `/props`, `/plugins`), and drafts a GitHub Release |
+| `release.yml` | Push of any `v*` tag, or manual preflight | Tag pushes build every platform and draft a release after the Windows archive gate passes. Manual preflight builds and tests all five Windows variants and uploads artifacts only |
 | `cache-warm.yml` | Push to `master` touching `engine/ggml` or `engine/CMakeLists.txt`, or manual | Builds the engine on `master` so tag builds can reuse the CMake cache. No packaging |
 | `rocm-build.yml` | Push or PR touching `engine/`, or manual | Compile-only ROCm/HIP check. Marked `continue-on-error`, so check the job, not the run colour |
 | `essentia.yml` | Called by `release.yml`, or manual | Builds the Essentia bundle for Linux and macOS |
@@ -300,8 +300,47 @@ others). [ggml-fork.md](ggml-fork.md) lists each one and explains why it exists.
 <!-- TODO(verify): rocm-build.yml says ROCm builds are not shipped, but release.yml's Linux matrix has a rocm variant and the release job collects every build artifact. Confirm whether a ROCm archive is published. -->
 
 Each build job checks out `engine/ggml` at the pinned HOT-ggml commit and builds it as is.
-Windows and Linux build with Ninja; macOS uses the default generator. Any pushed `v*` tag starts a full release build, so use a `-CI-Test` suffix for
-throwaway compile checks. [releasing.md](releasing.md) is the full runbook.
+Windows and Linux build with Ninja; macOS uses the default generator. Any pushed `v*` tag
+starts a full release build. For a Windows check before tagging, manually dispatch
+`release.yml` on the intended commit's branch. It uses the same Windows build and test
+jobs, names the version `0.0.0-preflight-<12-character commit SHA>`, and skips Linux,
+macOS, Essentia and release notes/creation. Dispatching it creates no tag or release.
+Pushes and dispatches need the maintainer's approval. [releasing.md](releasing.md) is the
+full runbook.
+
+### Windows archive gate
+
+`test-windows-artifacts` downloads each `release-win-<variant>` artifact onto a fresh
+`windows-2022` VM, verifies the zip against its `.sha256` sidecar, then runs
+`release/smoke-artifact.mjs`. The zip is the same immutable Actions artifact later
+collected for the draft release. A failure in any of the five test jobs blocks the draft.
+
+The helper extracts outside the checkout into `HOT Step smoke`, boots `server/server.mjs`
+with the extracted `runtime/node.exe`, and checks the extracted engine's `/health`,
+`/props` and `/plugins` using stub models. Its child processes search only Windows system
+directories and the explicitly provisioned CUDA runtime; no toolkit or build tree is on
+their `PATH`. The model-free `ace-server --backend-check` must initialise CPU and account
+for the expected GPU backend, including an explicitly identified absent driver/device.
+Missing package/runtime DLLs, unexplained loader failures and crashes fail the gate.
+Removing the package backend DLL and, on CUDA, a provisioned runtime DLL must also fail.
+These checks do not establish working GPU inference.
+
+CUDA runtime downloads use the packaged registry/bootstrap contract and an `actions/cache`
+entry keyed on the selected runtime pack's registry entries. CUDA 12.8 and Volta share
+the CUDA 12 cache. The helper reports downloaded bytes and elapsed time on a miss.
+Each test job uploads `windows-smoke-<variant>` evidence containing logs and `result.json`
+on success or failure; the extraction and runtime cache are excluded from that upload.
+The draft collects only `release-*` artifacts, so evidence never becomes a release asset.
+
+Local helper checks, without starting the app or compiling:
+
+```powershell
+node --test release/smoke-artifact.test.mjs
+node tools/docs/check-docs.mjs
+```
+
+For the archive command and backend acceptance rules, see
+[the helper reference](../../release/smoke-artifact.md).
 
 ## Portable releases
 
