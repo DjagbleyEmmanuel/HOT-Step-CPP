@@ -15,7 +15,7 @@ import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, spli
 import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, yue2StyleNormsForRun, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
-  enabled: false, everySteps: 0, seconds: 90, seed: 424242,
+  enabled: false, everySteps: 0, seconds: 90, seed: 424242, arScale: 0.6,
   previewMaxFrames: 2250, baseline: false, control: false,
 };
 
@@ -84,6 +84,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
   };
   return {
     enabled,
+    arScale: typeof b.arScale === 'number' && Number.isFinite(b.arScale) && b.arScale >= 0 ? b.arScale : YUE2_JOINT_PREVIEW_DEFAULTS.arScale,
     everySteps: integer('everySteps', everySteps, 0, 100000),
     seconds: integer('seconds', 90, 8, 360),
     ...(integer('takes', 1, 1, 4) > 1 ? { takes: integer('takes', 1, 1, 4) } : {}),
@@ -262,7 +263,7 @@ export async function renderYue2JointPreview(input: {
       if (input.signal?.aborted) throw new Error('preview cancelled');
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
-        { path: input.arAdapter, scales: unity }, { path: input.narAdapter, scales: unity },
+        { path: input.arAdapter, scales: { ...unity, global: input.options.arScale ?? YUE2_JOINT_PREVIEW_DEFAULTS.arScale! } }, { path: input.narAdapter, scales: unity },
       ], vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard' };
       await api.select(selected);
       await api.warm({ vae_variant: selected.vae_variant });

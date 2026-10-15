@@ -228,6 +228,8 @@ export interface TrainingPreview {
 
 /** Checkpoint preview controls for the YuE2 joint trainer (plan 27). */
 export interface Yue2JointPreviewOptions {
+  /** Music adapter strength for previews. The sound adapter stays at 1. */
+  arScale?: number;
   enabled: boolean;
   /** Steps between preview pauses; 0 with a KL-rung run = one pause per rung. */
   everySteps: number;

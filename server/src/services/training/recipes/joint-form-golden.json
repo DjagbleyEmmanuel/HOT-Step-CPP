@@ -33,6 +33,7 @@
       "everySteps": 0,
       "parallel": true,
       "takes": 1,
+      "arScale": 0.6,
       "odeSteps": 12,
       "narCacheRatio": 0,
       "seconds": 300,

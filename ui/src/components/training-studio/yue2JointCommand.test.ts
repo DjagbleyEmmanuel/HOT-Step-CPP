@@ -122,3 +122,16 @@ test('direct start preserves active-pipeline and prerequisite refusals from the 
     assert.equal(submissions, 1);
   }
 });
+
+
+test('joint preview request preserves AR scale and fills older forms with 0.6', () => {
+  assert.equal(YUE2_JOINT_FORM_DEFAULTS.preview.arScale, 0.6);
+  for (const arScale of [undefined, 0, 0.85]) {
+    const preview = { ...YUE2_JOINT_FORM_DEFAULTS.preview } as Record<string, unknown>;
+    if (arScale === undefined) delete preview.arScale;
+    else preview.arScale = arScale;
+    const form = { ...YUE2_JOINT_FORM_DEFAULTS, preview } as unknown as Yue2JointTrainRequest;
+    const captured = captureJointOverrides(form, {} as Yue2AitkPrepareRequest, false, '', '');
+    assert.equal((captured.preview as { arScale: number }).arScale, arScale ?? 0.6);
+  }
+});

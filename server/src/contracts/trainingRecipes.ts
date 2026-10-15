@@ -176,6 +176,7 @@ export const YUE2_JOINT_FORM_DEFAULTS = {
     "everySteps": 0,
     "parallel": true,
     "takes": 1,
+    "arScale": 0.6,
     "odeSteps": 12,
     "narCacheRatio": 0,
     "seconds": 300,
@@ -345,7 +346,7 @@ export const ACE_DIT_LOKR_EPOCHS = {
   "thorough": 900
 };
 
-export const YUE2_JOINT_LADDER_PREVIEW = { enabled: true, everySteps: 0, parallel: true, takes: 1, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
+export const YUE2_JOINT_LADDER_PREVIEW = { enabled: true, everySteps: 0, parallel: true, takes: 1, arScale: 0.6, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
   previewMaxFrames: 7500, baseline: false, control: false };
 
 export const YUE2_JOINT_FIXED_RECIPE_DROPOUTS = {

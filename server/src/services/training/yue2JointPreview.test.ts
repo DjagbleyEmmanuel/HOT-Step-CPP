@@ -15,11 +15,13 @@ test('preview options default off and clamp bounded values', () => {
   const d = parseYue2JointPreviewOptions(undefined, 50);
   assert.equal(d.enabled, false);
   assert.equal(d.everySteps, 50);
+  assert.equal(d.arScale, 0.6);
+  for (const arScale of [-1, NaN, Infinity, '0.8', null]) assert.equal(parseYue2JointPreviewOptions({ arScale }, 50).arScale, 0.6);
   const p = parseYue2JointPreviewOptions({ enabled: true, everySteps: 10, seconds: 999,
     previewMaxFrames: 9000, seed: 3, caption: '  song  ' }, 50);
   assert.deepEqual({ enabled: true, everySteps: 10, seconds: 90,
     previewMaxFrames: 9000, seed: 3, baseline: false, control: false,
-    caption: 'song' }, p);
+    caption: 'song', arScale: 0.6 }, p);
 });
 
 test('preview catalogue is durable and rejects traversal', () => {
@@ -207,4 +209,21 @@ test('a preview gets one cached MP3 beside its WAV, and pruning removes both', a
   assert.equal(fs.existsSync(file), false);
   assert.equal(fs.existsSync(a!), false);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+
+test('preview AR scale defaults to 0.6 and reaches adapter selection with NAR at unity', async () => {
+  for (const arScale of [undefined, 0, 0.85]) {
+    const f = previewFixture();
+    const { deps, calls } = mockDeps();
+    const options = parseYue2JointPreviewOptions({ enabled: true, arScale }, 50);
+    await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+      options, arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+    const selected = calls.find(c => c.name === 'select')?.value as { lm_adapter: Array<{ path: string; scales: Record<string, number> }> };
+    const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
+    assert.deepEqual(selected.lm_adapter, [
+      { path: 'ar.safetensors', scales: { ...unity, global: arScale ?? 0.6 } },
+      { path: 'nar.safetensors', scales: unity },
+    ]);
+  }
 });

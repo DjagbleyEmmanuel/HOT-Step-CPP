@@ -791,6 +791,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
 }
 
 export interface Yue2JointPreviewOptions {
+  /** Music adapter strength for previews. The sound adapter stays at 1. */
+  arScale?: number;
   enabled: boolean;
   everySteps: number;
   /** Artist takes per preview point. */
@@ -2671,7 +2673,7 @@ export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
-  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number },
+  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; arScale?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number },
 ): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
 }

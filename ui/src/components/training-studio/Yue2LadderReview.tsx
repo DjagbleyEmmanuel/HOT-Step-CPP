@@ -55,7 +55,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   run: Yue2AitkRunRecord | undefined;
   previews: Yue2JointPreviewRecord[];
   /** "Render more" settings. */
-  renderOpts: { seconds: number; takes: number; draft: boolean };
+  renderOpts: { seconds: number; takes: number; arScale?: number; draft: boolean };
   /** Owner's take on "Use this rung". Resolve true when handled (nothing
    *  more happens here); false or absent = link the rung and open cleanup. */
   onUse?: (dir: string, step: number) => Promise<boolean>;
@@ -122,7 +122,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const render = async (step: number) => {
     if (!datasetId || !runId) return;
     setRendering(step);
-    try { await runCommand(client, null, () => renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, ...draftOpts })); }
+    try { await runCommand(client, null, () => renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, arScale: renderOpts.arScale, ...draftOpts })); }
     catch (err) { fail(err); }
     finally { setRendering(null); }
   };

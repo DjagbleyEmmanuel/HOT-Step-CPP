@@ -118,7 +118,7 @@ Defaults the card ships:
 | Planner crop | 0 (whole song) | Off by default and not yet tested by ear. The planner trains on only the first this-many frames of each song (25 per second). It is the biggest speed lever, since the planner's backward pass is the largest cost of an update, but the planner never learns the rest of the song or its ending, and whole songs are what fixed endings and structure in this recipe. Only applies while the decoder crop is on. |
 | Save every | 10 / 20 / 30 updates (Fast / Balanced / Thorough) | Ten rungs per preset. |
 | Lyric timing supervision | Off | Not used by the recipe. |
-| Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint on the fixed preview seed. **Takes per checkpoint** (1 to 4) adds takes on fresh random seeds. On a card under 28 GB, or one the app cannot measure, training pauses for each preview instead | The run's ladder; see Picking the adapter. |
+| Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint on the fixed preview seed. **Takes per checkpoint** (1 to 4) adds takes on fresh random seeds. **Preview AR scale** defaults to 0.6 for the music adapter, including manual renders from the ladder; the sound (NAR) adapter stays at 1.0. On a card under 28 GB, or one the app cannot measure, training pauses for each preview instead | The run's ladder; see Picking the adapter. |
 | Stop the engine during training | Off | In the Checkpoint previews section. The parallel previews need the engine up, so turning it on hides "In parallel with training". Turn it on (and previews off) on a smaller card. |
 
 When to move off them:

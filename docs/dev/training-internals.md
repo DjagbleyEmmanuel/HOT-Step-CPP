@@ -176,6 +176,8 @@ skips those optional stages and the cursor objective. The timing weight is
 configurable and recorded with the run. Existing Legacy controls and its
 separate AR/NAR workflow are unchanged.
 
+Checkpoint previews select the AR adapter at `preview.arScale`, default 0.6, and the NAR adapter at 1.0. The joint form and batch ladder defaults carry the same AR scale. Manual renders accept `arScale`, falling back to the run's saved preview scale and then 0.6. Baseline previews select no adapters.
+
 Checkpoint previews are optional and disabled by default. They use the first
 eligible dataset track with a fixed default seed of 424242. Preview duration is
 bounded to 8–120 seconds and controls the semantic frame cap. Reaching that cap

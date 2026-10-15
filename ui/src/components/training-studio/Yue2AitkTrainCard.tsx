@@ -380,7 +380,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     writeStored(oneTake, 1);
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
-  return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' || stored.method === 'fixed-recipe' ? stored.method : 'base-matched' };
+  return { ...DEFAULT_FORM, ...stored, preview: { ...LADDER_PREVIEW, ...stored.preview }, method: stored.method === 'tuned' || stored.method === 'fixed-recipe' ? stored.method : 'base-matched' };
 }
 function writeStored(key: string, value: unknown): void {
   if (typeof window === 'undefined') return;
@@ -971,7 +971,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string, onReset?: () => void) => (
     <label className="flex flex-col gap-1">
       <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" onReset={onReset} />
-      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={fieldLocked(key)}
+      <input className={input} type={type} step={key === 'arScale' ? 0.1 : undefined} min={key === 'arScale' ? 0 : undefined} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={fieldLocked(key)}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
@@ -1571,6 +1571,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             !busy && (form.preview.takes ?? 1) !== LADDER_PREVIEW.takes
               ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, takes: LADDER_PREVIEW.takes } }))
               : undefined)}
+          {field(t('trainingStudio.yue2.method.previewArScale', 'Preview AR scale'), 'arScale', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, arScale: Math.max(0, Number(value) || 0) } })),
+            t('trainingStudio.yue2.method.previewArScaleInfo', 'Music adapter strength for checkpoint previews, including manual renders. Default 0.6. The sound (NAR) adapter stays at 1.0.'), t('trainingStudio.yue2.method.previewArScaleMeta', 'default 0.6'),
+            !busy && form.preview.arScale !== LADDER_PREVIEW.arScale
+              ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, arScale: LADDER_PREVIEW.arScale } }))
+              : undefined)}
           <label className="flex flex-col gap-1 md:col-span-2">
             <ParamLabel label={t('trainingStudio.yue2.method.previewLyrics', 'Preview lyrics')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -1727,7 +1732,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </div>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: two 300 s draft takes of the dataset\'s first sung track per rung. Take 1 uses the same seed on every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Take 2 uses a new random seed each time, so it is a song no other rung made; it shows how the checkpoint does on a fresh draw, and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
-          renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 2, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
+          renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 1, arScale: form.preview?.arScale ?? LADDER_PREVIEW.arScale, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
           onError={setError} idPrefix="train-rung" />
       </div>}
     </div>
