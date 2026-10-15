@@ -210,6 +210,7 @@ fi
 # Bundled server and app-owned resources, matching CI.
 mkdir -p "${STAGING_DIR}/server/data"
 cp release/staging/server/server.mjs "${STAGING_DIR}/server/"
+[ ! -d release/staging/server/chunks ] || cp -R release/staging/server/chunks "${STAGING_DIR}/server/"
 cp -r server/node_modules "${STAGING_DIR}/server/"
 cp -R server/src/data/. "${STAGING_DIR}/server/data/"
 cp server/node_modules/ffmpeg-static/ffmpeg "${STAGING_DIR}/server/ffmpeg"
@@ -229,6 +230,10 @@ printf '%s\n' "v${VERSION}" > "${STAGING_DIR}/VERSION"
 chmod +x "${STAGING_DIR}/HOT-Step.sh"
 
 ok "Release assembled"
+
+# Boot the assembled server with the shipped node, so a missing chunk fails here.
+"${STAGING_DIR}/runtime/bin/node" release/smoke-boot.mjs "${STAGING_DIR}/server/server.mjs"     || fail "Assembled server failed its boot test"
+ok "Server boot test passed"
 
 # ── Step 6: Set permissions ──────────────────────────────────────────
 step 6 "Setting permissions..."
