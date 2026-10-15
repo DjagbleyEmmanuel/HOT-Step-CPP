@@ -1,3 +1,4 @@
+import type { ReadOptions } from './httpClient';
 // studioDraftMirror.ts — mirror a studio's autosaved fields into its own
 // revisioned server draft (/api/studio-drafts), and load a saved draft back.
 //
@@ -31,6 +32,7 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
   let running: Promise<void> | null = null;
   let epoch = 0;
   let loadSeq = 0;
+  let loadController: AbortController | null = null;
 
   async function drain(): Promise<void> {
     while (pending) {
@@ -65,6 +67,7 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
   }
 
   return {
+    cancelLoad(): void { loadSeq++; loadController?.abort(); loadController = null; },
     /** Queue the latest body; resolves when everything queued so far is written or has failed. */
     save(token: string, body: StudioDraftBody): Promise<void> {
       pending = { token, body };
@@ -87,8 +90,10 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
      *  before replacing unsaved edits. Resolves true when the draft was applied. */
     async load(token: string, id: string, h: LoadHooks): Promise<boolean> {
       const seq = ++loadSeq;
+      loadController?.abort();
+      loadController = new AbortController();
       try {
-        const { document, sourceError } = await h.get(token, id);
+        const { document, sourceError } = await h.get(token, id, { signal: loadController.signal });
         if (seq !== loadSeq) return false;
         const refusal = h.refuse?.(document.body);
         if (refusal) { deps.onError(refusal); return false; }
@@ -108,7 +113,7 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
 const REPLACE_PROMPT = 'Replace the current form with the saved draft? Edits not yet saved to a draft will be lost.';
 
 export interface LoadHooks {
-  get(token: string, id: string): Promise<{ document: StudioDraftDocument; sourceError: string | null }>;
+  get(token: string, id: string, options?: ReadOptions): Promise<{ document: StudioDraftDocument; sourceError: string | null }>;
   /** The form as it is now. */
   current(): StudioDraftBody;
   confirm(message: string): boolean;
@@ -146,6 +151,7 @@ export function useStudioDraftMirror(studio: StudioDraftBody['studio'], token: s
   fields: Record<string, unknown>, identity: Omit<StudioDraftBody, 'studio' | 'fields'> = {}): StudioDraftControl {
   const [error, setError] = useState('');
   const mirror = useMemo(() => createDraftMirror({ api: studioDraftsApi, pointer: localPointer(studio), onError: setError }), [studio]);
+  useEffect(() => () => mirror.cancelLoad(), [mirror, token]);
   const body = JSON.stringify({ studio, fields, ...identity });
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => {

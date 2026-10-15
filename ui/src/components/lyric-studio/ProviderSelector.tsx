@@ -1,7 +1,10 @@
 // ProviderSelector.tsx — LLM provider/model selector for Lyric Studio
 // Ported from hot-step-9000 with lireekApi import adaptation
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '../../queries/client';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -17,19 +20,9 @@ interface LlmProviderInfo {
 }
 
 // ── Global provider cache ─────────────────────────────────────────────────
-let _providerCache: LlmProviderInfo[] | null = null;
-let _providerCacheTime = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
 export async function getCachedProviders(forceRefresh = false): Promise<LlmProviderInfo[]> {
-  const now = Date.now();
-  if (!forceRefresh && _providerCache && (now - _providerCacheTime) < CACHE_TTL_MS) {
-    return _providerCache;
-  }
-  const providers = await lireekApi.getProviders();
-  _providerCache = providers.filter(p => p.available);
-  _providerCacheTime = now;
-  return _providerCache;
+  if (forceRefresh) await queryClient.invalidateQueries({ queryKey: snapshotOptions('lireek', '/lireek/providers').queryKey });
+  return (await lireekApi.getProviders()).filter(p => p.available);
 }
 
 // ── localStorage persistence for model selections ─────────────────────────
@@ -137,38 +130,34 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
   selections,
   onSelectionsChange,
 }) => {
-  const [providers, setProviders] = useState<LlmProviderInfo[]>(_providerCache || []);
+  const snapshot = useQuery(snapshotOptions<LlmProviderInfo[]>('lireek', '/lireek/providers'));
+  const providers = snapshot.data?.filter(p => p.available) ?? [];
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(!_providerCache);
+  const loading = snapshot.isPending;
   // Use ref to always have latest selections for the async callback
   const selectionsRef = useRef(selections);
   selectionsRef.current = selections;
 
   useEffect(() => {
-    getCachedProviders()
-      .then(p => {
-        setProviders(p);
-        // Auto-select first available provider ONLY for empty slots
-        if (p.length > 0) {
-          const first = p[0];
-          const current = selectionsRef.current;
-          const updated = { ...current };
-          let changed = false;
-          for (const role of ['profiling', 'generation', 'refinement', 'coverCaption'] as const) {
-            if (!updated[role].provider || !p.find(pp => pp.id === updated[role].provider)) {
-              updated[role] = { provider: first.id, model: first.default_model || '' };
-              changed = true;
-            }
-          }
-          if (changed) {
-            onSelectionsChange(updated);
-            saveSelections(updated);
-          }
+    const p = snapshot.data?.filter(provider => provider.available) ?? [];
+    // Auto-select first available provider ONLY for empty slots
+    if (p.length > 0) {
+      const first = p[0];
+      const current = selectionsRef.current;
+      const updated = { ...current };
+      let changed = false;
+      for (const role of ['profiling', 'generation', 'refinement', 'coverCaption'] as const) {
+        if (!updated[role].provider || !p.find(pp => pp.id === updated[role].provider)) {
+          updated[role] = { provider: first.id, model: first.default_model || '' };
+          changed = true;
         }
-      })
-      .catch(err => console.error('Failed to load LLM providers:', err))
-      .finally(() => setLoading(false));
-  }, []);
+      }
+      if (changed) {
+        onSelectionsChange(updated);
+        saveSelections(updated);
+      }
+    }
+  }, [snapshot.data]);
 
   const updateRole = (role: keyof ModelSelections, provider: string, model: string) => {
     const updated = updateModelSelection(selectionsRef.current, role, provider, model);
@@ -245,22 +234,18 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   compact = false,
 }) => {
   const { t } = useTranslation();
-  const [providers, setProviders] = useState<LlmProviderInfo[]>(_providerCache || []);
-  const [loading, setLoading] = useState(!_providerCache);
+  const snapshot = useQuery(snapshotOptions<LlmProviderInfo[]>('lireek', '/lireek/providers'));
+  const providers = snapshot.data?.filter(p => p.available) ?? [];
+  const loading = snapshot.isPending;
 
   useEffect(() => {
-    getCachedProviders()
-      .then(p => {
-        setProviders(p);
-        if (!selectedProvider && p.length > 0) {
-          const first = p[0];
-          onProviderChange(first.id);
-          if (first.default_model) onModelChange(first.default_model);
-        }
-      })
-      .catch(err => console.error('Failed to load LLM providers:', err))
-      .finally(() => setLoading(false));
-  }, []);
+    const p = snapshot.data?.filter(provider => provider.available) ?? [];
+    if (!selectedProvider && p.length > 0) {
+      const first = p[0];
+      onProviderChange(first.id);
+      if (first.default_model) onModelChange(first.default_model);
+    }
+  }, [snapshot.data]);
 
   const currentProvider = providers.find(p => p.id === selectedProvider);
   const models = currentProvider?.models || [];

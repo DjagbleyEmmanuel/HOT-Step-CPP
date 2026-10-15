@@ -1,3 +1,6 @@
+import { serverKey } from '../../queries/keys';
+import { useQuery } from '@tanstack/react-query';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 /**
  * QueuePanel.tsx — Bulk operations panel for Lyric Studio V2.
  *
@@ -16,7 +19,7 @@
  * 'generate' keys selection by profile_id, 'audio' keys it by lyrics_set_id.
  */
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   X, Loader2, CheckCircle, AlertCircle, ListOrdered, Sparkles,
@@ -137,14 +140,16 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   };
 
   // Generation counts for the "generate" tab
-  const [genCountsMap, setGenCountsMap] = useState<Map<number, number>>(new Map());
-  const [genCountsLoading, setGenCountsLoading] = useState(false);
+  const generationQuery = useQuery({ ...snapshotOptions<Generation[] | { generations: Generation[] }>('lireek', '/lireek/generations/all'), enabled: open && (mode === 'audio' || mode === 'generate') });
+  const audioGens = Array.isArray(generationQuery.data) ? generationQuery.data : generationQuery.data?.generations ?? [];
+  const genCountsMap = new Map<number, number>();
+  for (const generation of audioGens) genCountsMap.set(generation.profile_id, (genCountsMap.get(generation.profile_id) ?? 0) + 1);
+  const genCountsLoading = generationQuery.isPending;
   const [genFilterThreshold, setGenFilterThreshold] = useState('');
 
   // Generate Audio state. `audioAllTracks` off means "take N per album", and only
   // then does the oldest/newest choice mean anything.
-  const [audioGens, setAudioGens] = useState<Generation[]>([]);
-  const [audioLoading, setAudioLoading] = useState(false);
+  const audioLoading = generationQuery.isPending;
   const [audioAllTracks, setAudioAllTracks] = useState(true);
   const [audioCount, setAudioCount] = useState(1);
   const [audioOrder, setAudioOrder] = useState<AudioOrder>('newest');
@@ -157,8 +162,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [audioProgress, setAudioProgress] = useState({ current: 0, total: 0 });
 
   // Presets state
-  const [presetMap, setPresetMap] = useState<Map<number, AlbumPreset>>(new Map());
-  const [presetsLoading, setPresetsLoading] = useState(false);
+  const presetQuery = useQuery({ ...snapshotOptions<{ presets: AlbumPreset[] }>('lireek', '/lireek/presets'), enabled: open });
+  const presetMap = new Map((presetQuery.data?.presets ?? []).map(p => [p.lyrics_set_id, p]));
+  const presetsLoading = presetQuery.isFetching;
   const [applying, setApplying] = useState(false);
   const [adapterPath, setAdapterPath] = useState('');
   const [matcheringPath, setMatcheringPath] = useState('');
@@ -172,14 +178,14 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [browserTarget, setBrowserTarget] = useState<'adapter' | 'matchering'>('adapter');
   // Planner-LM adapter bulk assignment (local HOT-Step feature)
   const [lmAdapterPath, setLmAdapterPath] = useState('');
-  const [lmAdapterList, setLmAdapterList] = useState<{ name: string; path: string }[]>([]);
-  useEffect(() => {
-    if (mode !== 'presets') return;
-    // Same scan folder the global Adapters menu uses (persisted store value)
-    let folder = '';
-    try { folder = JSON.parse(localStorage.getItem('hs-lmAdapterFolder') || '""') || ''; } catch { /* default */ }
-    adapterApi.lmList(folder || undefined).then(r => setLmAdapterList(r?.adapters || [])).catch(() => {});
-  }, [mode]);
+  let lmFolder = '';
+  try { lmFolder = JSON.parse(localStorage.getItem('hs-lmAdapterFolder') || '""') || ''; } catch { /* default */ }
+  const lmQuery = useQuery({
+    queryKey: serverKey('global-models/lm-adapters', { filters: { folder: lmFolder } }),
+    queryFn: ({ signal }) => adapterApi.lmList(lmFolder || undefined, { signal }),
+    enabled: open && mode === 'presets',
+  });
+  const lmAdapterList = lmQuery.data?.adapters ?? [];
 
   // Fetch lyrics state
   const [fetchInputMode, setFetchInputMode] = useState<FetchInputMode>('paste');
@@ -190,61 +196,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [fetchRunning, setFetchRunning] = useState(false);
   const fetchJobRef = useRef<string | null>(null);
 
-  const loadPresets = useCallback(async () => {
-    setPresetsLoading(true);
-    try {
-      const res = await lireekApi.listAllPresets();
-      const map = new Map<number, AlbumPreset>();
-      for (const p of res.presets) map.set(p.lyrics_set_id, p);
-      setPresetMap(map);
-    } catch (err) {
-      console.error('[QueuePanel] Failed to load presets:', err);
-    } finally {
-      setPresetsLoading(false);
-    }
-  }, []);
-
-  const loadGenerationCounts = useCallback(async () => {
-    setGenCountsLoading(true);
-    try {
-      const res = await lireekApi.listAllGenerations();
-      // API returns raw array (server) but type says { generations }, handle both
-      const gens = Array.isArray(res) ? res : (res.generations || []);
-      const counts = new Map<number, number>();
-      for (const g of gens) {
-        counts.set(g.profile_id, (counts.get(g.profile_id) || 0) + 1);
-      }
-      setGenCountsMap(counts);
-    } catch (err) {
-      console.error('[QueuePanel] Failed to load generation counts:', err);
-    } finally {
-      setGenCountsLoading(false);
-    }
-  }, []);
-
-  const loadAudioGenerations = useCallback(async () => {
-    setAudioLoading(true);
-    try {
-      const res = await lireekApi.listAllGenerations();
-      // Server hands back a raw array; the declared type says { generations }. Both happen.
-      const gens: Generation[] = Array.isArray(res) ? res : (res.generations || []);
-      setAudioGens(gens);
-    } catch (err) {
-      console.error('[QueuePanel] Failed to load generations:', err);
-      showToast?.(`Failed to load written songs: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setAudioLoading(false);
-    }
-  }, [showToast]);
-
-  // Refetch whenever the panel is OPEN on the audio tab — not just on tab click.
-  // The panel stays mounted across closes (state persists), and lyrics written
-  // by the MCP bypass the UI stores entirely, so a reopen straight onto this
-  // tab used to show the previous open's list: "Newest first" then honestly
-  // picked the newest of a STALE list, i.e. older songs. (Rob, 2026-08-08)
-  useEffect(() => {
-    if (open && mode === 'audio') loadAudioGenerations();
-  }, [open, mode, loadAudioGenerations]);
+  const loadPresets = useCallback(async () => { await presetQuery.refetch(); }, [presetQuery.refetch]);
+  const loadAudioGenerations = useCallback(async () => { await generationQuery.refetch(); }, [generationQuery.refetch]);
+  const loadGenerationCounts = useCallback(async () => { await lireekApi.listAllGenerations(); }, []);
 
   // Written songs folded into one row per album. /generations/all returns artist_id and
   // artist_name but NOT lyrics_set_id, so the album is recovered via the profile — which
@@ -1188,7 +1142,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
               </div>
               {(pendingCount > 0 || runningItem) && (
                 <div className="mt-2 text-[10px] text-zinc-500">
-                  {runningItem ? `Running: ${runningItem.label}` : ''} 
+                  {runningItem ? `Running: ${runningItem.label}` : ''}
                   {pendingCount > 0 ? ` · ${pendingCount} pending` : ''}
                   {doneCount > 0 ? ` · ${doneCount} done` : ''}
                 </div>

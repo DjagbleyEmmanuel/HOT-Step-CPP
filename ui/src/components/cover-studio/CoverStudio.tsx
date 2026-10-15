@@ -1,5 +1,14 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
 // Composes: SourcePanel, ArtistSettingsPanel
+
+import { pollWhile } from '../../queries/contract';
+import { waitForSnapshot } from '../../queries/cover-lyrics/wait';
+import { serverKey } from '../../queries/keys';
+import { songsChanged } from '../../queries/cover-lyrics/reads';
+import type { Yue2CoverResult } from '../../services/yue2CoverApi';
+import { useQuery } from '@tanstack/react-query';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import type { LyricsSet } from '../../services/lireekApi';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Song } from '../../types';
 import { Search, Loader2 } from 'lucide-react';
@@ -52,7 +61,7 @@ import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
-import { workflowApi } from '../../services/workflowApi';
+import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
 
 // ── Serial cover-generation queue ────────────────────────────────────────────
 // Lets the user stack multiple cover generations (different settings) without
@@ -132,13 +141,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [isSearchingLyrics, setIsSearchingLyrics] = useState(false);
 
   // ── Target artist ──
-  const [artists, setArtists] = useState<Artist[]>([]);
+  const artistsQuery = useQuery(snapshotOptions<Artist[]>('lireek', '/lireek/artists'));
+  const setsQuery = useQuery(snapshotOptions<LyricsSet[]>('lireek', '/lireek/lyrics-sets'));
+  const presetsQuery = useQuery(snapshotOptions<{ presets: AlbumPreset[] }>('lireek', '/lireek/presets'));
+  const artists = artistsQuery.data ?? [];
+  const allSets = setsQuery.data ?? [];
+  const allPresets = presetsQuery.data?.presets ?? [];
+  const isLoadingArtists = artistsQuery.isPending;
+  const isLoadingYue2Artists = setsQuery.isPending || presetsQuery.isPending;
   const [selectedArtistId, setSelectedArtistId] = useState<number | null>(() => restore('selectedArtistId', null));
   const [selectedPreset, setSelectedPreset] = useState<AlbumPreset | null>(() => restore('selectedPreset', null));
   const [artistCaption, setArtistCaption] = useState(() => restore<string>('artistCaption', ''));
-  const [artistPresets, setArtistPresets] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
-  const [isLoadingArtists, setIsLoadingArtists] = useState(false);
-  const [isLoadingYue2Artists, setIsLoadingYue2Artists] = useState(false);
+  const artistPresets = allSets.filter(ls => ls.artist_id === selectedArtistId).map(ls => ({
+    lsId: ls.id, album: ls.album || String(ls.id), preset: allPresets.find(p => p.lyrics_set_id === ls.id) ?? null,
+  }));
 
   // ── Cover caption LLM ──
   const [coverCaptionProvider, setCoverCaptionProvider] = useState(() => loadSelections().coverCaption.provider);
@@ -169,7 +185,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [yue2Nar, setYue2Nar] = useState(() => restore('yue2Nar', ''));
   const [selectedYue2ArtistId, setSelectedYue2ArtistId] = useState<number | null>(() => restore('selectedYue2ArtistId', null));
   const [selectedYue2LyricsSetId, setSelectedYue2LyricsSetId] = useState<number | null>(() => restore('selectedYue2LyricsSetId', null));
-  const [yue2Artists, setYue2Artists] = useState<Artist[]>([]);
+  const eligibleIds = new Set(allPresets.filter(p => p.yue2_ar_adapter_path && p.yue2_nar_adapter_path).map(p => p.lyrics_set_id));
+  const yue2Artists = artists.filter(a => allSets.some(ls => ls.artist_id === a.id && eligibleIds.has(ls.id)));
   const [yue2AlbumsForArtistId, setYue2AlbumsForArtistId] = useState<number | null>(null);
   const [yue2Albums, setYue2Albums] = useState<{ lsId: number; album: string; preset: AlbumPreset | null }[]>([]);
   const [coveringBand, setCoveringBand] = useState(() => restore<string>('coveringBand', ''));
@@ -177,7 +194,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The Build page (true) or the Prepare page (false).
   const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
   const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
-  const yue2ArtistRequestRef = useRef(0);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
@@ -187,7 +203,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>(() => restore('coverLyricSchedule', 'off'));
   const [captionMode, setCaptionMode] = useState(() => restore('captionMode', 'custom'));
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
-  const [readiness, setReadiness] = useState<Yue2CoverReadiness | null>(null);
+  const readinessQuery = useQuery({ ...snapshotOptions<Yue2CoverReadiness>('cover', '/yue2-cover/readiness', token ?? undefined), enabled: yue2Mode && !!token });
+  const readiness = readinessQuery.data ?? null;
   const [sheetJob, setSheetJob] = useState<Yue2CoverJob | null>(null);
   const [sheetJobId, setSheetJobId] = useState('');
   const sheetJobRef = useRef('');
@@ -266,7 +283,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => {
     if (!yue2Mode || !token) return;
     void useBackendStore.getState().fetchModels('yue2');
-    void yue2CoverApi.readiness(token).then(setReadiness).catch(err => setSheetError(err.message));
   }, [yue2Mode, token]);
 
   useEffect(() => {
@@ -279,27 +295,24 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     return () => { live = false; };
   }, [yue2Mode, renderMode, yue2Ar, yue2Nar, yue2Albums, selectedYue2LyricsSetId]);
 
+  const sheetSnapshot = useQuery({
+    ...snapshotOptions<Yue2CoverResult>('cover', `/yue2-cover/transcriptions/${encodeURIComponent(sheetJobId)}`, token ?? undefined),
+    enabled: !!sheetJobId && !!token,
+    refetchInterval: pollWhile<Yue2CoverResult>(data => !data || !!data.job && ['queued', 'running'].includes(data.job.status)),
+  });
   useEffect(() => {
-    if (!sheetJobId || !token) return;
-    let live = true;
-    const poll = async () => {
-      try {
-        const result = await yue2CoverApi.status(sheetJobId, token);
-        if (!live || sheetJobRef.current !== sheetJobId) return;
-        setSheetJob(result.job ?? null);
-        if (result.job?.status === 'done') {
-          setSheetAbc(result.abc || ''); setScoreSections(result.sections || []);
-          setSheetJobId(''); sheetJobRef.current = '';
-        } else if (result.job?.status === 'failed' || result.job?.status === 'cancelled') {
-          setSheetError(result.job.error || `Transcription ${result.job.status}`);
-          setSheetJobId(''); sheetJobRef.current = '';
-        }
-      } catch (err: any) { if (live) { setSheetError(err.message); setSheetJobId(''); sheetJobRef.current = ''; } }
-    };
-    void poll();
-    const timer = setInterval(() => { void poll(); }, 1000);
-    return () => { live = false; clearInterval(timer); };
-  }, [sheetJobId, token]);
+    if (!sheetJobId || sheetJobRef.current !== sheetJobId) return;
+    const result = sheetSnapshot.data;
+    if (!result) return;
+    setSheetJob(result.job ?? null);
+    if (result.job?.status === 'done') {
+      setSheetAbc(result.abc || ''); setScoreSections(result.sections || []);
+      setSheetJobId(''); sheetJobRef.current = '';
+    } else if (result.job?.status === 'failed' || result.job?.status === 'cancelled') {
+      setSheetError(result.job.error || `Transcription ${result.job.status}`);
+      setSheetJobId(''); sheetJobRef.current = '';
+    }
+  }, [sheetJobId, sheetSnapshot.data]);
 
   useEffect(() => {
     if (!yue2Mode || !token || !sheetAbc.trim()) { setSectionLint(null); return; }
@@ -545,48 +558,30 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   }, [coverSource?.timestamp]);
 
   // ── Load artists on mount ──
+  // Bulk snapshots avoid a per-artist and per-album request fan-out.
+  const restoredPresetLoaded = useRef(false);
   useEffect(() => {
-    setIsLoadingArtists(true);
-    lireekApi.listArtists()
-      .then(res => {
-        setArtists(res.artists);
-        if (yue2Mode) {
-          setIsLoadingYue2Artists(true);
-          void Promise.all(res.artists.map(async artist => {
-            const { lyrics_sets } = await lireekApi.listLyricsSets(artist.id).catch(() => ({ lyrics_sets: [] }));
-            const presets = await Promise.all(lyrics_sets.map(ls => lireekApi.getPreset(ls.id).then(r => r.preset).catch(() => null)));
-            return presets.some(p => p?.yue2_ar_adapter_path && p?.yue2_nar_adapter_path) ? artist : null;
-          })).then(eligible => setYue2Artists(eligible.filter((a): a is Artist => a !== null)))
-            .catch(() => setYue2Artists([])).finally(() => setIsLoadingYue2Artists(false));
-        }
-        if (!yue2Mode && selectedArtistId && !selectedPreset) {
-          const a = res.artists.find(x => x.id === selectedArtistId);
-          if (a) loadArtistPresets(a);
-        }
-      })
-      .catch(() => showToast(t('cover.failedToLoadArtists')))
-      .finally(() => setIsLoadingArtists(false));
-  }, [yue2Mode]);
+    if (restoredPresetLoaded.current || !setsQuery.data || !presetsQuery.data) return;
+    restoredPresetLoaded.current = true;
+    if (!yue2Mode && selectedArtistId && !selectedPreset) {
+      const ids = new Set(setsQuery.data.filter(ls => ls.artist_id === selectedArtistId).map(ls => ls.id));
+      const preset = presetsQuery.data.presets.find(p => ids.has(p.lyrics_set_id) && p.adapter_path);
+      if (preset) setSelectedPreset(preset);
+    }
+  }, [yue2Mode, setsQuery.data, presetsQuery.data, selectedArtistId]);
 
   useEffect(() => {
-    if (!yue2Mode || renderMode !== 'artist' || selectedYue2ArtistId == null) return;
-    const request = ++yue2ArtistRequestRef.current;
-    void lireekApi.listLyricsSets(selectedYue2ArtistId).then(async ({ lyrics_sets }) => {
-      const albums = await Promise.all(lyrics_sets.map(async ls => ({
-        lsId: ls.id, album: ls.album || String(ls.id),
-        preset: await lireekApi.getPreset(ls.id).then(r => r.preset).catch(() => null),
-      })));
-      if (request !== yue2ArtistRequestRef.current) return;
-      const available = albums.filter(a => a.preset?.yue2_ar_adapter_path && a.preset?.yue2_nar_adapter_path);
-      setYue2Albums(available);
-      setYue2AlbumsForArtistId(selectedYue2ArtistId);
-      const chosen = available.find(a => a.lsId === selectedYue2LyricsSetId) || available[0];
-      if (chosen && chosen.lsId !== selectedYue2LyricsSetId) setSelectedYue2LyricsSetId(chosen.lsId);
-    }).catch(() => { if (request === yue2ArtistRequestRef.current) setYue2Albums([]); });
-    return () => { yue2ArtistRequestRef.current++; };
-  }, [yue2Mode, renderMode, selectedYue2ArtistId]);
+    if (!yue2Mode || renderMode !== 'artist' || selectedYue2ArtistId == null || !setsQuery.data || !presetsQuery.data) return;
+    const presets = new Map(presetsQuery.data.presets.map(p => [p.lyrics_set_id, p]));
+    const available = setsQuery.data.filter(ls => ls.artist_id === selectedYue2ArtistId)
+      .map(ls => ({ lsId: ls.id, album: ls.album || String(ls.id), preset: presets.get(ls.id) ?? null }))
+      .filter(a => a.preset?.yue2_ar_adapter_path && a.preset?.yue2_nar_adapter_path);
+    setYue2Albums(available);
+    setYue2AlbumsForArtistId(selectedYue2ArtistId);
+    const chosen = available.find(a => a.lsId === selectedYue2LyricsSetId) || available[0];
+    if (chosen && chosen.lsId !== selectedYue2LyricsSetId) setSelectedYue2LyricsSetId(chosen.lsId);
+  }, [yue2Mode, renderMode, selectedYue2ArtistId, setsQuery.data, presetsQuery.data, selectedYue2LyricsSetId]);
 
-  // ── File upload + analysis pipeline ──
   const openUploadedAsset = async (assetId: string, lookup: number, cached?: {
     metadata: AudioMetadata; analysis: AudioAnalysis;
   }): Promise<CoverDraftResult | null> => {
@@ -756,17 +751,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   // ── Artist preset loading ──
+  const presetRequestRef = useRef(0);
+  useEffect(() => () => { presetRequestRef.current++; }, []);
   const loadArtistPresets = async (artist: Artist) => {
+    const request = ++presetRequestRef.current;
+    const source = sourceKeyRef.current;
+    const current = () => request === presetRequestRef.current && sourceKeyRef.current === source;
     try {
-      const { lyrics_sets } = await lireekApi.listLyricsSets(artist.id);
-      const results: typeof artistPresets = [];
-      for (const ls of lyrics_sets) {
-        try {
-          const { preset } = await lireekApi.getPreset(ls.id);
-          results.push({ lsId: ls.id, album: ls.album || ls.id.toString(), preset });
-        } catch { results.push({ lsId: ls.id, album: ls.album || ls.id.toString(), preset: null }); }
-      }
-      setArtistPresets(results);
+      const [{ lyrics_sets: allSets }, { presets }] = await Promise.all([lireekApi.listLyricsSets(), lireekApi.listAllPresets()]);
+      const lyrics_sets = allSets.filter(ls => ls.artist_id === artist.id);
+      const bySet = new Map(presets.map(p => [p.lyrics_set_id, p]));
+      const results = lyrics_sets.map(ls => ({ lsId: ls.id, album: ls.album || String(ls.id), preset: bySet.get(ls.id) ?? null }));
+      if (!current()) return;
       // Find caption — waterfall: generations → profiles → LLM
       if (token && sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
         setIsGeneratingCaption(true);
@@ -802,6 +798,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           } catch {}
         }
       }
+      if (!current()) return;
       setArtistCaption(caption);
       // Step 3: On-demand LLM generation (async, non-blocking)
       if (!caption) {
@@ -810,19 +807,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         if (provider) {
           setIsGeneratingCaption(true);
           lireekApi.generateCaption(artist.id, { provider, model: model || undefined })
-            .then(res => { if (res.caption) setArtistCaption(res.caption); })
+            .then(res => { if (current() && res.caption) setArtistCaption(res.caption); })
             .catch(err => console.warn('[CoverStudio] Caption generation failed:', err))
             .finally(() => setIsGeneratingCaption(false));
         }
       }
       }
+      if (!current()) return;
       // Pick adapter preset — use first album with adapter (don't override cover settings)
       const withAdapter = results.find(p => p.preset?.adapter_path);
       if (withAdapter?.preset) {
         setSelectedPreset(withAdapter.preset);
         applyPresetToGlobal(withAdapter.preset);
       } else { setSelectedPreset(results[0]?.preset || null); }
-    } catch { setSelectedPreset(null); setArtistPresets([]); setArtistCaption(''); }
+    } catch { if (current()) { setSelectedPreset(null); setArtistCaption(''); } }
   };
 
   const handleSelectArtist = async (artist: Artist) => {
@@ -1478,63 +1476,60 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // Poll a single cover job to completion. Resolves on any terminal state so
   // the serial queue can advance to the next cover. Updates the inline progress
   // (safe — jobs run one at a time) and the per-job queue item.
-  const pollJobAsync = (jobId: string, qId: string): Promise<void> => new Promise<void>((resolve) => {
+  const pollJobAsync = async (jobId: string, qId: string): Promise<void> => {
     setActiveJobId(jobId); setQueueItemId(qId);
     setGenProgress(0); setGenStage('Queued...');
-    // Clock ignores server-queue wait — only real generation time counts.
     const timer = createGenerationTimer();
-    const iv = setInterval(async () => {
-      try {
-        const s = await generateApi.status(jobId);
-        const tk = timer.tick(s.status);
-        // Server sends 0-100; normalise to 0-100 for display
-        const rawProg = s.progress;
-        const pct = rawProg != null
-          ? Math.min(100, Math.max(0, Math.round(rawProg > 1 ? rawProg : rawProg * 100)))
-          : undefined;
-        if (pct != null) setGenProgress(pct);
-        if (s.stage) setGenStage(s.stage);
+    let timedOut = false;
+    try {
+      await waitForSnapshot(serverKey('shell-queue/generation-status', { id: jobId }),
+        signal => generateApi.status(jobId, { signal }),
+        s => !timedOut && !['succeeded', 'failed', 'cancelled'].includes(s.status), s => {
+          const tk = timer.tick(s.status);
+          // Server sends 0-100; normalise to 0-100 for display
+          const rawProg = s.progress;
+          const pct = rawProg != null
+            ? Math.min(100, Math.max(0, Math.round(rawProg > 1 ? rawProg : rawProg * 100)))
+            : undefined;
+          if (pct != null) setGenProgress(pct);
+          if (s.stage) setGenStage(s.stage);
 
-        // Update shared queue item
-        updateManualQueueItem(qId, {
-          progress: pct,
-          stage: s.stage || 'Generating...',
-          elapsed: tk.elapsed,
-        });
-
-        if (tk.timedOut) {
-          clearInterval(iv);
-          showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-          failManualQueueItem(qId, 'Generation timed out');
-          resolve();
-          return;
-        }
-
-        if (s.status === 'succeeded') {
-          clearInterval(iv); setGenProgress(100); setGenStage('Complete!');
-          showToast(t('cover.coverGenerated'));
-
-          // Complete queue item with audio data
-          completeManualQueueItem(qId, {
-            audioUrl: s.result?.audioUrls?.[0] || '',
-            songId: s.result?.songIds?.[0],
-            masteredAudioUrl: s.result?.masteredAudioUrl,
-            noAdapterAudioUrl: s.result?.noAdapterAudioUrl,
-            audioDuration: s.result?.duration,
+          // Update shared queue item
+          updateManualQueueItem(qId, {
+            progress: pct,
+            stage: s.stage || 'Generating...',
+            elapsed: tk.elapsed,
           });
-          resolve();
-        } else if (s.status === 'failed' || s.status === 'cancelled') {
-          clearInterval(iv);
-          showToast(`Failed: ${s.error || 'Unknown error'}`);
-          failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
-          resolve();
-        }
-      } catch { /* transient poll error — keep polling */ }
-    }, 2000);
-    // Absolute backstop so a wedged job can't block the queue forever. Generous
-    // so it never pre-empts the generation-start timer above.
-    setTimeout(() => { clearInterval(iv); resolve(); }, (getGenerationTimeoutMinutes() + 30) * 60_000);
-  });
+
+          if (tk.timedOut) {
+            timedOut = true;
+            showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
+            failManualQueueItem(qId, 'Generation timed out');
+            return;
+          }
+
+          if (s.status === 'succeeded') {
+            setGenProgress(100); setGenStage('Complete!');
+            showToast(t('cover.coverGenerated'));
+
+            // Complete queue item with audio data
+            completeManualQueueItem(qId, {
+              audioUrl: s.result?.audioUrls?.[0] || '',
+              songId: s.result?.songIds?.[0],
+              masteredAudioUrl: s.result?.masteredAudioUrl,
+              noAdapterAudioUrl: s.result?.noAdapterAudioUrl,
+              audioDuration: s.result?.duration,
+            });
+          } else if (s.status === 'failed' || s.status === 'cancelled') {
+            showToast(`Failed: ${s.error || 'Unknown error'}`);
+            failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
+          }
+        }, { timeoutMs: (getGenerationTimeoutMinutes() + 30) * 60_000 });
+      await songsChanged();
+    } catch (err) {
+      failManualQueueItem(qId, err instanceof Error ? err.message : 'Generation status failed');
+    }
+  };
 
   // Cancel the currently-running cover. The poll sees the cancelled status,
   // resolves, and the queue advances to the next item.
@@ -1572,9 +1567,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleClearArtist = () => {
+    presetRequestRef.current++;
     setSelectedArtistId(null);
     setSelectedPreset(null);
-    setArtistPresets([]);
+
     setArtistCaption('');
   };
 
@@ -1777,7 +1773,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             scoreSource={sheetScoreSource} seekSection={seekSection} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}
-          
+
           {showMixer && sepStems && sepJobId && (
             <StemMixer jobId={sepJobId} stems={sepStems}
               controls={stemControls} onControlsChange={setStemControls}

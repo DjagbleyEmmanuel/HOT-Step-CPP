@@ -1,3 +1,8 @@
+import { queryClient } from '../queries/client';
+import { serverKey } from '../queries/keys';
+import { apiClient, type ReadOptions } from './httpClient';
+import { readSnapshot, changed } from '../queries/cover-lyrics/reads';
+import { getSessionEpoch } from '../queries/keys';
 // Authenticated YuE2 cover transcription endpoints.
 const BASE = '/api/yue2-cover';
 
@@ -127,25 +132,32 @@ export interface Yue2BuildSession {
 }
 
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
-  });
-  const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error || `Cover transcription failed (${response.status})`);
+  const target = { session: getSessionEpoch(), api: apiClient.baseUrl };
+  const url = `${BASE}${path}`.replace(/^\/api/, '');
+  if (!init?.method || init.method === 'GET') return readSnapshot<T>('cover', url, token, { signal: init?.signal ?? undefined }, /\/(build|transcriptions)\//.test(path) ? 0 : undefined);
+  const opts = { token, signal: init.signal ?? undefined };
+  const body = init.body ? JSON.parse(String(init.body)) : undefined;
+  if (path === '/source-metadata' || path === '/sections/review') {
+    return queryClient.fetchQuery({
+      queryKey: serverKey('cover-lyrics/cover', { auth: true, id: path, filters: body }),
+      queryFn: ({ signal }) => apiClient.post<T>(url, body, { token, signal: opts.signal ? AbortSignal.any([signal, opts.signal]) : signal }),
+    });
+  }
+  const result = init.method === 'DELETE' ? await apiClient.delete<T>(url, opts) : await apiClient.post<T>(url, body, opts);
+  await changed('cover', target);
   return result;
 }
 
 export const yue2CoverApi = {
-  readiness: (token: string) => request<Yue2CoverReadiness>('/readiness', token),
-  reviewSections: (abc: string, lyrics: string, token: string) => request<Yue2SectionReview>('/sections/review', token, {
-    method: 'POST', body: JSON.stringify({ abc, lyrics }),
+  readiness: (token: string, options: ReadOptions = {}) => request<Yue2CoverReadiness>('/readiness', token, options),
+  reviewSections: (abc: string, lyrics: string, token: string, options: ReadOptions = {}) => request<Yue2SectionReview>('/sections/review', token, {
+    ...options, method: 'POST', body: JSON.stringify({ abc, lyrics }),
   }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
   buildStart: (params: Record<string, unknown>, token: string) =>
     request<Yue2BuildSession>('/build', token, { method: 'POST', body: JSON.stringify({ params }) }),
-  buildGet: (id: string, token: string) => request<Yue2BuildSession>(`/build/${id}`, token),
+  buildGet: (id: string, token: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, token, options),
   buildGenerate: (id: string, to: number, count: number, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ to, count }) }),
   buildKeep: (id: string, take: string, token: string) =>
@@ -160,13 +172,13 @@ export const yue2CoverApi = {
   /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */
   saveDatasetDetails: (input: Yue2CoverSourceInput & ({ lyrics: string } | { bpm: number; key: string }), token: string) =>
     request<{ saved: true; file: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),
-  sourceMetadata: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
-    method: 'POST', body: JSON.stringify(input),
+  sourceMetadata: (input: Yue2CoverSourceInput, token: string, options: ReadOptions = {}) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
+    ...options, method: 'POST', body: JSON.stringify(input),
   }),
   start: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverResult>('/transcriptions', token, {
     method: 'POST', body: JSON.stringify(input),
   }),
-  status: (jobId: string, token: string) => request<Yue2CoverResult>(`/transcriptions/${encodeURIComponent(jobId)}`, token),
+  status: (jobId: string, token: string, options: ReadOptions = {}) => request<Yue2CoverResult>(`/transcriptions/${encodeURIComponent(jobId)}`, token, options),
   cancel: (jobId: string, token: string) => request<Yue2CoverResult>(`/transcriptions/${encodeURIComponent(jobId)}`, token, { method: 'DELETE' }),
   measureDrift: (songId: string, token: string) => request<Yue2CoverDriftResult>(
     `/drift/${encodeURIComponent(songId)}`, token, { method: 'POST' }),

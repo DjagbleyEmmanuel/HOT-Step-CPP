@@ -1,4 +1,9 @@
-import { workflowApi } from './workflowApi';
+import { changed } from '../queries/cover-lyrics/reads';
+import { waitForSnapshot } from '../queries/cover-lyrics/wait';
+import { workflowOptions } from '../queries/cover-lyrics/workflows';
+import { apiClient } from './httpClient';
+import type { WorkflowReplay } from '../../../server/src/contracts/workflow';
+import { coverLyricWorkflowApi as workflowApi } from '../queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 
 const BASE = '/api/yue2-cover';
@@ -15,19 +20,18 @@ export interface CoverDraftResult {
 
 export async function waitForCoverJob(token: string, jobId: string, cancelled: () => boolean,
   progress?: (job: WorkflowJob) => void): Promise<WorkflowJob> {
-  for (;;) {
-    if (cancelled()) {
-      await workflowApi.cancel(token, jobId).catch(() => {});
-      throw new Error('Cover operation cancelled');
-    }
-    const { job } = await workflowApi.get(token, jobId);
-    progress?.(job);
-    if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(job.status)) {
-      if (job.status !== 'succeeded') throw new Error(job.error || `Cover operation ${job.status}`);
-      return job;
-    }
-    await new Promise(resolve => setTimeout(resolve, 750));
-  }
+  const result = await waitForSnapshot(workflowOptions(token, jobId).queryKey,
+    signal => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(jobId)}?after=0`, { token, signal }),
+    data => !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(data.job.status),
+    data => {
+      if (cancelled()) {
+        void workflowApi.cancel(token, jobId).catch(() => {});
+        throw new Error('Cover operation cancelled');
+      }
+      progress?.(data.job);
+    });
+  if (result.job.status !== 'succeeded') throw new Error(result.job.error || `Cover operation ${result.job.status}`);
+  return result.job;
 }
 
 export const coverWorkflowApi = {
@@ -50,6 +54,7 @@ export const coverWorkflowApi = {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Score approval failed (${response.status})`);
+    await Promise.all([changed('drafts'), changed('cover')]);
     return data as { document: { id: string; revision: number }; sourceId: string; sourceLabel: string; abc: string };
   },
   saveScoreDetails: async (token: string, documentId: string, revision: number,
@@ -60,6 +65,7 @@ export const coverWorkflowApi = {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Score details save failed (${response.status})`);
+    await changed('cover');
     return data as { saved: true; bpm: number; key: string };
   },
 };

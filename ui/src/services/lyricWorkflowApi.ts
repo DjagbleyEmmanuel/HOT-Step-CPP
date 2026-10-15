@@ -1,4 +1,6 @@
-import { followJob, workflowApi } from './workflowApi';
+import type { ReadOptions } from './httpClient';
+import { readSnapshot } from '../queries/cover-lyrics/reads';
+import { coverLyricWorkflowApi as workflowApi, followCoverLyricJob as followJob } from '../queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 import type { WrittenSongIntent } from '../../../server/src/contracts/resolution';
 
@@ -29,8 +31,8 @@ export const lyricWorkflowApi = {
   submitRenders: (token: string, intents: WrittenSongIntent[], idempotencyKey = crypto.randomUUID()) =>
     submit(token, 'workflow-renders', { intents, idempotencyKey }),
   cancel: (token: string, id: string) => workflowApi.cancel(token, id),
-  list: (token: string) => workflowApi.list(token, { kind: 'lyric-batch' }),
-  get: (token: string, id: string) => workflowApi.get(token, id),
+  list: (token: string, options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-batch', token, options, 0),
+  get: (token: string, id: string, options: ReadOptions = {}) => workflowApi.get(token, id, 0, options),
   follow: followJob,
 };
 

@@ -1,5 +1,10 @@
 // SourcePanel.tsx — Left panel: source audio upload + metadata + analysis
-import React, { useCallback, useState, useEffect } from 'react';
+
+import { serverKey } from '../../queries/keys';
+import { useQuery } from '@tanstack/react-query';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import { queryClient } from '../../queries/client';
+import React, { useCallback, useState } from 'react';
 import { Upload, Music, Loader2, X, Layers, Volume2, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AudioMetadata, AudioAnalysis } from './coverStudioUtils';
@@ -82,18 +87,11 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   const [isTimbreUploading, setIsTimbreUploading] = useState(false);
   const [showTimbreBrowser, setShowTimbreBrowser] = useState(false);
   interface ReferenceTrack { name: string; size: number; url: string; }
-  const [timbreRefs, setTimbreRefs] = useState<ReferenceTrack[]>([]);
+  const referenceOptions = { ...snapshotOptions<{ references: ReferenceTrack[] }>('cover', '/mastering/references'), queryKey: serverKey('global-models/references') };
+  const referenceQuery = useQuery({ ...referenceOptions, enabled: showTimbreBrowser });
+  const timbreRefs = referenceQuery.data?.references ?? [];
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const timbreFileRef = React.useRef<HTMLInputElement>(null);
-
-  // Load references when browser opens
-  useEffect(() => {
-    if (showTimbreBrowser) {
-      masteringApi.listReferences()
-        .then(data => setTimbreRefs(data.references))
-        .catch(() => {});
-    }
-  }, [showTimbreBrowser]);
 
   const handleTimbreUpload = useCallback(async (file: File) => {
     if (!token) return;
@@ -102,10 +100,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       const result = await masteringApi.uploadReference(file, token);
       onTimbreOverridePathChange(result.name);
       // Refresh list if browser is open
-      if (showTimbreBrowser) {
-        const data = await masteringApi.listReferences();
-        setTimbreRefs(data.references);
-      }
+      await queryClient.invalidateQueries({ queryKey: referenceOptions.queryKey });
     } catch (err) {
       console.error('[Timbre] Upload failed:', err);
     } finally {

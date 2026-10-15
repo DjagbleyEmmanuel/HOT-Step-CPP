@@ -1,3 +1,7 @@
+import { useQuery } from '@tanstack/react-query';
+import { queryClient } from '../../queries/client';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, MoreHorizontal, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
@@ -20,31 +24,21 @@ export function buildNext(session: Yue2BuildSession | null): number {
 
 /** A Build-by-section session kept on the server, polled while takes render. */
 export function useYue2Build(token: string | null, sessionId: string, setSessionId: (id: string) => void) {
-  const [session, setSession] = useState<Yue2BuildSession | null>(null);
+  const options = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${sessionId}`, token ?? undefined);
+  const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0) });
+  const session = sessionId ? snapshot.data ?? null : null;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    setSession(null);
-    if (!token || !sessionId) return;
-    yue2CoverApi.buildGet(sessionId, token).then(setSession).catch(() => setSessionId(''));
-  }, [sessionId, token]);
-  const pending = !!session?.pending.length;
-  useEffect(() => {
-    if (!token || !session || !pending) return;
-    const timer = setInterval(() => { yue2CoverApi.buildGet(session.id, token).then(setSession).catch(() => {}); }, 2000);
-    return () => clearInterval(timer);
-  }, [session?.id, pending, token]);
-
   const call = async (fn: () => Promise<Yue2BuildSession>) => {
     setBusy(true);
-    try { const next = await fn(); setSession(next); setError(''); return next; }
+    try { const next = await fn(); const key = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${next.id}`, token!).queryKey; queryClient.setQueryData([key[0], key[1], options.queryKey[2], key[3], key[4]], next); setError(''); return next; }
     catch (err: any) { setError(err.message); return null; }
     finally { setBusy(false); }
   };
   const live = session && session.id === sessionId ? session : null;
   return {
-    session: live, error, busy,
+    session: live, error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. */
     generate: (params: Record<string, unknown>, to: number, count: number) => call(async () => {
       let id = live?.id;
@@ -54,7 +48,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, take, token!)),
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, token!, section)),
     remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, take, token!)),
-    startOver: () => { setSessionId(''); setSession(null); setError(''); },
+    startOver: () => { setSessionId(''); setError(''); },
   };
 }
 

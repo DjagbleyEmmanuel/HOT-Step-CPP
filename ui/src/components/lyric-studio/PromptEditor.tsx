@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Save, RotateCcw, Code2, Loader2 } from 'lucide-react';
@@ -24,41 +26,21 @@ interface Props {
 }
 
 export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
-  const [prompts, setPrompts] = useState<PromptData[]>([]);
+  const snapshot = useQuery({ ...snapshotOptions<{ prompts: { name: string; custom: string | null; default_content: string }[] }>('lireek', '/lireek/prompts'), enabled: open });
+  const prompts: PromptData[] = (snapshot.data?.prompts ?? []).map(p => ({ name: p.name, source: p.custom != null ? 'custom' : 'default', content: p.custom ?? p.default_content ?? '', default_content: p.default_content ?? '', has_default: !!p.default_content }));
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
-  const [loading, setLoading] = useState(false);
+  const loading = snapshot.isPending;
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) loadPrompts();
-  }, [open]);
-
-  const loadPrompts = async () => {
-    setLoading(true);
-    try {
-      const res = await lireekApi.listPrompts();
-      const rawData = Array.isArray(res?.prompts) ? res.prompts : Array.isArray(res) ? res : [];
-      const data: PromptData[] = rawData.map((p: any) => ({
-        name: p.name,
-        source: p.custom != null ? 'custom' : 'default',
-        content: p.custom ?? p.default_content ?? '',
-        default_content: p.default_content ?? '',
-        has_default: !!p.default_content,
-      }));
-      setPrompts(data);
-      if (data.length > 0 && !selected) {
-        setSelected(data[0].name);
-        setEditContent(data[0].content);
-        setDirty(false);
-      }
-    } catch { } finally {
-      setLoading(false);
-    }
-  };
+    if (!open || !snapshot.data || selected) return;
+    const first = snapshot.data.prompts[0];
+    if (first) { setSelected(first.name); setEditContent(first.custom ?? first.default_content ?? ''); setDirty(false); }
+  }, [open, snapshot.data, selected]);
 
   const selectPrompt = (name: string) => {
     const p = prompts.find(pp => pp.name === name);
@@ -77,7 +59,7 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
       setDirty(false);
       setToast('Saved');
       setTimeout(() => setToast(null), 2000);
-      loadPrompts();
+      await snapshot.refetch();
     } catch (err) {
       setToast(`Save failed: ${(err as Error).message}`);
       setTimeout(() => setToast(null), 3000);
@@ -93,9 +75,9 @@ export const PromptEditor: React.FC<Props> = ({ open, onClose }) => {
       await lireekApi.resetPrompt(selected);
       setToast('Reset to default');
       setTimeout(() => setToast(null), 2000);
-      await loadPrompts();
-      const updated = prompts.find(p => p.name === selected);
-      if (updated) setEditContent(updated.content);
+      const updated = (await snapshot.refetch()).data?.prompts.find(p => p.name === selected);
+      if (updated) setEditContent(updated.custom ?? updated.default_content ?? '');
+      setDirty(false);
     } catch (err) {
       setToast(`Reset failed: ${(err as Error).message}`);
       setTimeout(() => setToast(null), 3000);

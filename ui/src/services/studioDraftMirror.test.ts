@@ -174,3 +174,22 @@ test('a refused draft (wrong backend) changes nothing and says why', async () =>
   assert.equal(h.pointer()!.id, 'd1');
   assert.match(h.error(), /saved for MiniMax-Music3/);
 });
+
+
+test('leaving an editor aborts its draft read and a late response cannot adopt or apply it', async () => {
+  const h = harness();
+  const held = deferred<ReturnType<typeof doc>>();
+  let signal: AbortSignal | undefined;
+  let applied = 0;
+  const loading = h.mirror.load('t', 'old', {
+    get: (_token, _id, options) => { signal = options?.signal; return held.promise; },
+    current: () => body({}), confirm: () => { throw new Error('Stale confirmation'); },
+    apply: () => { applied++; },
+  });
+  h.mirror.cancelLoad();
+  assert.equal(signal?.aborted, true);
+  held.resolve(doc('old', 1, { 'hs-caption': 'Old' }));
+  assert.equal(await loading, false);
+  assert.equal(applied, 0);
+  assert.equal(h.pointer(), null);
+});

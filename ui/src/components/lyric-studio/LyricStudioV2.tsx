@@ -12,6 +12,9 @@
  * Ported from hot-step-9000 with import path + API adaptations for the C++ engine.
  */
 
+import { useQuery } from '@tanstack/react-query';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import type { AlbumPreset } from '../../services/lireekApi';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
@@ -47,8 +50,21 @@ import { loadSelections, saveSelections, type ModelSelections } from './Provider
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { cacheMm3SourceTracks, collectMm3SourceTracks } from '../../utils/mm3CaptionSource';
 
-
 // ── URL helpers ──────────────────────────────────────────────────────────────
+
+const attemptedArtwork = new Set<string>();
+async function fillMissingArtwork(items: Array<{ id: number; image_url?: string }>, kind: 'artist' | 'album') {
+  for (const item of items) {
+    const key = `${kind}:${item.id}`;
+    if (item.image_url || attemptedArtwork.has(key)) continue;
+    attemptedArtwork.add(key);
+    try {
+      if (kind === 'artist') await lireekApi.refreshArtistImage(item.id);
+      else await lireekApi.refreshAlbumImage(item.id);
+    } catch { /* Artwork is advisory; explicit refresh remains available. */ }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
 
 const LS_BASE = '/lyric-studio';
 
@@ -97,15 +113,21 @@ export const LyricStudioV2: React.FC = () => {
   const [nav, setNav] = useState<NavState>({ level: 'artists', selectedArtist: null, selectedAlbum: null });
 
   // ── Data ──
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [albums, setAlbums] = useState<LyricsSet[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [generations, setGenerations] = useState<Generation[]>([]);
-  const [artistsLoading, setArtistsLoading] = useState(true);
-  const [albumsLoading, setAlbumsLoading] = useState(false);
-
-  const albumLoadIdRef = useRef(0);
-  const albumDataLoadIdRef = useRef(0);
+  const artistsQuery = useQuery(snapshotOptions<Artist[]>('lireek', '/lireek/artists'));
+  const albumListPath = `/lireek/lyrics-sets?artist_id=${nav.selectedArtist?.id ?? ''}`;
+  const albumsQuery = useQuery({ ...snapshotOptions<LyricsSet[]>('lireek', albumListPath), enabled: !!nav.selectedArtist });
+  const detailPath = `/lireek/lyrics-sets/${nav.selectedAlbum?.id ?? ''}/full-detail`;
+  const detailQuery = useQuery({ ...snapshotOptions<{ lyrics_set: LyricsSet; profiles: Profile[]; generations: Generation[] }>('lireek', detailPath), enabled: !!nav.selectedAlbum });
+  const artists = artistsQuery.data ?? [];
+  const albums = nav.selectedArtist ? albumsQuery.data ?? [] : [];
+  const profiles = nav.selectedAlbum ? detailQuery.data?.profiles ?? [] : [];
+  const generations = nav.selectedAlbum ? detailQuery.data?.generations ?? [] : [];
+  const artistsLoading = artistsQuery.isPending;
+  const albumsLoading = albumsQuery.isPending && !!nav.selectedArtist;
+  useEffect(() => {
+    const album = detailQuery.data?.lyrics_set;
+    if (album) setNav(prev => prev.selectedAlbum?.id === album.id ? { ...prev, selectedAlbum: album } : prev);
+  }, [detailQuery.data]);
 
   // ── Tabs ──
   const [activeTab, setActiveTab] = useState<TabId>('source-lyrics');
@@ -141,10 +163,13 @@ export const LyricStudioV2: React.FC = () => {
   const [fetchingLabel, setFetchingLabel] = useState('');
 
   // ── Bulk queue data ──
-  const [allLyricsSets, setAllLyricsSets] = useState<LyricsSet[]>([]);
-  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const allSetsQuery = useQuery({ ...snapshotOptions<LyricsSet[]>('lireek', '/lireek/lyrics-sets'), enabled: queueOpen });
+  const allProfilesQuery = useQuery({ ...snapshotOptions<Profile[]>('lireek', '/lireek/profiles'), enabled: queueOpen });
+  const allLyricsSets = allSetsQuery.data ?? [];
+  const allProfiles = allProfilesQuery.data ?? [];
 
-  const [artistIdsWithAdapters, setArtistIdsWithAdapters] = useState<Set<number>>(new Set());
+  const presetsQuery = useQuery(snapshotOptions<{ presets: Array<AlbumPreset & { artist_id?: number }> }>('lireek', '/lireek/presets'));
+  const artistIdsWithAdapters = new Set((presetsQuery.data?.presets ?? []).filter(p => p.adapter_path && p.artist_id).map(p => p.artist_id!));
 
   // ── Playback (for backdrop effect) ──
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
@@ -163,54 +188,19 @@ export const LyricStudioV2: React.FC = () => {
   }, []);
 
   // ── Load artists ──
-  const loadArtists = useCallback(async (retries = 5): Promise<Artist[]> => {
-    setArtistsLoading(true);
-    let artistsList: Artist[] = [];
-    try {
-      const res = await lireekApi.listArtists();
-      artistsList = res.artists;
-      setArtists(res.artists);
-    } catch (err) {
-      console.warn(`[LyricStudioV2] Failed to load artists (retries left: ${retries}):`, err);
-      if (retries > 0) {
-        await new Promise(r => setTimeout(r, 2000));
-        return loadArtists(retries - 1);
-      }
-    } finally {
-      setArtistsLoading(false);
-    }
-
-    // Background: fetch missing artist images
-    const missing = artistsList.filter(a => !a.image_url);
-    if (missing.length > 0) {
-      const fetchNext = (idx: number) => {
-        if (idx >= missing.length) return;
-        lireekApi.refreshArtistImage(missing[idx].id)
-          .then(result => {
-            if (result.image_url) {
-              setArtists(prev => prev.map(a => a.id === missing[idx].id ? { ...a, image_url: result.image_url } : a));
-            }
-          })
-          .catch(() => {})
-          .finally(() => setTimeout(() => fetchNext(idx + 1), 500));
-      };
-      fetchNext(0);
-    }
-    return artistsList;
+  const loadArtists = useCallback(async (): Promise<Artist[]> => {
+    const { artists } = await lireekApi.listArtists();
+    void fillMissingArtwork(artists, 'artist');
+    return artists;
   }, []);
 
   // ── Initial load: artists + URL restore ──
   useEffect(() => {
+    let live = true;
+    const initialPath = window.location.pathname;
     const init = async () => {
       const artistsList = await loadArtists();
-      // Background: load adapter mapping
-      lireekApi.listAllPresets().then(({ presets }) => {
-        const ids = new Set<number>();
-        for (const p of presets as any[]) {
-          if (p.adapter_path && p.artist_id) ids.add(p.artist_id);
-        }
-        setArtistIdsWithAdapters(ids);
-      }).catch(() => {});
+      if (!live || initialPath !== window.location.pathname) return;
       const parsed = parseUrl(window.location.pathname);
       if (parsed.artistId) {
         isRestoringUrl.current = true;
@@ -218,7 +208,7 @@ export const LyricStudioV2: React.FC = () => {
           const artist = artistsList.find(a => a.id === parsed.artistId);
           if (!artist) return;
           const albumRes = await lireekApi.listLyricsSets(artist.id);
-          setAlbums(albumRes.lyrics_sets);
+          if (!live || initialPath !== window.location.pathname) return;
 
           if (parsed.albumId) {
             const album = albumRes.lyrics_sets.find(a => a.id === parsed.albumId);
@@ -236,60 +226,20 @@ export const LyricStudioV2: React.FC = () => {
         }
       }
     };
-    init();
+    void init().catch(console.error);
+    return () => { live = false; };
   }, [loadArtists]);
 
   // ── Load albums ──
   const loadAlbums = useCallback(async (artistId: number) => {
-    const loadId = ++albumLoadIdRef.current;
-    setAlbumsLoading(true);
-    let albumsList: LyricsSet[] = [];
-    try {
-      const res = await lireekApi.listLyricsSets(artistId);
-      if (loadId !== albumLoadIdRef.current) return;
-      albumsList = res.lyrics_sets;
-      setAlbums(res.lyrics_sets);
-    } catch (err) {
-      console.error('[LyricStudioV2] Failed to load albums:', err);
-    } finally {
-      if (loadId === albumLoadIdRef.current) setAlbumsLoading(false);
-    }
-
-    // Background: fetch missing album images
-    const missing = albumsList.filter(a => !a.image_url && a.album);
-    if (missing.length > 0) {
-      const fetchNext = (idx: number) => {
-        if (idx >= missing.length || loadId !== albumLoadIdRef.current) return;
-        lireekApi.refreshAlbumImage(missing[idx].id)
-          .then(result => {
-            if (loadId !== albumLoadIdRef.current) return;
-            if (result.image_url) {
-              setAlbums(prev => prev.map(a => a.id === missing[idx].id ? { ...a, image_url: result.image_url } : a));
-            }
-          })
-          .catch(() => {})
-          .finally(() => setTimeout(() => fetchNext(idx + 1), 500));
-      };
-      fetchNext(0);
-    }
+    const { lyrics_sets } = await lireekApi.listLyricsSets(artistId);
+    void fillMissingArtwork(lyrics_sets.filter(album => !!album.album), 'album');
   }, []);
 
   // ── Load album detail data ──
-  const loadAlbumData = useCallback(async (albumId: number, retries = 2) => {
-    const loadId = ++albumDataLoadIdRef.current;
-    try {
-      const { lyrics_set, profiles: p, generations: g } = await lireekApi.getAlbumFullDetail(albumId);
-      if (loadId !== albumDataLoadIdRef.current) return;
-      setNav(prev => ({ ...prev, selectedAlbum: lyrics_set }));
-      setProfiles(p);
-      setGenerations(g);
-    } catch (err) {
-      if (loadId !== albumDataLoadIdRef.current) return;
-      if (retries > 0) {
-        await new Promise(r => setTimeout(r, 2000));
-        return loadAlbumData(albumId, retries - 1);
-      }
-    }
+  const loadAlbumData = useCallback(async (albumId: number) => {
+    try { await lireekApi.getAlbumFullDetail(albumId); }
+    catch (err) { console.warn('[LyricStudioV2] Failed to load album:', err); }
   }, []);
 
   // ── Navigation handlers ──
@@ -300,9 +250,6 @@ export const LyricStudioV2: React.FC = () => {
   }, []);
 
   const handleSelectArtist = useCallback((artist: Artist) => {
-    setAlbums([]);
-    setProfiles([]);
-    setGenerations([]);
     setSongCount(0);
     setNav({ level: 'albums', selectedArtist: artist, selectedAlbum: null });
     loadAlbums(artist.id);
@@ -322,22 +269,21 @@ export const LyricStudioV2: React.FC = () => {
     if (albumId === albumIdRef.current) return;
     albumIdRef.current = albumId;
     if (albumId == null) return;
-    setProfiles([]);
-    setGenerations([]);
+
     setSongCount(0);
     loadAlbumData(albumId);
   }, [nav.selectedAlbum?.id, loadAlbumData]);
 
   const handleBackToArtists = useCallback(() => {
     setNav({ level: 'artists', selectedArtist: null, selectedAlbum: null });
-    setAlbums([]); setProfiles([]); setGenerations([]); setSongCount(0);
+    setSongCount(0);
     loadArtists();
     pushUrl();
   }, [loadArtists, pushUrl]);
 
   const handleBackToAlbums = useCallback(() => {
     setNav(prev => ({ ...prev, level: 'albums', selectedAlbum: null }));
-    setProfiles([]); setGenerations([]); setSongCount(0);
+    setSongCount(0);
     pushUrl(nav.selectedArtist?.id);
   }, [pushUrl, nav.selectedArtist]);
 
@@ -352,14 +298,14 @@ export const LyricStudioV2: React.FC = () => {
       const parsed = parseUrl(window.location.pathname);
       if (!parsed.artistId) {
         setNav({ level: 'artists', selectedArtist: null, selectedAlbum: null });
-        setAlbums([]); setProfiles([]); setGenerations([]); setSongCount(0);
+         setSongCount(0);
         return;
       }
       const artist = artists.find(a => a.id === parsed.artistId);
       if (!artist) return;
       if (!parsed.albumId) {
         setNav({ level: 'albums', selectedArtist: artist, selectedAlbum: null });
-        setProfiles([]); setGenerations([]); setSongCount(0);
+        setSongCount(0);
         loadAlbums(artist.id);
         return;
       }
@@ -386,16 +332,14 @@ export const LyricStudioV2: React.FC = () => {
   const handleRefreshImage = useCallback(async (artist: Artist) => {
     try {
       showToast(`Refreshing image for ${artist.name}...`);
-      const res = await lireekApi.refreshArtistImage(artist.id);
-      setArtists(prev => prev.map(a => a.id === artist.id ? { ...a, image_url: res.image_url } : a));
+      await lireekApi.refreshArtistImage(artist.id);
       showToast(`Updated image for ${artist.name}`);
     } catch (err: any) { showToast(`Couldn't find image: ${err.message}`); }
   }, [showToast]);
 
   const handleSetImage = useCallback(async (artist: Artist, url: string) => {
     try {
-      const res = await lireekApi.setArtistImage(artist.id, url);
-      setArtists(prev => prev.map(a => a.id === artist.id ? { ...a, image_url: res.image_url } : a));
+      await lireekApi.setArtistImage(artist.id, url);
       showToast(`Image updated for ${artist.name}`);
     } catch (err: any) { showToast(`Failed: ${err.message}`); }
   }, [showToast]);
@@ -411,16 +355,14 @@ export const LyricStudioV2: React.FC = () => {
 
   const handleRefreshAlbumImage = useCallback(async (album: LyricsSet) => {
     try {
-      const res = await lireekApi.refreshAlbumImage(album.id);
-      setAlbums(prev => prev.map(a => a.id === album.id ? { ...a, image_url: res.image_url } : a));
+      await lireekApi.refreshAlbumImage(album.id);
       showToast('Album image updated');
     } catch { showToast('Could not find album image on Genius'); }
   }, [showToast]);
 
   const handleSetAlbumImage = useCallback(async (album: LyricsSet, url: string) => {
     try {
-      const res = await lireekApi.setAlbumImage(album.id, url);
-      setAlbums(prev => prev.map(a => a.id === album.id ? { ...a, image_url: res.image_url } : a));
+      await lireekApi.setAlbumImage(album.id, url);
       showToast('Album image set');
     } catch (err: any) { showToast(`Failed: ${err.message}`); }
   }, [showToast]);
@@ -595,9 +537,7 @@ export const LyricStudioV2: React.FC = () => {
   // Queue open helper
   const openQueuePanel = useCallback(async () => {
     try {
-      const [lsRes, pRes] = await Promise.all([lireekApi.listLyricsSets(), lireekApi.listProfiles()]);
-      setAllLyricsSets(lsRes.lyrics_sets);
-      setAllProfiles(pRes.profiles);
+      await Promise.all([lireekApi.listLyricsSets(), lireekApi.listProfiles()]);
     } catch (err) { console.error('[LyricStudioV2] Failed to load queue data:', err); }
     setQueueOpen(true);
   }, []);
@@ -816,9 +756,7 @@ export const LyricStudioV2: React.FC = () => {
           await loadArtists();
           if (nav.selectedArtist) loadAlbums(nav.selectedArtist.id);
           try {
-            const [lsRes, pRes] = await Promise.all([lireekApi.listLyricsSets(), lireekApi.listProfiles()]);
-            setAllLyricsSets(lsRes.lyrics_sets);
-            setAllProfiles(pRes.profiles);
+            await Promise.all([lireekApi.listLyricsSets(), lireekApi.listProfiles()]);
           } catch {}
         }} />
 
