@@ -1,5 +1,5 @@
 import { yue2OptimRequest } from '../services/training/yue2Optim.js';
-import { selectYue2Audio, YUE2_AUDIO_EXTS } from '../services/training/yue2AudioStaging.js';
+import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../services/training/yue2AudioStaging.js';
 // training.ts — Dataset Studio HTTP surface (Training Studio phase 1)
 //
 // Import audio → local label (/understand + Essentia) → optional cloud enhance
@@ -4740,7 +4740,7 @@ router.post('/datasets/:id/yue2-stems', (req: Request, res: Response) => {
     if (!ds) return;
     const b = (req.body || {}) as Record<string, unknown>;
 
-    const audioDir = ds.sourceDir;
+    const audioDir = yue2SeparationAudioDir(yue2PreprocessManifest(ds.slug), ds.sourceDir);
     if (!audioDir || !fs.existsSync(audioDir)) {
       res.status(400).json({ error: `This dataset has no audio folder on disk (${audioDir || 'unset'})` });
       return;

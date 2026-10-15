@@ -13,6 +13,7 @@ import { emitProgress, finishJob, isCancelled, pushEvent, trainerLine, type Trai
 import { log } from './yue2TrainRunner.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, prepareFixedRecipeCaption } from './fixedRecipeCaption.js';
 import { randomUUID } from 'crypto';
+import { refreshYue2StagedSidecars } from './yue2AudioStaging.js';
 
 export type AitkPrepareModelName = 'vae' | 'semantic' | 'sheetsage';
 
@@ -147,6 +148,7 @@ function parseProgress(job: TrainingJob, line: string): void {
  *  Preparation imports captions from this manifest verbatim, so a stale cut
  *  trains on ACE captions while the sidecars sit unread beside the audio. */
 export function yue2CaptionsStale(manifestPath: string): boolean {
+  refreshYue2StagedSidecars(manifestPath);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { caption_mode?: unknown; sources?: Array<{ source?: unknown; caption?: unknown }> };
   const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
   let sidecars = 0;

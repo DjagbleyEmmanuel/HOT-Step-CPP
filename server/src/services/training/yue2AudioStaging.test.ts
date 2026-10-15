@@ -90,3 +90,19 @@ test('refuses staging from its own persistent files before removing them', t => 
   }], f.output), /own source audio/);
   assert.ok(fs.existsSync(path.join(dir, 'track.wav')));
 });
+
+test('reserves every sidecar destination across distinct audio stems', t => {
+  const f = fixture(t);
+  f.write('track.wav');
+  f.write('track.yue2.wav');
+  f.write('track.yue2.txt', 'planner caption or second track metadata');
+  const dir = stageYue2Audio(f.samples(true), f.output);
+  const audio = fs.readdirSync(dir).filter(n => n.endsWith('.wav'));
+  assert.equal(audio.length, 2);
+  for (const name of audio) {
+    const original = fs.readFileSync(path.join(dir, name), 'utf8');
+    const suffix = original === 'track.wav' ? '.yue2.txt' : '.txt';
+    assert.equal(fs.readFileSync(path.join(dir, name.replace(/\.wav$/, suffix)), 'utf8'),
+      'planner caption or second track metadata');
+  }
+});
