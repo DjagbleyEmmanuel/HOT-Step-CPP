@@ -286,7 +286,12 @@ static const char * const YUE2_VAE_VARIANT_NAME[YUE2_VAE_VARIANT_COUNT] = { "sta
 
 // ── The model ────────────────────────────────────────────────────────────────
 
+struct Yue2VaeGraph;
+
 struct Yue2Model {
+    // The decoder supplies the deleter, keeping its graph definition out of
+    // the loader header. Destroy compute buffers before weights/backends.
+    std::shared_ptr<Yue2VaeGraph> vae_decode_cache;
     // discovery + probe (cheap, header-only)
     std::string               models_dir;
     std::vector<std::string>  search_dirs;
@@ -1279,6 +1284,7 @@ static void yue2_evict_half(Yue2Model * m, bool ar, bool nar) {
 }
 
 static void yue2_unload(Yue2Model * m) {
+    m->vae_decode_cache.reset();
     if (!m->backend_ref && !m->lm_resident && !m->nar_resident && !m->vae_resident && !m->wctx_lm.ctx &&
         !m->wctx_nar.ctx && !m->wctx_vae.ctx) {
         return;
@@ -1606,6 +1612,7 @@ static bool yue2_load_parts(Yue2Model * m, bool want_lm, bool want_vae, Yue2VaeV
 static bool yue2_load_parts(Yue2Model * m, bool want_ar, bool want_nar, bool want_vae, Yue2VaeVariant variant,
                             bool want_encoder, std::string * err_out) {
     if (want_vae && m->vae_resident && m->vae_loaded_variant != variant) {
+        m->vae_decode_cache.reset();
         wctx_free(&m->wctx_vae);
         m->vae             = Yue2VaeWeights{};
         m->tmap_vae.clear();

@@ -745,6 +745,9 @@ link_ggml_backends(ace-caption)
 # docs/plans/yue2/06-engine-port-plan.md milestone M0. Header-only loader
 # (no acestep-core dependency), same posture as moss-ggml-test.
 add_executable(yue2-probe tools/yue2-probe.cpp)
+add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
+target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
+link_ggml_backends(yue2-vae-lifetime-test)
 # yue2-nar-graph.h also contains the optional Lua sampler dispatch. The probe
 # includes that header for parity fixtures even though it uses native midpoint.
 target_link_libraries(yue2-probe PRIVATE yyjson luajit)

@@ -179,6 +179,13 @@ because the store keeps 0-byte entries resident after use and their real VRAM wo
 make the YuE2 load run out of memory (#160, #195; the ONNX Runtime SA3 refiner was the
 case that hit it).
 
+The YuE2 VAE decoder cache belongs to its model. Unloading YuE2 or switching
+VAE variants destroys the decoder graph, scheduler compute buffers and derived
+weights before releasing the VAE weights or backend. A resident model reuses its
+cache between decodes. `yue2-vae-lifetime-test <models-dir>` checks both VAE
+variants, repeated unload/reload and cache reuse with real decoder allocations;
+set `GGML_BACKEND=CPU` or `GGML_BACKEND=CUDA0` to select the device.
+
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
 the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
 NAR stage can use Lua solvers and schedulers through `infer_method` and

@@ -606,7 +606,15 @@ static bool yue2_vae_run(const Yue2Model & m, Yue2VaeGraph * g, const float * sr
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-static Yue2VaeGraph g_yue2_vae;
+static Yue2VaeGraph * yue2_vae_decode_cache(Yue2Model & m) {
+    if (!m.vae_decode_cache) {
+        m.vae_decode_cache = std::shared_ptr<Yue2VaeGraph>(new Yue2VaeGraph{}, [](Yue2VaeGraph * g) {
+            yue2_vae_graph_free(g);
+            delete g;
+        });
+    }
+    return m.vae_decode_cache.get();
+}
 
 // Untiled ("full=True") decode: one graph over the whole song. `latent_ct`
 // is 64*T floats, channel-major (see file header — this is a TRANSPOSE of
@@ -625,10 +633,11 @@ static bool yue2_vae_decode(Yue2Model & m, const float * latent_ct, int64_t T, s
         }
         return false;
     }
-    if (!yue2_vae_prepare(m, &g_yue2_vae, err)) {
+    Yue2VaeGraph * g = yue2_vae_decode_cache(m);
+    if (!yue2_vae_prepare(m, g, err)) {
         return false;
     }
-    return yue2_vae_run(m, &g_yue2_vae, latent_ct, T, out_planar, out_samples, err);
+    return yue2_vae_run(m, g, latent_ct, T, out_planar, out_samples, err);
 }
 
 struct Yue2VaeTileBoundary {
@@ -652,7 +661,8 @@ static bool yue2_vae_decode_tiled(Yue2Model & m, const float * latent_ct, int64_
         }
         return false;
     }
-    if (!yue2_vae_prepare(m, &g_yue2_vae, err)) {
+    Yue2VaeGraph * g = yue2_vae_decode_cache(m);
+    if (!yue2_vae_prepare(m, g, err)) {
         return false;
     }
     if (halo_frames < (int64_t) m.vae_cfg.required_halo) {
@@ -676,7 +686,6 @@ static bool yue2_vae_decode_tiled(Yue2Model & m, const float * latent_ct, int64_
     std::vector<float> assembled;  // filled lazily once `total` is known
     int64_t             total = -1;
 
-    Yue2VaeGraph * g    = &g_yue2_vae;
     int64_t        tidx = 0;
     for (int64_t start = 0; start < T; start += core_frames, tidx++) {
         const int64_t end   = std::min(T, start + core_frames);
