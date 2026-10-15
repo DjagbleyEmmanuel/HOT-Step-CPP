@@ -57,6 +57,8 @@ every render in `_experiments/_LISTENING/<stamp>-release-gate/` with a score
 sheet: listen before you tag, because nothing mechanical judges quality.
 Details and flags: [tools/release-gate/README.md](../../tools/release-gate/README.md).
 
+Every assembler (the local `release/build-release.ps1` and each CI platform job) also runs `release/smoke-boot.mjs` on the freshly bundled `server.mjs`, right after esbuild and before anything is packaged. It boots the bundle from a throwaway root and profile on a free port and fails the build if it exits or never answers `/api/health` (60 s). A bundle that dies at startup cannot be zipped.
+
 ## 1. (Optional) Compile-test before releasing
 
 To verify CI compiles without cutting a real release, push a throwaway

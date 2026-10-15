@@ -213,6 +213,11 @@ Write-Host "  Running esbuild..."
 cmd /c "node `"$(Join-Path $ReleaseDir 'esbuild.config.mjs')`" 2>&1"
 if ($LASTEXITCODE -ne 0) { throw "esbuild bundle failed" }
 
+# Gate: the bundle must boot before anything is zipped (a bad bundle once shipped with exit 13).
+Write-Host "  Boot-testing server.mjs with the portable runtime..."
+& $NodeExe (Join-Path $ReleaseDir "smoke-boot.mjs") (Join-Path $StagingDir "server\server.mjs")
+if ($LASTEXITCODE -ne 0) { throw "Server bundle failed its boot test - not releasing" }
+
 Write-Host "  Server bundle complete" -ForegroundColor Green
 
 # ── Phase 4: Build UI ─────────────────────────────────────────────────

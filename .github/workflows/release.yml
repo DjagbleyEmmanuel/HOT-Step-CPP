@@ -559,6 +559,8 @@ jobs:
           if (-not (Test-Path "$serverOut/server.mjs")) {
             throw "esbuild failed: server.mjs not found in $serverOut"
           }
+          node release/smoke-boot.mjs "$serverOut/server.mjs"
+          if ($LASTEXITCODE -ne 0) { throw "server.mjs failed its boot test" }
           # Copy better-sqlite3 minimal package
           $bsqlSrc = "server/node_modules/better-sqlite3"
           $bsqlDst = "$serverOut/node_modules/better-sqlite3"
@@ -935,6 +937,7 @@ jobs:
           # Re-run esbuild into clean staging (staging was wiped above)
           node release/esbuild.config.mjs
           [ -f "$SRVOUT/server.mjs" ] || { echo "ERROR: server.mjs missing after esbuild"; exit 1; }
+          node release/smoke-boot.mjs "$SRVOUT/server.mjs" || { echo "ERROR: server.mjs failed its boot test"; exit 1; }
           # Copy better-sqlite3
           BSQL_SRC="server/node_modules/better-sqlite3"
           BSQL_DST="$SRVOUT/node_modules/better-sqlite3"
@@ -1437,6 +1440,7 @@ jobs:
           # Re-run esbuild into clean staging (staging was wiped above)
           node release/esbuild.config.mjs
           [ -f "$SRVOUT/server.mjs" ] || { echo "ERROR: server.mjs missing after esbuild"; exit 1; }
+          node release/smoke-boot.mjs "$SRVOUT/server.mjs" || { echo "ERROR: server.mjs failed its boot test"; exit 1; }
           # Copy better-sqlite3
           BSQL_SRC="server/node_modules/better-sqlite3"
           BSQL_DST="$SRVOUT/node_modules/better-sqlite3"
