@@ -13,6 +13,7 @@
 //   The user then takes the server's value or reapplies theirs over it.
 import type { ImportPreferenceItem, SettingsFamily } from './preferencesApi';
 import { hashImportValue, preferencesApi } from './preferencesApi';
+import { queriedSettingsApi } from '../queries/shell-queue/preferences';
 import { WorkflowRequestError } from './workflowApi';
 
 export type SettingStatus = 'loading' | 'idle' | 'saving' | 'conflict' | 'failed';
@@ -58,7 +59,8 @@ export class SettingDocument {
 
   constructor(opts: SettingDocumentOptions) {
     this.opts = opts;
-    this.api = opts.api ?? preferencesApi.settings;
+    // Query owns the reads unless a caller supplies its own adapter.
+    this.api = opts.api ?? queriedSettingsApi;
     this.base = readLocal(opts.localKey) ?? opts.fallback;
     this.snap = { value: this.base, status: 'loading', serverValue: null, error: null };
   }

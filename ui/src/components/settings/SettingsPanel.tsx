@@ -4,6 +4,7 @@
 // Environment settings read from / write to the server's .env file.
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Zap, Download, Tag, AlertTriangle, Loader2, Settings2,
   ChevronRight, Save, Scissors,
@@ -11,9 +12,10 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
-import { getStemStats, deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
+import { deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
+import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { DataFolderPanel } from './DataFolderPanel';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
@@ -79,13 +81,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const { token } = useAuth();
+  const queryClient = useQueryClient();
   const [coverSet, setCoverSetState] = useState<CoverSet>(getCoverSet);
   const [nukeConfirm, setNukeConfirm] = useState(false);
   // The release tag the server reports; a git checkout says "dev" (#185).
-  const [appVersion, setAppVersion] = useState('');
-  useEffect(() => {
-    fetch('/api/health').then(r => r.json()).then(d => setAppVersion(String(d?.version || ''))).catch(() => {});
-  }, []);
+  const appVersion = String(useQuery(healthOptions()).data?.version || '');
   const [nukeRunning, setNukeRunning] = useState(false);
   const [nukeResult, setNukeResult] = useState<string | null>(null);
   const [nukeLyricsConfirm, setNukeLyricsConfirm] = useState(false);
@@ -94,7 +94,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [nukeProfilesRunning, setNukeProfilesRunning] = useState(false);
 
   // Stem storage state
-  const [stemStats, setStemStats] = useState<StemStats | null>(null);
+  const stemStats = useQuery(stemStatsOptions()).data ?? null;
   const [stemClearConfirm, setStemClearConfirm] = useState(false);
   const [stemClearing, setStemClearing] = useState(false);
   const [stemClearError, setStemClearError] = useState<string | null>(null);
@@ -149,17 +149,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  // Load stem storage stats
-  useEffect(() => {
-    getStemStats().then(setStemStats).catch(() => setStemStats(null));
-  }, []);
-
   const handleClearStems = async () => {
     setStemClearing(true);
     setStemClearError(null);
     try {
       await deleteAllJobs();
-      setStemStats({ totalBytes: 0, jobCount: 0, stemCount: 0 });
+      queryClient.setQueryData<StemStats>(stemStatsOptions().queryKey, { totalBytes: 0, jobCount: 0, stemCount: 0 });
+      void queryClient.invalidateQueries({ queryKey: stemStatsOptions().queryKey });
       setStemClearConfirm(false);
     } catch (err: any) {
       console.error('[Settings] Clear stems failed:', err);
@@ -202,8 +198,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
       setEnvLoading(true);
       const [data, gpuData] = await Promise.all([
-        settingsApi.getEnv(),
-        settingsApi.getGpus().catch(() => ({ gpus: [] })),
+        queryClient.fetchQuery(envOptions()),
+        queryClient.fetchQuery(gpusOptions()).catch(() => ({ gpus: [] })),
       ]);
       setEnvValues(data.values);
       setEnvOriginal(data.values);
@@ -214,7 +210,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     } finally {
       setEnvLoading(false);
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => { loadEnvSettings(); }, [loadEnvSettings]);
 
@@ -254,6 +250,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
       const res = await settingsApi.updateEnv(diff);
       setEnvOriginal({ ...envValues });
+      void queryClient.invalidateQueries({ queryKey: envOptions().queryKey });
       if (res.restartRequired) {
         // Name them. "Some changes require a restart" left the user to work out
         // which value on screen is a lie about what the engine is running.

@@ -1,8 +1,10 @@
+import type { ReadOptions } from './httpClient';
 import type { AudioIntentItem, AudioQueueState, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
 
-async function call<T>(path: string, token: string, body?: unknown): Promise<T> {
+async function call<T>(path: string, token: string, body?: unknown, opts: ReadOptions = {}): Promise<T> {
   const response = await fetch(`/api/audio-queue${path}`, {
     method: body === undefined ? 'GET' : 'POST',
+    signal: opts.signal,
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -12,8 +14,8 @@ async function call<T>(path: string, token: string, body?: unknown): Promise<T> 
 }
 
 export const audioQueueApi = {
-  list: (token: string) => call<{ items: AudioIntentItem[] }>('/items', token),
-  state: (token: string) => call<AudioQueueState>('/state', token),
+  list: (token: string, opts?: ReadOptions) => call<{ items: AudioIntentItem[] }>('/items', token, undefined, opts),
+  state: (token: string, opts?: ReadOptions) => call<AudioQueueState>('/state', token, undefined, opts),
   enqueue: (token: string, idempotencyKey: string, request: Record<string, unknown>, meta?: Record<string, unknown>) =>
     call<{ item: AudioIntentItem; created: boolean }>('/items', token, { idempotencyKey, request, meta }),
   cancel: (token: string, id: string) => call<{ item: AudioIntentItem }>(`/items/${encodeURIComponent(id)}/cancel`, token, {}),

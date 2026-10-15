@@ -32,6 +32,8 @@ import {
   startPostProcessing, canPostProcess, revertPostProcessing, dismissRun, usePostProcessRun,
 } from '../../stores/postProcessStore';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
+import { queryClient } from '../../queries/client';
+import { invalidateSongs } from '../../queries/shell-queue/songs';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -255,6 +257,7 @@ async function retranscribe(song: Song): Promise<void> {
     const { retranscribeLyrics } = await import('../../services/api');
     const result = await retranscribeLyrics(song.id);
     console.log(`[Retranscribe] ${result.wordCount} words, ${result.lineCount} lines`);
+    void invalidateSongs(queryClient);
   } catch (err: any) {
     console.error('[Retranscribe] Failed:', err.message);
   }

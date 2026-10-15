@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { dataFolderApi, type DataFolderLocation, type DataFolderOperation, type DataFolderPreview } from '../../services/dataFolderApi';
 import { ParamLabel } from '../shared/ParamLabel';
+import { dataFolderOptions } from '../../queries/shell-queue/settings';
 import { StyledSelect } from '../shared/StyledSelect';
 
 export function DataFolderPanel() {
   const { t } = useTranslation();
-  const [location, setLocation] = useState<DataFolderLocation | null>(null);
+  const queryClient = useQueryClient();
+  const locationQuery = useQuery(dataFolderOptions());
+  const location: DataFolderLocation | null = locationQuery.data ?? null;
   const [kind, setKind] = useState<DataFolderOperation>('move');
   const [target, setTarget] = useState('');
   const [preview, setPreview] = useState<DataFolderPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const revision = useRef(0);
-  const reload = async () => setLocation(await dataFolderApi.location());
-  useEffect(() => { reload().catch(e => setError(e.message)); }, []);
+  const reload = () => queryClient.refetchQueries({ queryKey: dataFolderOptions().queryKey });
+  useEffect(() => { if (locationQuery.error) setError(locationQuery.error.message); }, [locationQuery.error]);
   const change = () => { revision.current++; setPreview(null); setError(''); };
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError('');

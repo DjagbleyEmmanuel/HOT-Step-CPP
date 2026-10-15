@@ -37,6 +37,9 @@
  */
 
 import { useBackendStore } from '../stores/backendStore';
+import { apiClient } from '../services/httpClient';
+import { queryClient } from '../queries/client';
+import { serverKey } from '../queries/keys';
 
 /** The registered id of the YuE2 backend (server/src/services/backends/yue2/index.ts). */
 export const YUE2_BACKEND_ID = 'yue2';
@@ -218,11 +221,15 @@ export async function fetchYue2CaptionSource(
   else return { datasetId: '', datasetName: '', tracks: [] };
 
   try {
-    const res = await fetch(`/api/training/yue2-dataset-captions?${params.toString()}`);
-    if (!res.ok) return { datasetId: '', datasetName: '', tracks: [] };
-    const data = await res.json() as {
-      datasetId?: string; datasetName?: string; tracks?: Yue2SourceTrack[];
-    };
+    // Query owns the read (fresh each time, concurrent asks share one
+    // request); a failure is caught here, never cached as an empty answer.
+    const data = await queryClient.fetchQuery({
+      queryKey: serverKey('shell-queue/yue2-captions', { filters: Object.fromEntries(params) }),
+      queryFn: ({ signal }) => apiClient.get<{
+        datasetId?: string; datasetName?: string; tracks?: Yue2SourceTrack[];
+      }>(`/training/yue2-dataset-captions?${params.toString()}`, { signal }),
+      staleTime: 0,
+    });
     const datasetId = data.datasetId || '';
     const datasetName = data.datasetName || '';
     const tracks = (data.tracks ?? []).filter(t => t && t.name && (t.styled || t.caption));

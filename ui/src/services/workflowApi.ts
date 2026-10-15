@@ -5,6 +5,7 @@
 // so it can send the bearer token. It resumes from the last event it saw
 // after a drop, and hands back a fresh snapshot (gap: true) when the server
 // no longer holds the events in between.
+import type { ReadOptions } from './httpClient';
 import type {
   WorkflowDocument, WorkflowEvent, WorkflowJob, WorkflowJobStatus, WorkflowReplay,
 } from '../../../server/src/contracts/workflow';
@@ -31,9 +32,10 @@ export class WorkflowRequestError extends Error {
 /** A JSON request with the bearer token that throws WorkflowRequestError,
  *  carrying the stale revision or unsupported-version reason. Shared by the
  *  typed-document domain clients, whose routes live outside /api/workflows. */
-export async function revisionedRequest<T>(token: string, url: string, method = 'GET', body?: unknown): Promise<T> {
+export async function revisionedRequest<T>(token: string, url: string, method = 'GET', body?: unknown, opts: ReadOptions = {}): Promise<T> {
   const response = await fetch(url, {
     method,
+    signal: opts.signal,
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -44,8 +46,8 @@ export async function revisionedRequest<T>(token: string, url: string, method = 
   return value as T;
 }
 
-const call = <T>(token: string, path: string, method = 'GET', body?: unknown): Promise<T> =>
-  revisionedRequest<T>(token, `/api/workflows${path}`, method, body);
+const call = <T>(token: string, path: string, method = 'GET', body?: unknown, opts?: ReadOptions): Promise<T> =>
+  revisionedRequest<T>(token, `/api/workflows${path}`, method, body, opts);
 
 const id = (v: string) => encodeURIComponent(v);
 const FINAL = new Set<WorkflowJobStatus>(['succeeded', 'failed', 'cancelled', 'interrupted']);
@@ -55,7 +57,8 @@ export const workflowApi = {
     call<{ job: WorkflowJob; created: boolean }>(token, '/jobs', 'POST', { kind, idempotencyKey, input }),
   list: (token: string, filter: { kind?: string; status?: WorkflowJobStatus } = {}) =>
     call<{ jobs: WorkflowJob[] }>(token, `/jobs?${new URLSearchParams(filter as Record<string, string>)}`),
-  get: (token: string, jobId: string, after = 0) => call<WorkflowReplay>(token, `/jobs/${id(jobId)}?after=${after}`),
+  get: (token: string, jobId: string, after = 0, opts?: ReadOptions) =>
+    call<WorkflowReplay>(token, `/jobs/${id(jobId)}?after=${after}`, 'GET', undefined, opts),
   cancel: (token: string, jobId: string) => call<{ job: WorkflowJob }>(token, `/jobs/${id(jobId)}/cancel`, 'POST', {}),
   retry: (token: string, jobId: string) => call<{ job: WorkflowJob }>(token, `/jobs/${id(jobId)}/retry`, 'POST', {}),
 

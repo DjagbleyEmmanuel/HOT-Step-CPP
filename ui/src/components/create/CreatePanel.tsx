@@ -5,6 +5,7 @@
 // per-song content and metadata.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Zap, ListPlus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -38,13 +39,18 @@ import {
   yue2TrackBpm,
   type Yue2CaptionSelection, type Yue2SourceTrack,
 } from '../../utils/yue2CaptionSource';
-import { listDatasets, type TrainingDatasetSummary } from '../../services/trainingApi';
+import { getTrainingWorker, type TrainingDatasetSummary } from '../../services/trainingApi';
+// training-data's worker-scoped dataset list, read through its options so
+// Create and Training Studio share one cache entry per worker.
+import { trainingQueries } from '../../queries/training-data/queries';
 import { extractCaptionTags } from '../../utils/captionTags';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { GenerationParams, Song } from '../../types';
 import type { CreateIntent } from '../../../../server/src/contracts/resolution';
+
+const NO_DATASETS: TrainingDatasetSummary[] = [];
 
 interface CreatePanelProps {
   onGenerate: (params: Partial<GenerationParams>, intent?: CreateIntent) => void;
@@ -152,7 +158,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     { datasetId: '', datasetName: '', tracks: [] });
   const [yue2SourcePending, setYue2SourcePending] = useState(false);
   const [yue2DatasetChoice, setYue2DatasetChoice] = useState<string>(() => readYue2CaptionDataset());
-  const [yue2DatasetOptions, setYue2DatasetOptions] = useState<TrainingDatasetSummary[]>([]);
+  const yue2DatasetsQuery = useQuery({ ...trainingQueries.datasets(getTrainingWorker()), enabled: yue2Mode });
+  const yue2DatasetOptions: TrainingDatasetSummary[] = yue2DatasetsQuery.data ?? NO_DATASETS;
   const [yue2Selection, setYue2Selection] = useState<Yue2CaptionSelection>({ mode: 'custom' });
   const yue2ResolveSeq = useRef(0);
   // The caption as it stands right now, for the effect below — which must not
@@ -172,13 +179,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // The catalogue for the Dataset dropdown — every dataset, not just the ones
   // with a YuE2 adapter, since the block is meant to be reachable even for a
   // base-model render whose dataset just happens to carry captions too.
-  useEffect(() => {
-    if (!yue2Mode) return;
-    let live = true;
-    void listDatasets().then(ds => { if (live) setYue2DatasetOptions(ds); }).catch(() => {});
-    return () => { live = false; };
-  }, [yue2Mode]);
-
   const resolveYue2Dataset = useCallback(async () => {
     const seq = ++yue2ResolveSeq.current;
     if (!yue2Mode) {

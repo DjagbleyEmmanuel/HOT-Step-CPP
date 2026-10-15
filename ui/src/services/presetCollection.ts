@@ -14,6 +14,7 @@
 //   a same-name collision waits for an explicit keep-both or replace.
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
 import { preferencesApi, type ImportPreferenceItem, type PresetFamily } from './preferencesApi';
+import { queriedPresetsApi } from '../queries/shell-queue/preferences';
 import { WorkflowRequestError } from './workflowApi';
 
 export type PresetEntryStatus = 'saved' | 'creating' | 'saving' | 'deleting' | 'failed' | 'conflict';
@@ -85,7 +86,8 @@ export class PresetCollection<B extends Record<string, unknown>> {
 
   constructor(opts: PresetCollectionOptions) {
     this.opts = opts;
-    this.api = opts.api ?? preferencesApi.presets;
+    // Query owns the reads unless a caller supplies its own adapter.
+    this.api = opts.api ?? queriedPresetsApi;
   }
 
   // ── Store protocol (useSyncExternalStore / zustand subscribe) ─────────────

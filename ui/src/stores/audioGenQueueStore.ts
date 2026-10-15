@@ -15,7 +15,7 @@
 
 import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import { lireekApi } from '../services/lireekApi';
-import { generateApi, songApi, healthApi, withIntentTimeout } from '../services/api';
+import { generateApi, healthApi, withIntentTimeout } from '../services/api';
 import { useGlobalParamsStore } from './globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
@@ -36,6 +36,11 @@ import { readMm3CaptionSelection } from '../utils/mm3CaptionSource';
 import { readYue2SongSelection, readYue2DatasetForLyricsSet } from '../utils/yue2CaptionSource';
 import { getUseLlmDuration } from '../utils/estimateDuration';
 import { audioQueueApi } from '../services/audioQueueApi';
+import { queryClient } from '../queries/client';
+import { ACTIVE_POLL_MS } from '../queries/contract';
+import {
+  readAudioQueue, readGenerationStatus, readSelectedPath, readSong, readSongIds, readWorkflowJob,
+} from '../queries/shell-queue/queue';
 import { workflowApi } from '../services/workflowApi';
 import { exportQueueBackup, restoreQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
 import { decideQueueOwnerAction } from './audioQueueOwnerDecision';
@@ -555,6 +560,32 @@ export async function retryQueueMigration(token: string): Promise<void> {
 
 let _serverProjectionTimer: ReturnType<typeof setInterval> | null = null;
 let _serverProjectionBusy = false;
+/** A refresh was asked for while one was in flight (an enqueue racing the
+ *  poll). The running read may predate the change, so read once more after
+ *  it rather than wait for the next tick, which an idle queue spaces out. */
+let _serverProjectionAgain = false;
+/** Ticks skipped since the last idle read. With nothing waiting or running
+ *  the projection reads every PROJECTION_IDLE_EVERY ticks (about 10 s), only
+ *  to notice work another tab or client queued. Any local command refreshes
+ *  at once, and active work brings back the 1.5 s cadence on the next tick. */
+let _projectionIdleTicks = 0;
+const PROJECTION_IDLE_EVERY = 7;
+
+/** True when no row is waiting or running, so polling has nothing to follow. */
+function _queueIdle(): boolean {
+  return !_state.items.some(item => item.status === 'pending' || item.status === 'loading-adapter' || item.status === 'generating');
+}
+
+/** Song ids already handed to the library (the `song-created` event or an
+ *  enqueue's onSongCreated) this page. The server projection and an
+ *  enqueue's own waiter can both see one render finish; the library, and
+ *  every effect hung off it, must hear about it once. */
+const _deliveredSongIds = new Set<string>();
+function _claimSongDelivery(songId: string): boolean {
+  if (_deliveredSongIds.has(songId)) return false;
+  _deliveredSongIds.add(songId);
+  return true;
+}
 
 function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): AudioQueueItem {
   const view = server.meta?.view as AudioQueueItem | undefined;
@@ -593,10 +624,11 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
 }
 
 async function refreshServerProjection(token: string): Promise<void> {
-  if (_serverProjectionBusy || queueOwner() !== 'server') return;
+  if (queueOwner() !== 'server') return;
+  if (_serverProjectionBusy) { _serverProjectionAgain = true; return; }
   _serverProjectionBusy = true;
   try {
-    const { items } = await audioQueueApi.list(token);
+    const { items } = await readAudioQueue(token);
     const previous = new Map(_state.items.map(item => [item.id, item]));
     // A studio's own row (addManualQueueItem) lives only in this tab until its
     // render reaches the server queue: a Cover workflow queued behind another
@@ -620,7 +652,7 @@ async function refreshServerProjection(token: string): Promise<void> {
       const item = _state.items.find(entry => entry.serverQueueId === server.id);
       if (!item) continue;
       try {
-        const job = await generateApi.status(server.jobId);
+        const job = await readGenerationStatus(server.jobId);
         item.progress = job.progress === undefined ? item.progress : Math.min(100, (job.progress > 1 ? job.progress / 100 : job.progress) * 100);
         item.stage = job.stage || item.stage;
         _captureMm3Stream(item, job);
@@ -637,14 +669,22 @@ async function refreshServerProjection(token: string): Promise<void> {
     _emit();
   } catch (err) {
     console.warn('[AudioQueue] Server projection refresh failed:', err);
-  } finally { _serverProjectionBusy = false; }
+  } finally {
+    _serverProjectionBusy = false;
+    if (_serverProjectionAgain) { _serverProjectionAgain = false; void refreshServerProjection(token); }
+  }
 }
 
 function _startServerProjection(token: string): void {
   _lastToken = token;
   if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
+  _projectionIdleTicks = 0;
   void refreshServerProjection(token);
-  _serverProjectionTimer = setInterval(() => { void refreshServerProjection(token); }, 1500);
+  _serverProjectionTimer = setInterval(() => {
+    if (_queueIdle() && ++_projectionIdleTicks < PROJECTION_IDLE_EVERY) return;
+    _projectionIdleTicks = 0;
+    void refreshServerProjection(token);
+  }, ACTIVE_POLL_MS);
 }
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
@@ -668,6 +708,10 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
   _serverProjectionTimer = null;
   _serverProjectionBusy = false;
+  _serverProjectionAgain = false;
+  _projectionIdleTicks = 0;
+  _deliveredSongIds.clear();
+  queryClient.clear();
   if (_persistTimer) clearTimeout(_persistTimer);
   _persistTimer = null;
 }
@@ -755,7 +799,7 @@ export async function rollbackAudioQueue(token: string): Promise<void> {
     if (JSON.stringify(await _idbGet(IDB_KEY)) !== JSON.stringify(plan.restored)) throw new Error('Reconciled browser queue failed readback');
     // Cancel what is still waiting on the server. An earlier, partial attempt
     // may have cancelled some already; those are now terminal and skipped.
-    const live = new Map((await audioQueueApi.list(token)).items.map(item => [item.id, item.status]));
+    const live = new Map((await readAudioQueue(token)).items.map(item => [item.id, item.status]));
     for (const id of plan.cancelIds) {
       const status = live.get(id);
       if (status === 'pending' || status === 'held') await audioQueueApi.cancel(token, id);
@@ -809,7 +853,7 @@ async function _hydrateItemFromSong(item: AudioQueueItem): Promise<boolean> {
   if (!songId || _hydratedSongIds.has(songId)) return false;
   _hydratedSongIds.add(songId);
   try {
-    const { song } = await songApi.get(songId);
+    const { song } = await readSong(songId);
     if (!song) return false;
     let dirty = false;
     const mastered = song.masteredAudioUrl || (song as any).mastered_audio_url;
@@ -1136,16 +1180,16 @@ function _followWorkflowRender(id: string, workflowJobId: string, token: string)
     if (!item || item.workflowJobId !== workflowJobId || ended(item.status)) return false;
     if (queueOwner() === 'server') return true; // the projection fills it in
     try {
-      const { job } = await workflowApi.get(token, workflowJobId);
+      const { job } = await readWorkflowJob(token, workflowJobId);
       const intentId = job.audioIntentIds[job.audioIntentIds.length - 1];
-      const intentItem = intentId ? (await audioQueueApi.list(token)).items.find(i => i.id === intentId) : undefined;
+      const intentItem = intentId ? (await readAudioQueue(token)).items.find(i => i.id === intentId) : undefined;
       // Real generation time is the server's (intentQueue's follow() loop),
       // same source projectServerItem reads — never this loop's own poll
       // cadence, which can miss a fast job entirely (F19).
       if (intentItem?.elapsedSeconds != null) item.elapsed = intentItem.elapsedSeconds;
       const jobId = intentItem?.jobId;
       if (!jobId) return true;
-      const status = await generateApi.status(jobId);
+      const status = await readGenerationStatus(jobId);
       if (ended(item.status)) return false;
       if (status.progress !== undefined) item.progress = Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100));
       if (status.stage) item.stage = status.stage;
@@ -1278,9 +1322,9 @@ function _notifyItemSongs(item: AudioQueueItem): void {
 
 async function _notifySongCreated(songId: string): Promise<void> {
   try {
-    const { song } = await songApi.get(songId);
+    const { song } = await readSong(songId);
     if (song) {
-      window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
+      if (_claimSongDelivery(songId)) window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
       // This IS the row the restore sweep would have asked for.
       _hydratedSongIds.add(songId);
       const item = _state.items.find(i => i.songId === songId);
@@ -1410,12 +1454,14 @@ export async function enqueueSimpleGen(
       void (async () => {
         for (;;) {
           await new Promise(resolve => setTimeout(resolve, 1500));
-          const server = (await audioQueueApi.list(token)).items.find(entry => entry.idempotencyKey === id);
+          // Rides the projection's reads: a list younger than one poll is reused.
+          const server = (await readAudioQueue(token, ACTIVE_POLL_MS)).items.find(entry => entry.idempotencyKey === id);
           if (!server || ['failed', 'cancelled', 'interrupted'].includes(server.status)) return;
           if (server.status !== 'succeeded') continue;
           const ids = (server.result?.songIds as string[] | undefined) ?? [];
           for (const songId of ids) {
-            try { onSongCreated((await songApi.get(songId)).song); } catch { /* projection still updates library */ }
+            if (!_claimSongDelivery(songId)) continue;
+            try { onSongCreated((await readSong(songId)).song); } catch { /* projection still updates library */ }
           }
           return;
         }
@@ -1440,7 +1486,7 @@ export async function enqueueSimpleGen(
     while (true) {
       await new Promise(r => setTimeout(r, 1500));
       try {
-        const status = await generateApi.status(res.jobId);
+        const status = await readGenerationStatus(res.jobId);
         const t = timer.tick(status.status);
         item.progress = status.progress !== undefined
           ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
@@ -1500,8 +1546,9 @@ export async function enqueueSimpleGen(
           // Fetch and deliver songs to the library
           if (onSongCreated) {
             for (const songId of songIds) {
+              if (!_claimSongDelivery(songId)) continue;
               try {
-                const { song } = await songApi.get(songId);
+                const { song } = await readSong(songId);
                 onSongCreated(song);
               } catch { /* non-fatal */ }
             }
@@ -1673,7 +1720,7 @@ async function _pruneDeletedSongs(token: string): Promise<void> {
   if (candidates.length === 0) return;
 
   try {
-    const { ids } = await songApi.listIds(token);
+    const { ids } = await readSongIds(token);
     const existing = new Set(ids);
     const candidateSet = new Set(candidates);
     const before = _state.items.length;
@@ -1927,7 +1974,7 @@ async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<bool
   console.log(`[AudioQueue] Attempting to reconnect to job ${jobId}...`);
 
   try {
-    const status = await generateApi.status(jobId);
+    const status = await readGenerationStatus(jobId);
     // Server knows about this job — reconnect!
     if (status.status === 'succeeded') {
       // Already done — just collect the results
@@ -2019,7 +2066,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     ? item.globalParams
     : useGlobalParamsStore.getState().getGlobalParams();
   const backendId = useBackendStore.getState().activeBackendId;
-  if ((await generateApi.selectedPath(token)) === 'resolved') {
+  if ((await readSelectedPath(token)) === 'resolved') {
     if (backendId === YUE2_BACKEND_ID) await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
     const appSettings = (() => {
       try { return JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>; }
@@ -2313,7 +2360,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
     // says "Cancelled by user" until the engine acknowledges (#140).
     if (item.status === 'failed') return;
     try {
-      const status = await generateApi.status(jobId);
+      const status = await readGenerationStatus(jobId);
       const t = timer.tick(status.status);
       item.progress = status.progress !== undefined
         ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))

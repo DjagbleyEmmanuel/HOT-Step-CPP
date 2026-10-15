@@ -1,3 +1,5 @@
+import type { ReadOptions } from './httpClient';
+
 export type DataFolderOperation = 'move' | 'repoint' | 'create' | 'import';
 export interface DataFolderPending {
   kind: DataFolderOperation | 'migrate';
@@ -25,8 +27,8 @@ export interface DataFolderPreview {
   freeBytes: number | null;
   blockers: string[];
 }
-async function request<T>(suffix = '', body?: unknown): Promise<T> {
-  const response = await fetch(`/api/settings/data-folder${suffix}`, body === undefined ? undefined : {
+async function request<T>(suffix = '', body?: unknown, opts: ReadOptions = {}): Promise<T> {
+  const response = await fetch(`/api/settings/data-folder${suffix}`, body === undefined ? { signal: opts.signal } : {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const data = await response.json();
@@ -34,7 +36,7 @@ async function request<T>(suffix = '', body?: unknown): Promise<T> {
   return data as T;
 }
 export const dataFolderApi = {
-  location: () => request<DataFolderLocation>(),
+  location: (opts?: ReadOptions) => request<DataFolderLocation>('', undefined, opts),
   preview: (kind: DataFolderOperation, target: string) => request<DataFolderPreview>('/preview', { kind, target }),
   schedule: (kind: DataFolderOperation, target: string) => request<{ pending: DataFolderPending; restartRequested: boolean }>('/schedule', { kind, target }),
   cancel: () => request<{ cancelled: boolean }>('/cancel', {}),

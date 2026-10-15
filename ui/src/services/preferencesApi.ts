@@ -12,14 +12,16 @@ import type {
 } from '../../../server/src/contracts/preferences';
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
 import { WorkflowRequestError } from './workflowApi';
+import type { ReadOptions } from './httpClient';
 
 export type { ImportPreferenceItem, ImportPreferenceResult };
 export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
 export type SettingsFamily = 'ai-continue-template' | 'storm-tuning';
 
-async function request<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
+async function request<T>(url: string, method = 'GET', body?: unknown, opts: ReadOptions = {}): Promise<T> {
   const res = await fetch(url, {
     method,
+    signal: opts.signal,
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -42,7 +44,8 @@ export const preferencesApi = {
     resolveYue2Joint: <T extends object>(preset: { name: string; version?: 1 | 2; settings: object }, currentForm: T, lyricTiming: boolean) =>
       request<{ result: Omit<ResolveYue2PresetResult, 'effectiveForm'> & { effectiveForm: T } }>(
         '/api/preferences/presets/yue2-joint/resolve', 'POST', { preset, currentForm, lyricTiming }),
-    list: <T>(family: PresetFamily) => request<{ documents: TypedDocument<T>[] }>(`/api/preferences/presets/${family}`),
+    list: <T>(family: PresetFamily, opts?: ReadOptions) =>
+      request<{ documents: TypedDocument<T>[] }>(`/api/preferences/presets/${family}`, 'GET', undefined, opts),
     create: <T>(family: PresetFamily, body: T) => request<{ document: TypedDocument<T> }>(`/api/preferences/presets/${family}`, 'POST', { body }),
     update: <T>(family: PresetFamily, docId: string, expectedRevision: number, body: T) =>
       request<{ document: TypedDocument<T> }>(`/api/preferences/presets/${family}/${id(docId)}`, 'PUT', { expectedRevision, body }),
@@ -52,7 +55,8 @@ export const preferencesApi = {
       request<{ results: ImportPreferenceResult[] }>(`/api/preferences/presets/${family}/import`, 'POST', { items }),
   },
   settings: {
-    get: <T>(family: SettingsFamily) => request<{ document: TypedDocument<T> | null }>(`/api/preferences/settings/${family}`),
+    get: <T>(family: SettingsFamily, opts?: ReadOptions) =>
+      request<{ document: TypedDocument<T> | null }>(`/api/preferences/settings/${family}`, 'GET', undefined, opts),
     upsert: <T>(family: SettingsFamily, expectedRevision: number | undefined, body: T) =>
       request<{ document: TypedDocument<T> }>(`/api/preferences/settings/${family}`, 'PUT', { expectedRevision, body }),
     import: (family: SettingsFamily, item: ImportPreferenceItem) =>

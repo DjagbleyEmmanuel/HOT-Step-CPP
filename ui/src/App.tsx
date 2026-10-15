@@ -12,7 +12,10 @@ import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
 import { usePersistedState } from './hooks/usePersistedState';
 import { useTheme } from './hooks/useTheme';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { songApi } from './services/api';
+import { bridgeEvents } from './queries/sseBridge';
+import { SONG_VIEWS, invalidateSongs, patchLibrary, patchSong, removeSongs, songOptions, songsOptions } from './queries/shell-queue/songs';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
 import { SongList } from './components/library/SongList';
@@ -22,7 +25,6 @@ import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinish
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
 import { AudioQueueMigrationBanner } from './components/shared/AudioQueueMigrationBanner';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
-import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { PostProcessDock } from './components/shared/PostProcessActivity';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
@@ -261,6 +263,9 @@ const ABMiniBar: React.FC = () => {
 };
 
 /** Extract the source tag from a song's generation params */
+/** A stable empty library, so memo and callback deps don't churn before load. */
+const NO_SONGS: Song[] = [];
+
 function getSongSource(song: Song): string {
   return (song.generationParams as any)?.source || (song.generation_params as any)?.source || 'create';
 }
@@ -268,9 +273,13 @@ function getSongSource(song: Song): string {
 /** Inner app content — must be rendered inside GlobalParamsProvider */
 const AppContent: React.FC = () => {
   const { t } = useTranslation();
-  const { token, isLoading } = useAuth();
+  // sessionEpoch re-renders this component when the auth-scoped keys move.
+  const { token, sessionEpoch, isLoading } = useAuth();
+  void sessionEpoch;
+  const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState(() => viewFromUrl());
-  const [songs, setSongs] = useState<Song[]>([]);
+  const songsQuery = useQuery({ ...songsOptions(token || ''), enabled: !!token });
+  const songs = songsQuery.data?.songs ?? NO_SONGS;
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
 
   // Resizable panel widths (persisted)
@@ -383,9 +392,7 @@ const AppContent: React.FC = () => {
             await new Promise(r => setTimeout(r, 5000));
             if (cancelled) return;
             try {
-              const songRes = await fetch(`/api/songs/${currentTrack.id}`);
-              const songData = await songRes.json();
-              const s = songData.song || songData;
+              const { song: s } = await queryClient.fetchQuery({ ...songOptions(currentTrack.id), staleTime: 0 });
               const ddUrl = s.disco_data_url || '';
               if (ddUrl) {
                 console.log(`[Disco] Disco data ready for ${currentTrack.id}: ${ddUrl}`);
@@ -400,7 +407,7 @@ const AppContent: React.FC = () => {
       })();
       return () => { cancelled = true; };
     }
-  }, [currentTrack?.id, currentTrack?.discoDataUrl, settings.discoKickExtract]);
+  }, [currentTrack?.id, currentTrack?.discoDataUrl, settings.discoKickExtract, queryClient]);
 
   // Wrap seek to also sync kick stem
   const handleSeek = useCallback((time: number) => {
@@ -511,11 +518,11 @@ const AppContent: React.FC = () => {
     }
   }, [discoMode, settings.discoKickExtract]);
 
-  // Song created callback — add to library + trigger sidebar refresh
-  const [songCreatedCount, setSongCreatedCount] = useState(0);
+  // Song created callback — show it in the library now, then refetch every
+  // song view (library, details, recent feeds).
   const handleSongCreated = useCallback((song: Song) => {
-    setSongs(prev => [song, ...prev.filter(s => s.id !== song.id)]);
-    setSongCreatedCount(c => c + 1);
+    patchLibrary(queryClient, prev => [song, ...prev.filter(s => s.id !== song.id)]);
+    void invalidateSongs(queryClient);
 
     // Auto-extract drum stems + disco data for disco mode if setting enabled
     if (settings.discoKickExtract && song.id && !song.disco_data_url) {
@@ -529,7 +536,7 @@ const AppContent: React.FC = () => {
         })
         .catch(err => console.warn('[Disco] Stem extraction failed:', err));
     }
-  }, [settings.discoKickExtract]);
+  }, [settings.discoKickExtract, queryClient]);
 
   // Play a song from the library (used by SongList, RightSidebar)
   const playSong = useCallback((song: Song) => {
@@ -630,21 +637,17 @@ const AppContent: React.FC = () => {
   }, [mm3StreamState.jobId, mm3StreamState.chunks, mm3StreamState.playing, streamingSong]);
 
 
-  // Load songs on mount
-  useEffect(() => {
-    if (!token) return;
-    songApi.list(token)
-      .then(({ songs }) => setSongs(songs))
-      .catch(err => console.error('[App] Failed to load songs:', err));
-  }, [token]);
-
-  // Refresh songs (kept for future use — e.g. after external DB changes)
-  // const refreshSongsList = useCallback(() => {
-  //   if (!token) return;
-  //   songApi.list(token)
-  //     .then(({ songs }) => setSongs(songs))
-  //     .catch(err => console.error('[App] Refresh failed:', err));
-  // }, [token]);
+  // The library is the shared songs query above. When the server comes back
+  // after a drop (the shared /api/logs stream reopens), refetch every song
+  // view: songs may have changed while this tab could not hear about it. The
+  // log lines themselves are not parsed here.
+  useEffect(() => bridgeEvents(queryClient, {
+    url: '/api/logs',
+    reconnect: true,
+    parse: () => undefined,
+    map: () => undefined,
+    reconnectInvalidate: SONG_VIEWS,
+  }), [queryClient]);
 
   // Global params from context
   const globalParams = useGlobalParams();
@@ -680,10 +683,10 @@ const AppContent: React.FC = () => {
   const handleDelete = useCallback(async (song: Song) => {
     if (!token) return;
     await songApi.delete(song.id, token);
-    setSongs(prev => prev.filter(s => s.id !== song.id));
+    void removeSongs(queryClient, [song.id]);
     if (selectedSong?.id === song.id) setSelectedSong(null);
     showToast(`Deleted "${song.title}"`, 'success');
-  }, [token, selectedSong]);
+  }, [token, selectedSong, queryClient]);
 
   // Handle bulk delete
   const handleBulkDelete = useCallback((ids: string[]) => {
@@ -698,7 +701,7 @@ const AppContent: React.FC = () => {
         try {
           await songApi.bulkDelete(ids, token);
           const idSet = new Set(ids);
-          setSongs(prev => prev.filter(s => !idSet.has(s.id)));
+          void removeSongs(queryClient, ids);
           if (selectedSong && idSet.has(selectedSong.id)) setSelectedSong(null);
           showToast(`Deleted ${ids.length} track${ids.length !== 1 ? 's' : ''}`, 'success');
         } catch (err: any) {
@@ -706,7 +709,7 @@ const AppContent: React.FC = () => {
         }
       },
     });
-  }, [token, selectedSong]);
+  }, [token, selectedSong, queryClient]);
 
   // Reuse handler
   const [reuseData, setReuseData] = useState<{ song: Song; timestamp: number } | null>(null);
@@ -728,18 +731,17 @@ const AppContent: React.FC = () => {
 
   // Song update handler
   const handleSongUpdate = useCallback((updatedSong: Song) => {
-    setSongs(prev => prev.map(s => s.id === updatedSong.id ? updatedSong : s));
+    patchLibrary(queryClient, prev => prev.map(s => s.id === updatedSong.id ? updatedSong : s));
+    void invalidateSongs(queryClient);
     if (selectedSong?.id === updatedSong.id) setSelectedSong(updatedSong);
-  }, [selectedSong]);
+  }, [selectedSong, queryClient]);
 
   // Listen for cover art completion events (fired by SongList context menu)
   useEffect(() => {
     const handler = (e: Event) => {
       const { songId, coverUrl } = (e as CustomEvent).detail;
       if (!songId || !coverUrl) return;
-      setSongs(prev => prev.map(s =>
-        s.id === songId ? { ...s, coverUrl, cover_url: coverUrl } : s
-      ));
+      patchSong(queryClient, songId, { coverUrl, cover_url: coverUrl });
       // Also update selected song if it's the one that got cover art
       setSelectedSong(prev =>
         prev?.id === songId ? { ...prev, coverUrl, cover_url: coverUrl } as Song : prev
@@ -747,7 +749,7 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('cover-art-updated', handler);
     return () => window.removeEventListener('cover-art-updated', handler);
-  }, []);
+  }, [queryClient]);
 
   // Listen for post-processing completion (fired by postProcessStore after a
   // "Run Post-Processing" finishes). The song now has a mastered file, which
@@ -756,11 +758,7 @@ const AppContent: React.FC = () => {
     const handler = (e: Event) => {
       const { songId, masteredAudioUrl } = (e as CustomEvent).detail;
       if (!songId || !masteredAudioUrl) return;
-      setSongs(prev => prev.map(s =>
-        s.id === songId
-          ? { ...s, masteredAudioUrl, mastered_audio_url: masteredAudioUrl }
-          : s
-      ));
+      patchSong(queryClient, songId, { masteredAudioUrl, mastered_audio_url: masteredAudioUrl });
       setSelectedSong(prev =>
         prev?.id === songId
           ? { ...prev, masteredAudioUrl, mastered_audio_url: masteredAudioUrl } as Song
@@ -769,16 +767,14 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('song-postprocessed', handler);
     return () => window.removeEventListener('song-postprocessed', handler);
-  }, []);
+  }, [queryClient]);
 
   // ...and the reverse, when a processed version is thrown away.
   useEffect(() => {
     const handler = (e: Event) => {
       const { songId } = (e as CustomEvent).detail || {};
       if (!songId) return;
-      setSongs(prev => prev.map(s =>
-        s.id === songId ? { ...s, masteredAudioUrl: '', mastered_audio_url: '' } : s
-      ));
+      patchSong(queryClient, songId, { masteredAudioUrl: '', mastered_audio_url: '' });
       setSelectedSong(prev =>
         prev?.id === songId
           ? { ...prev, masteredAudioUrl: '', mastered_audio_url: '' } as Song
@@ -787,7 +783,7 @@ const AppContent: React.FC = () => {
     };
     window.addEventListener('song-postprocess-reverted', handler);
     return () => window.removeEventListener('song-postprocess-reverted', handler);
-  }, []);
+  }, [queryClient]);
 
   // Listen for song-created events (fired by audioGenQueueStore on completion)
   // This covers Lyric Studio, Cover Studio, and resumed queue items.
@@ -855,13 +851,12 @@ const AppContent: React.FC = () => {
             settings={settings}
             onSettingsChange={setSettings}
             onNukeComplete={() => {
-              setSongs([]);
+              patchLibrary(queryClient, () => []);
+              void invalidateSongs(queryClient);
               setSelectedSong(null);
-              // Queue + Recent Songs live outside library state: the queue is a
-              // persisted singleton store, Recent Songs a module-level cache —
-              // both survive the nuke unless explicitly cleared.
+              // The queue is a persisted singleton store outside the song
+              // cache, so it survives the nuke unless explicitly cleared.
               clearFinishedFromAudioQueue();
-              clearRecentSongsCache();
             }}
           />
         </DiscoPulseWrapper>
@@ -1470,7 +1465,6 @@ const AppContent: React.FC = () => {
           <ActivitySidebar
             source={ACTIVITY_SOURCE[activeView]}
             showToast={showToast}
-            refreshKey={songCreatedCount}
             compact={activitySidebarWidth < 380}
             showTerminal
           />

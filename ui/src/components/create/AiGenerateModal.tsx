@@ -8,16 +8,18 @@
 // backend changes required.
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { X, Sparkles, Dice5, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import {
   runLlmInspire,
-  fetchInspireProviders,
   generateRandomSubject,
   type InspireProvider,
 } from '../../services/inspireApi';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
+// The studios area's provider list: Insta-Gen reads the same cache entry.
+import { inspireProvidersOptions } from '../../queries/studios/resources';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 
@@ -58,8 +60,10 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
   const { token } = useAuth();
 
   // ── Provider state ──
-  const [providers, setProviders] = useState<InspireProvider[]>([]);
-  const [providersLoading, setProvidersLoading] = useState(true);
+  const providersQuery = useQuery({ ...inspireProvidersOptions(), enabled: isOpen });
+  const providers = useMemo<InspireProvider[]>(
+    () => (providersQuery.data ?? []).filter(p => p.available), [providersQuery.data]);
+  const providersLoading = providersQuery.isPending;
   const [selectedProvider, setSelectedProvider] = useState(() => loadPersisted(STORAGE_KEY_PROVIDER));
   const [selectedModel, setSelectedModel] = useState(() => loadPersisted(STORAGE_KEY_MODEL));
 
@@ -74,26 +78,15 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
   const [error, setError] = useState('');
   const [randomLoading, setRandomLoading] = useState(false);
 
-  // ── Load providers on open ──
+  // ── Auto-select the first provider if none persisted or it is unavailable ──
   useEffect(() => {
-    if (!isOpen) return;
-    setProvidersLoading(true);
-    fetchInspireProviders()
-      .then(list => {
-        const available = list.filter(p => p.available);
-        setProviders(available);
-        // Auto-select first if none persisted or persisted one is unavailable
-        if (available.length > 0 && !available.find(p => p.id === selectedProvider)) {
-          const first = available[0];
-          setSelectedProvider(first.id);
-          setSelectedModel(first.default_model);
-          savePersisted(STORAGE_KEY_PROVIDER, first.id);
-          savePersisted(STORAGE_KEY_MODEL, first.default_model);
-        }
-      })
-      .catch(() => { /* leave empty */ })
-      .finally(() => setProvidersLoading(false));
-  }, [isOpen]);
+    if (!isOpen || providers.length === 0 || providers.find(p => p.id === selectedProvider)) return;
+    const first = providers[0];
+    setSelectedProvider(first.id);
+    setSelectedModel(first.default_model);
+    savePersisted(STORAGE_KEY_PROVIDER, first.id);
+    savePersisted(STORAGE_KEY_MODEL, first.default_model);
+  }, [isOpen, providers]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Current provider's models ──
   const currentProvider = useMemo(
