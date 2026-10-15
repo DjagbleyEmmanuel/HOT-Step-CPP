@@ -53,14 +53,16 @@ export function patchLibrary(client: QueryClient, edit: (songs: Song[]) => Song[
   client.setQueriesData<SongList>({ queryKey: resourceKey(SHARED.songs) }, old => old && { songs: edit(old.songs) });
 }
 
-/** Apply a field patch to one song wherever it is cached: library lists,
- *  its detail and the recent-songs feed. Rows carry both spellings, so the
- *  patch should too. */
-export function patchSong(client: QueryClient, id: string, patch: Record<string, unknown>): void {
+/** Apply a field patch to one song wherever this area caches it (library
+ *  lists, its detail, the recent-songs feed), then refetch every song view.
+ *  The refetch also cancels any older read still in flight, so it cannot
+ *  land over the patch. Rows carry both spellings, so the patch should too. */
+export function patchSong(client: QueryClient, id: string, patch: Record<string, unknown>): Promise<unknown> {
   const edit = <T extends { id: string }>(rows: T[]) => rows.map(s => (s.id === id ? { ...s, ...patch } : s));
   patchLibrary(client, edit);
   client.setQueriesData<{ song: Song }>({ queryKey: resourceKey(SHARED.song, {}, id) }, old => old && { song: { ...old.song, ...patch } });
   client.setQueriesData<{ songs: { id: string }[] }>({ queryKey: RECENT }, old => old && { ...old, songs: edit(old.songs) });
+  return invalidateSongs(client);
 }
 
 /** After a successful delete: drop the rows now, then refetch. */

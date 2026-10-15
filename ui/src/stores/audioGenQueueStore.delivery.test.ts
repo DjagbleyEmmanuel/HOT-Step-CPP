@@ -70,3 +70,57 @@ test('server-owned render: one submission, and the finished song is delivered on
     globalThis.fetch = saved;
   }
 });
+
+test('a failed song read by the enqueue waiter does not stop the projection delivering it', async () => {
+  localStorage.setItem(OWNER_KEY, 'server');
+  songCreatedEvents.length = 0;
+  const server: Record<string, unknown>[] = [];
+  let holdStatus = false;
+  let releaseStatus!: () => void;
+  const statusHeld = new Promise<void>(resolve => { releaseStatus = resolve; });
+  let songReads = 0;
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    const path = new URL(url, 'http://local').pathname;
+    if (path === '/api/audio-queue/items' && method === 'POST') {
+      const { idempotencyKey, request, meta } = JSON.parse(String(init!.body));
+      const item = { id: 'srv1', idempotencyKey, status: 'submitted', jobId: 'job1', request, meta, createdAt: 1 };
+      server.push(item);
+      return ok({ item, created: true });
+    }
+    if (path === '/api/audio-queue/items') return ok({ items: server });
+    if (path === '/api/generate/status/job1') {
+      // Holding the status read keeps the projection busy mid-refresh, so
+      // the enqueue waiter is the first to see the render finish.
+      if (holdStatus) await statusHeld;
+      return ok({ jobId: 'job1', status: 'running', progress: 50 });
+    }
+    if (path === '/api/songs/song1') {
+      // The first read fails (a 4xx is never retried); later reads work.
+      if (songReads++ === 0) return new Response(JSON.stringify({ error: 'busy' }), { status: 404 });
+      return ok({ song: { id: 'song1', title: 'Done', audio_url: '/audio/s.wav' } });
+    }
+    return new Response(JSON.stringify({ error: 'no route' }), { status: 404 });
+  }) as typeof fetch;
+  _resetAudioQueueForTests([]);
+  const delivered: string[] = [];
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  try {
+    await resumeQueue('t');
+    await enqueueSimpleGen({ title: 'Done' } as never, 't', song => delivered.push(song.id));
+    holdStatus = true;
+    await wait(2000);                       // the projection's next tick is now stuck on status
+    Object.assign(server[0], { status: 'succeeded', result: { songIds: ['song1'], audioUrls: ['/audio/s.wav'] } });
+    await wait(3500);                       // the waiter sees it and its song read fails
+    assert.equal(songReads, 1, 'the waiter read first and failed');
+    assert.deepEqual([...delivered, ...songCreatedEvents], []);
+    releaseStatus();                        // the projection catches up and delivers
+    await wait(2500);
+    assert.deepEqual([...delivered, ...songCreatedEvents], ['song1'], 'delivered once after recovery');
+  } finally {
+    releaseStatus();
+    _resetAudioQueueForTests();
+    globalThis.fetch = saved;
+  }
+});

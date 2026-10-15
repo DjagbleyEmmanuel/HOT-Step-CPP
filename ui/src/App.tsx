@@ -741,7 +741,7 @@ const AppContent: React.FC = () => {
     const handler = (e: Event) => {
       const { songId, coverUrl } = (e as CustomEvent).detail;
       if (!songId || !coverUrl) return;
-      patchSong(queryClient, songId, { coverUrl, cover_url: coverUrl });
+      void patchSong(queryClient, songId, { coverUrl, cover_url: coverUrl });
       // Also update selected song if it's the one that got cover art
       setSelectedSong(prev =>
         prev?.id === songId ? { ...prev, coverUrl, cover_url: coverUrl } as Song : prev
@@ -758,7 +758,7 @@ const AppContent: React.FC = () => {
     const handler = (e: Event) => {
       const { songId, masteredAudioUrl } = (e as CustomEvent).detail;
       if (!songId || !masteredAudioUrl) return;
-      patchSong(queryClient, songId, { masteredAudioUrl, mastered_audio_url: masteredAudioUrl });
+      void patchSong(queryClient, songId, { masteredAudioUrl, mastered_audio_url: masteredAudioUrl });
       setSelectedSong(prev =>
         prev?.id === songId
           ? { ...prev, masteredAudioUrl, mastered_audio_url: masteredAudioUrl } as Song
@@ -774,7 +774,7 @@ const AppContent: React.FC = () => {
     const handler = (e: Event) => {
       const { songId } = (e as CustomEvent).detail || {};
       if (!songId) return;
-      patchSong(queryClient, songId, { masteredAudioUrl: '', mastered_audio_url: '' });
+      void patchSong(queryClient, songId, { masteredAudioUrl: '', mastered_audio_url: '' });
       setSelectedSong(prev =>
         prev?.id === songId
           ? { ...prev, masteredAudioUrl: '', mastered_audio_url: '' } as Song

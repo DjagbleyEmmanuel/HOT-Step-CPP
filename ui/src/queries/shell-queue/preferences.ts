@@ -3,9 +3,10 @@
 // PresetCollection and SettingDocument keep unsaved edits, legacy imports
 // and revision conflicts; these adapters give Query their authoritative
 // reads. Reads are always fresh (staleTime 0): a refresh after a conflict
-// must see the current revision. Concurrent reads of one family share a
-// request, and every write invalidates the family it changed. Writes run
-// once, never retried.
+// must see the current revision, so an entry is dropped as soon as nothing
+// reads it (gcTime 0): it only exists to join concurrent reads of one family
+// into one request. Every write invalidates the family it changed. Writes
+// run once, never retried.
 
 import { queryOptions } from '@tanstack/react-query';
 import {
@@ -19,12 +20,14 @@ const presetsOptions = <T>(family: PresetFamily) => queryOptions({
   queryKey: serverKey('shell-queue/presets', { filters: { family } }),
   queryFn: ({ signal }) => preferencesApi.presets.list<T>(family, { signal }),
   staleTime: 0,
+  gcTime: 0,
 });
 
 const settingOptions = <T>(family: SettingsFamily) => queryOptions({
   queryKey: serverKey('shell-queue/setting', { filters: { family } }),
   queryFn: ({ signal }) => preferencesApi.settings.get<T>(family, { signal }),
   staleTime: 0,
+  gcTime: 0,
 });
 
 /** Run a write with no read of `key` in flight across it, then refetch. */

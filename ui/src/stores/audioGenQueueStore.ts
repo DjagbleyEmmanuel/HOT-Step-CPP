@@ -1460,8 +1460,12 @@ export async function enqueueSimpleGen(
           if (server.status !== 'succeeded') continue;
           const ids = (server.result?.songIds as string[] | undefined) ?? [];
           for (const songId of ids) {
-            if (!_claimSongDelivery(songId)) continue;
-            try { onSongCreated((await readSong(songId)).song); } catch { /* projection still updates library */ }
+            // Claim only once the row is in hand: a failed read leaves the
+            // song for the projection's own delivery.
+            try {
+              const { song } = await readSong(songId);
+              if (_claimSongDelivery(songId)) onSongCreated(song);
+            } catch { /* projection still updates library */ }
           }
           return;
         }
@@ -1546,10 +1550,9 @@ export async function enqueueSimpleGen(
           // Fetch and deliver songs to the library
           if (onSongCreated) {
             for (const songId of songIds) {
-              if (!_claimSongDelivery(songId)) continue;
               try {
                 const { song } = await readSong(songId);
-                onSongCreated(song);
+                if (_claimSongDelivery(songId)) onSongCreated(song);
               } catch { /* non-fatal */ }
             }
           }

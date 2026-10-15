@@ -23,7 +23,7 @@ studios' `studios/recent-songs` (invalidated only, never edited here).
 | Generation completes (`song-created`, queue `onSongCreated`), import | Prepend to the library, invalidate |
 | Rename, metadata edit, crop, retranscribe | Patch or invalidate |
 | Delete, bulk delete, Recent Songs delete | Drop rows, remove the detail, invalidate (cancels a list read already in flight) |
-| Cover art finished, post-processing done or reverted | Patch library, detail and recent feed |
+| Cover art finished, post-processing done or reverted | Patch library, detail and recent feed, then invalidate (cancels an older read in flight) |
 | Nuke generations | Empty the library, invalidate |
 | Server comes back (shared `/api/logs` stream reopens) | Invalidate every song view |
 
@@ -45,7 +45,9 @@ work another tab queued). A local command refreshes at once. A refresh asked
 for while one is in flight runs again straight after it, so an enqueue that
 races the poll still appears at once.
 
-A finished render's song is delivered to the library once per page. The
+A finished render's song is delivered to the library once per page. A
+path claims the delivery only after its song read succeeds, so a failed
+read leaves it to the other path. The
 projection's `song-created` event and the enqueue's own waiter used to both
 deliver a server-owned Create render, which ran `handleSongCreated` (and the
 disco stem extraction it starts) twice.
@@ -63,7 +65,7 @@ disco stem extraction it starts) twice.
 | File browser listing | `shell-queue/browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | `shell-queue/adapter-scan` | Fresh per click |
 | YuE2 caption source | `shell-queue/yue2-captions` | Fresh; failures caught by the caller, never cached as empty |
-| Presets and settings documents | `shell-queue/presets`, `shell-queue/setting` | Default adapters for `PresetCollection` and `SettingDocument`; fresh reads, writes invalidate |
+| Presets and settings documents | `shell-queue/presets`, `shell-queue/setting` | Default adapters for `PresetCollection` and `SettingDocument`; fresh reads, dropped when unread (gcTime 0), writes invalidate |
 
 Create reads two other areas' snapshots through their exported options, so
 both views share one cache entry: the YuE2 dataset list

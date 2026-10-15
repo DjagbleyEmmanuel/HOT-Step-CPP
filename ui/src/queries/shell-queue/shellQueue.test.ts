@@ -85,12 +85,38 @@ test('patchSong edits the library, the detail and the recent feed in place', () 
   c.setQueryData(songsOptions('t').queryKey, { songs: [song('a'), song('b')] as never[] });
   c.setQueryData(sharedKeys.song('a'), { song: song('a') });
   c.setQueryData(recentSongsOptions('t', 'create').queryKey, { songs: [song('a')] as never[] });
-  patchSong(c, 'a', { mastered_audio_url: '/audio/a_m.wav' });
+  void patchSong(c, 'a', { mastered_audio_url: '/audio/a_m.wav' });
   const lib = c.getQueryData<{ songs: Record<string, unknown>[] }>(songsOptions('t').queryKey)!;
   assert.equal(lib.songs[0].mastered_audio_url, '/audio/a_m.wav');
   assert.equal(lib.songs[1].mastered_audio_url, undefined);
   assert.equal(c.getQueryData<{ song: Record<string, unknown> }>(sharedKeys.song('a'))!.song.mastered_audio_url, '/audio/a_m.wav');
   assert.equal(c.getQueryData<{ songs: Record<string, unknown>[] }>(recentSongsOptions('t', 'create').queryKey)!.songs[0].mastered_audio_url, '/audio/a_m.wav');
+});
+
+test('a completion patch reconciles every song view; an older read in flight cannot undo it', async () => {
+  const c = client();
+  let release: (() => void) | undefined;
+  let served = 0;
+  globalThis.fetch = async () => {
+    // The first library read predates the post-processing pass and is slow.
+    if (served++ === 0) { await new Promise<void>(resolve => { release = resolve; }); return json({ songs: [song('a')] }); }
+    return json({ songs: [song('a', { mastered_audio_url: '/audio/a_m.wav' })] });
+  };
+  c.setQueryData(songsOptions('t').queryKey, { songs: [song('a')] as never[] });
+  const studios = serverKey('studios/recent-songs', { auth: true, filters: { limit: 50 } });
+  c.setQueryData(studios, { songs: [song('a')] });
+  const library = new QueryObserver(c, { ...songsOptions('t'), staleTime: 0 });
+  const stop = library.subscribe(() => {});
+  try {
+    while (!release) await tick();
+    const reconciled = patchSong(c, 'a', { mastered_audio_url: '/audio/a_m.wav' });
+    assert.equal(c.getQueryState(studios)?.isInvalidated, true, 'studios feed is reconciled too');
+    release!();
+    await reconciled;
+    await tick();
+    const row = library.getCurrentResult().data!.songs[0] as unknown as Record<string, unknown>;
+    assert.equal(row.mastered_audio_url, '/audio/a_m.wav');
+  } finally { stop(); }
 });
 
 test('queue status reads: concurrent loops share one request, and failures are not retried', async () => {
