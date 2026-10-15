@@ -62,6 +62,8 @@ inline bool reads_bf16(const ggml_tensor * reader, int idx) {
         case GGML_OP_ACC: case GGML_OP_OUT_PROD: case GGML_OP_CPY: case GGML_OP_CONT: case GGML_OP_DUP:
             return true;
         case GGML_OP_REPEAT: return idx == 0;
+        // The trainer's RoPE is plain NeoX, which CUDA reads from BF16.
+        case GGML_OP_ROPE: return idx == 0;
         case GGML_OP_SET: return idx == 1;
         case GGML_OP_UNARY:
             switch (ggml_get_unary_op(reader)) {
