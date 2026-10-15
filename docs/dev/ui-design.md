@@ -190,5 +190,5 @@ down.
 ## Verifying a change
 
 Type-check (`npx tsc -b` from `ui/`), then ask the user to look at the screen; never use a browser
-agent for visual checks ([AGENTS.md](../../AGENTS.md#ui--browser-verification)). Say which page and
+agent for visual checks. Say which page and
 which control.

@@ -1,6 +1,6 @@
 # Building from source
 
-Resolve runtime paths first using [Finding the data folder](../../AGENTS.md#finding-the-data-folder).
+Resolve runtime paths first using the [data folder configuration](config.md#dev-checkouts).
 `<data root>/...` paths below describe the managed layout; environment overrides
 can place individual children elsewhere.
 

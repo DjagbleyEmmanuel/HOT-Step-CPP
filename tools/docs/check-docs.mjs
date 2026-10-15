@@ -7,7 +7,7 @@
 //   1. generated tables are current (delegates to build-docs.mjs --check)
 //   2. every UI studio folder has a user page (STUDIO_PAGES below)
 //   3. every skill folder is listed in .claude/skills/README.md
-//   4. every relative link and image in a tracked .md resolves
+//   4. every relative link and image in a tracked .md resolves (gitignored targets warn)
 //   5. FEATURES.md links to every studio page
 //   6. no new native <select> / checkbox under ui/src (docs/dev/ui-design.md); the
 //      files that still have them are listed in ui-primitives-baseline.json, which
@@ -92,6 +92,11 @@ for (const file of [...tracked, ...untrackedNew]) {
     if (!target) continue;
     const resolved = path.resolve(path.dirname(path.join(ROOT, file)), target);
     if (fs.existsSync(resolved)) continue;
+    // Agent-only files can exist locally but be absent from CI and public checkouts.
+    if (spawnSync('git', ['check-ignore', '-q', '--', rel(resolved)], { cwd: ROOT }).status === 0) {
+      warn.push(`${file}: gitignored link target missing ${m[1]}`);
+      continue;
+    }
     // A missing screenshot that the page already flags with <!-- screenshot: needed --> is a
     // known gap, reported but not fatal, so CI does not block on images only a human can take.
     if (m[0].startsWith('!') && raw.includes('screenshot: needed')) warn.push(`${file}: screenshot missing ${m[1]}`);

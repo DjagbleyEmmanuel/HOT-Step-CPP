@@ -93,7 +93,7 @@ For contributors:
 - [Architecture](docs/dev/architecture.md): the engine, server and UI tiers, and how a request flows through them.
 - [Building from source](docs/dev/building.md): prerequisites, the dev loop, engine rebuild rules, packaging.
 - [Writing and maintaining the docs](docs/dev/docs-contributing.md): layout, page template, and the docs checker.
-- [AGENTS.md](AGENTS.md): project rules for coding agents.
+- `AGENTS.md`: local project rules for coding agents.
 
 ## Platform support
 

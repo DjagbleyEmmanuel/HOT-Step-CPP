@@ -76,4 +76,4 @@ In sidebar order.
 | [Writing style](dev/writing-style.md) | Rules for prose a human reads |
 | [UI design rules](dev/ui-design.md) | The shared controls every screen uses (dropdown, toggle, hover explanation), accent colours, and the check that enforces them |
 | [Skill library](../.claude/skills/README.md) | Procedures per maintenance domain for coding agents |
-| [AGENTS.md](../AGENTS.md) | Project rules for agents, including the documentation ownership table |
+| `AGENTS.md` (local only) | Project rules for agents, including the documentation ownership table |
