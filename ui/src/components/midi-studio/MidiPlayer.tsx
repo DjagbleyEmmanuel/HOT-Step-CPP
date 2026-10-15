@@ -1,3 +1,5 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { midiNotesOptions, midiJobsOptions } from '../../queries/studios/midi';
 // MidiPlayer.tsx — live piano roll + synced playback for MIDI Studio
 //
 // Plays the ORIGINAL track (audio element) and the transcribed MIDI (WebAudio
@@ -10,7 +12,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  getMidiNotes, getMidiStreamUrl, channelLabel,
+  getMidiStreamUrl, channelLabel,
 } from '../../services/midiStudioApi';
 import { MidiSynth, type PlayNote } from './midiSynth';
 
@@ -33,6 +35,8 @@ interface Props {
 
 export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => {
   const { t } = useTranslation();
+  const client = useQueryClient();
+  const notesQuery = useQuery({ ...midiNotesOptions(jobId), enabled: !live });
 
   // NOTE: parent must mount this component with a key unique per (job, mode)
   // — notes accumulate for the component's lifetime, no in-place reset.
@@ -117,6 +121,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
             setChunks({ done: ev.completed, total: ev.total });
             setFrontier(ev.completed * 5.0);
           } else if (ev.type === 'status') {
+            void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey });
+            void client.invalidateQueries({ queryKey: midiNotesOptions(jobId).queryKey });
             flush();
             setLiveDone(true);
             setFrontier(null);
@@ -124,24 +130,28 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
           }
         } catch { /* ignore malformed */ }
       };
-      es.onerror = () => { /* server restarts end the stream; job list will reconcile */ };
+      es.onopen = () => { void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey }); };
+      es.onerror = () => { void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey }); };
       return () => { window.clearInterval(flushTimer); es.close(); };
-    } else {
-      getMidiNotes(jobId).then(parsed => {
-        const label = new Map<number, string>();
-        for (const ch of parsed.channels) label.set(ch.channel, channelLabel(ch));
-        addNotes(parsed.notes.map(n => ({
-          pitch: n.pitch, start: n.start, duration: n.duration,
-          family: label.get(n.channel) || `ch${n.channel}`,
-        })));
-        setDuration(d => Math.max(d, parsed.durationSec));
-      }).catch(() => {});
-      return undefined;
     }
+    return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, live]);
 
   // ── audio element wiring (original track = master clock) ──
+  useEffect(() => {
+    const parsed = notesQuery.data;
+    if (live || !parsed) return;
+    const label = new Map(parsed.channels.map(ch => [ch.channel, channelLabel(ch)]));
+    const notes = parsed.notes.map(n => ({ pitch: n.pitch, start: n.start, duration: n.duration,
+      family: label.get(n.channel) || `ch${n.channel}` }));
+    notesRef.current = [];
+    synthRef.current?.setAllNotes([]);
+    setFamilies([]);
+    addNotes(notes);
+    setDuration(d => Math.max(d, parsed.durationSec));
+  }, [notesQuery.data, live, addNotes]);
+
   useEffect(() => {
     const el = audioRef.current;
     if (!el || !sourceAudioUrl) return;

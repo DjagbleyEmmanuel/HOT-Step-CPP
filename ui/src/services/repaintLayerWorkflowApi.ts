@@ -1,4 +1,4 @@
-import { followJob, workflowApi } from './workflowApi';
+import { followStudioJob as followJob, studioWorkflowApi as workflowApi } from '../queries/studios/workflows';
 export type SourceRef = { kind: 'asset' | 'song'; id: string; expectedUrl: string };
 interface CommonCapture { source: SourceRef; expectedBackend: string; engineParams: Record<string, unknown> }
 export interface RepaintCapture extends CommonCapture {
@@ -19,13 +19,14 @@ export async function submitStudioRender(token: string, kind: 'repaint-render' |
 }
 
 export async function followStudioRender(token: string, jobId: string,
-  onStage?: (stage: string) => void): Promise<RenderResult> {
+  onStage?: (stage: string) => void, opts?: { signal?: AbortSignal }): Promise<RenderResult> {
   const status = await followJob(token, jobId, {
     onEvent: event => {
       if (event.type === 'audio') onStage?.('Generating...');
       if (event.type === 'request') onStage?.('Queued...');
     },
-  });
+  }, opts);
+  if (opts?.signal?.aborted) throw new DOMException('Observation cancelled', 'AbortError');
   const { job } = await workflowApi.get(token, jobId);
   if (status !== 'succeeded' || !job.result) throw new Error(job.error || `Workflow ${status}`);
   return job.result as RenderResult;

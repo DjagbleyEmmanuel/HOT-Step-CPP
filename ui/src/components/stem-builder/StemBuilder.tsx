@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { modelsOptions } from '../../queries/studios/shared';
 // StemBuilder.tsx — Main Stem Builder orchestrator
 //
 // Lego mode UI: generates new instrument tracks layered over backing audio.
@@ -18,9 +20,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { modelApi } from '../../services/api';
 import { submitStudioRender, followStudioRender, type SourceRef } from '../../services/repaintLayerWorkflowApi';
-import { workflowApi } from '../../services/workflowApi';
+import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
 import { useBackendStore } from '../../stores/backendStore';
 import { TrackPicker, type TrackName } from './TrackPicker';
 import { LayerStack, type LayerInfo } from './LayerStack';
@@ -63,9 +64,10 @@ export const StemBuilder: React.FC = () => {
   const [caption, setCaption] = useState('');
 
   // ── Model selection ──
-  const [baseModels, setBaseModels] = useState<string[]>([]);
+  const modelsQuery = useQuery(modelsOptions());
+  const baseModels = getBaseModels(modelsQuery.data?.models.dit || []);
   const [buildModel, setBuildModel] = useState<string>('');
-  const [modelsLoading, setModelsLoading] = useState(true);
+  const modelsLoading = modelsQuery.isPending;
 
   // ── Generation state ──
   const [isGenerating, setIsGenerating] = useState(false);
@@ -101,9 +103,10 @@ export const StemBuilder: React.FC = () => {
     const id = localStorage.getItem('hs-sb-workflowJob');
     if (!id || !token) return;
     let mounted = true;
+    const observation = new AbortController();
     setIsGenerating(true);
     setActiveJobId(id);
-    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); })
+    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
       .then(async result => {
         if (!mounted) return;
         const { job } = await workflowApi.get(token, id);
@@ -120,10 +123,10 @@ export const StemBuilder: React.FC = () => {
         showToast('Layer complete!');
       }).catch(err => { if (mounted) showToast(`Layer ${String((err as Error).message)}`); })
       .finally(() => {
-        if (localStorage.getItem('hs-sb-workflowJob') === id) localStorage.removeItem('hs-sb-workflowJob');
+        if (mounted && localStorage.getItem('hs-sb-workflowJob') === id) localStorage.removeItem('hs-sb-workflowJob');
         if (mounted) { setIsGenerating(false); setActiveJobId(null); }
       });
-    return () => { mounted = false; };
+    return () => { mounted = false; observation.abort(); };
   }, [token]);
 
   // ── Persist model ──
@@ -133,18 +136,12 @@ export const StemBuilder: React.FC = () => {
 
   // ── Load base models on mount ──
   useEffect(() => {
-    modelApi.list()
-      .then(data => {
-        const base = getBaseModels(data.models.dit || []);
-        setBaseModels(base);
-        if (base.length > 0) {
-          const stored = localStorage.getItem('hs-sb-model');
-          setBuildModel(stored && base.includes(stored) ? stored : base[0]);
-        }
-      })
-      .catch(err => console.error('[StemBuilder] Failed to load models:', err))
-      .finally(() => setModelsLoading(false));
-  }, []);
+    const base = getBaseModels(modelsQuery.data?.models.dit || []);
+    if (base.length && !buildModel) {
+      const stored = localStorage.getItem('hs-sb-model');
+      setBuildModel(stored && base.includes(stored) ? stored : base[0]);
+    }
+  }, [modelsQuery.data, buildModel]);
 
   // ── File upload ──
   const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,6 +300,7 @@ export const StemBuilder: React.FC = () => {
   return (
     <BackendCapabilityGate feature="stems">
     <div className="flex flex-col w-full h-full overflow-hidden">
+      {(modelsQuery.error) && <div role="alert" className="text-sm text-red-500">{(modelsQuery.error)?.message}</div>}
       {/* Toast */}
       {toast && (
         <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">

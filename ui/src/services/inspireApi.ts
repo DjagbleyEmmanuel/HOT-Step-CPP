@@ -1,3 +1,6 @@
+import { serverKey } from '../queries/keys';
+import { waitForSnapshot } from '../queries/studios/wait';
+import { apiClient, type ReadOptions } from './httpClient';
 // inspireApi.ts — Frontend API client for the inspire endpoint
 //
 // Provides submit + poll interface for the Insta-Gen inspire flow.
@@ -62,15 +65,8 @@ export async function submitInspire(params: InspireParams, token?: string): Prom
 }
 
 /** Poll inspire job status */
-export async function pollInspireStatus(jobId: string, token?: string): Promise<InspireJobStatus> {
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/status/${jobId}`, { headers });
-  if (!res.ok) {
-    throw new Error(`Poll failed (${res.status})`);
-  }
-  return res.json();
+export async function pollInspireStatus(jobId: string, token?: string, opts?: ReadOptions): Promise<InspireJobStatus> {
+  return apiClient.get<InspireJobStatus>(`${BASE}/status/${jobId}`.replace('/api', ''), { ...opts, token });
 }
 
 /** Cancel an inspire job */
@@ -92,29 +88,12 @@ export async function runInspireAndWait(
 ): Promise<InspireResult> {
   const jobId = await submitInspire(params, token);
 
-  const POLL_MS = 800;
-  const MAX_POLLS = 300; // ~4 minutes
-
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise(r => setTimeout(r, POLL_MS));
-    const status = await pollInspireStatus(jobId, token);
-
-    if (onProgress && status.stage && status.progress !== undefined) {
-      onProgress(status.stage, status.progress);
-    }
-
-    if (status.status === 'succeeded' && status.result) {
-      return status.result;
-    }
-    if (status.status === 'failed') {
-      throw new Error(status.error || 'Inspire failed');
-    }
-    if (status.status === 'cancelled') {
-      throw new Error('Inspire was cancelled');
-    }
-  }
-
-  throw new Error('Inspire timed out');
+  const status = await waitForSnapshot(serverKey('studios/inspire-job', { auth: !!token, id: jobId }),
+    signal => pollInspireStatus(jobId, token, { signal }),
+    job => job.status === 'pending' || job.status === 'running',
+    job => { if (job.stage && job.progress !== undefined) onProgress?.(job.stage, job.progress); }, { timeoutMs: 240_000 });
+  if (status.status === 'succeeded' && status.result) return status.result;
+  throw new Error(status.error || `Inspire ${status.status}`);
 }
 
 // ── External LLM lyric generation ──────────────────────────────────
@@ -172,10 +151,8 @@ export async function runLlmInspire(
 }
 
 /** Fetch available LLM providers for the Insta-Gen provider dropdown */
-export async function fetchInspireProviders(): Promise<InspireProvider[]> {
-  const res = await fetch(`${BASE}/llm/providers`);
-  if (!res.ok) throw new Error(`Failed to fetch providers: ${res.statusText}`);
-  return res.json();
+export async function fetchInspireProviders(opts?: ReadOptions): Promise<InspireProvider[]> {
+  return apiClient.get<InspireProvider[]>(`${BASE}/llm/providers`.replace('/api', ''), opts);
 }
 
 /** Ask the LLM to generate a random song subject for the given genres */
@@ -210,10 +187,8 @@ export interface InstagenPromptData {
 }
 
 /** Fetch the current InstaGen system prompt (custom + default) */
-export async function fetchInstagenPrompt(): Promise<InstagenPromptData> {
-  const res = await fetch(`${BASE}/llm/prompt`);
-  if (!res.ok) throw new Error(`Failed to fetch prompt: ${res.statusText}`);
-  return res.json();
+export async function fetchInstagenPrompt(opts?: ReadOptions): Promise<InstagenPromptData> {
+  return apiClient.get<InstagenPromptData>(`${BASE}/llm/prompt`.replace('/api', ''), opts);
 }
 
 /** Save a custom InstaGen system prompt */
@@ -240,7 +215,7 @@ export async function resetInstagenPrompt(): Promise<void> {
 
 // Durable Insta-Gen workflows. The preview document is the authority for
 // edits; approval names its exact revision.
-import { workflowApi, followJob } from './workflowApi';
+import { studioWorkflowApi as workflowApi, followStudioJob as followJob } from '../queries/studios/workflows';
 export { followJob };
 
 export interface InstaWorkflowInput {

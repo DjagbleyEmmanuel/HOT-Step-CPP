@@ -1,3 +1,6 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { inspireProvidersOptions, inspirePromptOptions } from '../../queries/studios/resources';
+import { sharedKeys } from '../../queries/keys';
 // InstaGenPanel.tsx — Main Insta-Gen studio container
 //
 // Genre-first music generation with three lyric modes:
@@ -16,15 +19,12 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { GenreSelector } from './GenreSelector';
 import { InspirePreview } from './InspirePreview';
 import {
-  fetchInspireProviders,
-  fetchInstagenPrompt,
   saveInstagenPrompt,
   resetInstagenPrompt,
   instaWorkflowApi,
   followJob,
   type InstaWorkflowInput,
   type InspireResult,
-  type InspireProvider,
 } from '../../services/inspireApi';
 import { songApi } from '../../services/api';
 import {
@@ -65,7 +65,9 @@ interface InstaGenPanelProps {
 
 export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, activeJobCount: _activeJobCount, onNavigate }) => {
   const { t } = useTranslation();
-  const { token } = useAuth();
+  const { token, sessionEpoch } = useAuth();
+  void sessionEpoch;
+  const client = useQueryClient();
   const globalParams = useGlobalParams();
 
   // ── Persisted state ──
@@ -87,8 +89,8 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   const [inspireProgress, setInspireProgress] = useState('');
   const [activePreviewJob, setActivePreviewJob] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [providers, setProviders] = useState<InspireProvider[]>([]);
-  const [providersLoaded, setProvidersLoaded] = useState(false);
+  const providersQuery = useQuery(inspireProvidersOptions());
+  const providers = (providersQuery.data ?? []).filter(provider => provider.available);
   const [randomSubject, setRandomSubject] = useState(false);
 
   // ── Prompt editor state ──
@@ -102,22 +104,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
 
   // ── Load LLM providers on mount ──
   useEffect(() => {
-    if (providersLoaded) return;
-    fetchInspireProviders()
-      .then((list) => {
-        setProviders(list.filter(p => p.available));
-        setProvidersLoaded(true);
-        // Auto-select first available provider if none persisted
-        if (!selectedProvider && list.length > 0) {
-          const first = list.find(p => p.available);
-          if (first) {
-            setSelectedProvider(first.id);
-            setSelectedModel(first.default_model);
-          }
-        }
-      })
-      .catch(() => setProvidersLoaded(true));
-  }, [providersLoaded, selectedProvider, setSelectedProvider, setSelectedModel]);
+    if (!selectedProvider) {
+      const first = providersQuery.data?.find(provider => provider.available);
+      if (first) { setSelectedProvider(first.id); setSelectedModel(first.default_model); }
+    }
+  }, [providersQuery.data, selectedProvider, setSelectedProvider, setSelectedModel]);
 
   // ── Current provider info ──
   const currentProvider = useMemo(
@@ -213,7 +204,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         audioDuration: audio.duration,
       });
       if (songId) {
-        try { const { song } = await songApi.get(songId); onSongCreated?.(song); } catch { /* library refresh still runs */ }
+        try { const { song } = await client.fetchQuery({ queryKey: sharedKeys.song(songId), queryFn: ({ signal }) => songApi.get(songId, { signal }) }); onSongCreated?.(song); } catch { /* library refresh still runs */ }
       }
     } catch (err: any) {
       failManualQueueItem(queueId, err.message || 'Generation failed');
@@ -333,6 +324,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
 
   return (
     <div className="h-full flex flex-col bg-white dark:bg-suno overflow-y-auto">
+      {(providersQuery.error) && <div role="alert" className="text-sm text-red-500">{(providersQuery.error)?.message}</div>}
 
       {/* Header — matches CreatePanel */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5 flex-shrink-0">
@@ -385,7 +377,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
               onClick={() => {
                 if (!promptEditorOpen && !promptLoaded) {
                   // Load prompt on first open
-                  fetchInstagenPrompt().then(data => {
+                  client.fetchQuery(inspirePromptOptions()).then(data => {
                     setPromptDefault(data.default_content);
                     setPromptContent(data.custom || data.default_content);
                     setPromptIsCustom(!!data.custom);
@@ -429,6 +421,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
                           if (!confirm('Reset to default prompt? Your customizations will be lost.')) return;
                           try {
                             await resetInstagenPrompt();
+                            await client.invalidateQueries({ queryKey: inspirePromptOptions().queryKey });
                             setPromptContent(promptDefault);
                             setPromptIsCustom(false);
                             setPromptDirty(false);
@@ -446,6 +439,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
                       setPromptSaving(true);
                       try {
                         await saveInstagenPrompt(promptContent);
+                        await client.invalidateQueries({ queryKey: inspirePromptOptions().queryKey });
                         setPromptDirty(false);
                         setPromptIsCustom(true);
                       } catch { /* ignore */ }

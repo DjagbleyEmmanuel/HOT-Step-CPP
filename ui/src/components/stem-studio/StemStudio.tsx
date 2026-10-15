@@ -1,3 +1,6 @@
+import { extractResultOptions } from '../../queries/studios/resources';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { modelsOptions } from '../../queries/studios/shared';
 // StemStudio.tsx — Main Stem Studio orchestrator
 //
 // Composes: SourceSelector, TrackSelector, StemMixer, RecentExtractions
@@ -12,9 +15,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Info, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { modelApi } from '../../services/api';
 import {
-  submitExtraction, submitSupersep, waitForExtraction, getExtractResult,
+  submitExtraction, submitSupersep, waitForExtraction,
   getStemUrl, getDownloadAllUrl, TRACK_CATEGORIES,
   type ExtractProgress, type ExtractJobResult,
 } from '../../services/stemStudioApi';
@@ -41,6 +43,8 @@ function getBaseModels(ditModels: string[]): string[] {
 
 export const StemStudio: React.FC = () => {
   const { t } = useTranslation();
+  const client = useQueryClient();
+  const selectedResult = React.useRef<string | null>(null);
   // Source audio (persisted across sessions for testing convenience)
   const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => localStorage.getItem('hs-stem-sourceUrl') || '');
   const [sourceFileName, _setSourceFileName] = useState(() => localStorage.getItem('hs-stem-sourceFile') || '');
@@ -62,9 +66,10 @@ export const StemStudio: React.FC = () => {
   const [lyrics, setLyrics] = useState('');
 
   // Model selection — extract requires base/SFT model
-  const [baseModels, setBaseModels] = useState<string[]>([]);
+  const modelsQuery = useQuery(modelsOptions());
+  const baseModels = getBaseModels(modelsQuery.data?.models.dit || []);
   const [extractModel, setExtractModel] = useState<string>('');
-  const [modelsLoading, setModelsLoading] = useState(true);
+  const modelsLoading = modelsQuery.isPending;
 
   // Extraction state
   const [isExtracting, setIsExtracting] = useState(false);
@@ -84,18 +89,12 @@ export const StemStudio: React.FC = () => {
 
   // Fetch available base models on mount — restore persisted selection
   useEffect(() => {
-    modelApi.list()
-      .then(data => {
-        const base = getBaseModels(data.models.dit || []);
-        setBaseModels(base);
-        if (base.length > 0) {
-          const stored = localStorage.getItem('hs-stem-extractModel');
-          setExtractModel(stored && base.includes(stored) ? stored : base[0]);
-        }
-      })
-      .catch(err => console.error('[StemStudio] Failed to load models:', err))
-      .finally(() => setModelsLoading(false));
-  }, []);
+    const base = getBaseModels(modelsQuery.data?.models.dit || []);
+    if (base.length && !extractModel) {
+      const stored = localStorage.getItem('hs-stem-extractModel');
+      setExtractModel(stored && base.includes(stored) ? stored : base[0]);
+    }
+  }, [modelsQuery.data, extractModel]);
 
   // Persist extract model selection
   useEffect(() => {
@@ -221,12 +220,13 @@ export const StemStudio: React.FC = () => {
   const handleSelectPastJob = useCallback(async (jobId: string) => {
     try {
       setActiveJobId(jobId);
-      const result = await getExtractResult(jobId);
-      loadResultIntoMixer(jobId, result);
+      selectedResult.current = jobId;
+      const result = await client.fetchQuery(extractResultOptions(jobId));
+      if (selectedResult.current === jobId) loadResultIntoMixer(jobId, result);
     } catch (err) {
       console.error('Failed to load past job:', err);
     }
-  }, [loadResultIntoMixer]);
+  }, [loadResultIntoMixer, client]);
 
   const handleDownloadStem = useCallback((stem: MixerStemInfo) => {
     if (!activeJobId) return;
@@ -267,6 +267,7 @@ export const StemStudio: React.FC = () => {
 
   return (
     <div className="flex flex-col w-full h-full overflow-hidden">
+      {(modelsQuery.error) && <div role="alert" className="text-sm text-red-500">{(modelsQuery.error)?.message}</div>}
 
       {/* Main workspace */}
       <div className="flex-1 flex overflow-hidden">

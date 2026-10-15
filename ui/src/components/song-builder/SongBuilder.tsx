@@ -1,3 +1,6 @@
+import { getSessionEpoch } from '../../queries/keys';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { projectsOptions, projectOptions } from '../../queries/studios/resources';
 // SongBuilder.tsx — Udio-style section-by-section song assembly
 //
 // Build a song one section at a time. Each section generates N candidate
@@ -55,7 +58,9 @@ const BAR_PRESETS = [2, 4, 6, 8, 12, 16, 24, 32];
 // ── Main studio ──────────────────────────────────────────────────────────────
 
 export const SongBuilder: React.FC = () => {
-  const { token } = useAuth();
+  const { token, sessionEpoch } = useAuth();
+  void sessionEpoch;
+  const client = useQueryClient();
   const gp = useGlobalParamsStore();
 
   // Previews route through the global play bar (full scrub/transport for free).
@@ -74,9 +79,12 @@ export const SongBuilder: React.FC = () => {
   }, [playingTrackId]);
 
   // Project list / current project
-  const [projects, setProjects] = useState<BuilderProject[]>([]);
-  const [project, setProject] = useState<BuilderProject | null>(null);
-  const [sections, setSections] = useState<BuilderSection[]>([]);
+  const projectsQuery = useQuery({ ...projectsOptions(token || ''), enabled: !!token });
+  const projects = projectsQuery.data?.projects ?? [];
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const projectQuery = useQuery({ ...projectOptions(token || '', activeProjectId || ''), enabled: !!token && !!activeProjectId });
+  const project = projectQuery.data?.project ?? null;
+  const sections = projectQuery.data?.sections ?? [];
   const [, setLoading] = useState(false);
   const [toast, setToast] = useState('');
 
@@ -126,6 +134,26 @@ export const SongBuilder: React.FC = () => {
   // right after opening from the list) by the time they run.
   const projectIdRef = useRef<string | null>(null);
 
+  // Project snapshots stay in Query. Local fields above are composer drafts.
+  const setProjects = (update: (previous: BuilderProject[]) => BuilderProject[]) => {
+    if (getSessionEpoch() !== sessionEpoch) return;
+    client.setQueryData(projectsOptions(token || '').queryKey,
+      (previous: { projects: BuilderProject[] } | undefined) => ({ projects: update(previous?.projects ?? []) }));
+  };
+  const setProject = (value: BuilderProject | null | ((previous: BuilderProject | null) => BuilderProject | null)) => {
+    if (getSessionEpoch() !== sessionEpoch) return;
+    const next = typeof value === 'function' ? value(project) : value;
+    setActiveProjectId(next?.id ?? null);
+    if (next) client.setQueryData(projectOptions(token || '', next.id).queryKey,
+      (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => ({ project: next, sections: previous?.sections ?? [] }));
+  };
+  const setSections = (next: BuilderSection[]) => {
+    if (getSessionEpoch() !== sessionEpoch) return;
+    const id = projectIdRef.current;
+    if (id) client.setQueryData(projectOptions(token || '', id).queryKey,
+      (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => previous && ({ ...previous, sections: next }));
+  };
+
   // Per-section lyric editing (correct the sheet fed forward when the DiT alters lines)
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editLyrics, setEditLyrics] = useState('');
@@ -166,12 +194,6 @@ export const SongBuilder: React.FC = () => {
     [chosenSections],
   );
 
-  // ── Load project list on mount ──
-  useEffect(() => {
-    if (!token) return;
-    builderApi.listProjects(token).then(r => setProjects(r.projects)).catch(() => {});
-  }, [token]);
-
   // When no head exists, the only valid direction is 'first'
   useEffect(() => {
     if (!headSong && direction !== 'first') setDirection('first');
@@ -182,7 +204,11 @@ export const SongBuilder: React.FC = () => {
   // it whenever either changes so a stale point can't leak into a new extension.
   useEffect(() => { setClipPoint(null); setSeedSectionId(null); }, [head?.id, direction]);
 
-  const loadView = useCallback((projectId: string) => builderApi.getProject(projectId, token!), [token]);
+  const loadView = useCallback(async (projectId: string) => {
+    const options = projectOptions(token!, projectId);
+    await client.cancelQueries({ queryKey: options.queryKey });
+    return client.fetchQuery(options);
+  }, [token, client]);
 
   // Follow a section job: each variant event reloads the project, so its
   // candidates appear as they land.
@@ -219,8 +245,10 @@ export const SongBuilder: React.FC = () => {
   const openProject = useCallback(async (id: string) => {
     if (!token) return;
     setLoading(true);
+    projectIdRef.current = id;
     try {
-      const { project: p, sections: secs } = await builderApi.getProject(id, token);
+      const { project: p, sections: secs } = await loadView(id);
+      if (projectIdRef.current !== id) return;
       followRef.current?.abort(); followRef.current = null;
       projectIdRef.current = p.id;
       setProject(p); setSections(secs); setNewStyle(p.style);
@@ -244,6 +272,7 @@ export const SongBuilder: React.FC = () => {
       projectIdRef.current = p.id;
       setProject(p); setSections([]); setNewTitle('');
       setProjects(prev => [p, ...prev]);
+      void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
     } catch (e: any) { showToast(`Create failed: ${e.message}`); }
   }, [token, newTitle, newStyle, newBpm, newKey, newTimeSig]);
 
@@ -258,15 +287,32 @@ export const SongBuilder: React.FC = () => {
     setProject(prev => prev ? { ...prev, ...local } : prev);
     try {
       const { project: saved } = await builderApi.updateProject(project.id, patch, token);
-      setProject(prev => prev ? { ...prev, revision: saved.revision } : prev);
+      if (getSessionEpoch() !== sessionEpoch) return;
+      client.setQueryData(projectOptions(token, saved.id).queryKey,
+        (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => previous && ({ ...previous, project: saved }));
+      void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
     } catch { /* non-fatal */ }
   }, [project, token]);
+
+  const deleteProject = async (id: string) => {
+    if (!token) return;
+    const listKey = projectsOptions(token).queryKey;
+    const detailKey = projectOptions(token, id).queryKey;
+    try {
+      await Promise.all([client.cancelQueries({ queryKey: listKey }), client.cancelQueries({ queryKey: detailKey })]);
+      await builderApi.deleteProject(id, token);
+      await Promise.all([client.cancelQueries({ queryKey: listKey }), client.cancelQueries({ queryKey: detailKey })]);
+      client.setQueryData(listKey, (previous: { projects: BuilderProject[] } | undefined) => previous && ({ projects: previous.projects.filter(project => project.id !== id) }));
+      client.removeQueries({ queryKey: detailKey });
+    } catch (error) { showToast(error instanceof Error ? error.message : String(error)); }
+    finally { await client.invalidateQueries({ queryKey: listKey }); }
+  };
 
   const backToList = useCallback(() => {
     followRef.current?.abort(); followRef.current = null;
     projectIdRef.current = null;
     setProject(null); setSections([]); setIsGenerating(false);
-    if (token) builderApi.listProjects(token).then(r => setProjects(r.projects)).catch(() => {});
+    if (token) void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
   }, [token]);
 
   const refresh = useCallback(async () => {
@@ -517,6 +563,7 @@ export const SongBuilder: React.FC = () => {
 
           {/* Existing projects */}
           <h2 className="text-sm font-semibold text-zinc-400 mb-2">Your songs</h2>
+          {projectsQuery.error && <div role="alert" className="text-sm text-red-500">{projectsQuery.error.message}</div>}
           {projects.length === 0 ? (
             <p className="text-xs text-zinc-600 py-6 text-center">No songs yet — start one above.</p>
           ) : (
@@ -534,7 +581,7 @@ export const SongBuilder: React.FC = () => {
                   <span className="text-[11px] text-zinc-600">{p.section_count ?? 0} section{(p.section_count ?? 0) === 1 ? '' : 's'}</span>
                   <Trash2
                     size={14} className="text-zinc-600 hover:text-red-400"
-                    onClick={async (e) => { e.stopPropagation(); if (token) { await builderApi.deleteProject(p.id, token); setProjects(prev => prev.filter(x => x.id !== p.id)); } }}
+                    onClick={e => { e.stopPropagation(); void deleteProject(p.id); }}
                   />
                 </button>
               ))}
@@ -549,6 +596,7 @@ export const SongBuilder: React.FC = () => {
   const canPrepend = !!headSong;
   return (
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
+      {(projectsQuery.error || projectQuery.error) && <div role="alert" className="text-sm text-red-500">{(projectsQuery.error || projectQuery.error)?.message}</div>}
       {toast && <Toast msg={toast} />}
 
       {/* Header */}

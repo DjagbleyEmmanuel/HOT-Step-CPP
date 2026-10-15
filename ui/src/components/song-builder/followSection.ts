@@ -3,7 +3,7 @@
 // state, so a follow started while a project is being opened reloads that
 // project; once the user has moved to another project (isCurrent false) its
 // results are dropped.
-import { followJob } from '../../services/workflowApi';
+import { followStudioJob as followJob } from '../../queries/studios/workflows';
 import type { WorkflowJobStatus } from '../../../../server/src/contracts/workflow';
 
 export interface FollowSectionHandlers<V> {
@@ -22,6 +22,7 @@ export interface FollowSectionHandlers<V> {
 
 export function followSection<V>(token: string, projectId: string, jobId: string, h: FollowSectionHandlers<V>, signal: AbortSignal): Promise<void> {
   let total = 1, finished = 0, landed = 0;
+  let snapshots = 0;
   const live = () => !signal.aborted && h.isCurrent(projectId);
   const reload = async () => {
     try { const view = await h.load(projectId); if (live()) h.onView(view); } catch { /* the next event or the end reloads */ }
@@ -29,7 +30,10 @@ export function followSection<V>(token: string, projectId: string, jobId: string
   // followJob starts at event 0 and resumes after the last one it delivered,
   // so each variant event is counted once across reconnects.
   return (h.follow ?? followJob)(token, jobId, {
-    onSnapshot: job => { total = Number((job.input as { variants?: number }).variants) || 1; },
+    onSnapshot: (job, gap) => {
+      total = Number((job.input as { variants?: number }).variants) || 1;
+      if ((snapshots++ > 0 || gap) && live()) void reload();
+    },
     onEvent: e => {
       if (e.type !== 'variant' || !live()) return;
       finished++;

@@ -1,3 +1,8 @@
+import { queryClient } from '../queries/client';
+import { serverKey } from '../queries/keys';
+import { ACTIVE_POLL_MS } from '../queries/contract';
+import { waitForSnapshot } from '../queries/studios/wait';
+import { apiClient, type ReadOptions } from './httpClient';
 // supersepApi.ts — API client for SuperSep stem separation
 //
 // Communicates with the Node server /api/supersep endpoints.
@@ -75,17 +80,13 @@ export async function startSeparation(
 }
 
 /** Poll job progress. */
-export async function getProgress(jobId: string): Promise<ProgressResult> {
-  const res = await fetch(`${API_BASE}/${jobId}/progress`);
-  if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
-  return res.json();
+export async function getProgress(jobId: string, opts?: ReadOptions): Promise<ProgressResult> {
+  return apiClient.get<ProgressResult>(`${API_BASE}/${jobId}/progress`.replace('/api', ''), opts);
 }
 
 /** Get stem list (metadata only, no audio). */
-export async function getStemList(jobId: string): Promise<StemListResult> {
-  const res = await fetch(`${API_BASE}/${jobId}/result`);
-  if (!res.ok) throw new Error(`Result fetch failed: ${res.status}`);
-  return res.json();
+export async function getStemList(jobId: string, opts?: ReadOptions): Promise<StemListResult> {
+  return apiClient.get<StemListResult>(`${API_BASE}/${jobId}/result`.replace('/api', ''), opts);
 }
 
 /** Get the URL for a specific stem's audio. */
@@ -124,26 +125,12 @@ export async function releaseSeparation(jobId: string): Promise<void> {
 export async function waitForCompletion(
   jobId: string,
   onProgress?: (progress: number, message: string) => void,
-  pollIntervalMs = 500,
+  pollIntervalMs = ACTIVE_POLL_MS,
 ): Promise<StemListResult> {
-  return new Promise((resolve, reject) => {
-    const poll = async () => {
-      try {
-        const p = await getProgress(jobId);
-        onProgress?.(p.progress, p.message);
-
-        if (p.status === 'done') {
-          const result = await getStemList(jobId);
-          resolve(result);
-        } else if (p.status === 'failed' || p.status === 'cancelled') {
-          reject(new Error(p.error || `Separation ${p.status}`));
-        } else {
-          setTimeout(poll, pollIntervalMs);
-        }
-      } catch (err) {
-        reject(err);
-      }
-    };
-    poll();
-  });
+  const p = await waitForSnapshot(serverKey('studios/separation-progress', { id: jobId }),
+    signal => getProgress(jobId, { signal }), p => p.status === 'running',
+    p => onProgress?.(p.progress, p.message), { pollMs: pollIntervalMs });
+  if (p.status !== 'done') throw new Error(p.error || `Separation ${p.status}`);
+  return queryClient.fetchQuery({ queryKey: serverKey('studios/separation-result', { id: jobId }),
+    queryFn: ({ signal }) => getStemList(jobId, { signal }) });
 }

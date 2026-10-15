@@ -8,20 +8,22 @@
 // Model weights are gated on Hugging Face and downloaded in-app with the
 // user's read token.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Piano, FolderOpen, Search, X, Download, Trash2, ChevronDown, ChevronUp,
   CheckCircle2, ExternalLink, Music, KeyRound, Loader2, AlertTriangle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
-import { songApi } from '../../services/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { midiJobsOptions, midiStatusOptions, removeMidiJob } from '../../queries/studios/midi';
+import { useStudioSongs } from '../../queries/studios/shared';
 import type { Song } from '../../types';
 import {
-  getMidiStatus, submitTranscription, listMidiJobs, deleteMidiJob,
-  getMidiFileUrl, saveHfToken, startModelDownload, getMidiProgress,
+  submitTranscription,
+  getMidiFileUrl, saveHfToken, startModelDownload,
   HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL,
-  type MidiStudioStatus, type MidiJobSummary, type MuscriptorModel,
+  type MuscriptorModel,
 } from '../../services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
 
@@ -33,9 +35,17 @@ const MODEL_INFO: Array<{ id: MuscriptorModel; params: string }> = [
 
 export const MidiStudio: React.FC = () => {
   const { t } = useTranslation();
-  const { token } = useAuth();
+  const { sessionEpoch } = useAuth();
+  void sessionEpoch;
+  const client = useQueryClient();
+  const statusQuery = useQuery(midiStatusOptions());
+  const jobsQuery = useQuery(midiJobsOptions());
+  const status = statusQuery.data;
+  const jobs = jobsQuery.data ?? [];
+  const refreshStatus = () => client.invalidateQueries({ queryKey: midiStatusOptions().queryKey });
+  const refreshJobs = () => client.invalidateQueries({ queryKey: midiJobsOptions().queryKey });
+  const deletion = useMutation({ mutationFn: (id: string) => removeMidiJob(client, id), retry: false });
 
-  const [status, setStatus] = useState<MidiStudioStatus | null>(null);
 
   // ── HF access token (gated weights) ──
   const [hfTokenInput, setHfTokenInput] = useState('');
@@ -47,7 +57,8 @@ export const MidiStudio: React.FC = () => {
   // ── Source selection ──
   const [showLibrary, setShowLibrary] = useState(false);
   const [librarySearch, setLibrarySearch] = useState('');
-  const [librarySongs, setLibrarySongs] = useState<Song[]>([]);
+  const songsQuery = useStudioSongs(showLibrary);
+  const librarySongs = (songsQuery.data?.songs ?? []).filter(song => song.audioUrl);
   const [sourceAudioUrl, setSourceAudioUrl] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [sourceSongId, setSourceSongId] = useState<string | undefined>(undefined);
@@ -55,60 +66,8 @@ export const MidiStudio: React.FC = () => {
     (localStorage.getItem('hs-midi-model') as MuscriptorModel) || 'small');
 
   // ── Jobs ──
-  const [jobs, setJobs] = useState<MidiJobSummary[]>([]);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState('');
-  const pollRef = useRef<number | null>(null);
-
-  const refreshStatus = useCallback(() => {
-    getMidiStatus().then(setStatus).catch(() => {});
-  }, []);
-  const refreshJobs = useCallback(() => {
-    listMidiJobs().then(setJobs).catch(() => {});
-  }, []);
-
-  useEffect(() => { refreshStatus(); refreshJobs(); }, [refreshStatus, refreshJobs]);
-
-  // Poll status while any model download is in flight
-  const anyDownloading = !!status && Object.values(status.models).some(ms => ms.downloading);
-  useEffect(() => {
-    if (!anyDownloading) return;
-    const iv = window.setInterval(refreshStatus, 1500);
-    return () => window.clearInterval(iv);
-  }, [anyDownloading, refreshStatus]);
-
-  // Poll progress of active transcription jobs
-  const hasActiveJobs = jobs.some(j => j.status === 'queued' || j.status === 'transcribing');
-  useEffect(() => {
-    if (!hasActiveJobs) { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } return; }
-    pollRef.current = window.setInterval(async () => {
-      let anyFinished = false;
-      const updated = await Promise.all(jobs.map(async (j) => {
-        if (j.status !== 'queued' && j.status !== 'transcribing') return j;
-        try {
-          const p = await getMidiProgress(j.id);
-          if (p.status === 'done' || p.status === 'failed' || p.status === 'cancelled') anyFinished = true;
-          return {
-            ...j, status: p.status, error: p.error, gated: p.gated,
-            noteCount: p.noteCount ?? j.noteCount,
-            chunksDone: p.chunksDone, chunksTotal: p.chunksTotal,
-          };
-        } catch { return j; }
-      }));
-      setJobs(updated);
-      if (anyFinished) refreshJobs();
-    }, 1500);
-    return () => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasActiveJobs, jobs.map(j => `${j.id}:${j.status}`).join(',')]);
-
-  // Load library songs when picker opens
-  useEffect(() => {
-    if (showLibrary && token) {
-      songApi.list(token).then(({ songs }) => setLibrarySongs(songs.filter(s => s.audioUrl))).catch(() => {});
-    }
-  }, [showLibrary, token]);
-
   const filteredSongs = useMemo(() => {
     if (!librarySearch.trim()) return librarySongs;
     const q = librarySearch.toLowerCase();
@@ -188,11 +147,9 @@ export const MidiStudio: React.FC = () => {
 
   const handleDelete = async (jobId: string) => {
     try {
-      await deleteMidiJob(jobId);
+      await deletion.mutateAsync(jobId);
       if (expandedJob === jobId) setExpandedJob(null);
-      setJobs(js => js.filter(j => j.id !== jobId));
-    } catch { /* refresh will reconcile */ }
-    refreshJobs();
+    } catch (err) { setSubmitError(err instanceof Error ? err.message : String(err)); }
   };
 
   const engineMissing = !!status && !status.engineAvailable;

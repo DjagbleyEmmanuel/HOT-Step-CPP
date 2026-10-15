@@ -1,3 +1,4 @@
+import { apiClient, type ReadOptions } from './httpClient';
 // streamSessionsApi.ts — client for /api/stream-sessions (Batch 5 row 8a).
 //
 // The STORM and MM3 stream responses name their Node session in the
@@ -17,8 +18,8 @@ async function readJson<T>(res: Response): Promise<T> {
 
 const base = (id: string) => `/api/stream-sessions/${encodeURIComponent(id)}`;
 
-export async function getStreamSession(id: string): Promise<StreamSessionSummary> {
-  return (await readJson<{ session: StreamSessionSummary }>(await fetch(base(id)))).session;
+export async function getStreamSession(id: string, opts?: ReadOptions): Promise<StreamSessionSummary> {
+  return (await apiClient.get<{ session: StreamSessionSummary }>(base(id).replace('/api', ''), opts)).session;
 }
 
 export async function streamRecording(id: string, action: 'start' | 'stop' | 'discard'): Promise<StreamSessionSummary> {

@@ -1,3 +1,4 @@
+import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 // StormPage.tsx — Full-width STORM Streaming performance page
 // MDMAchine / A&E Concepts 2026
 
@@ -289,20 +290,12 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const [liveScheduler,    setLiveScheduler]    = usePersistedState('hs-storm-scheduler', gp.scheduler ?? '');
   const [liveGuidanceMode, setLiveGuidanceMode] = usePersistedState('hs-storm-guidance-mode', gp.guidanceMode ?? '');
   // Plugin registry for dropdowns
-  const [pluginRegistry, setPluginRegistry] = React.useState<{
-    solvers:   { name: string; display: string }[];
-    schedulers:{ name: string; display: string }[];
-    guidance:  { name: string; display: string }[];
-  }>({ solvers: [], schedulers: [], guidance: [] });
-  React.useEffect(() => {
-    fetch('/api/plugins').then(r => r.json()).then(data => {
-      setPluginRegistry({
-        solvers:    (data.solvers    ?? []).map((p: any) => ({ name: p.name, display: p.display ?? p.name })),
-        schedulers: (data.schedulers ?? []).map((p: any) => ({ name: p.name, display: p.display ?? p.name })),
-        guidance:   (data.guidance   ?? []).map((p: any) => ({ name: p.name, display: p.display ?? p.name })),
-      });
-    }).catch(() => {}); // silent fail — dropdowns just stay empty until engine is up
-  }, []);
+  const { registry } = usePluginRegistry();
+  const pluginRegistry = {
+    solvers: registry.solvers.map(p => ({ name: p.name, display: p.display ?? p.name })),
+    schedulers: registry.schedulers.map(p => ({ name: p.name, display: p.display ?? p.name })),
+    guidance: registry.guidance.map(p => ({ name: p.name, display: p.display ?? p.name })),
+  };
   // Live params from StormLiveControls (shared between seq + cont)
   const [liveParams, setLiveParams] = React.useState({ guidance_scale: gp.guidanceScale??7, inference_steps: gp.inferenceSteps??20, duration: 120, bpm: 120 });
   const [selectedSlot, setSelectedSlot] = React.useState<number | null>(null);

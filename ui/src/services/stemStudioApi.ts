@@ -1,3 +1,8 @@
+import { queryClient } from '../queries/client';
+import { serverKey, resourceKey } from '../queries/keys';
+import { ACTIVE_POLL_MS } from '../queries/contract';
+import { waitForSnapshot } from '../queries/studios/wait';
+import { apiClient, type ReadOptions } from './httpClient';
 // stemStudioApi.ts — API client for Stem Studio extraction
 //
 // Communicates with Node server /api/stem-studio endpoints.
@@ -134,17 +139,13 @@ export async function submitSupersep(params: SupersepParams): Promise<string> {
 }
 
 /** Poll extraction job progress. */
-export async function getExtractProgress(jobId: string): Promise<ExtractProgress> {
-  const res = await fetch(`${API_BASE}/${jobId}/progress`);
-  if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
-  return res.json();
+export async function getExtractProgress(jobId: string, opts?: ReadOptions): Promise<ExtractProgress> {
+  return apiClient.get<ExtractProgress>(`${API_BASE}/${jobId}/progress`.replace('/api', ''), opts);
 }
 
 /** Get completed extraction result with stem metadata. */
-export async function getExtractResult(jobId: string): Promise<ExtractJobResult> {
-  const res = await fetch(`${API_BASE}/${jobId}/result`);
-  if (!res.ok) throw new Error(`Result fetch failed: ${res.status}`);
-  return res.json();
+export async function getExtractResult(jobId: string, opts?: ReadOptions): Promise<ExtractJobResult> {
+  return apiClient.get<ExtractJobResult>(`${API_BASE}/${jobId}/result`.replace('/api', ''), opts);
 }
 
 /** Get the direct URL for a specific stem's audio. */
@@ -158,10 +159,8 @@ export function getDownloadAllUrl(jobId: string): string {
 }
 
 /** List all past extraction jobs (newest first). */
-export async function listJobs(): Promise<ExtractJobSummary[]> {
-  const res = await fetch(`${API_BASE}/jobs`);
-  if (!res.ok) throw new Error(`List jobs failed: ${res.status}`);
-  return res.json();
+export async function listJobs(opts?: ReadOptions): Promise<ExtractJobSummary[]> {
+  return apiClient.get<ExtractJobSummary[]>(`${API_BASE}/jobs`.replace('/api', ''), opts);
 }
 
 /** Delete a single extraction job and its files. */
@@ -177,10 +176,8 @@ export async function deleteAllJobs(): Promise<void> {
 }
 
 /** Get stem storage statistics for the Settings page. */
-export async function getStemStats(): Promise<StemStats> {
-  const res = await fetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
-  return res.json();
+export async function getStemStats(opts?: ReadOptions): Promise<StemStats> {
+  return apiClient.get<StemStats>(`${API_BASE}/stats`.replace('/api', ''), opts);
 }
 
 /**
@@ -190,24 +187,18 @@ export async function getStemStats(): Promise<StemStats> {
 export async function waitForExtraction(
   jobId: string,
   onProgress?: (p: ExtractProgress) => void,
-  pollMs = 1000,
+  pollMs = ACTIVE_POLL_MS,
 ): Promise<ExtractJobResult> {
-  return new Promise((resolve, reject) => {
-    const poll = async () => {
-      try {
-        const p = await getExtractProgress(jobId);
-        onProgress?.(p);
-        if (p.status === 'done') {
-          resolve(await getExtractResult(jobId));
-        } else if (p.status === 'failed' || p.status === 'cancelled') {
-          reject(new Error(p.error || `Extraction ${p.status}`));
-        } else {
-          setTimeout(poll, pollMs);
-        }
-      } catch (err) { reject(err); }
-    };
-    poll();
+  const p = await waitForSnapshot(serverKey('studios/extract-progress', { id: jobId }),
+    signal => getExtractProgress(jobId, { signal }),
+    p => !['done', 'failed', 'cancelled'].includes(p.status), onProgress, { pollMs });
+  if (p.status !== 'done') throw new Error(p.error || `Extraction ${p.status}`);
+  const result = await queryClient.fetchQuery({
+    queryKey: serverKey('studios/extract-result', { id: jobId }),
+    queryFn: ({ signal }) => getExtractResult(jobId, { signal }),
   });
+  await queryClient.invalidateQueries({ queryKey: resourceKey('studios/extractions') });
+  return result;
 }
 
 /** Format bytes for display */

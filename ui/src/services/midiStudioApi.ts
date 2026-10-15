@@ -1,3 +1,4 @@
+import { apiClient, type ReadOptions } from './httpClient';
 // midiStudioApi.ts — API client for MIDI Studio (audio → MIDI transcription)
 //
 // Communicates with Node server /api/midi-studio endpoints, which run
@@ -109,8 +110,8 @@ async function jsonOrThrow<T>(res: Response, what: string): Promise<T> {
 // ── API Functions ────────────────────────────────────────────────────────
 
 /** Get MuScriptor install/environment status. */
-export async function getMidiStatus(): Promise<MidiStudioStatus> {
-  return jsonOrThrow(await fetch(`${API_BASE}/status`), 'Status');
+export async function getMidiStatus(opts?: ReadOptions): Promise<MidiStudioStatus> {
+  return apiClient.get<MidiStudioStatus>(`${API_BASE}/status`.replace('/api', ''), opts);
 }
 
 /** Save (or clear, with '') the Hugging Face read token for gated weights. */
@@ -128,8 +129,8 @@ export async function startModelDownload(model: MuscriptorModel): Promise<void> 
 }
 
 /** Poll a transcription job's progress. */
-export async function getMidiProgress(jobId: string): Promise<MidiJobProgress> {
-  return jsonOrThrow(await fetch(`${API_BASE}/${jobId}/progress`), 'Progress');
+export async function getMidiProgress(jobId: string, opts?: ReadOptions): Promise<MidiJobProgress> {
+  return apiClient.get<MidiJobProgress>(`${API_BASE}/${jobId}/progress`.replace('/api', ''), opts);
 }
 
 /** SSE URL streaming live note events for an in-flight job (Phase 6 UI). */
@@ -149,13 +150,13 @@ export async function submitTranscription(params: TranscribeParams): Promise<str
 }
 
 /** Fetch the parsed note data for the piano-roll preview. */
-export async function getMidiNotes(jobId: string): Promise<ParsedMidi> {
-  return jsonOrThrow(await fetch(`${API_BASE}/${jobId}/notes`), 'Notes');
+export async function getMidiNotes(jobId: string, opts?: ReadOptions): Promise<ParsedMidi> {
+  return apiClient.get<ParsedMidi>(`${API_BASE}/${jobId}/notes`.replace('/api', ''), opts);
 }
 
 /** List all transcription jobs (newest first). */
-export async function listMidiJobs(): Promise<MidiJobSummary[]> {
-  return jsonOrThrow(await fetch(`${API_BASE}/jobs`), 'List jobs');
+export async function listMidiJobs(opts?: ReadOptions): Promise<MidiJobSummary[]> {
+  return apiClient.get<MidiJobSummary[]>(`${API_BASE}/jobs`.replace('/api', ''), opts);
 }
 
 /** Cancel and/or delete a job. */

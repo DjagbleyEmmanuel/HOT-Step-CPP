@@ -1,5 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
+import { serverKey } from '../../queries/keys';
+import { apiClient } from '../../services/httpClient';
 // SourceSelector.tsx — Upload or pick existing track for stem extraction
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Upload, Music, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
@@ -31,25 +34,22 @@ const SOURCE_FILTERS = [
 ];
 
 export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, sourceFileName, onSourceChange }) => {
-  const { token } = useAuth();
+  const { token, sessionEpoch } = useAuth();
+  void sessionEpoch;
   const { t } = useTranslation();
   const [uploadDragging, setUploadDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [songs, setSongs] = useState<Song[]>([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Fetch songs for the picker (requires auth token)
-  useEffect(() => {
-    if (!showPicker || !token) return;
-    const url = filter === 'all' ? '/api/songs/recent?limit=50' : `/api/songs/recent?source=${filter}&limit=50`;
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(data => setSongs(data.songs || []))
-      .catch(() => setSongs([]));
-  }, [showPicker, filter, token]);
+  const songsQuery = useQuery({
+    queryKey: serverKey('studios/recent-songs', { auth: true, filters: { source: filter === 'all' ? undefined : filter, limit: 50 } }),
+    queryFn: ({ signal }) => apiClient.get<{ songs: Song[] }>(`/songs/recent?limit=50${filter === 'all' ? '' : `&source=${encodeURIComponent(filter)}`}`, { token, signal }),
+    enabled: showPicker && !!token,
+  });
+  const songs = songsQuery.data?.songs ?? [];
 
   const filteredSongs = songs.filter(s =>
     !search || s.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -86,6 +86,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
 
   return (
     <div style={styles.container}>
+      {(songsQuery.error) && <div role="alert" className="text-sm text-red-500">{(songsQuery.error)?.message}</div>}
       <h3 style={styles.sectionTitle}>{t('stem.sourceAudio')}</h3>
 
       {/* Current selection */}

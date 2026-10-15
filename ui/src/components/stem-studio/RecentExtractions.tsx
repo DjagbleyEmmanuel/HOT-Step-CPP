@@ -1,8 +1,11 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { extractionsOptions } from '../../queries/studios/resources';
+import { resourceKey } from '../../queries/keys';
 // RecentExtractions.tsx — List of past extraction jobs (right sidebar)
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, ChevronRight, Clock } from 'lucide-react';
-import { listJobs, deleteJob, type ExtractJobSummary } from '../../services/stemStudioApi';
+import { deleteJob, type ExtractJobSummary } from '../../services/stemStudioApi';
 
 interface RecentExtractionsProps {
   onSelectJob: (jobId: string) => void;
@@ -24,30 +27,25 @@ function timeAgo(dateStr: string): string {
 }
 
 export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJob, activeJobId, refreshTrigger }) => {
-  const [jobs, setJobs] = useState<ExtractJobSummary[]>([]);
+  const client = useQueryClient();
+  const jobsQuery = useQuery(extractionsOptions());
+  const jobs = jobsQuery.data ?? [];
+  const loading = jobsQuery.isPending;
   const { t } = useTranslation();
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await listJobs();
-      setJobs(data);
-    } catch (err) {
-      console.warn('Failed to load recent extractions:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh, refreshTrigger]);
+  useEffect(() => {
+    if (refreshTrigger) void client.invalidateQueries({ queryKey: extractionsOptions().queryKey });
+  }, [client, refreshTrigger]);
 
   const handleDelete = async (e: React.MouseEvent, jobId: string) => {
     e.stopPropagation();
     if (!confirm('Delete this extraction and all its stems?')) return;
     try {
+      await client.cancelQueries({ queryKey: extractionsOptions().queryKey });
       await deleteJob(jobId);
-      setJobs(prev => prev.filter(j => j.id !== jobId));
+      await client.cancelQueries({ queryKey: extractionsOptions().queryKey });
+      client.setQueryData<ExtractJobSummary[]>(extractionsOptions().queryKey, jobs => jobs?.filter(job => job.id !== jobId));
+      client.removeQueries({ queryKey: resourceKey('studios/extract-result', undefined, jobId) });
+      await client.invalidateQueries({ queryKey: extractionsOptions().queryKey });
     } catch (err) {
       console.error('Delete failed:', err);
     }
@@ -55,6 +53,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
 
   return (
     <div style={styles.container}>
+      {jobsQuery.error && <div role="alert">{jobsQuery.error.message}</div>}
 
       {loading && jobs.length === 0 && (
         <div style={styles.emptyMsg}>Loading...</div>

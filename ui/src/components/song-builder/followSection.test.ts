@@ -64,3 +64,24 @@ test('after the user moves to another project, a late result changes nothing', a
   assert.deepEqual(views, ['view-p1']);
   assert.equal(ended, false);
 });
+
+test('reconnect snapshots reload the current project even without a new variant event', async () => {
+  const views: string[] = [];
+  let loads = 0;
+  await followSection('t', 'project', 'job', {
+    follow: async (_token, _id, handlers) => {
+      const job = { input: { variants: 2 } } as unknown as WorkflowJob;
+      handlers.onSnapshot?.(job, false);
+      handlers.onSnapshot?.(job, false);
+      await new Promise(resolve => setImmediate(resolve));
+      return 'succeeded';
+    },
+    load: async () => `snapshot-${++loads}`,
+    isCurrent: () => true,
+    onView: view => views.push(view),
+    onProgress: () => {},
+    onEnd: () => {},
+    onError: error => { throw error; },
+  }, new AbortController().signal);
+  assert.deepEqual(views, ['snapshot-1', 'snapshot-2']);
+});

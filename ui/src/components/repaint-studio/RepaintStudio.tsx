@@ -1,3 +1,4 @@
+import { useStudioSongs } from '../../queries/studios/shared';
 // RepaintStudio.tsx — Main Repaint Studio orchestrator
 //
 // Composes: RepaintWaveform, RegionLyricsEditor, RepaintSettings
@@ -8,11 +9,11 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { songApi } from '../../services/api';
 import { submitStudioRender, followStudioRender } from '../../services/repaintLayerWorkflowApi';
-import { workflowApi } from '../../services/workflowApi';
+import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
 import { useBackendStore } from '../../stores/backendStore';
-import { fetchLrc } from '../../utils/lrcUtils';
+import { useQuery } from '@tanstack/react-query';
+import { lyricsOptions } from '../../queries/studios/lyrics';
 import { RepaintWaveform } from './RepaintWaveform';
 import { RegionLyricsEditor } from './RegionLyricsEditor';
 import { RepaintSettings } from './RepaintSettings';
@@ -52,7 +53,8 @@ export const RepaintStudio: React.FC = () => {
   const [duration, setDuration] = useState(0);
 
   // ── LRC state ──
-  const [lrcText, setLrcText] = useState<string | null>(null);
+  const lyricsQuery = useQuery(lyricsOptions(sourceAudioUrl));
+  const lrcText = lyricsQuery.data ?? null;
 
   // ── Region state ──
   const [regionStart, setRegionStart] = useState(() => restore<number>('regionStart', 0));
@@ -80,7 +82,8 @@ export const RepaintStudio: React.FC = () => {
   // ── Library picker ──
   const [showLibrary, setShowLibrary] = useState(false);
   const [librarySearch, setLibrarySearch] = useState('');
-  const [librarySongs, setLibrarySongs] = useState<Song[]>([]);
+  const libraryQuery = useStudioSongs(showLibrary);
+  const librarySongs = libraryQuery.data?.songs ?? [];
 
   // ── Persist ──
   useEffect(() => { persist('sourceSong', sourceSong); }, [sourceSong]);
@@ -115,9 +118,10 @@ export const RepaintStudio: React.FC = () => {
     const id = localStorage.getItem('hs-repaint-workflowJob');
     if (!id || !token) return;
     let mounted = true;
+    const observation = new AbortController();
     setIsGenerating(true);
     setActiveJobId(id);
-    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); })
+    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
       .then(async result => {
         if (!mounted) return;
         const { job } = await workflowApi.get(token, id);
@@ -132,28 +136,13 @@ export const RepaintStudio: React.FC = () => {
         showToast('Repaint complete!');
       }).catch(err => { if (mounted) showToast(`Repaint ${String((err as Error).message)}`); })
       .finally(() => {
-        if (localStorage.getItem('hs-repaint-workflowJob') === id) localStorage.removeItem('hs-repaint-workflowJob');
+        if (mounted && localStorage.getItem('hs-repaint-workflowJob') === id) localStorage.removeItem('hs-repaint-workflowJob');
         if (mounted) { setIsGenerating(false); setActiveJobId(null); }
       });
-    return () => { mounted = false; };
+    return () => { mounted = false; observation.abort(); };
   }, [token]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
-
-  // ── Load LRC when source audio changes ──
-  useEffect(() => {
-    if (!sourceAudioUrl) { setLrcText(null); return; }
-    fetchLrc(sourceAudioUrl).then(setLrcText);
-  }, [sourceAudioUrl]);
-
-  // ── Load library songs for picker ──
-  useEffect(() => {
-    if (showLibrary && token) {
-      songApi.list(token)
-        .then(({ songs }) => setLibrarySongs(songs))
-        .catch(() => {});
-    }
-  }, [showLibrary, token]);
 
   const filteredSongs = useMemo(() => {
     if (!librarySearch.trim()) return librarySongs;
@@ -216,7 +205,6 @@ export const RepaintStudio: React.FC = () => {
     setSourceName('');
     setLyrics('');
     setStyleCaption('');
-    setLrcText(null);
     setRegionStart(0);
     setRegionEnd(0);
     setDuration(0);
@@ -308,6 +296,7 @@ export const RepaintStudio: React.FC = () => {
   return (
     <BackendCapabilityGate feature="repaint">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
+      {(lyricsQuery.error || libraryQuery.error) && <div role="alert" className="text-sm text-red-500">{(lyricsQuery.error || libraryQuery.error)?.message}</div>}
       {/* Toast */}
       <StudioDraftPicker control={draft} textKey="hs-repaint-sourceName" apply={applyDraft} />
       {toast && (
