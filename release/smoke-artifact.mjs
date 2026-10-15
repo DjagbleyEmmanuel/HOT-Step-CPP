@@ -184,7 +184,9 @@ export function assertBackends(report, variant) {
   if (!report.selected) failures.push('no backend selected');
   for (const f of report.files || []) {
     if (!f.load_error) continue;
-    const driver = DRIVER_DLLS[f.missing?.dll?.toLowerCase()];
+    // Only a driver DLL that is not there at all (126, not on the search path)
+    // proves "no driver"; a present one failing with 127/193/1114 is a defect.
+    const driver = f.missing?.code === 126 && f.missing.exists === false && DRIVER_DLLS[f.missing.dll?.toLowerCase()];
     if (driver && f.file === GPU_BACKENDS[variant]?.file) notes.push(`${f.file}: ${driver} absent (${f.missing.chain})`);
     else failures.push(`${f.file} failed to load: ${f.load_error}${f.missing ? `; missing ${f.missing.chain} (${f.missing.error})` : '; no missing import found'}`);
   }

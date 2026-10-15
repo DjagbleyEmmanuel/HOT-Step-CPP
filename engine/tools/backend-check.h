@@ -126,6 +126,8 @@ struct Missing {
     std::string chain;  // "cublas64_13.dll -> cublasLt64_13.dll"
     std::string leaf;   // the import that will not load
     std::string error;  // Windows error for the leaf
+    DWORD       code   = 0;
+    bool        exists = false;  // the leaf is on the loader's search path
 };
 
 // Depth-first: the first import of path that will not load. A dependency that
@@ -141,16 +143,17 @@ static Missing missing_import(const std::wstring & path, std::set<std::wstring> 
             FreeLibrary(h);
             continue;
         }
-        DWORD   err = GetLastError();
+        DWORD   err    = GetLastError();
         wchar_t found[MAX_PATH];
-        if (err == ERROR_MOD_NOT_FOUND && depth < 6 && SearchPathW(nullptr, name.c_str(), nullptr, MAX_PATH, found, nullptr)) {
+        bool    exists = SearchPathW(nullptr, name.c_str(), nullptr, MAX_PATH, found, nullptr) != 0;
+        if (err == ERROR_MOD_NOT_FOUND && depth < 6 && exists) {
             Missing deeper = missing_import(found, seen, depth + 1);
             if (!deeper.leaf.empty()) {
                 deeper.chain = narrow(name) + " -> " + deeper.chain;
                 return deeper;
             }
         }
-        return { narrow(name), narrow(name), win_error(err) };
+        return { narrow(name), narrow(name), win_error(err), err, exists };
     }
     return {};
 }
@@ -285,7 +288,9 @@ static int run() {
             FreeLibrary(h);
             continue;
         }
-        yyjson_mut_obj_add_strcpy(doc, f, "load_error", win_error(GetLastError()).c_str());
+        DWORD load_err = GetLastError();
+        yyjson_mut_obj_add_strcpy(doc, f, "load_error", win_error(load_err).c_str());
+        yyjson_mut_obj_add_uint(doc, f, "load_error_code", load_err);
         std::set<std::wstring> seen;
         Missing                m = missing_import(full, seen, 0);
         if (!m.leaf.empty()) {
@@ -293,6 +298,8 @@ static int run() {
             yyjson_mut_obj_add_strcpy(doc, mo, "dll", m.leaf.c_str());
             yyjson_mut_obj_add_strcpy(doc, mo, "chain", m.chain.c_str());
             yyjson_mut_obj_add_strcpy(doc, mo, "error", m.error.c_str());
+            yyjson_mut_obj_add_uint(doc, mo, "code", m.code);
+            yyjson_mut_obj_add_bool(doc, mo, "exists", m.exists);
         }
     }
     if (fh != INVALID_HANDLE_VALUE) {

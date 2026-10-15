@@ -46,8 +46,10 @@ this a missing dependency looks the same as a machine with no GPU.
 `engine/.variant` sets the expectation, defaulting to `cuda` as the app does.
 The check fails unless the CPU backend initialises and a backend is selected.
 The expected GPU backend (`ggml-cuda.dll` or `ggml-vulkan.dll`) must register,
-with any number of devices, or fail for an identified missing driver: an absent
-`nvcuda.dll` or `vulkan-1.dll`, or `VK_ERROR_INCOMPATIBLE_DRIVER`. Anything
+with any number of devices, or fail for an identified missing driver:
+`nvcuda.dll` or `vulkan-1.dll` failing with error 126 and not on the loader's
+search path, or `VK_ERROR_INCOMPATIBLE_DRIVER`. A driver DLL that exists but
+fails (127, 193, 1114 and so on) is a failure, not an absent driver. Anything
 else fails: a missing package DLL, a missing runtime DLL, a missing export, a
 bare error 126 with no missing import found, or a crash. A CPU variant DLL that
 fails to load also fails the check.

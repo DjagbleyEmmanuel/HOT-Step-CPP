@@ -111,7 +111,8 @@ const report = (extra = {}) => ({
   files: [{ file: 'ggml-cpu.dll', registered: true }], log: [], ...extra,
 });
 const cudaFile = extra => ({ files: [{ file: 'ggml-cpu.dll', registered: true }, { file: 'ggml-cuda.dll', registered: false, ...extra }] });
-const missing = (dll, chain = dll) => ({ load_error: '126: The specified module could not be found.', missing: { dll, chain, error: '126: not found' } });
+const missing = (dll, chain = dll, code = 126, exists = false) => ({ load_error: '126: The specified module could not be found.', load_error_code: 126,
+  missing: { dll, chain, error: `${code}: loader error`, code, exists } });
 
 const policy = [
   ['cpu passes', 'cpu', report(), null],
@@ -127,6 +128,11 @@ const policy = [
   ['loads but never registers', 'cuda', report(cudaFile({ init_ok: false })), /loaded but did not register/],
   ['vulkan without a driver', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, init_ok: false, vk_create_instance: -9 }] }), null],
   ['vulkan loader absent', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, ...missing('vulkan-1.dll') }] }), null],
+  ['present vulkan-1.dll missing an export', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, ...missing('vulkan-1.dll', 'vulkan-1.dll', 127, true) }] }), /vulkan-1.dll \(127/],
+  ['present vulkan-1.dll is a bad image', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, ...missing('vulkan-1.dll', 'vulkan-1.dll', 193, true) }] }), /vulkan-1.dll \(193/],
+  ['present vulkan-1.dll init fails', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, ...missing('vulkan-1.dll', 'vulkan-1.dll', 1114, true) }] }), /vulkan-1.dll \(1114/],
+  ['present nvcuda.dll with 126 below it', 'cuda', report(cudaFile(missing('nvcuda.dll', 'nvcuda.dll', 126, true))), /nvcuda.dll \(126/],
+  ['report without absence proof', 'cuda', report(cudaFile({ load_error: '126', missing: { dll: 'nvcuda.dll', chain: 'nvcuda.dll', error: '126' } })), /failed to load/],
   ['vulkan init fails with a driver', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, init_ok: false, vk_create_instance: 0 }] }), /did not register/],
   ['driver DLL excuses only the expected GPU', 'cpu', report({ files: [{ file: 'ggml-cuda.dll', registered: false, ...missing('nvcuda.dll') }] }), /ggml-cuda.dll failed to load/],
   ['CPU variant DLL fails to load', 'vulkan', report({ registered: [{ name: 'Vulkan', devices: [] }, cpuReg],
