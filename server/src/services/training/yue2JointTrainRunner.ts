@@ -579,6 +579,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     state.lastLoss = event.loss ?? state.lastLoss;
     pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step,
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
+      ...(event.arCe === undefined ? {} : { arCe: event.arCe }),
+      ...(event.cursorCe === undefined ? {} : { cursorCe: event.cursorCe }),
       ...(event.arKl === undefined ? {} : { arKl: event.arKl }),
       ...(event.narMse === undefined ? {} : { narMse: event.narMse }),
       ...(event.plannerFrozen ? { plannerFrozen: true } : {}),
@@ -671,7 +673,7 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; lr?: number; stepMs?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; arCe?: number; cursorCe?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; lr?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -685,6 +687,8 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
     const stepMs = finite(event.step_ms) && event.step_ms >= 0 ? event.step_ms : undefined;
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
       ...(loss === undefined ? {} : { loss }),
+      ...(finite(event.ar_ce) ? { arCe: event.ar_ce } : {}),
+      ...(finite(event.cursor_ce) ? { cursorCe: event.cursor_ce } : {}),
       ...(finite(event.ar_kl) ? { arKl: event.ar_kl } : {}),
       ...(finite(event.nar_mse) ? { narMse: event.nar_mse } : {}),
       ...(event.planner_frozen === true ? { plannerFrozen: true } : {}),

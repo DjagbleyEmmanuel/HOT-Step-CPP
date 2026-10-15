@@ -1966,6 +1966,9 @@ export interface TrainingMetricEvent {
   totalSteps?: number;
   loss?: number;
   lr?: number;
+  /** YuE2 joint: raw planner and cursor cross-entropy, absent on frozen steps. */
+  arCe?: number;
+  cursorCe?: number;
   arKl?: number;
   /** YuE2 joint: the decoder's flow loss for this step; the only loss once
    *  the planner is frozen. */
