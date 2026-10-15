@@ -105,8 +105,17 @@ filesystem path.
 
 ## 4. Publish
 
-The workflow leaves the release as a **draft**. Verify the asset count (18) and
-the `What's Changed` notes, then:
+The workflow leaves the release as a **draft**. Before publishing, arrange the
+release body in this order:
+
+1. Curated release notes under a `Highlights` heading.
+2. GitHub's generated `What's Changed` list and `Full Changelog` link, generated
+   against the previous release tag. Keep both; never replace them with the
+   curated notes.
+3. The Downloads table, unchanged.
+
+Verify the asset count and notes, then leave the draft for the maintainer to
+publish. The maintainer uses:
 
 ```bash
 gh release view vX.Y.Z --json assets --jq '.assets | length'   # expect 22
