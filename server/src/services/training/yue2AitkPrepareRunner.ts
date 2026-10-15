@@ -234,6 +234,10 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
     if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Preparation wrote an invalid schema-1 dataset manifest');
     if (o.captionGrammar === 'fixed-recipe') {
       value.caption_grammar = FIXED_RECIPE_CAPTION_GRAMMAR;
+      // The captions already open with the trigger (fixedRecipeLegacyManifest),
+      // so the engine stamps it into each export with the bare template.
+      const trigger = o.trigger?.trim().normalize('NFC');
+      if (trigger) { value.trigger = trigger; value.style_template = 'bare'; }
       fs.writeFileSync(manifest, JSON.stringify(value));
     }
     job.done = 1; emitProgress(job);

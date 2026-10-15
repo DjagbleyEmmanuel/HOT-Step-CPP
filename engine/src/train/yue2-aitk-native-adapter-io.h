@@ -9,6 +9,7 @@
 
 #include "yue2-aitk-adapter-io.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -83,7 +84,10 @@ inline bool write_one(const char * path, const std::vector<STWTensor> & tensors,
         {"steps", std::to_string(steps)}, {"yue2_adapter_layout", "native_split_v1"},
     };
     md.insert(md.end(), extra.begin(), extra.end());
-    if (!trigger.empty()) { md.push_back({"trigger", trigger}); md.push_back({"style_template", "upstream"}); }
+    // The caller may name the template (fixed-recipe captions are bare); the
+    // native importer's wrapper is upstream, the default.
+    const bool templated = std::any_of(extra.begin(), extra.end(), [](const auto & kv) { return kv.first == "style_template"; });
+    if (!trigger.empty()) { md.push_back({"trigger", trigger}); if (!templated) md.push_back({"style_template", "upstream"}); }
     // Same key the legacy AR trainer writes; generate.ts reads it to know the
     // bare trigger is a prompt this adapter actually trained on.
     if (caption_dropout > 0.0f) {

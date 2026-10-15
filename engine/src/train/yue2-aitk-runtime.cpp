@@ -408,6 +408,7 @@ static int run_impl(Config config, std::string * error) {
         if (with_abc && config.abc_dropout < 1.0f) cot += cot.empty() ? "full" : ",full";
         if (!cot.empty()) adapter_meta.push_back({"cot", cot});
         if (!config.style_norms.empty()) adapter_meta.push_back({"style_norms", config.style_norms});
+        if (!dataset.trigger.empty()) adapter_meta.push_back({"style_template", dataset.style_template});
     }
     yue2_aitk::Yue2NativeSampler sampler(config.seed);
     std::vector<size_t> order(dataset.items.size()); std::iota(order.begin(), order.end(), 0);

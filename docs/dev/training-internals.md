@@ -221,6 +221,14 @@ the dataset slug. Re-prepare datasets made before this change to populate those
 prefixes correctly. The server invalidates the old Fixed recipe preparation
 cache and re-prepares it automatically.
 
+The prepared manifest's `trigger` and `style_template` (`upstream` or `bare`)
+pass through to every native AR/NAR export, along with a trigger-prefixed file
+name. Fixed recipe captions already open with the trigger, so after preparation
+the server stamps `trigger` and `style_template: bare` into the manifest. A
+Fixed recipe cache without that stamp counts as stale and is re-prepared.
+Exports from older Fixed recipe runs carry neither field; the adapter catalogue
+recovers the trigger from the run's prepared styles instead.
+
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch
 calculations have documented rounding differences; audio quality still needs

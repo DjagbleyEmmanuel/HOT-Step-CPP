@@ -27,7 +27,7 @@ function fixture() {
     fs.mkdirSync(opts.output);
     fs.writeFileSync(path.join(opts.output, 'latent.bin'), 'prepared');
     fs.writeFileSync(path.join(opts.output, 'dataset.json'), JSON.stringify({ schema_version: 1,
-      ...(opts.captionGrammar ? { caption_grammar: FIXED_RECIPE_CAPTION_GRAMMAR } : {}),
+      ...(opts.captionGrammar ? { caption_grammar: FIXED_RECIPE_CAPTION_GRAMMAR, trigger: opts.trigger, style_template: 'bare' } : {}),
       recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin', prefix_full_nocap_ids: [1], prefix_full_uncond_ids: [1] }] }));
   };
   return { dir, o, job, prepare, calls: () => calls };
@@ -89,6 +89,26 @@ test('Fixed recipe automatically replaces the old grammar cache and then reuses 
   assert.equal(f.calls(), 2);
   assert.notEqual(await ensureYue2PreparedDataset(f.job(), { ...options, trigger: 'changed_tag' }, f.prepare), second);
   assert.equal(f.calls(), 3);
+});
+
+test('a Fixed recipe dataset that does not record its trigger is regenerated', async () => {
+  const f = fixture();
+  const options = { ...f.o, captionGrammar: 'fixed-recipe' as const, trigger: 'sample_slug', lyricTiming: false };
+  const first = await ensureYue2PreparedDataset(f.job(), options, f.prepare);
+  assert.ok(first);
+  const manifest = JSON.parse(fs.readFileSync(first, 'utf8'));
+  delete manifest.trigger; delete manifest.style_template;
+  const oldText = JSON.stringify(manifest);
+  fs.writeFileSync(first, oldText);
+  const indexPath = path.join(f.dir, 'aitk-auto-prepare-fixed-recipe-v1.json');
+  const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  const latent = path.join(path.dirname(first), 'latent.bin');
+  const st = fs.statSync(latent);
+  index.outputFingerprint = createHash('sha256').update(oldText)
+    .update(JSON.stringify([[path.resolve(latent), st.size, st.mtimeMs, st.ctimeMs]])).digest('hex');
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  assert.notEqual(await ensureYue2PreparedDataset(f.job(), options, f.prepare), first);
+  assert.equal(f.calls(), 2);
 });
 
 test('a dataset prepared before trigger-only prefixes is regenerated, not reused', async () => {

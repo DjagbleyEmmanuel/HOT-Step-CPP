@@ -42,6 +42,10 @@ function outputFingerprint(manifest: string, captionGrammar?: 'fixed-recipe'): s
   if (captionGrammar === 'fixed-recipe' && data.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR) {
     throw new Error('Prepared dataset has no Fixed recipe caption marker');
   }
+  // Prepared before 2026-10-15: exports from it would not record the trigger.
+  if (captionGrammar === 'fixed-recipe' && data.style_template !== 'bare') {
+    throw new Error('Prepared dataset does not record its trigger');
+  }
   // Prepared before 2026-09-20: no trigger-only prefixes, so caption dropout
   // (a card default) is refused by the engine. Stale, so it re-prepares.
   if (!data.items.every((item: Record<string, unknown>) => Array.isArray(item.prefix_full_nocap_ids))) {
