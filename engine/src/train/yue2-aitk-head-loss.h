@@ -180,10 +180,12 @@ struct ChunkWorkspace {
         adapted = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         base = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         targets = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, count);
-        // CUDA with BF16 activation storage: the logits are stored as BF16
+        // CUDA with BF16 activation storage (not strict F32, the reference):
+        // the logits are stored as BF16
         // (their values are BF16-rounded anyway) and the loss kernel writes
         // the gradient as BF16, the round the backward applied to it.
-        bf16 = !request.head->parts.empty() && yue2_aitk_is_cuda(request.backend) && yue2_aitk_bf16_storage::enabled();
+        bf16 = !request.head->parts.empty() && yue2_aitk_is_cuda(request.backend) && yue2_aitk_bf16_storage::enabled() &&
+            !yue2_aitk_graph::strict_f32();
         logit_grad = ggml_new_tensor_2d(tmp.ctx, bf16 ? GGML_TYPE_BF16 : GGML_TYPE_F32, kVocab, count);
         if (!request.head->parts.empty()) {
             // GGUF head: ConvRot's BF16 boundaries (rounded input, output and

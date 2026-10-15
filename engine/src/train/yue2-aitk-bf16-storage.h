@@ -1,7 +1,8 @@
 #pragma once
 
 // BF16 activation storage (on by default on CUDA, the only backend with the
-// BF16-source kernels; YUE2_AITK_BF16_STORAGE=0 is the rollback). The block
+// BF16-source kernels, except in strict F32, the reference;
+// YUE2_AITK_BF16_STORAGE=0 is the rollback). The block
 // graph is built and differentiated exactly as before, in F32. This pass then
 // stores every BF16_ROUND output as BF16, along with the views and conts that
 // only reread it. Every other node keeps its F32 output, so each op does the
