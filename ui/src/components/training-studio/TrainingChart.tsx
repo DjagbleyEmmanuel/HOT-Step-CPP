@@ -193,7 +193,8 @@ export const TrainingChart: React.FC<Props> = ({
   // YuE2 decoder-only phase after the planner freezes): keep it, each series
   // filters its own values.
   const stepPts = steps.filter(s => config
-    ? Object.values(s).some(v => typeof v === 'number' && Number.isFinite(v))
+    ? Number.isFinite(s.ep) && Object.entries(s).some(([key, value]) =>
+      !['step', 'ep', 'elapsedMs'].includes(key) && typeof value === 'number' && Number.isFinite(value))
     : Number.isFinite(s.loss) || Number.isFinite(s.narMse) || Number.isFinite(s.narRecon) || Number.isFinite(s.gradNorm) || Number.isFinite(s.stepMs));
   const evalPts = evals.filter(e => Number.isFinite(e.loss));
 

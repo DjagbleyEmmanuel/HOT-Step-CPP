@@ -41,8 +41,19 @@ test('composite target is a separate readout; planner freeze marks the AR endpoi
     { step: 2, ep: 2, frozen: true, narMse: 2 },
   ], options: { stopMode: 'loss', targetLoss: 4 } }));
   assert.match(html, /Planner frozen at step 1/);
-  assert.match(html, /Composite loss stop mean/);
+  assert.match(html, /Composite loss stop mean 9\.0000 \/ target 4/);
   assert.doesNotMatch(html, /stroke="#10b981"/);
+});
+
+test('configured charts ignore steps carrying only coordinates and elapsed time', () => {
+  const props = { epochs: [], target: 0, config: { series: ['arCe'] }, steps: [
+    { step: 1, ep: 1, loss: NaN, arCe: 2 },
+  ] };
+  const expected = renderToStaticMarkup(createElement(TrainingChart, props));
+  const actual = renderToStaticMarkup(createElement(TrainingChart, { ...props, steps: [
+    ...props.steps, { step: 100, ep: 100, loss: NaN, elapsedMs: 1000 },
+  ] }));
+  assert.equal(actual, expected);
 });
 
 test('unconfigured shared chart retains the existing loss and learning-rate defaults', () => {

@@ -675,7 +675,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           setLiveMetric(item);
           if (typeof item.step === 'number' && Number.isFinite(item.step)) {
             setStepHistory(previous => {
-              const next = reduceYue2Metric(previous, item, METRIC_CAP);
+              const next = reduceYue2Metric(previous, { ...item,
+                // Older trainers lack cumulative time; retain the job-clock fallback.
+                trainMs: item.trainMs ?? (typeof job.startedAt === 'number' && typeof item.ts === 'number'
+                  ? Math.max(0, item.ts - job.startedAt) : undefined),
+              }, METRIC_CAP);
               writeStored(metricKey, { steps: next });
               return next;
             });
@@ -1767,7 +1771,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {frozenAt !== undefined && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
             {t('trainingStudio.yue2.method.plannerFrozen', 'Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the loss and KL lines end here, the step counter and pace below keep moving.', { step: frozenAt })}
           </div>}
-          <div className="text-[10px] text-zinc-500">{job?.status === 'running' && jointEta(stepHistory, form)}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
+            {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
+            {stepHistory.at(-1)?.elapsedMs !== undefined && <span>elapsed {formatDurationMs(stepHistory.at(-1)!.elapsedMs!)}</span>}
+            {job?.status === 'running' && <span>{jointEta(stepHistory, form)}</span>}
+          </div>
         </div>
       )}
       {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>

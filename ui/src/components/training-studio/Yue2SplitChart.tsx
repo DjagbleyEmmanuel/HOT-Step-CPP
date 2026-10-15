@@ -35,6 +35,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   }, [job?.id, hasPoints]);
   const history = points ?? stream;
   const last = history.at(-1);
+  const lastStopMean = history.findLast(p => Number.isFinite(p.ma20))?.ma20;
   const frozenIndex = history.findIndex(p => p.frozen);
   const frozen = frozenIndex < 0 ? undefined : history[Math.max(0, frozenIndex - 1)].step;
   const kls: number[] = [];
@@ -94,7 +95,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
       {pace.length > 0 && <span>{t('trainingStudio.split.pace', { value: (pace.reduce((a, b) => a + b, 0) / pace.length / 1000).toFixed(2), defaultValue: 'Pace {{value}} s/step' })}</span>}
       {vram !== undefined && <span>{t('trainingStudio.split.vram', { value: (vram / 1024).toFixed(1), defaultValue: 'VRAM {{value}} GB' })}</span>}
       {frozen !== undefined && <span>{t('trainingStudio.split.frozenAt', { step: frozen, defaultValue: 'Planner frozen at step {{step}}' })}</span>}
-      {options?.stopMode === 'loss' && <span>{t('trainingStudio.split.compositeStop', { value: last?.ma20?.toFixed(4) ?? missing, target: options.targetLoss, defaultValue: 'Composite loss stop mean {{value}} / target {{target}}' })}</span>}
+      {options?.stopMode === 'loss' && <span>{t('trainingStudio.split.compositeStop', { value: lastStopMean?.toFixed(4) ?? missing, target: options.targetLoss, defaultValue: 'Composite loss stop mean {{value}} / target {{target}}' })}</span>}
     </div>
   </div>;
 };
