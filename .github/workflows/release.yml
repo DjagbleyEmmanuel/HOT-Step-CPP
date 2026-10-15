@@ -104,11 +104,14 @@ jobs:
               -DHOT_STEP_STATIC_RUNTIME=ON
               -DGGML_CPU_ALL_VARIANTS=ON
             cuda_version: ''
+          # All CPU variants, picked at runtime. Without them GGML_NATIVE copies
+          # the runner's CPU (AVX512) and the archive dies with 0xC000001D elsewhere.
           - variant: cpu
             cmake_flags: >-
               -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
-              -DGGML_BACKEND_DL=OFF
+              -DGGML_BACKEND_DL=ON
               -DHOT_STEP_STATIC_RUNTIME=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
             cuda_version: ''
 
     steps:
@@ -1241,10 +1244,12 @@ jobs:
               -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
             cuda_version: ''
+          # All CPU variants, never native: see the Windows cpu entry.
           - variant: cpu
             cmake_flags: >-
               -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
-              -DGGML_BACKEND_DL=OFF
+              -DGGML_BACKEND_DL=ON
+              -DGGML_CPU_ALL_VARIANTS=ON
             cuda_version: ''
 
     steps:
