@@ -8,11 +8,44 @@
 #include "yue2-aitk-batch.h"
 #include "yue2-aitk-cursor-loss.h"
 
+#include <cstdlib>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 // One explicit, deterministic joint update. The runner supplies sampled noise,
 // timestep and target so this seam can be compared without conflating RNGs.
 // No prefix is retained across calls, and neither expert updates before both
 // objectives have supplied all adapter gradients.
 namespace yue2_aitk_joint {
+// The frozen teacher's final hidden is a function of the AR input ids alone
+// (no adapters, no prefix, a frozen base), so a repeated item reuses it
+// instead of running the 28 base blocks again. Host memory up to
+// YUE2_AITK_TEACHER_CACHE_MB (default 2048; 0 turns it off). Items are kept
+// as they come until it is full and never evicted: epochs revisit items in
+// a cycle, which evicting the oldest would turn into all misses.
+struct TeacherCache {
+    std::unordered_map<std::string, std::vector<float>> entries;
+    size_t bytes = 0;
+    static size_t limit() {
+        static const size_t mb = [] { const char * v = std::getenv("YUE2_AITK_TEACHER_CACHE_MB"); return v && *v ? size_t(std::strtoull(v, nullptr, 10)) : size_t(2048); }();
+        return mb << 20;
+    }
+    static std::string key(const std::vector<int32_t> & ids) {
+        return std::string(reinterpret_cast<const char *>(ids.data()), ids.size() * sizeof(int32_t));
+    }
+    const std::vector<float> * find(const std::string & k) const {
+        auto it = entries.find(k);
+        return it == entries.end() ? nullptr : &it->second;
+    }
+    bool has_room(size_t floats) const { return bytes + floats * sizeof(float) <= limit(); }
+    void put(const std::string & k, std::vector<float> && hidden) {
+        bytes += hidden.size() * sizeof(float);
+        entries.emplace(k, std::move(hidden));
+    }
+};
+inline TeacherCache & teacher_cache() { static TeacherCache c; return c; }
+
 struct Metrics { double ar_ce=0, ar_kl=0, nar_mse=0, gradient_norm=0, cursor_ce=0; size_t cursor_frames=0; int step=0; bool skipped=false; };
 struct Input {
     const yue2_aitk::Batch * batch=nullptr;
@@ -124,13 +157,27 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     {
         Yue2AitkStackTape base;
         base.keep_device_final=device_handoff;
-        if(teacher) {
-            notify("AR frozen teacher forward");
-            if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
-        }
         // A host tape (YUE2_AITK_HOST_TAPE=1) leaves device_final null and fills final_hidden.
         auto source=[](const Yue2AitkStackTape & t){Yue2AitkArHeadRows::Source s;if(t.device_final)s.device=t.device_final;else s.host=&t.final_hidden;return s;};
-        const Yue2AitkArHeadRows::Source base_source=source(base);
+        Yue2AitkArHeadRows::Source base_source;
+        if(teacher) {
+            notify("AR frozen teacher forward");
+            const bool cache=TeacherCache::limit()>0;
+            const std::string key=cache?TeacherCache::key(batch.ar.input_ids):std::string();
+            if(const std::vector<float> * hit=cache?teacher_cache().find(key):nullptr) {
+                base_source.host=hit;
+            } else {
+                if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
+                base_source=source(base);
+                const size_t floats=size_t(ar.length)*2048;
+                if(cache && teacher_cache().has_room(floats)) {
+                    std::vector<float> hidden;
+                    if(base.device_final){hidden.resize(size_t(ggml_nelements(base.device_final)));ggml_backend_tensor_get(base.device_final,hidden.data(),0,ggml_nbytes(base.device_final));}
+                    else hidden=base.final_hidden;
+                    teacher_cache().put(key,std::move(hidden));
+                }
+            }
+        }
         YUE2_PROF("head: AR final norm + row gather (device)");
         if(!rows.init(backend,model,source(ar),teacher?&base_source:nullptr,ar.length,batch.ar.prediction_positions,ar_w,error)) return false;
     }
