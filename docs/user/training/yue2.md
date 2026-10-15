@@ -191,6 +191,8 @@ The ear test that set the recipe scored 5 on every quality criterion at every ru
 
 The Refine tab is hidden since 2026-09-27; its code is kept. It belongs to the earlier recipe and its KL rungs, and the Review page still opens those ladders on it. What follows applies only to runs made before that date and to refinements started from them.
 
+Refine keeps the source run's Preview AR scale for its training previews and manual ladder renders, defaulting to 0.6 for older runs. The sound (NAR) adapter stays at 1.0.
+
 Refinement continues the finished run with the planner live, saves a checkpoint each time the KL crosses the next rung, and renders previews per rung so you can hear where it starts to fall apart late in the song. Its defaults:
 
 | Setting | Default | Notes |

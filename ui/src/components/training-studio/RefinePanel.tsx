@@ -12,6 +12,7 @@ import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { pollWhile } from '../../queries/contract';
+import { YUE2_JOINT_LADDER_PREVIEW } from '../../../../server/src/contracts/trainingRecipes';
 import { trainingQueries } from '../../queries/training-data/queries';
 import { useJobSelection, useRunJob } from '../../queries/training-runs/hooks';
 import { runCommand, runQueries } from '../../queries/training-runs/queries';
@@ -133,7 +134,7 @@ export const RefinePanel: React.FC = () => {
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
-        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, ...draftOpts } } as unknown as Yue2JointTrainRequest;
+        preview: { enabled: autoPreview, everySteps: 0, arScale: (opts.preview as Yue2JointTrainRequest['preview'])?.arScale ?? YUE2_JOINT_LADDER_PREVIEW.arScale, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, ...draftOpts } } as unknown as Yue2JointTrainRequest;
       const result = await runCommand(client, trainingWorker, () => startYue2JointTrain(datasetId, request, { worker: trainingWorker }));
       setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
       setLadderRun(result.jobId);
@@ -374,7 +375,7 @@ export const RefinePanel: React.FC = () => {
         </div>}
         {cleanupNote && <div className="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
         <Yue2LadderReview ref={ladderRef} datasetId={datasetId} datasetName={datasetName} run={ladderRunRec} previews={previews}
-          renderOpts={{ seconds, takes, draft }} onUse={onUse} onPicked={setPicked} onError={setError} idPrefix="refine-rung"
+          renderOpts={{ seconds, takes, draft, arScale: (ladderRunRec?.options.preview as Yue2JointTrainRequest['preview'])?.arScale ?? YUE2_JOINT_LADDER_PREVIEW.arScale }} onUse={onUse} onPicked={setPicked} onError={setError} idPrefix="refine-rung"
           />
       </div>
 
