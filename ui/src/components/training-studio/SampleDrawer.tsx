@@ -4,45 +4,16 @@
 // element is local to the drawer: preview never touches the global playback
 // store because these files are not library songs.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { hashKey, useQuery } from '@tanstack/react-query';
+import React, { useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Headphones, Loader2, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { sampleAudioUrl, saveSampleMm3, saveSampleYue2 } from '../../services/trainingApi';
-import { queryClient } from '../../queries/client';
 import { trainingQueries as tq } from '../../queries/training-data/queries';
 import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
 import { AuditionPlayer } from './AuditionPlayer';
+import { useCaptionFile } from './useCaptionFile';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../shared/Toggle';
-
-/**
- * One caption file as an editor seed. Query owns the read (and cancels it when
- * the drawer moves to another sample or worker), but the editor is seeded only
- * by the first answer fetched for each key: never a cached copy, and never a
- * later refetch that could write over the user's typing.
- */
-function useCaptionFile(options: ReturnType<typeof tq.sampleMm3>, enabled: boolean) {
-  const query = useQuery({ ...options, enabled, refetchOnReconnect: false });
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const savedRef = useRef('');
-  const seededFor = useRef<string | null>(null);
-  const hash = hashKey(options.queryKey);
-  useEffect(() => { setText(null); setError(null); }, [hash]);
-  useEffect(() => {
-    if (seededFor.current === hash || !query.isFetchedAfterMount || query.isFetching) return;
-    seededFor.current = hash;
-    if (query.data) { savedRef.current = query.data.text; setText(query.data.text); }
-    else { setText(''); setError(query.error?.message ?? null); }
-  }, [hash, query.isFetchedAfterMount, query.isFetching, query.data, query.error]);
-  /** A confirmed write: the cache takes the server's answer. */
-  const saved = (value: string) => {
-    savedRef.current = value;
-    queryClient.setQueryData(options.queryKey, { text: value });
-  };
-  return { text, setText, error, setError, savedRef, saved };
-}
 
 interface SampleDrawerProps {
   sampleId: string;
