@@ -6,6 +6,8 @@ import { trainingQueries } from '../training-data/queries';
 import { setTrainingWorker } from '../../services/trainingApi';
 import { pollWhile } from '../contract';
 import { runQueries, runCommand, activeJob } from './queries';
+import { gpusOptions } from '../shell-queue/settings';
+import { invalidateRunReads } from './events';
 
 const originalFetch = globalThis.fetch;
 const clients: ReturnType<typeof createQueryClient>[] = [];
@@ -18,6 +20,32 @@ afterEach(() => {
 });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status, headers: { 'Content-Type': 'application/json' },
+});
+
+test('run GPU and preparation reads join other areas and refresh after commands and events', async () => {
+  const cache = client();
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++; await tick();
+    return json({ gpus: [], pipeline: { status: 'running' }, job: { status: 'running' } });
+  };
+  const pairs = [
+    [runQueries.gpus(), gpusOptions()],
+    [runQueries.preparation('chain'), trainingQueries.preparation('chain')],
+    [runQueries.preparationJob('chain'), trainingQueries.preparationJob('chain')],
+  ] as const;
+  for (const [one, two] of pairs) {
+    await Promise.all([cache.fetchQuery(one), cache.fetchQuery(two)]);
+  }
+  assert.equal(calls, 3);
+  await runCommand(cache, 'remote-worker', async () => {});
+  for (const [one] of pairs.slice(1)) {
+    assert.equal(cache.getQueryState(one.queryKey)?.isInvalidated, true);
+    cache.setQueryData(one.queryKey, { status: 'running' });
+  }
+  await invalidateRunReads(cache, 'remote-worker');
+  for (const [one] of pairs.slice(1)) assert.equal(cache.getQueryState(one.queryKey)?.isInvalidated, true);
+  assert.equal(cache.getQueryState(runQueries.gpus().queryKey)?.isInvalidated, false);
 });
 
 test('two status consumers share one read, including a fresh remount', async () => {

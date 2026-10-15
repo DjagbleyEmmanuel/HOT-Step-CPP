@@ -58,13 +58,19 @@ The recent-song endpoint has a distinct response and filtered key, with no
 worker/backend scope because it is a local library resource. Song writers in
 the shell integration must also invalidate `resourceKey('studios/recent-songs')`.
 
-Workflow reads use the auth session and captured job/document id. Their
+Workflow reads use `sharedKeys.workflowJob(id, after)` and
+`sharedKeys.workflowDocument(id)`, with the auth session and captured id. Their
 existing stream reducer keeps event sequencing and replay suppression.
 Snapshots and replay events invalidate the captured job, document and songs
-keys with 50 ms burst coalescing; terminal completion flushes the pending
+keys with 50 ms burst coalescing, including every `after` variant of the job
+and all `SONG_VIEWS`; terminal completion flushes the pending
 timer. A delayed stream from an obsolete auth epoch cannot deliver effects
 or invalidate the new epoch. Recovered repaint/layer subscriptions abort on
 unmount without cancelling the server job or clearing its recovery pointer.
+
+Repaint lyrics use `sharedKeys.lrc(sidecarUrl(audio, '.lrc'))` and the
+canonical `fetchLrc` read, sharing player reads across track variants.
+Missing sidecars cache null. Crop and retranscription invalidate that entry.
 
 The extraction/separation wait helpers use Query observers rather than their
 own polling loops. They detach at a terminal status, nonretryable read error,

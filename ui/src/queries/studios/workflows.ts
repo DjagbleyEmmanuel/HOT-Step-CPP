@@ -3,18 +3,18 @@ import { apiClient } from '../../services/httpClient';
 import { followJob, workflowApi } from '../../services/workflowApi';
 import type { WorkflowDocument, WorkflowReplay } from '../../../../server/src/contracts/workflow';
 import { queryClient } from '../client';
-import { serverKey, resourceKey, sharedKeys, getSessionEpoch } from '../keys';
+import { resourceKey, sharedKeys, getSessionEpoch, invalidateSongViews, SHARED } from '../keys';
 
 export const workflowOptions = (token: string, id: string, after = 0) => {
   return queryOptions({
-  queryKey: serverKey('studios/workflow-job', { auth: true, id, filters: { after } }),
+  queryKey: sharedKeys.workflowJob(id, after),
   queryFn: ({ signal }) => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(id)}?after=${after}`, { token, signal }),
   staleTime: 0,
   });
 };
 export const documentOptions = (token: string, id: string) => {
   return queryOptions({
-  queryKey: serverKey('studios/workflow-document', { auth: true, id }),
+  queryKey: sharedKeys.workflowDocument(id),
   queryFn: ({ signal }) => apiClient.get<{ document: WorkflowDocument }>(`/workflows/documents/${encodeURIComponent(id)}`, { token, signal }),
   staleTime: 0,
   });
@@ -48,15 +48,16 @@ export const followStudioJob: typeof followJob = (token, id, handlers, opts) => 
     controller.abort();
     return false;
   };
-  const songsKey = sharedKeys.songs();
-  const documentsKey = resourceKey('studios/workflow-document', jobKey[2]);
+  const jobsKey = resourceKey(SHARED.workflowJob, jobKey[2], id);
+  const documentsKey = resourceKey(SHARED.workflowDocument, jobKey[2]);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const flush = () => {
     clearTimeout(timer);
     timer = undefined;
-    void queryClient.invalidateQueries({ queryKey: jobKey });
+    if (getSessionEpoch() !== epoch) return;
+    void queryClient.invalidateQueries({ queryKey: jobsKey });
     void queryClient.invalidateQueries({ queryKey: documentsKey });
-    void queryClient.invalidateQueries({ queryKey: songsKey });
+    void invalidateSongViews(queryClient);
   };
   const invalidate = () => { timer ??= setTimeout(flush, 50); };
   return followJob(token, id, {

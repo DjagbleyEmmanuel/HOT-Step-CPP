@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { aceModelsOptions, localOptions } from '../../queries/global-models/options';
-import { serverKey } from '../../queries/keys';
+import { aceModelsOptions, localOptions, adapterScanOptions } from '../../queries/global-models/options';
 // AdaptersDropdown.tsx — Adapter configuration UI for the global param bar
 //
 // Adapted from create/AdaptersAccordion.tsx to read from GlobalParamsContext.
@@ -52,9 +51,7 @@ export const AdaptersDropdown: React.FC = () => {
   // Internal state
   const client = useQueryClient();
   const [scanFolder, setScanFolder] = useState('');
-  const scanKey = serverKey('global-models/adapter-scan', { filters: { folder: scanFolder } });
-  const { data: scan } = useQuery({ queryKey: scanKey,
-    queryFn: ({ signal }) => adapterApi.scan(scanFolder, { signal }), enabled: false });
+  const { data: scan } = useQuery({ ...adapterScanOptions(scanFolder), enabled: false });
   const adapterFiles: AdapterFile[] = scan?.files ?? [];
   const [showGroupScales, setShowGroupScales] = usePersistedState('hs-adapterAccordion-groupScales', false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
@@ -123,9 +120,9 @@ export const AdaptersDropdown: React.FC = () => {
     setScanError(null);
     try {
       setScanFolder(dir);
-      const key = serverKey('global-models/adapter-scan', { filters: { folder: dir } });
+      const key = adapterScanOptions(dir).queryKey;
       await client.invalidateQueries({ queryKey: key });
-      const result = await client.fetchQuery({ queryKey: key, queryFn: ({ signal }) => adapterApi.scan(dir, { signal }) });
+      const result = await client.fetchQuery(adapterScanOptions(dir));
       if (result.files.length === 0) {
         setScanError('No .safetensors files found in this folder');
       }

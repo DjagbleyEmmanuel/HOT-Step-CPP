@@ -1,12 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query';
 import * as api from '../../services/trainingApi';
 import { bridgeEvents, type BridgeOptions } from '../sseBridge';
-import { resourceKey, scopeOf } from '../keys';
+import { resourceKey, scopeOf, SHARED } from '../keys';
 import type { Worker } from './queries';
 
 export function invalidateRunReads(client: QueryClient, worker: Worker) {
   return client.invalidateQueries({ queryKey: ['hs'], predicate: q =>
-    (String(q.queryKey[1]).startsWith('training-runs/') || String(q.queryKey[1]).startsWith('training-data/')) &&
+    (q.queryKey[1] === SHARED.preparation || q.queryKey[1] === SHARED.preparationJob ||
+      String(q.queryKey[1]).startsWith('training-runs/') || String(q.queryKey[1]).startsWith('training-data/')) &&
     (scopeOf(q.queryKey)?.worker === undefined || scopeOf(q.queryKey)?.worker === worker) });
 }
 
@@ -18,6 +19,7 @@ export function bridgeRunEvents(client: QueryClient, jobId: string, worker: Work
     url: api.jobStreamUrl(jobId, { worker }),
     subscribe,
     reconnectInvalidate: [
+      resourceKey(SHARED.preparation), resourceKey(SHARED.preparationJob),
       resourceKey('training-data/job', { worker }, jobId),
       ...['mm3-status', 'yue2-status', 'ar-status', 'optimise', 'prepare', 'sources', 'source', 'jobs']
         .map(name => resourceKey(`training-runs/${name}`, { worker })),

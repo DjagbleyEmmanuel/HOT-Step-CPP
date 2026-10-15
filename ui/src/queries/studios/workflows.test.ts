@@ -11,7 +11,10 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   const original = globalThis.fetch;
   queryClient.clear();
   startAuthSession(queryClient, 'test-A');
-  const keys = [workflowOptions('test-A', 'job').queryKey, documentOptions('test-A', 'doc').queryKey, sharedKeys.songs()];
+  const keys = [sharedKeys.workflowJob('job'), sharedKeys.workflowJob('job', 7),
+    sharedKeys.workflowDocument('doc'), sharedKeys.songs()];
+  assert.deepEqual(workflowOptions('test-A', 'job', 7).queryKey, keys[1]);
+  assert.deepEqual(documentOptions('test-A', 'doc').queryKey, keys[2]);
   for (const key of keys) queryClient.setQueryData(key, {});
   let invalidations = 0;
   const unsubscribe = queryClient.getQueryCache().subscribe(event => {
@@ -23,10 +26,10 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   try {
     assert.equal(await followStudioJob('test-A', 'job', { onEvent: () => { effects++; } }), 'succeeded');
     assert.equal(effects, 1);
-    assert.equal(invalidations, 3);
+    assert.equal(invalidations, 4);
     for (const key of keys) assert.equal(queryClient.getQueryState(key)?.isInvalidated, true);
     await new Promise(resolve => setTimeout(resolve, 60));
-    assert.equal(invalidations, 3, 'terminal cleanup removed the pending coalescing timer');
+    assert.equal(invalidations, 4, 'terminal cleanup removed the pending coalescing timer');
   } finally { unsubscribe(); globalThis.fetch = original; queryClient.clear(); }
 });
 

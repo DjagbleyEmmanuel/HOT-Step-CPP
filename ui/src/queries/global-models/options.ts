@@ -1,10 +1,17 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { ApiClient } from '../../services/httpClient';
+import { adapterApi } from '../../services/api';
 import { serverKey, sharedKeys, scopeOf, resourceKey, type ServerKey } from '../keys';
 import { pollWhile } from '../contract';
 import type { PluginRegistry } from '../../types/pluginTypes';
 import type { ModelRegistry, AceModels } from '../../types';
 import type { BackendCapabilities, BackendInfo, BackendModelCatalogue } from '../../stores/backendStore';
+
+export const adapterScanOptions = (folder: string) => queryOptions({
+  queryKey: sharedKeys.adapterScan(folder),
+  queryFn: ({ signal }) => adapterApi.scan(folder, { signal }),
+  staleTime: 0,
+});
 
 // Each request uses the API origin and backend captured in its key.
 function read<T>(key: ServerKey, path: string) {

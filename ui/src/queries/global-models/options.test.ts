@@ -7,6 +7,8 @@ import { ApiError } from '../../services/httpClient';
 import { pluginsOptions, capabilitiesOptions, backendModelsOptions, registryOptions,
   vramOptions, invalidateModels, usableCapabilities } from './options';
 import { bridgeDownloads, downloadsKey, downloadFrame } from './downloads';
+import { adapterScanOptions } from './options';
+import { adapterScanOptions as shellScanOptions } from '../shell-queue/settings';
 import { projectQuery } from './projection';
 import type { BackendCapabilities } from '../../stores/backendStore';
 
@@ -16,6 +18,16 @@ const originalFetch = globalThis.fetch;
 afterEach(() => { clients.splice(0).forEach(c => c.clear()); globalThis.fetch = originalFetch; });
 const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('global and shell adapter scans share a request and retain folder isolation', async () => {
+  const cache = client();
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; await tick(); return json({ files: [] }); };
+  await Promise.all([cache.fetchQuery(adapterScanOptions('folder-A')), cache.fetchQuery(shellScanOptions('folder-A'))]);
+  assert.equal(calls, 1);
+  await cache.fetchQuery(adapterScanOptions('folder-B'));
+  assert.equal(calls, 2);
+});
 
 test('simultaneous plugin, capability and VRAM consumers share one request per key', async () => {
   const c = client();

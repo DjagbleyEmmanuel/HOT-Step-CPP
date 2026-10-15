@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createQueryClient, queryClient } from '../client';
 import { projectOptions, inspirePromptOptions } from './resources';
 import { lyricsOptions } from './lyrics';
+import { lrcOptions } from '../shell-queue/lyrics';
 import { waitForSnapshot } from './wait';
 import { serverKey } from '../keys';
 import { saveInstagenPrompt } from '../../services/inspireApi';
@@ -14,6 +15,23 @@ import type { PluginRegistry } from '../../types/pluginTypes';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('Repaint and player variants share the LRC request and sidecar invalidation', async () => {
+  const original = globalThis.fetch;
+  const client = createQueryClient();
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; await tick(); return new Response('[00:01] Words'); };
+  try {
+    const studio = lyricsOptions('/audio/track_mastered.wav');
+    const player = lrcOptions('/audio/track.wav');
+    const results = await Promise.all([client.fetchQuery(studio), client.fetchQuery(player)]);
+    assert.deepEqual(results, ['[00:01] Words', '[00:01] Words']);
+    assert.equal(calls, 1);
+    const { invalidateSidecars } = await import('../keys');
+    await invalidateSidecars(client);
+    assert.equal(client.getQueryState(studio.queryKey)?.isInvalidated, true);
+  } finally { globalThis.fetch = original; client.clear(); }
+});
 
 test('studio plugin selection shares the canonical request and preserves the full cached registry', async () => {
   const original = globalThis.fetch;

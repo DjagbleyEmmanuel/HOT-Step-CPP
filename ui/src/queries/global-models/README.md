@@ -24,7 +24,7 @@ and request URL. Reads consume Query's AbortSignal and throw on HTTP failures.
 | `PostProcessingDropdown.tsx` | Shared plugins plus `global-models/pp-vae`, `stablestep`, `sa3-adapters` |
 | `GenerationDropdown.tsx`, `MasteringDropdown.tsx`, `PostProcessingDropdown.tsx` | One `global-models/references` snapshot; upload/delete invalidates all consumers |
 | `CoverArtDropdown.tsx` | `global-models/cover-art`; download/cancel are explicit commands |
-| `AdaptersDropdown.tsx` | Folder-filtered `global-models/lm-adapters` and `adapter-scan`; scan is a read-only POST owned by Query |
+| `AdaptersDropdown.tsx` | Folder-filtered `global-models/lm-adapters` and shared `adapter-scan`; scan is a read-only POST owned by Query, fresh per click and shared with shell-queue |
 | `ProfilesModal.tsx` | `global-models/profiles`; save/rename/delete/import invalidates it |
 | `SeedManagerDrawer.tsx` | `global-models/seeds`; save/delete/favorite invalidates it; random GET remains an explicit selection command |
 | `MonitorBar.tsx`, `vstChainStore.ts`, `VstChainDropdown.tsx` | `global-models/monitor`, `vst-chain`, `vst-scan`; exact-key projections preserve existing store selectors |

@@ -6,7 +6,7 @@ import { trainingOperation } from '../../services/trainingOperations';
 import type { TrainingRecipe } from '../../services/trainingRecipesApi';
 import type { TrainingRecipeFamily } from '../../../../server/src/contracts/trainingRecipes';
 import { settingsApi } from '../../services/api';
-import { scopeOf, serverKey } from '../keys';
+import { scopeOf, serverKey, sharedKeys, resourceKey, SHARED } from '../keys';
 import { pollWhile } from '../contract';
 
 export type Worker = string | null;
@@ -24,7 +24,7 @@ export const runQueries = {
     },
   }),
   gpus: () => queryOptions({
-    queryKey: serverKey('training-runs/gpus'),
+    queryKey: sharedKeys.gpus(),
     queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
   }),
   mm3Status: (worker: Worker, id: string) => queryOptions({
@@ -121,13 +121,13 @@ export const runQueries = {
       !data || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))),
   }),
   preparation: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/preparation', { id }),
+    queryKey: sharedKeys.preparation(id),
     queryFn: ({ signal }) => preparation.getYue2Preparation(id, { signal }),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof preparation.getYue2Preparation>>>(data =>
       !data || !['done', 'failed', 'cancelled', 'interrupted'].includes(data.status)),
   }),
   preparationJob: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/preparation-job', { id }),
+    queryKey: sharedKeys.preparationJob(id),
     queryFn: ({ signal }) => preparation.getYue2PreparationJob<api.TrainingJobSummary>(id, { signal }),
   }),
 };
@@ -137,6 +137,8 @@ export const runQueries = {
 export async function runCommand<T>(client: QueryClient, worker: Worker, command: () => Promise<T>): Promise<T> {
   const result = await command();
   await Promise.all([
+    ...[SHARED.preparation, SHARED.preparationJob].map(resource =>
+      client.invalidateQueries({ queryKey: resourceKey(resource) })),
     client.invalidateQueries({ queryKey: ['hs'], predicate: q =>
       String(q.queryKey[1]).startsWith('training-runs/') &&
       (scopeOf(q.queryKey)?.worker === undefined || scopeOf(q.queryKey)?.worker === worker) }),

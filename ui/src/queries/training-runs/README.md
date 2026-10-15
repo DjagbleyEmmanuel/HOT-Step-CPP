@@ -6,6 +6,12 @@ Query's abort signal to the transport. Local run indexes, review records,
 previews and worker administration retain their local routes. They omit the
 worker scope even when Train on points to a remote machine.
 
+GPU reads use `sharedKeys.gpus()`. Preparation detail and current job use
+`sharedKeys.preparation(id)` and `sharedKeys.preparationJob(id)`, sharing the
+training-data executor's local snapshots. The dataset-filtered preparation
+list keeps its area key. Successful commands, terminal events and reconnects
+also invalidate shared preparation snapshots.
+
 `hooks.ts` retains only job/pipeline IDs and reload signals as client state.
 Job adoption is guarded by a selection generation, including a switch away
 and back to the same worker or dataset. Query owns the job object and polling.
