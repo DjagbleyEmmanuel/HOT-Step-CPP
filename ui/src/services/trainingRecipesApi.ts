@@ -1,6 +1,7 @@
 import type { TrainingRecipeFamily } from '../../../server/src/contracts/trainingRecipes';
 import type { TrainingWorkerRef } from '../../../server/src/contracts/trainingOperation';
 import { currentWorkerRef, snapshotFor, trainingOperation } from './trainingOperations';
+import type { ReadOptions } from './httpClient';
 
 export interface TrainingRecipe<T = Record<string, unknown>> {
   recipeVersion: number;
@@ -14,13 +15,13 @@ export interface TrainingRecipe<T = Record<string, unknown>> {
   worker?: TrainingWorkerRef;
 }
 
-export function getTrainingRecipe<T>(family: TrainingRecipeFamily, preset?: string): Promise<TrainingRecipe<T>> {
+export function getTrainingRecipe<T>(family: TrainingRecipeFamily, preset?: string, opts: ReadOptions = {}): Promise<TrainingRecipe<T>> {
   const params = new URLSearchParams();
   if (preset) params.set('preset', preset);
   const worker = currentWorkerRef();
   if (worker.kind === 'remote') params.set('worker', worker.name);
   const suffix = params.size ? `?${params}` : '';
-  return trainingOperation('recipes', `/${family}${suffix}`);
+  return trainingOperation('recipes', `/${family}${suffix}`, opts);
 }
 
 /** Resolve a form at command time. The worker is captured in the operation

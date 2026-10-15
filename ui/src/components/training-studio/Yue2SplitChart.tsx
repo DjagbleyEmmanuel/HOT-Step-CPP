@@ -4,6 +4,7 @@ import { TrainingChart, type ChartStepPoint, type ChartMilestone } from './Train
 import { klReading, reduceYue2Metric, type Yue2Point } from './yue2ChartData';
 import { jobStreamUrl, type TrainingJobSummary, type TrainingStreamEvent } from '../../services/trainingApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
+import { useTrainingStore } from '../../stores/trainingStore';
 
 interface Props {
   mode?: 'joint' | 'ar' | 'nar';
@@ -21,10 +22,12 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   const [stream, setStream] = useState<Yue2Point[]>([]);
   const [streamVram, setStreamVram] = useState<number>();
   const hasPoints = points !== undefined;
+  // The job lives on the worker selected when its chart opened.
+  const worker = useTrainingStore(s => s.trainingWorker);
   useEffect(() => {
     setStream([]); setStreamVram(undefined);
     if (hasPoints || !job?.id) return;
-    return subscribeEventSource(jobStreamUrl(job.id), { message: data => {
+    return subscribeEventSource(jobStreamUrl(job.id, { worker }), { message: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
         if (item.type !== 'metric') return;
@@ -32,7 +35,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
         else setStream(p => reduceYue2Metric(p, item));
       } catch { /* Ignore malformed replay frames. */ }
     } });
-  }, [job?.id, hasPoints]);
+  }, [job?.id, hasPoints, worker]);
   const history = points ?? stream;
   const last = history.at(-1);
   const lastStopMean = history.findLast(p => Number.isFinite(p.ma20))?.ma20;

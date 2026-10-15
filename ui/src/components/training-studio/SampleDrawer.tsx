@@ -40,23 +40,27 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
   // MM3 Structured Caption — a separate file (<stem>.mm3.txt), not a sidecar
   // field, so it does not ride the store's optimistic edit path. Fetched when
   // the drawer opens on a sample; saved on blur; Escape reverts to last saved.
+  // These reads seed an editor, so they stay plain requests rather than cache
+  // entries a background refetch could write over the user's typing. Each is
+  // aborted when the drawer moves on, and goes to the worker it opened on.
+  const worker = useTrainingStore(s => s.trainingWorker);
   const [mm3, setMm3] = useState<string | null>(null);
   const [mm3Error, setMm3Error] = useState<string | null>(null);
   const mm3SavedRef = useRef('');
   useEffect(() => {
-    let stale = false;
+    const ctl = new AbortController();
     setMm3(null);
     setMm3Error(null);
     if (!datasetId || !sampleId) return;
-    getSampleMm3(datasetId, sampleId)
-      .then(({ text }) => { if (!stale) { mm3SavedRef.current = text; setMm3(text); } })
-      .catch((err: Error) => { if (!stale) { setMm3(''); setMm3Error(err.message); } });
-    return () => { stale = true; };
-  }, [datasetId, sampleId]);
+    getSampleMm3(datasetId, sampleId, { worker, signal: ctl.signal })
+      .then(({ text }) => { if (!ctl.signal.aborted) { mm3SavedRef.current = text; setMm3(text); } })
+      .catch((err: Error) => { if (!ctl.signal.aborted) { setMm3(''); setMm3Error(err.message); } });
+    return () => ctl.abort();
+  }, [datasetId, sampleId, worker]);
   const flushMm3 = () => {
     if (!datasetId || mm3 === null || mm3 === mm3SavedRef.current) return;
     const text = mm3;
-    saveSampleMm3(datasetId, sampleId, text)
+    saveSampleMm3(datasetId, sampleId, text, { worker })
       .then(() => { mm3SavedRef.current = text; setMm3Error(null); })
       .catch((err: Error) => setMm3Error(err.message));
   };
@@ -67,19 +71,19 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
   const [yue2Error, setYue2Error] = useState<string | null>(null);
   const yue2SavedRef = useRef('');
   useEffect(() => {
-    let stale = false;
+    const ctl = new AbortController();
     setYue2(null);
     setYue2Error(null);
     if (!datasetId || !sampleId) return;
-    getSampleYue2(datasetId, sampleId)
-      .then(({ text }) => { if (!stale) { yue2SavedRef.current = text; setYue2(text); } })
-      .catch((err: Error) => { if (!stale) { setYue2(''); setYue2Error(err.message); } });
-    return () => { stale = true; };
-  }, [datasetId, sampleId]);
+    getSampleYue2(datasetId, sampleId, { worker, signal: ctl.signal })
+      .then(({ text }) => { if (!ctl.signal.aborted) { yue2SavedRef.current = text; setYue2(text); } })
+      .catch((err: Error) => { if (!ctl.signal.aborted) { setYue2(''); setYue2Error(err.message); } });
+    return () => ctl.abort();
+  }, [datasetId, sampleId, worker]);
   const flushYue2 = () => {
     if (!datasetId || yue2 === null || yue2 === yue2SavedRef.current) return;
     const text = yue2;
-    saveSampleYue2(datasetId, sampleId, text)
+    saveSampleYue2(datasetId, sampleId, text, { worker })
       .then(() => { yue2SavedRef.current = text; setYue2Error(null); })
       .catch((err: Error) => setYue2Error(err.message));
   };
