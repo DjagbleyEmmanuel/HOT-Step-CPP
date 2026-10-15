@@ -15,8 +15,9 @@ observes `shell-queue/recent-songs`, one entry per source filter. Both are
 auth-scoped and replace the old component state and module-level cache.
 
 Every song write patches the cached rows at once and then invalidates every
-song view (`SONG_VIEWS`): library, details, this area's recent feed and
-studios' `studios/recent-songs` (invalidated only, never edited here).
+song view (`SONG_VIEWS`, defined in `../keys.ts`): library, details, this
+area's recent feed, studios' `studios/recent-songs` and Cover's
+`cover-lyrics/cover-songs` (the last two invalidated only, never edited here).
 
 | Write | Follow-up |
 |---|---|
@@ -60,11 +61,14 @@ disco stem extraction it starts) twice.
 | Cover art job | `shell-queue/cover-art-job` | Observer, 2 s, stops at a terminal status, five-minute safety stop |
 | Server version | `shell-queue/health` | Settings footer |
 | `.env` values | `shell-queue/env` | Fresh each load; seeds the editable form |
-| GPUs, stem storage | `shell-queue/gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
+| GPUs, stem storage | shared `gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
 | Data folder | `shell-queue/data-folder` | Fresh each visit; refetched after a cancel or a failed command |
-| File browser listing | `shell-queue/browse` | Fresh each navigation; only the newest navigation lands |
-| Adapter folder scan | `shell-queue/adapter-scan` | Fresh per click |
+| File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
+| Adapter folder scan | shared `adapter-scan` | Fresh per click |
 | YuE2 caption source | `shell-queue/yue2-captions` | Fresh; failures caught by the caller, never cached as empty |
+| Workflow job (queue) | shared `workflow-job`, `after` 0 | Fresh per read, no retry |
+| Waveform peaks | shared `peaks` | `audio/peaksClient.ts`; never stale, `forgetPeaks` removes a rewritten file's entry, failures uncached |
+| Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop and retranscribe call `invalidateSidecars` |
 | Presets and settings documents | `shell-queue/presets`, `shell-queue/setting` | Default adapters for `PresetCollection` and `SettingDocument`; fresh reads, dropped when unread (gcTime 0), writes invalidate |
 
 Create reads two other areas' snapshots through their exported options, so
@@ -78,7 +82,7 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | Consumer | Disposition |
 |---|---|
 | `App.tsx` | query (library, reconnect bridge); `/api/health` liveness probes with a timeout stay transport; extract-kick, shutdown and restart are mutations; `/api/logs` presence is a stream |
-| `audio/peaksClient.ts` | transport: immutable per-file waveform data with its own 60-entry cache and in-flight sharing, used outside React |
+| `audio/peaksClient.ts` | query (shared `peaks`), read by the playback engine outside React |
 | `components/create/AdaptersAccordion.tsx` | query (scan) |
 | `components/create/AiGenerateModal.tsx` | query (studios providers); inspire and random subject are commands |
 | `components/create/CreatePanel.tsx` | query (training-data datasets); YuE2 plan is a command |
@@ -89,8 +93,8 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `components/details/Yue2CoverDrift.tsx` | mutation (measure) |
 | `components/library/CoverArtPromptModal.tsx` | query (job); prompt preview is a one-shot pre-fill of an editable field; generate is a mutation |
 | `components/library/ImportTracksModal.tsx` | mutation; `song-created` invalidates |
-| `components/player/LyricsBar.tsx`, `SectionMarkers.tsx` | transport: static sidecar files |
-| `components/player/TrimControls.tsx` | mutation; invalidates |
+| `components/player/LyricsBar.tsx`, `SectionMarkers.tsx` | query (shared `lrc`, `lyrics-json`) |
+| `components/player/TrimControls.tsx` | mutation; invalidates song views and sidecars |
 | `components/settings/DataFolderPanel.tsx` | query; preview, schedule, cancel and restart are commands |
 | `components/settings/SettingsPanel.tsx` | query (health, env, GPUs, stem stats); saves, purges and restart are mutations |
 | `components/shared/FileBrowserModal.tsx` | query |
@@ -109,7 +113,7 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `stores/postProcessStore.ts` | query |
 | `utils/downloadTrack.ts` | mutation (export download) |
 | `utils/heapWatch.ts` | client timer |
-| `utils/lrcUtils.ts`, `wordLrcUtils.ts` | transport: static sidecar files |
+| `utils/lrcUtils.ts`, `wordLrcUtils.ts` | transport: canonical sidecar reads for the shared keys |
 | `utils/mm3CaptionSource.ts` (not in the manifest: dynamic import) | transport: reads cover-lyrics' `lireekApi.getLyricsSet` |
 | `utils/yue2CaptionSource.ts` | query |
 

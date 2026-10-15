@@ -5,13 +5,44 @@
 // store because these files are not library songs.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { hashKey, useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Headphones, Loader2, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getSampleMm3, getSampleYue2, sampleAudioUrl, saveSampleMm3, saveSampleYue2 } from '../../services/trainingApi';
+import { sampleAudioUrl, saveSampleMm3, saveSampleYue2 } from '../../services/trainingApi';
+import { queryClient } from '../../queries/client';
+import { trainingQueries as tq } from '../../queries/training-data/queries';
 import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
 import { AuditionPlayer } from './AuditionPlayer';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../shared/Toggle';
+
+/**
+ * One caption file as an editor seed. Query owns the read (and cancels it when
+ * the drawer moves to another sample or worker), but the editor is seeded only
+ * by the first answer fetched for each key: never a cached copy, and never a
+ * later refetch that could write over the user's typing.
+ */
+function useCaptionFile(options: ReturnType<typeof tq.sampleMm3>, enabled: boolean) {
+  const query = useQuery({ ...options, enabled, refetchOnReconnect: false });
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const savedRef = useRef('');
+  const seededFor = useRef<string | null>(null);
+  const hash = hashKey(options.queryKey);
+  useEffect(() => { setText(null); setError(null); }, [hash]);
+  useEffect(() => {
+    if (seededFor.current === hash || !query.isFetchedAfterMount || query.isFetching) return;
+    seededFor.current = hash;
+    if (query.data) { savedRef.current = query.data.text; setText(query.data.text); }
+    else { setText(''); setError(query.error?.message ?? null); }
+  }, [hash, query.isFetchedAfterMount, query.isFetching, query.data, query.error]);
+  /** A confirmed write: the cache takes the server's answer. */
+  const saved = (value: string) => {
+    savedRef.current = value;
+    queryClient.setQueryData(options.queryKey, { text: value });
+  };
+  return { text, setText, error, setError, savedRef, saved };
+}
 
 interface SampleDrawerProps {
   sampleId: string;
@@ -40,51 +71,25 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
   // MM3 Structured Caption — a separate file (<stem>.mm3.txt), not a sidecar
   // field, so it does not ride the store's optimistic edit path. Fetched when
   // the drawer opens on a sample; saved on blur; Escape reverts to last saved.
-  // These reads seed an editor, so they stay plain requests rather than cache
-  // entries a background refetch could write over the user's typing. Each is
-  // aborted when the drawer moves on, and goes to the worker it opened on.
+  // YuE2's planner caption (<stem>.yue2.txt) works the same way.
   const worker = useTrainingStore(s => s.trainingWorker);
-  const [mm3, setMm3] = useState<string | null>(null);
-  const [mm3Error, setMm3Error] = useState<string | null>(null);
-  const mm3SavedRef = useRef('');
-  useEffect(() => {
-    const ctl = new AbortController();
-    setMm3(null);
-    setMm3Error(null);
-    if (!datasetId || !sampleId) return;
-    getSampleMm3(datasetId, sampleId, { worker, signal: ctl.signal })
-      .then(({ text }) => { if (!ctl.signal.aborted) { mm3SavedRef.current = text; setMm3(text); } })
-      .catch((err: Error) => { if (!ctl.signal.aborted) { setMm3(''); setMm3Error(err.message); } });
-    return () => ctl.abort();
-  }, [datasetId, sampleId, worker]);
+  const enabled = !!datasetId && !!sampleId;
+  const mm3File = useCaptionFile(tq.sampleMm3(worker, datasetId ?? '', sampleId), enabled);
+  const yue2File = useCaptionFile(tq.sampleYue2(worker, datasetId ?? '', sampleId), enabled);
+  const { text: mm3, setText: setMm3, error: mm3Error, setError: setMm3Error, savedRef: mm3SavedRef } = mm3File;
+  const { text: yue2, setText: setYue2, error: yue2Error, setError: setYue2Error, savedRef: yue2SavedRef } = yue2File;
   const flushMm3 = () => {
     if (!datasetId || mm3 === null || mm3 === mm3SavedRef.current) return;
     const text = mm3;
     saveSampleMm3(datasetId, sampleId, text, { worker })
-      .then(() => { mm3SavedRef.current = text; setMm3Error(null); })
+      .then(saved => { mm3File.saved(saved.text ?? text); setMm3Error(null); })
       .catch((err: Error) => setMm3Error(err.message));
   };
-
-  // YuE2 planner caption — the third format, same file-not-field arrangement
-  // as MM3 (<stem>.yue2.txt), so the same fetch-on-open / save-on-blur path.
-  const [yue2, setYue2] = useState<string | null>(null);
-  const [yue2Error, setYue2Error] = useState<string | null>(null);
-  const yue2SavedRef = useRef('');
-  useEffect(() => {
-    const ctl = new AbortController();
-    setYue2(null);
-    setYue2Error(null);
-    if (!datasetId || !sampleId) return;
-    getSampleYue2(datasetId, sampleId, { worker, signal: ctl.signal })
-      .then(({ text }) => { if (!ctl.signal.aborted) { yue2SavedRef.current = text; setYue2(text); } })
-      .catch((err: Error) => { if (!ctl.signal.aborted) { setYue2(''); setYue2Error(err.message); } });
-    return () => ctl.abort();
-  }, [datasetId, sampleId, worker]);
   const flushYue2 = () => {
     if (!datasetId || yue2 === null || yue2 === yue2SavedRef.current) return;
     const text = yue2;
     saveSampleYue2(datasetId, sampleId, text, { worker })
-      .then(() => { yue2SavedRef.current = text; setYue2Error(null); })
+      .then(saved => { yue2File.saved(saved.text ?? text); setYue2Error(null); })
       .catch((err: Error) => setYue2Error(err.message));
   };
 

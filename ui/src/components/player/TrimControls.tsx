@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { songApi } from '../../services/api';
 import { invalidateSongs } from '../../queries/shell-queue/songs';
+import { invalidateSidecars } from '../../queries/keys';
 import { useAuth } from '../../context/AuthContext';
 
 interface TrimControlsProps {
@@ -60,8 +61,10 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
       const result = await songApi.crop(songId!, trimInPoint!, trimOutPoint!, token, audioUrl ?? undefined);
       if (result.cropped) {
         onReload(result.newDuration);
-        // The row's duration and file changed under every song view.
+        // The row's duration and file changed under every song view, and
+        // the lyric sidecars were cut with it.
         void invalidateSongs(queryClient);
+        void invalidateSidecars(queryClient);
       }
     } catch (err: any) {
       setError(err.message || t('trim.cropFailed'));

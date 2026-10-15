@@ -7,7 +7,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, FolderOpen, Info, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { scanPreview, type ScanPreview } from '../../services/trainingApi';
+import { hashKey, type QueryKey } from '@tanstack/react-query';
+import type { ScanPreview } from '../../services/trainingApi';
+import { queryClient } from '../../queries/client';
+import { trainingQueries as tq } from '../../queries/training-data/queries';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -61,15 +64,21 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
 
   // Monotonic request id — a slow scan of an earlier prefix must never overwrite
   // the preview for the path the user actually settled on.
+  // The superseded scan is cancelled as well as ignored.
   const scanSeq = useRef(0);
+  const scanKey = useRef<QueryKey | null>(null);
 
   const runScan = useCallback(async (dir: string, rec: boolean) => {
     if (!dir) return;
     const seq = ++scanSeq.current;
+    const options = tq.scanPreview(useTrainingStore.getState().trainingWorker, dir, rec);
+    // A repeat of the same request joins it instead.
+    if (scanKey.current && hashKey(scanKey.current) !== hashKey(options.queryKey)) void queryClient.cancelQueries({ queryKey: scanKey.current, exact: true });
+    scanKey.current = options.queryKey;
     setScanning(true);
     setScanError(null);
     try {
-      const result = await scanPreview(dir, rec);
+      const result = await queryClient.fetchQuery(options);
       if (seq !== scanSeq.current) return;
       setPreview(result);
     } catch (err) {

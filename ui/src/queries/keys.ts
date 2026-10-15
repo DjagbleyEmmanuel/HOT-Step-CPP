@@ -41,6 +41,37 @@ export const SHARED = {
   vram: 'vram',
   /** `apiClient.get('/logs/models-loaded')`: raw `{ loaded }`. Owner: global-models. */
   loadedModels: 'loaded-models',
+  /** `settingsApi.getGpus()`: raw `GpusResponse`. Owner: shell-queue. */
+  gpus: 'gpus',
+  /** `adapterApi.scan(folder)`, filters `{ folder }`: a read-only POST, raw
+   *  response. Owner: global-models. */
+  adapterScan: 'adapter-scan',
+  /** `adapterApi.browse(dir, filter)`, filters `{ dir, filter }`: raw
+   *  `BrowseResponse`. Owner: shell-queue. */
+  browse: 'browse',
+  /** `apiClient.get('/workflows/jobs/<id>?after=<after>', { token })`, filters
+   *  `{ after }` (always present, 0 for the whole history): `WorkflowReplay`.
+   *  Auth. Owner: shell-queue. */
+  workflowJob: 'workflow-job',
+  /** `apiClient.get('/workflows/documents/<id>', { token })`:
+   *  `{ document: WorkflowDocument }`. Auth. Owner: shell-queue. */
+  workflowDocument: 'workflow-document',
+  /** `getYue2Preparation(id)`: `Yue2PreparationSummary`. Local. Owner: training-data. */
+  preparation: 'yue2-preparation',
+  /** `getYue2PreparationJob(id)`: the chain's current job or null. Local.
+   *  Owner: training-data. */
+  preparationJob: 'yue2-preparation-job',
+  /** `fetchPeaks`' read of `/audio/peaks?url=<id>`, id = the audio URL as
+   *  played: raw `Peaks` (may carry `unsupported`). Owner: shell-queue. */
+  peaks: 'peaks',
+  /** `.lrc` sidecar text or null when missing, id = `sidecarUrl(audio, '.lrc')`
+   *  so every variant of a track shares it (`utils/lrcUtils.ts` fetchLrc).
+   *  Owner: shell-queue. */
+  lrc: 'lrc',
+  /** `.lyrics.json` word timings or null when missing, id =
+   *  `sidecarUrl(audio, '.lyrics.json')` (`utils/wordLrcUtils.ts`
+   *  fetchLyricsJson). Owner: shell-queue. */
+  lyricsJson: 'lyrics-json',
 } as const;
 export type SharedResource = typeof SHARED[keyof typeof SHARED];
 export type Resource = SharedResource | `${Area}/${string}`;
@@ -129,4 +160,32 @@ export const sharedKeys = {
   capabilities: (backend: string) => serverKey(SHARED.capabilities, { backend }),
   vram: () => serverKey(SHARED.vram),
   loadedModels: () => serverKey(SHARED.loadedModels),
+  gpus: () => serverKey(SHARED.gpus),
+  adapterScan: (folder: string) => serverKey(SHARED.adapterScan, { filters: { folder } }),
+  browse: (dir: string, filter?: string) => serverKey(SHARED.browse, { filters: { dir, filter } }),
+  workflowJob: (id: string, after = 0) => serverKey(SHARED.workflowJob, { auth: true, id, filters: { after } }),
+  workflowDocument: (id: string) => serverKey(SHARED.workflowDocument, { auth: true, id }),
+  preparation: (id: string) => serverKey(SHARED.preparation, { id }),
+  preparationJob: (id: string) => serverKey(SHARED.preparationJob, { id }),
+  peaks: (audioUrl: string) => serverKey(SHARED.peaks, { id: audioUrl }),
+  lrc: (sidecar: string) => serverKey(SHARED.lrc, { id: sidecar }),
+  lyricsJson: (sidecar: string) => serverKey(SHARED.lyricsJson, { id: sidecar }),
 };
+
+/** Every cached view of song rows, across areas. A song write, delete,
+ *  completion or reconnect invalidates all of them; an area that edits rows
+ *  in place still invalidates this whole list after. Area feeds listed here
+ *  keep their own shape and owner; this only names them for invalidation. */
+export const SONG_VIEWS: QueryKey[] = [
+  resourceKey(SHARED.songs), resourceKey(SHARED.song), resourceKey('shell-queue/recent-songs'),
+  resourceKey('studios/recent-songs'), resourceKey('cover-lyrics/cover-songs'),
+];
+
+export function invalidateSongViews(client: QueryClient): Promise<unknown> {
+  return Promise.all(SONG_VIEWS.map(queryKey => client.invalidateQueries({ queryKey })));
+}
+
+/** A track's lyric sidecars, after a crop or retranscription rewrote them. */
+export function invalidateSidecars(client: QueryClient): Promise<unknown> {
+  return Promise.all([SHARED.lrc, SHARED.lyricsJson].map(r => client.invalidateQueries({ queryKey: resourceKey(r) })));
+}

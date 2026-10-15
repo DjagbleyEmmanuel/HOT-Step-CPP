@@ -151,7 +151,7 @@ Two tiers, both in `ui/src/services/`:
   and `{ signal }` for local-only routes. Pass explicit `worker: null` for a
   local target; omitted worker can mean the live selection in legacy callers.
 
-**Auth**: single-user local app. `AuthContext` auto-logs-in on mount via `authApi.autoLogin()` (`GET /api/auth/auto`); components do `const { token } = useAuth()` and pass `token` to api methods. Newer endpoints (stem-studio, vst, settings) skip the token entirely — both styles coexist.
+**Auth**: single-user local app. `AuthContext` auto-logs-in on mount via `authApi.autoLogin()` (`GET /api/auth/auto`); components do `const { token } = useAuth()` and pass `token` to api methods. Some routes (stem-studio, vst, settings, song detail) take no token. Any Query key whose read sends the token sets `{ auth: true }` so it carries `sessionEpoch` (see above); the song-detail key carries one too, but only so sign-out drops it.
 
 **snake_case gotcha**: the server returns SQLite snake_case rows. `normalizeSong()` (api.ts:76-114) maps to camelCase while keeping BOTH spellings (`audioUrl` and `audio_url`) and parses `generation_params` if it arrives as a JSON string. Any new endpoint returning songs must route through it or the player/library break.
 

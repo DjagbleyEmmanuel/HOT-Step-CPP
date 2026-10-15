@@ -1627,6 +1627,8 @@ async function runPreparation(
 }
 
 /** Read a captured server chain; this poll is a projection, not its executor.
+ *  Its reads go through the shared preparation keys, so a Monitor panel
+ *  showing the same chain joins them rather than asking again.
  *  The chain carries on on the server whatever the studio shows, so the
  *  follow stops once "Train on" moves elsewhere, and only projects the
  *  chain's job while its dataset is the open one. */
@@ -1635,11 +1637,11 @@ async function followYue2Preparation(
 ): Promise<boolean> {
   let lastJobId: string | null = null;
   for (;;) {
-    const pipeline = await preparationApi.getYue2Preparation(id);
+    const pipeline = await queryClient.fetchQuery(tq.preparation(id));
     if (get().trainingWorker !== worker) return false;
     const running = pipeline.stages.findIndex(s => s.status === 'running');
     set({ yue2RunAllStage: running < 0 ? null : running + 1 });
-    const job = await preparationApi.getYue2PreparationJob<TrainingJobSummary>(id);
+    const job = await queryClient.fetchQuery(tq.preparationJob(id));
     if (get().trainingWorker !== worker) return false;
     if (job && isCurrent(get, worker, datasetId)) {
       if (job.id !== lastJobId) {

@@ -6,7 +6,7 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { getSongPostProcessingStatus, songApi, type PostProcessJobStatus } from '../../services/api';
 import type { Song } from '../../types';
 import { pollWhile } from '../contract';
-import { resourceKey, serverKey, sharedKeys, SHARED } from '../keys';
+import { invalidateSongViews, resourceKey, serverKey, sharedKeys, SHARED, SONG_VIEWS } from '../keys';
 
 export const songsOptions = (token: string) => queryOptions({
   queryKey: sharedKeys.songs(),
@@ -37,14 +37,12 @@ export const postProcessStatusOptions = (songId: string, jobId: string) => query
 
 const RECENT = resourceKey('shell-queue/recent-songs');
 
-/** Every cached view of the library, across areas. A song write refetches
- *  all of them. Studios' recent-songs feed is only invalidated, never edited
- *  from here: its shape belongs to studios. */
-export const SONG_VIEWS = [resourceKey(SHARED.songs), resourceKey(SHARED.song), RECENT, resourceKey('studios/recent-songs')];
+/** Every cached view of the library, across areas (keys.ts). A song write
+ *  refetches all of them. Studios' and Cover's feeds are only invalidated,
+ *  never edited from here: their shapes belong to their areas. */
+export { SONG_VIEWS };
 
-export function invalidateSongs(client: QueryClient): Promise<unknown> {
-  return Promise.all(SONG_VIEWS.map(queryKey => client.invalidateQueries({ queryKey })));
-}
+export const invalidateSongs = (client: QueryClient): Promise<unknown> => invalidateSongViews(client);
 
 type SongList = { songs: Song[] };
 

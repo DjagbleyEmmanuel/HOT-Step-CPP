@@ -11,9 +11,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, FolderOpen, FolderPlus, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { adapterApi } from '../../services/api';
+import { queryClient } from '../../queries/client';
+import { trainingQueries as tq } from '../../queries/training-data/queries';
 import {
-  PIPELINE_STAGES, scanPreview,
+  PIPELINE_STAGES,
   type MergePolicy, type PipelineStage, type TrainingDatasetSummary,
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -130,7 +131,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
     if (gen !== genRef.current) return;
     setRows(prev => prev.map(r => (r.path === path ? { ...r, scanning: true, scanError: null } : r)));
     try {
-      const preview = await scanPreview(path, true);
+      const preview = await queryClient.fetchQuery(tq.scanPreview(useTrainingStore.getState().trainingWorker, path, true));
       if (gen !== genRef.current) return;
       setRows(prev => prev.map(r => (r.path === path
         ? { ...r, scanning: false, audioFiles: preview.audioFiles, checked: r.checked && preview.audioFiles > 0 }
@@ -162,7 +163,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
     setLoadingRoot(true);
     setRows([]);
     try {
-      const result = await adapterApi.browse(dir, 'trainingAudio');
+      const result = await queryClient.fetchQuery(tq.browse(dir, 'trainingAudio'));
       if (gen !== genRef.current) return;
       const subdirs = result.entries.filter(e => e.type === 'dir' && e.name !== '..');
       const initial: FolderRow[] = subdirs.map(e => ({

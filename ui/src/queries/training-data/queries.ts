@@ -11,8 +11,9 @@
 // Query; nothing else fetches these snapshots.
 
 import { queryOptions, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import { scopeOf, serverKey, type Resource } from '../keys';
+import { scopeOf, serverKey, sharedKeys, type Resource } from '../keys';
 import * as api from '../../services/trainingApi';
+import * as preparation from '../../services/trainingPreparationApi';
 import { adapterApi } from '../../services/api';
 import type { LmSize } from '../../services/trainingApi';
 
@@ -32,6 +33,10 @@ export const TD = {
   workers: 'training-data/workers',
   workerDispatch: 'training-data/worker-dispatch',
   lmAdapters: 'training-data/lm-adapters',
+  scanPreview: 'training-data/scan-preview',
+  sampleMm3: 'training-data/sample-mm3',
+  sampleYue2: 'training-data/sample-yue2',
+  lyricStudioPreview: 'training-data/lyric-studio-preview',
 } as const satisfies Record<string, Resource>;
 
 type Worker = string | null;
@@ -103,6 +108,50 @@ export const trainingQueries = {
   workerDispatch: (name: string) => queryOptions({
     queryKey: serverKey(TD.workerDispatch, { id: name }),
     queryFn: ({ signal }) => api.getWorkerDispatch(name, { signal }),
+  }),
+
+  // One-shot reads below are fetched with fetchQuery, never observed: they
+  // seed a form or a wizard row, so no background refetch can write over the
+  // user's edits. staleTime 0 asks the server on every open; concurrent reads
+  // still share a request. A caller that moves on cancels its old key.
+
+  /** A server YuE2 preparation chain and its current job. Local (shared keys). */
+  preparation: (id: string) => queryOptions({
+    queryKey: sharedKeys.preparation(id),
+    queryFn: ({ signal }) => preparation.getYue2Preparation(id, { signal }),
+    staleTime: 0,
+  }),
+  preparationJob: (id: string) => queryOptions({
+    queryKey: sharedKeys.preparationJob(id),
+    queryFn: ({ signal }) => preparation.getYue2PreparationJob<api.TrainingJobSummary>(id, { signal }),
+    staleTime: 0,
+  }),
+  /** The folder picker's listing, on this PC (shared key). */
+  browse: (dir: string, filter?: string) => queryOptions({
+    queryKey: sharedKeys.browse(dir, filter),
+    queryFn: ({ signal }) => adapterApi.browse(dir, filter, { signal }),
+    staleTime: 0,
+  }),
+  /** What a folder holds before a dataset is created from it. */
+  scanPreview: (worker: Worker, path: string, recursive = true) => queryOptions({
+    queryKey: serverKey(TD.scanPreview, { worker, filters: { path, recursive } }),
+    queryFn: ({ queryKey, signal }) => api.scanPreview(path, recursive, { worker: workerOf(queryKey), signal }),
+    staleTime: 0,
+  }),
+  sampleMm3: (worker: Worker, id: string, sampleId: string) => queryOptions({
+    queryKey: serverKey(TD.sampleMm3, { worker, id, filters: { sampleId } }),
+    queryFn: ({ queryKey, signal }) => api.getSampleMm3(id, sampleId, { worker: workerOf(queryKey), signal }),
+    staleTime: 0,
+  }),
+  sampleYue2: (worker: Worker, id: string, sampleId: string) => queryOptions({
+    queryKey: serverKey(TD.sampleYue2, { worker, id, filters: { sampleId } }),
+    queryFn: ({ queryKey, signal }) => api.getSampleYue2(id, sampleId, { worker: workerOf(queryKey), signal }),
+    staleTime: 0,
+  }),
+  lyricStudioPreview: (worker: Worker, id: string) => queryOptions({
+    queryKey: serverKey(TD.lyricStudioPreview, { worker, id }),
+    queryFn: ({ queryKey, signal }) => api.getLyricStudioPreview(id, { worker: workerOf(queryKey), signal }),
+    staleTime: 0,
   }),
 };
 

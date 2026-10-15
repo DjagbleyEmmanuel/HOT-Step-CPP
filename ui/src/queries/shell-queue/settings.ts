@@ -6,7 +6,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { adapterApi, healthApi, settingsApi } from '../../services/api';
 import { dataFolderApi } from '../../services/dataFolderApi';
 import { getStemStats } from '../../services/stemStudioApi';
-import { serverKey } from '../keys';
+import { serverKey, sharedKeys } from '../keys';
 
 export const healthOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/health'),
@@ -22,7 +22,7 @@ export const envOptions = () => queryOptions({
 });
 
 export const gpusOptions = () => queryOptions({
-  queryKey: serverKey('shell-queue/gpus'),
+  queryKey: sharedKeys.gpus(),
   queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
 });
 
@@ -42,7 +42,7 @@ export const dataFolderOptions = () => queryOptions({
 
 /** An explicit adapter-folder scan (a read-only POST). Fresh per click. */
 export const adapterScanOptions = (folder: string) => queryOptions({
-  queryKey: serverKey('shell-queue/adapter-scan', { filters: { folder } }),
+  queryKey: sharedKeys.adapterScan(folder),
   queryFn: ({ signal }) => adapterApi.scan(folder, { signal }),
   staleTime: 0,
 });
@@ -50,7 +50,7 @@ export const adapterScanOptions = (folder: string) => queryOptions({
 /** One directory listing in the file browser. Fresh each time it is opened,
  *  since files come and go; the cache only joins repeated requests. */
 export const browseOptions = (dir: string, filter?: string) => queryOptions({
-  queryKey: serverKey('shell-queue/browse', { filters: { dir, filter } }),
+  queryKey: sharedKeys.browse(dir, filter),
   queryFn: ({ signal }) => adapterApi.browse(dir, filter, { signal }),
   staleTime: 0,
 });

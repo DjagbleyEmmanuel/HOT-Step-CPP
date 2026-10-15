@@ -11,10 +11,11 @@
 import { queryOptions } from '@tanstack/react-query';
 import { generateApi, songApi } from '../../services/api';
 import { audioQueueApi } from '../../services/audioQueueApi';
-import { workflowApi } from '../../services/workflowApi';
+import { apiClient } from '../../services/httpClient';
+import type { WorkflowReplay } from '../../../../server/src/contracts/workflow';
 import { queryClient } from '../client';
 import { ACTIVE_POLL_MS } from '../contract';
-import { serverKey } from '../keys';
+import { serverKey, sharedKeys } from '../keys';
 import { songOptions } from './songs';
 
 export const audioQueueItemsOptions = (token: string) => queryOptions({
@@ -30,8 +31,8 @@ export const generationStatusOptions = (jobId: string) => queryOptions({
 });
 
 export const workflowJobOptions = (token: string, jobId: string) => queryOptions({
-  queryKey: serverKey('shell-queue/workflow-job', { auth: true, id: jobId }),
-  queryFn: ({ signal }) => workflowApi.get(token, jobId, undefined, { signal }),
+  queryKey: sharedKeys.workflowJob(jobId),
+  queryFn: ({ signal }) => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(jobId)}?after=0`, { token, signal }),
   retry: false,
 });
 

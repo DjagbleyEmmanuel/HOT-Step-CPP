@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { queryClient } from '../client';
-import { scopeOf } from '../keys';
+import { scopeOf, sharedKeys } from '../keys';
 import { trainingQueries } from './queries';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { setTrainingWorker } from '../../services/trainingApi';
@@ -338,4 +338,29 @@ test('deleting a dataset drops its cached detail and refreshes the list', async 
   assert.equal(queryClient.getQueryData(trainingQueries.dataset(null, 'd').queryKey), undefined);
   assert.equal(srv.calls.filter(u => u === `${LOCAL}/datasets`).length, 2, 'list read again after the delete');
   assert.equal(useTrainingStore.getState().selectedDatasetId, null);
+});
+
+test('preparation reads use the local shared keys: concurrent polls join, each poll asks again', async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    await tick();
+    return new Response(JSON.stringify({ pipeline: { id: 'p', status: 'running', stages: [] } }), { status: 200 });
+  }) as typeof fetch;
+  setTrainingWorker('A');
+  const options = trainingQueries.preparation('p');
+  assert.deepEqual(options.queryKey, sharedKeys.preparation('p'));
+  assert.equal('worker' in scopeOf(options.queryKey)!, false);
+  await Promise.all([queryClient.fetchQuery(options), queryClient.fetchQuery(trainingQueries.preparation('p'))]);
+  assert.equal(calls, 1);
+  await queryClient.fetchQuery(options);
+  assert.equal(calls, 2);
+});
+
+test('a scan preview goes to the worker captured when it was asked for', async () => {
+  const server = fakeServer({ [`${A}/scan-preview?path=x&recursive=1`]: { body: { audioFiles: 3 } } });
+  const read = queryClient.fetchQuery(trainingQueries.scanPreview('A', 'x'));
+  setTrainingWorker('B');
+  assert.equal((await read).audioFiles, 3);
+  assert.deepEqual(server.calls, [`${A}/scan-preview?path=x&recursive=1`]);
 });

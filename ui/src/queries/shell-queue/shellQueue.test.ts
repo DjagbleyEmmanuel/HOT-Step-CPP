@@ -8,6 +8,10 @@ import {
 } from './songs';
 import { readAudioQueue, readGenerationStatus } from './queue';
 import { queriedPresetsApi, queriedSettingsApi } from './preferences';
+import { gpusOptions } from './settings';
+import { lrcOptions, lyricsJsonOptions } from './lyrics';
+import { fetchPeaks, forgetPeaks, peaksCached } from '../../audio/peaksClient';
+import { invalidateSidecars } from '../keys';
 
 const clients: ReturnType<typeof createQueryClient>[] = [];
 const client = () => { const c = createQueryClient(); clients.push(c); return c; };
@@ -179,4 +183,65 @@ test('preference reads are fresh and shared; a write runs once and the next read
   await queriedSettingsApi.get('storm-tuning');
   assert.deepEqual(requests, ['GET /api/preferences/settings/storm-tuning']);
   assert.deepEqual(resourceKey('shell-queue/presets').slice(0, 2), ['hs', 'shell-queue/presets']);
+});
+
+test("a shell write or delete invalidates Cover's cached feed as well as the library", async () => {
+  const c = client();
+  globalThis.fetch = async () => json({ songs: [song('b')] });
+  const cover = serverKey('cover-lyrics/cover-songs', { auth: true });
+  c.setQueryData(cover, { songs: [song('a'), song('b')] });
+  await patchSong(c, 'a', { title: 'renamed' });
+  assert.equal(c.getQueryState(cover)?.isInvalidated, true, 'write: Cover feed refetches on next use');
+  c.setQueryData(cover, { songs: [song('a'), song('b')] });
+  await removeSongs(c, ['a']);
+  assert.equal(c.getQueryState(cover)?.isInvalidated, true, 'delete: Cover feed refetches on next use');
+});
+
+test('duplicated snapshots share one canonical key across areas', () => {
+  assert.deepEqual(gpusOptions().queryKey, sharedKeys.gpus());
+  assert.notDeepEqual(sharedKeys.workflowJob('j', 0), sharedKeys.workflowJob('j', 5), 'after filter stays in the key');
+  assert.equal(typeof (sharedKeys.workflowJob('j')[2] as { session?: number }).session, 'number');
+  // Every variant of a track reads one sidecar entry.
+  assert.deepEqual(lrcOptions('/audio/x_mastered.wav?_t=1').queryKey, lrcOptions('/audio/x.wav').queryKey);
+});
+
+test('lyric sidecars: missing is cached as none, failures throw, crop/retranscribe invalidate', async () => {
+  const c = client();
+  globalThis.fetch = async input => {
+    const url = String(input);
+    if (url.includes('missing')) return new Response('', { status: 404 });
+    if (url.includes('shell')) return new Response('<html>spa</html>', { status: 200 });
+    if (url.includes('broken')) return new Response('', { status: 500 });
+    return url.endsWith('.lrc') ? new Response('[00:01.00] Words', { status: 200 }) : json({ version: 1, lines: [] });
+  };
+  assert.equal(await c.fetchQuery(lrcOptions('/audio/missing.wav')), null);
+  assert.equal(await c.fetchQuery(lyricsJsonOptions('/audio/shell.wav')), null);
+  assert.equal(await c.fetchQuery(lrcOptions('/audio/ok.wav')), '[00:01.00] Words');
+  assert.deepEqual(await c.fetchQuery(lyricsJsonOptions('/audio/ok.wav')), { version: 1, lines: [] });
+  await assert.rejects(c.fetchQuery({ ...lrcOptions('/audio/broken.wav'), retry: false }), /500/);
+  await invalidateSidecars(c);
+  assert.equal(c.getQueryState(lrcOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
+  assert.equal(c.getQueryState(lyricsJsonOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
+});
+
+test('peaks: concurrent reads share a request, failures are not cached, forget drops the entry', async () => {
+  let calls = 0;
+  let fail = true;
+  globalThis.fetch = async () => {
+    calls++;
+    await tick();
+    return fail ? json({ error: 'nope' }, 404) : json({ version: 1, duration: 1, sampleRate: 1, channels: 1, min: [0], max: [1] });
+  };
+  assert.equal(await fetchPeaks('/audio/p.wav'), null);
+  assert.equal(peaksCached('/audio/p.wav'), null);
+  fail = false;
+  calls = 0;
+  const [a, b] = await Promise.all([fetchPeaks('/audio/p.wav'), fetchPeaks('/audio/p.wav')]);
+  assert.equal(calls, 1);
+  assert.equal(a, b);
+  assert.equal(peaksCached('/audio/p.wav')?.duration, 1);
+  forgetPeaks('/audio/p.wav');
+  assert.equal(peaksCached('/audio/p.wav'), null);
+  await fetchPeaks('/audio/p.wav');
+  assert.equal(calls, 2, 'the rewritten file is read again');
 });
