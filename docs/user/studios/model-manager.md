@@ -50,6 +50,11 @@ See [the model list](../models.md) for every file in the catalogue: exact filena
 
 **Runtime files install elsewhere.** CUDA/cuDNN DLLs and TensorRT builder resources install next to the engine binary, not into the models folder, even though they appear as rows and packs here. TensorRT builder resources are GPU-specific; the MiniMax-Music3 TensorRT group marks the one that matches your GPU when it can detect it.
 
+Closing and reopening Model Manager within 30 seconds reuses the recent
+catalogue. Download completion, reconnection and model deletion refresh the
+catalogue and backend availability. Downloads are commands you start explicitly;
+reopening the manager does not start them again.
+
 ## Related
 
 - [Getting started](../getting-started.md)

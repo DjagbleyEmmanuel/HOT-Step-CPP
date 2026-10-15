@@ -4,6 +4,11 @@ HOT-Step CPP is a desktop app for local AI music generation. It started as a for
 
 This page is the catalogue: one line per feature, grouped in sidebar order. Each group links to the page that explains how to use it. The full doc index is in [docs/README.md](docs/README.md).
 
+Studio lists and status views reuse recent server results when you return to a
+view. Active jobs refresh while running; returning to a view never submits a
+new job. See [Generation](docs/user/generation.md), [MIDI Studio](docs/user/studios/midi-studio.md)
+and [Model Manager](docs/user/studios/model-manager.md).
+
 ## Backends
 
 Pick the backend from a button in the global bar. The choice survives a restart, switching frees the outgoing backend's VRAM, controls a backend cannot use are hidden, and studios it cannot run point you back to ACE-Step 1.5. Details: [Backends](docs/user/backends.md), [Models](docs/user/models.md), [Getting higher quality output](docs/user/quality.md).

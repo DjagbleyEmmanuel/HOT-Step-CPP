@@ -63,6 +63,12 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 
 ## Tips and limits
 
+The transcription list refreshes about every 1.5 seconds while jobs are queued
+or transcribing and stops polling when they finish. A slow refresh does not
+start overlapping cycles. Deleting a job waits for server confirmation; an
+older pending refresh cannot put a successfully deleted row back. Returning
+to MIDI Studio shows existing jobs without submitting another transcription.
+
 Transcription is one-way: audio in, a `.mid` file out. There is no path from
 a transcribed (or any other) MIDI file back into music generation.
 

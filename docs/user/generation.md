@@ -474,6 +474,12 @@ cover-nofsq, repaint, lego and extract; the caption and lyrics go to the DiT as
 written. lego, extract and complete need a base or SFT DiT, not a turbo model.
 <!-- TODO(verify): whether Stem Separator's extract jobs use any Generation-bar settings. They are submitted by the Stem Separator's own route, not the shared generation queue path. -->
 
+Returning to a studio does not submit another generation. The queue keeps its
+existing order and ownership rules while status views share current results.
+Leaving a status view stops that view's observation; use the job's explicit
+cancel control to stop server work. A completed server-queued render reaches
+the Library once, including when both the queue and its submitting view follow it.
+
 ## Related
 
 - [Custom-Gen](studios/create.md)

@@ -205,6 +205,11 @@ editor instead.
   have one. It adds a second download of the raw latent alongside the audio
   and is not a Library control.
 
+The Library reuses a recent list when you return. Creating, importing, editing
+or deleting songs refreshes the affected library views. Generation completion
+adds the finished song once, even when the queue and submitting panel both
+follow it. A failed write keeps the previous saved result visible.
+
 ## Related
 
 - [Auto-Gen](insta-gen.md)

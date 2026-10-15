@@ -257,6 +257,11 @@ its value has moved from the default; click it to snap that one field back.
 - Finished covers save to the library tagged with their source, alongside every
   other generation; open [Library](library.md) to find, play or export one.
 
+Artist, lyrics-set and preset lists reuse recent results when you return.
+Transcription and section-build status refresh while active and stop at the
+end. Returning to Cover Studio does not start a new transcription or render;
+your lyric edits and queued execution remain separate from list refreshes.
+
 ## Related
 
 - [Create](create.md)

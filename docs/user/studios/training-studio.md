@@ -90,6 +90,12 @@ Side-Step is a separate, more comprehensive Python training suite by the same au
 <!-- TODO(verify): confirm whether a dataset's audio files are required to stay in their original source folder after Build/Preprocess/Train, or whether the folder can be moved once dataset.json and any tensor caches exist. -->
 <!-- TODO(verify): confirm whether the generation-side adapter picker reads the adapter folder live or needs a refresh/restart after a training run finishes. -->
 
+Dataset and training-status views keep results separate for each **Train on**
+target. Switching workers does not cancel the job on the previous worker.
+Run indexes, mirrored previews and review records remain local to this PC.
+Active job status refreshes while work runs and stops at a terminal state;
+returning to Train, Review or Refine does not repeat a start or audition command.
+
 ## Related
 
 - [ACE-Step training](../training/ace-step.md)

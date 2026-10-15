@@ -150,6 +150,11 @@ caption writer imitates, are re-read from the dataset's sidecar files every
 time the set is loaded, including by the MCP tools, so a re-captioned dataset
 shows up without re-exporting.
 
+Returning to an artist or album reuses recent catalogue results. Saving
+profiles, presets or drafts refreshes their saved lists while unsaved lyric
+text stays in the editor. Reconnecting a workflow stream refreshes its status
+without repeating the render command.
+
 ## Related
 
 - [Custom-Gen](create.md)
