@@ -8,6 +8,12 @@
 #include "yue2-aitk-native-adapter-io.h"
 #include "yue2-aitk-lora.h"
 
+#if YUE2_AITK_CUDA_RUNTIME
+#include "clip_cuda.h"
+#include <cuda_runtime_api.h>
+#endif
+
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -86,6 +92,9 @@ public:
     }
 
     void reset() {
+#if YUE2_AITK_CUDA_RUNTIME
+        clip_cuda_.release();
+#endif
         initialized_ = false; slots_.clear(); frozen_.clear(); layer_slots_ = {}; layer_grads_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
         if (buffer_) { ggml_backend_buffer_free(buffer_); buffer_ = nullptr; }
         if (ctx_) { ggml_free(ctx_); ctx_ = nullptr; }
@@ -190,7 +199,14 @@ public:
     bool clip_gradients(float max_norm, double * norm, std::string * error=nullptr, float pre_scale=1.0f) {
         if (!initialized_ || !(max_norm>0) || !std::isfinite(max_norm) || !(pre_scale>0) || !std::isfinite(pre_scale)) return fail(error,"invalid clipping request");
         static const bool host_path = std::getenv("YUE2_AITK_CLIP_HOST") != nullptr;
-        return host_path ? clip_gradients_host(max_norm, norm, error, pre_scale) : clip_gradients_device(max_norm, norm, error, pre_scale);
+        if (host_path) return clip_gradients_host(max_norm, norm, error, pre_scale);
+#if YUE2_AITK_CUDA_RUNTIME
+        // CUDA: the same maths in four kernel launches instead of a graph of
+        // ~10 nodes per slot (YUE2_AITK_CLIP_GRAPH=1 keeps the graph).
+        static const bool graph_path = std::getenv("YUE2_AITK_CLIP_GRAPH") != nullptr;
+        if (!graph_path && yue2_aitk_is_cuda(backend_)) return clip_gradients_cuda(max_norm, norm, error, pre_scale);
+#endif
+        return clip_gradients_device(max_norm, norm, error, pre_scale);
     }
 
     // Copy every slot's gradient into F32 tensors of matching shape, device to
@@ -258,6 +274,51 @@ private:
     float alpha_ = 32.0f;
     int lokr_dim_ = 0;     // 0 = LoRA sites
     int lokr_factor_ = 0;
+#if YUE2_AITK_CUDA_RUNTIME
+    // The CUDA clip's stream, chunk table (every gradient slot cut into
+    // kChunkElements pieces; the slots never move) and scratch.
+    struct ClipCuda {
+        cudaStream_t stream = nullptr;
+        yue2_clip_cuda::Chunk * chunks = nullptr;
+        float * scratch = nullptr;
+        int n_chunks = 0;
+        void release() {
+            if (chunks) cudaFree(chunks);
+            if (scratch) cudaFree(scratch);
+            if (stream) cudaStreamDestroy(stream);
+            *this = {};
+        }
+    } clip_cuda_;
+
+    bool clip_gradients_cuda(float max_norm, double * norm, std::string * error, float pre_scale) {
+        if (!clip_cuda_.stream) {
+            std::vector<yue2_clip_cuda::Chunk> chunks;
+            for (const Slot & s : slots_) {
+                float * data = static_cast<float *>(s.gradient->data);
+                const int64_t n = ggml_nelements(s.gradient);
+                for (int64_t o = 0; o < n; o += yue2_clip_cuda::kChunkElements)
+                    chunks.push_back({data + o, int(std::min<int64_t>(yue2_clip_cuda::kChunkElements, n - o))});
+            }
+            if (chunks.empty() ||
+                cudaStreamCreateWithFlags(&clip_cuda_.stream, cudaStreamNonBlocking) != cudaSuccess ||
+                cudaMalloc(reinterpret_cast<void **>(&clip_cuda_.chunks), chunks.size()*sizeof(chunks[0])) != cudaSuccess ||
+                cudaMalloc(reinterpret_cast<void **>(&clip_cuda_.scratch), (chunks.size() + 4)*sizeof(float)) != cudaSuccess ||
+                cudaMemcpy(clip_cuda_.chunks, chunks.data(), chunks.size()*sizeof(chunks[0]), cudaMemcpyHostToDevice) != cudaSuccess) {
+                clip_cuda_.release();
+                return fail(error, "CUDA clip setup failed");
+            }
+            clip_cuda_.n_chunks = int(chunks.size());
+        }
+        ggml_backend_synchronize(backend_);  // the gradients come from GGML's stream
+        float denom = 0.0f, sqrt_sum = 0.0f;
+        if (yue2_clip_cuda::clip(clip_cuda_.chunks, clip_cuda_.n_chunks, pre_scale, max_norm, 1e-6f,
+                                 clip_cuda_.scratch, &denom, &sqrt_sum, clip_cuda_.stream) != cudaSuccess)
+            return fail(error, "CUDA clip failed");
+        if (!std::isfinite(denom) || !std::isfinite(sqrt_sum)) return fail(error, "non-finite gradient before clipping");
+        if (norm) *norm = double(denom) * double(sqrt_sum);
+        return true;
+    }
+#endif
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }

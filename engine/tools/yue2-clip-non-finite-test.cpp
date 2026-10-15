@@ -47,6 +47,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -60,17 +61,18 @@ struct Result { bool ok; double norm; double post_norm; std::string error; };
 // Puts the backend's own env var exactly where clip_gradients() reads it
 // (a static local, latched on first call), so each (path, case) combination
 // needs its own process.
-Result run_one(bool host_path, const std::string & kase) {
+Result run_one(bool host_path, const std::string & kase, bool gpu = false) {
 #ifdef _WIN32
     _putenv_s("YUE2_AITK_CLIP_HOST", host_path ? "1" : "");
 #else
     if (host_path) setenv("YUE2_AITK_CLIP_HOST", "1", 1); else unsetenv("YUE2_AITK_CLIP_HOST");
 #endif
     ggml_backend_load_all();
-    ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
-    if (!cpu_dev) return {false, 0.0, 0.0, "no CPU device found"};
+    // gpu: the first GPU, which on a CUDA build runs the CUDA clip kernels.
+    ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(gpu ? GGML_BACKEND_DEVICE_TYPE_GPU : GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (!cpu_dev) return {false, 0.0, 0.0, "no device found"};
     ggml_backend_t backend = ggml_backend_dev_init(cpu_dev, nullptr);
-    if (!backend) return {false, 0.0, 0.0, "cpu backend init failed"};
+    if (!backend) return {false, 0.0, 0.0, "backend init failed"};
 
     Yue2AitkTrainState state;
     std::string error;
@@ -128,9 +130,10 @@ int main(int argc, char ** argv) {
     const char * which_case = std::getenv("YUE2_CLIP_TEST_CASE");
     if (which_path && which_case) {
         const bool host_path = std::string(which_path) == "host";
+        const bool cuda_path = std::string(which_path) == "cuda";
         const std::string kase = which_case;
-        const Result r = run_one(host_path, kase);
-        const char * path_name = host_path ? "host" : "device";
+        const Result r = run_one(host_path, kase, cuda_path);
+        const char * path_name = host_path ? "host" : cuda_path ? "cuda" : "device";
         if (kase == "huge" || kase == "extreme" || kase == "dense_large" || kase == "near_limit") {
             // Expect success, norm close to a known-by-construction value:
             // "huge"/"extreme" are a single spike (the other 2048*2048-1
@@ -174,7 +177,17 @@ int main(int argc, char ** argv) {
 
     const std::string self = argv[0];
     bool all_ok = true;
-    for (const char * path : {"device", "host"}) {
+    // "cuda": the device path on a CUDA GPU (the trainer's CUDA clip kernels);
+    // only on a CUDA build with a CUDA device.
+    bool cuda = false;
+#if YUE2_AITK_CUDA_RUNTIME
+    ggml_backend_load_all();
+    if (ggml_backend_dev_t gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU))
+        cuda = std::strcmp(ggml_backend_reg_name(ggml_backend_dev_backend_reg(gpu)), "CUDA") == 0;
+#endif
+    if (!cuda) std::printf("SKIP (cuda): no CUDA build or device\n");
+    for (const char * path : {"device", "host", "cuda"}) {
+        if (!cuda && std::strcmp(path, "cuda") == 0) continue;
         for (const char * kase : {"inf", "huge", "extreme", "dense_large", "near_limit", "clipped"}) {
 #ifdef _WIN32
             _putenv_s("YUE2_CLIP_TEST_PATH", path);
