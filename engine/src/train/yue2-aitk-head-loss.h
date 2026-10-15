@@ -14,6 +14,7 @@
 
 #include "yue2-aitk-model.h"
 #include "yue2-aitk-graph.h"
+#include "yue2-aitk-bf16-storage.h"
 #include "../../ggml/include/ggml-alloc.h"
 #if YUE2_AITK_CUDA_RUNTIME
 #include "joint_loss_cuda.h"
@@ -165,6 +166,7 @@ struct ChunkWorkspace {
     ggml_tensor * chunk_kl = nullptr;    // [1, count]
     ggml_cgraph * forward = nullptr;
     ggml_cgraph * backward = nullptr;
+    bool bf16 = false;
 
     Status init(const Request & request, std::size_t requested_count, std::string * error) {
         if (tmp.ctx) return Status::success;
@@ -178,7 +180,11 @@ struct ChunkWorkspace {
         adapted = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         base = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         targets = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, count);
-        logit_grad = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, kVocab, count);
+        // CUDA with BF16 activation storage: the logits are stored as BF16
+        // (their values are BF16-rounded anyway) and the loss kernel writes
+        // the gradient as BF16, the round the backward applied to it.
+        bf16 = !request.head->parts.empty() && yue2_aitk_is_cuda(request.backend) && yue2_aitk_bf16_storage::enabled();
+        logit_grad = ggml_new_tensor_2d(tmp.ctx, bf16 ? GGML_TYPE_BF16 : GGML_TYPE_F32, kVocab, count);
         if (!request.head->parts.empty()) {
             // GGUF head: ConvRot's BF16 boundaries (rounded input, output and
             // incoming gradient) over a plain mul_mat; the backward reads the
@@ -188,7 +194,7 @@ struct ChunkWorkspace {
             };
             adapted_logits = logits(adapted);
             base_logits = logits(base);
-            hidden_grad = yue2_aitk_graph::mm(tmp.ctx, request.head->dense_t, ggml_bf16_round(tmp.ctx, logit_grad));
+            hidden_grad = yue2_aitk_graph::mm(tmp.ctx, request.head->dense_t, bf16 ? logit_grad : ggml_bf16_round(tmp.ctx, logit_grad));
         } else {
             adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
                 request.head->scales_f32, nullptr, request.head->rotation, true);
@@ -233,6 +239,7 @@ struct ChunkWorkspace {
         ggml_build_forward_expand(forward, adapted_logits);
         ggml_build_forward_expand(forward, base_logits);
         ggml_build_forward_expand(backward, hidden_grad);
+        if (bf16) yue2_aitk_bf16_storage::apply(forward, {});
         if (!validate_nodes(request.backend, forward, error) || !validate_nodes(request.backend, backward, error))
             return fail(Status::graph_failure, error, "head-loss graph contains a node this backend does not support");
         tmp.buffer = ggml_backend_alloc_ctx_tensors(tmp.ctx, request.backend);
@@ -349,17 +356,25 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         }
 #if YUE2_AITK_CUDA_RUNTIME
         if (cuda) {
-        auto * adapted_ptr = static_cast<const float *>(adapted_logits->data);
-        auto * base_ptr = static_cast<const float *>(base_logits->data);
+        auto * adapted_ptr = adapted_logits->data;
+        auto * base_ptr = base_logits->data;
         auto * target_ptr = static_cast<const uint32_t *>(targets->data);
-        auto * gradient_ptr = static_cast<float *>(logit_grad->data);
+        auto * gradient_ptr = logit_grad->data;
         auto * ce_ptr = static_cast<float *>(per_ce_t->data);
         auto * kl_ptr = static_cast<float *>(per_kl_t->data);
         if (!adapted_ptr || !base_ptr || !target_ptr || !gradient_ptr || !ce_ptr || !kl_ptr)
             return fail(Status::graph_failure, error, "head-loss CUDA tensor data is unavailable");
-        const auto loss_status = yue2_joint_loss_cuda::forward_chunk(
-            adapted_ptr, base_ptr, target_ptr, gradient_ptr, ce_ptr, kl_ptr,
-            offset, count, request.positions, kVocab, request.kl_weight, nullptr);
+        const bool bf16 = workspace.bf16;
+        if (bf16 && (adapted_logits->type != GGML_TYPE_BF16 || base_logits->type != GGML_TYPE_BF16))
+            return fail(Status::graph_failure, error, "head-loss BF16 logits were not stored as BF16");
+        const auto loss_status = bf16 ?
+            yue2_joint_loss_cuda::forward_chunk_bf16(
+                adapted_ptr, base_ptr, target_ptr, gradient_ptr, ce_ptr, kl_ptr,
+                offset, count, request.positions, kVocab, request.kl_weight, nullptr) :
+            yue2_joint_loss_cuda::forward_chunk(
+                static_cast<const float *>(adapted_ptr), static_cast<const float *>(base_ptr), target_ptr,
+                static_cast<float *>(gradient_ptr), ce_ptr, kl_ptr,
+                offset, count, request.positions, kVocab, request.kl_weight, nullptr);
         if (loss_status != yue2_joint_loss_cuda::Status::success)
             return fail(Status::cuda_failure, error, yue2_joint_loss_cuda::status_string(loss_status));
         if (cudaStreamSynchronize(nullptr) != cudaSuccess)
