@@ -201,6 +201,10 @@ Prepare. Finish preparing those before generating the first takes.
 2. Choose 1 to 10 takes, then press **Generate N takes of A → B**, with the
    count and section names shown for your selection. Each take uses a fresh seed,
    continues everything kept so far, and stops a little beyond the chosen range.
+   Takes render in groups of up to four, with one audio result per seed. Ten
+   takes run as 4 + 4 + 2, and each group finishes before the next starts.
+   If a group fails or returns a missing or mismatched track, none of that
+   group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.
 3. Play each take to compare it. Preview starts four seconds before its first new
    section, where available, so you can hear the join. Takes covering the first
@@ -219,6 +223,9 @@ Once the first takes start, the build's settings, score and lyrics are fixed.
 Edits on Prepare do not change that build. Choose **Start over** in Build actions
 or beside **Build in progress** on Prepare to unlock them for a new build.
 **Open** on Prepare returns to the existing build.
+
+A take's seed reproduces its composition only with the same group size. The
+same seed rendered alone can differ from one rendered in a group of four.
 
 YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
 latent or BPM/key correction controls. The YuE2 score tempo and pitch controls

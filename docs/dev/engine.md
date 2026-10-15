@@ -159,8 +159,13 @@ then the composer keeps sampling from frame `codec_ids.length`. Use it to keep a
 render's codecs up to a section boundary and recompose the rest. The frame clock, caps,
 `min_tokens` and the repetition window carry on from the prefix. Under guidance
 (`cfg_scale` other than 1) the negative set is prefilled with the same prefix, because the
-decode feeds both sets each sampled frame. The request needs one song and no
-`semantic_retries`, and the prefix must stay under both the context and the stage cap.
+decode feeds both sets each sampled frame. The request accepts one to four songs
+with a shared prefix and no `semantic_retries`, and the prefix must stay under both
+the context and the stage cap. Each `songs` entry can supply its own explicit seed.
+Matching prompts share the prefix prefill by copying KV rows and logits, including
+the negative CFG rows; scheduled lyrics replay the prefix as a batch. Every row's
+output must begin with the exact prefix, or the whole job fails. Reproduction by
+seed requires the same batch width.
 A lyric schedule still needs `cfg_scale` 1. The stage fails if the output does not begin with the exact
 prefix. The NAR and VAE then render the whole stream again, prefix included. Prefix
 noise is the same for the same `noise_seed`, but the NAR attends both ways across its

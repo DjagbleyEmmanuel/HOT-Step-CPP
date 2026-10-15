@@ -18,8 +18,8 @@ import path from 'node:path';
 import { randomInt, randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
-import { runOnGpuLane } from './generation/gpuLane.js';
-import { yue2Align, yue2Synth, type Yue2SynthRequest } from './backends/yue2/client.js';
+import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
+import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './backends/yue2/client.js';
 import { sectionKind } from './backends/yue2/coverDrift.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
@@ -63,13 +63,16 @@ export interface Yue2BuildSession {
   /** Kept takes, oldest first; the last is the spine. */
   kept: string[];
   /** Takes still rendering. */
-  pending: Array<{ from: number; to: number; count: number }>;
+  pending: Array<{ from: number; to: number; count: number; activeCount?: number; phase?: string; progress?: number }>;
   error: string | null;
   /** The params a Save song render submits, as the session was started. */
   params: Record<string, unknown>;
 }
 
 interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRequest; scoreStarts: number[] }
+
+interface BuildRun { cancelled: boolean; jobId?: string }
+const runs = new Map<string, BuildRun>();
 
 const root = () => path.join(config.data.audioDir, 'takes');
 const sessionDir = (id: string) => path.join(root(), id);
@@ -166,11 +169,21 @@ async function alignStarts(stored: Stored, wav: Buffer, frames: number, through?
   return stored.sections.map((_, i) => (through !== undefined && i > through ? null : starts[i] ?? null));
 }
 
-async function waitJob(jobId: string): Promise<void> {
+async function waitJob(jobId: string, run: BuildRun, lease: LaneLease,
+  progress: (phase: string, progress: number) => void): Promise<Yue2TrackDetail[]> {
   const started = Date.now();
+  let cancelSent = false;
   for (;;) {
+    if ((run.cancelled || !lease.isCurrent()) && !cancelSent) {
+      run.cancelled = true;
+      await aceClient.cancelJob(jobId);
+      cancelSent = true;
+    }
     const status = await aceClient.pollJob(jobId);
-    if (status.status === 'done') return;
+    if (status.status === 'done') {
+      if (run.cancelled) throw new Error('YuE2 takes cancelled');
+      return (status as { tracks?: Yue2TrackDetail[] }).tracks ?? [];
+    }
     if (status.status === 'failed' || status.status === 'cancelled') {
       throw new Error(`YuE2 take ${status.status}${(status as { error?: string }).error ? `: ${(status as { error?: string }).error}` : ''}`);
     }
@@ -178,6 +191,7 @@ async function waitJob(jobId: string): Promise<void> {
       await aceClient.cancelJob(jobId).catch(() => {});
       throw new Error('YuE2 take timed out after 15 minutes');
     }
+    progress(status.phase ?? 'rendering', status.phase_total ? Math.round(100 * (status.phase_step ?? 0) / status.phase_total) : 0);
     await new Promise(r => setTimeout(r, 750));
   }
 }
@@ -211,7 +225,7 @@ export function createBuildSession(params: Record<string, unknown>, request: Yue
   if (!request.abc) throw new TakesError('Build by section needs an approved score.');
   const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
   if (!sections.length) throw new TakesError('The score has no section labels.');
-  // One song per take: the composer cannot resume a prefix across a batch.
+  // The take count controls songs; every song has exactly one noise variation.
   request = { ...request };
   delete request.lm_batch_size;
   delete request.synth_batch_size;
@@ -253,55 +267,130 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const last = to + 1 >= stored.sections.length;
   const length = stored.scoreStarts[to + 1] - stored.scoreStarts[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
-  stored.pending.push({ from, to, count });
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
+  const pending = { from, to, count, activeCount: 0, phase: 'queued', progress: 0 };
+  stored.pending.push(pending);
   stored.error = null;
   save(stored);
+  const run: BuildRun = { cancelled: false };
+  runs.set(id, run);
 
   void (async () => {
-    for (let n = 0; n < count; n++) {
-      const seed = randomInt(1, 2 ** 31 - 1);
-      try {
-        await runOnGpuLane(async () => {
-          const req: Yue2SynthRequest = { ...stored.request, seed,
+    try {
+      for (let n = 0; n < count; n += 4) {
+        if (run.cancelled) throw new Error('YuE2 takes cancelled');
+        const seeds = Array.from({ length: Math.min(4, count - n) }, () => randomInt(1, 2 ** 31 - 1));
+        await runOnGpuLane(async lease => {
+          const checkCancelled = () => {
+            if (run.cancelled || !lease.isCurrent()) throw new Error('YuE2 takes cancelled');
+          };
+          checkCancelled();
+          const update = (phase: string, progress: number) => {
+            const fresh = load(id, userId);
+            Object.assign(fresh.pending[0], { activeCount: seeds.length, phase, progress });
+            save(fresh);
+          };
+          update('starting', 0);
+          const req: Yue2SynthRequest = { ...stored.request, synth_batch_size: 1,
             ...(prefix.length ? { codec_ids: prefix, continue_codec_ids: true } : {}),
             ...(cap ? { preview_max_frames: cap } : {}) };
-          if (prefix.length) delete req.semantic_retries;
-          const sub = await yue2Synth(req);
-          await waitJob(sub.job_id);
-          const status = await aceClient.pollJob(sub.job_id) as { tracks?: Array<{ semantic_ids?: number[] }> };
-          const ids = status.tracks?.[0]?.semantic_ids ?? [];
-          if (!ids.length) throw new Error('The engine returned no codec stream for the take.');
-          const body = await aceClient.getJobResult(sub.job_id);
-          if (!body.ok) throw new Error(`YuE2 take result fetch failed (${body.status})`);
-          const wav = Buffer.from(await body.arrayBuffer());
-          const takeId = randomUUID().slice(0, 8);
-          fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
-          fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-          const starts = await alignStarts(stored, wav, ids.length, last ? undefined : to + 1);
-          // Before `from` the frames are the spine's own.
-          for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
-          // A section the aligner missed inside the take: the score's length on.
-          for (let i = from + 1; i <= Math.min(to + 1, stored.sections.length - 1); i++) {
-            const estimate = start + stored.scoreStarts[i] - stored.scoreStarts[from];
-            if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
+          // Sessions saved by older servers may still carry batch fields.
+          delete req.lm_batch_size;
+          delete req.songs;
+          if (seeds.length === 1) req.seed = seeds[0];
+          else {
+            delete req.seed;
+            req.songs = seeds.map(seed => ({ style: stored.request.style, lyrics: stored.request.lyrics,
+              abc: stored.request.abc, seed }));
           }
-          const fresh = load(id, userId);
-          const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (from ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
-          fresh.takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks });
-          save(fresh);
+          // Retry winners use a different seed, which breaks the take identity.
+          delete req.semantic_retries;
+          const sub = await yue2Synth(req);
+          run.jobId = sub.job_id;
+          try {
+            const tracks = await waitJob(sub.job_id, run, lease, update);
+            checkCancelled();
+            const body = await aceClient.getJobResult(sub.job_id);
+            if (!body.ok) throw new Error(`YuE2 take result fetch failed (${body.status})`);
+            const audio = Buffer.from(await body.arrayBuffer());
+            const contentType = body.headers.get('content-type') ?? 'audio/wav';
+            const parts = contentType.startsWith('multipart/mixed') ? splitMultipartMixed(audio, contentType) : [audio];
+            // Metadata and WAV parts share their order, but song indices may have
+            // gaps. Validate the entire chunk before attaching any of its audio.
+            const mapped = mapTakeTracks(seeds, tracks, parts);
+            update('aligning', 100);
+            const takes: Yue2Take[] = [];
+            for (const { seed, ids, wav } of mapped) {
+              checkCancelled();
+              const starts = await alignStarts(stored, wav, ids.length, last ? undefined : to + 1);
+              checkCancelled();
+              for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
+              for (let i = from + 1; i <= Math.min(to + 1, stored.sections.length - 1); i++) {
+                const estimate = start + stored.scoreStarts[i] - stored.scoreStarts[from];
+                if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
+              }
+              const takeId = randomUUID().slice(0, 8);
+              const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (from ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
+              fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
+              fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks });
+            }
+            const fresh = load(id, userId);
+            fresh.takes.push(...takes);
+            Object.assign(fresh.pending[0], { count: count - n - seeds.length, activeCount: 0, phase: 'queued', progress: 0 });
+            save(fresh);
+          } catch (err) {
+            await aceClient.cancelJob(sub.job_id).catch(() => {});
+            throw err;
+          } finally {
+            run.jobId = undefined;
+          }
         }, { label: `yue2 build: ${stored.sections[from].label}–${stored.sections[to].label}`, family: 'yue2' });
-      } catch (err) {
-        const fresh = load(id, userId);
-        fresh.error = (err as Error).message;
-        save(fresh);
       }
+    } catch (err) {
+      const fresh = load(id, userId);
+      fresh.error = (err as Error).message;
+      save(fresh);
+    } finally {
+      runs.delete(id);
+      const fresh = load(id, userId);
+      fresh.pending = [];
+      save(fresh);
     }
-    const fresh = load(id, userId);
-    const at = fresh.pending.findIndex(p => p.from === from && p.to === to && p.count === count);
-    if (at >= 0) fresh.pending.splice(at, 1);
-    save(fresh);
   })();
   return view(stored);
+}
+
+/** Validate every track before any take is saved. Parts follow track order. */
+export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts: Buffer[]): Array<{ seed: number; ids: number[]; wav: Buffer }> {
+  if (tracks.length !== seeds.length || parts.length !== tracks.length) {
+    throw new Error(`YuE2 take chunk expected ${seeds.length} tracks, received ${tracks.length} metadata rows and ${parts.length} audio parts. No takes saved.`);
+  }
+  const mapped: Array<{ seed: number; ids: number[]; wav: Buffer }> = [];
+  for (let i = 0; i < tracks.length; i++) {
+    const track = tracks[i];
+    if (!Number.isInteger(track.song) || track.song < 0 || track.song >= seeds.length || mapped[track.song]
+      || track.seed !== seeds[track.song] || track.variation !== 0) {
+      throw new Error(`YuE2 take chunk has a missing, duplicate or mismatched song/seed at track ${i}. No takes saved.`);
+    }
+    if (!track.semantic_ids?.length || parts[i].length < 44
+      || parts[i].toString('ascii', 0, 4) !== 'RIFF' || parts[i].toString('ascii', 8, 12) !== 'WAVE') {
+      throw new Error(`YuE2 take chunk song ${track.song} has no codec stream or valid WAV audio. No takes saved.`);
+    }
+    mapped[track.song] = { seed: track.seed, ids: track.semantic_ids, wav: parts[i] };
+  }
+  return mapped;
+}
+
+/** Stops this session's current chunk and prevents later chunks from starting. */
+export async function cancelBuildTakes(id: string, userId: string): Promise<Yue2BuildSession> {
+  load(id, userId);
+  const run = runs.get(id);
+  if (run) {
+    run.cancelled = true;
+    if (run.jobId) await aceClient.cancelJob(run.jobId);
+  }
+  return getBuildSession(id, userId);
 }
 
 /** Keeps a take of the next sections: it becomes the spine. */

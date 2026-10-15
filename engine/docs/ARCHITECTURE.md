@@ -413,14 +413,33 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `nar_chunk_frames` | 0 | NAR chunk cap in frames (25 per second). 0 renders a normal song in one chunk |
 | `end_threshold` | 0.0 | 0 to 1. Stop the semantic stage when the sampler puts this much probability on the end token |
 | `end_bias`, `end_bias_from_sec`, `end_bias_ramp_sec` | 0.0 | Additive end-token bias (-50 to 50), when it starts, and its ramp |
-| `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Single song, single variation |
-| `continue_codec_ids` | false | Treat `codec_ids` as a prefix and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
+| `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Without continuation, single song and single variation only |
+| `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
 | `vae_variant` | `"standard"` | `standard` or `legacy` |
 | `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
 | `id` | `"yue2"` | Request label |
 
 Progress and results for `/yue2/synth` use the shared `GET /job`.
+
+For resumed batches, send `songs: [{style, lyrics, abc, seed}, ...]` with
+`codec_ids`, `continue_codec_ids: true` and optionally `preview_max_frames`.
+Each song needs its own explicit seed to identify its take; its `noise_seed`
+defaults to that seed. Cover Studio uses one synthesis variation per song and
+submits up to four songs at a time, so ten section takes use chunks of 4, 4 and 2.
+The prefix, frame caps, repetition history and CFG state apply to every row.
+Distinct prompts prefill separately; matching prompts copy the prefix KV rows
+and logits. A lyric schedule replays the prefix in a batched decode.
+
+Completed job status includes `tracks`, with one entry per audio part in part
+order. Each entry has `song`, `variation`, `seed`, `noise_seed`, `frames`,
+`end_reason` and `semantic_ids`. The audio result is a WAV for one track or
+`multipart/mixed` for several tracks. Pair each part with its metadata, then
+map by `song` and `seed`: a dropped song leaves a gap in the song indices.
+Section takes reject the entire chunk if an expected track is missing or its
+seed does not match. A row failure, including a prefix mismatch, fails the
+whole engine job with one error. Seeds reproduce only at the same batch width;
+song 0 at batch 4 can differ from the same seed at batch 1.
 
 Under `--keep-loaded` the request's render half (NAR and VAE) runs on a second thread with
 its own backend instance (`yue2-job.h`, the NAR lane) once the AR half has composed and
