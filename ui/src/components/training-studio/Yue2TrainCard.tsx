@@ -45,7 +45,7 @@ import {
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs } from '../../utils/trainingEta';
 import { JobProgress } from './JobProgress';
-import { TrainingChart } from './TrainingChart';
+import { Yue2SplitChart } from './Yue2SplitChart';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -693,8 +693,6 @@ export const Yue2NarTrainCard: React.FC<{
   const yue2Live = useTrainingStore(s => s.yue2Live);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
   const trainMilestones = useTrainingStore(s => s.trainMilestones);
-  const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
-  const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
 
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -1175,17 +1173,12 @@ export const Yue2NarTrainCard: React.FC<{
               ))}
             </div>
           )}
-          {trainStepSeries.length > 1 && (
+          {trainStepSeries.length > 0 && (
             <div className="mt-3">
               {/* target 0 hides the target line: the YuE2 trainer has no
                   stop-on-loss mode, so there is never a line to draw. */}
-              <TrainingChart
-                epochs={trainLmEpochs}
-                steps={trainStepSeries}
-                milestones={trainMilestones}
-                target={0}
-                maxEpochs={trainMaxEpochs}
-              />
+              <Yue2SplitChart mode="nar" points={trainStepSeries.map(s => ({ ...s, ep: s.step }))}
+                milestones={trainMilestones} vramMb={yue2Live?.usedMb} totalSteps={activeJob.total} />
             </div>
           )}
         </div>

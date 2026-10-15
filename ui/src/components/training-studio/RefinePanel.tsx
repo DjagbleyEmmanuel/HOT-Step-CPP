@@ -15,7 +15,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { decideReviewUse, getReviewLadder, pickFromLadder } from '../../services/trainingReviewApi';
-import { Yue2JointRunChart } from './Yue2JointRunChart';
+import { Yue2SplitChart } from './Yue2SplitChart';
 import {
   cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, listYue2JointPreviewsLocal, yue2RungScoresExportUrl, deleteYue2AitkRun,
   setYue2ReviewComplete, type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
@@ -352,7 +352,7 @@ export const RefinePanel: React.FC = () => {
         {active && trainingWorker && !runs.some(r => r.jobId === job?.id) && <div className="mt-2 text-[11px] text-sky-700 dark:text-sky-300">
           {t('trainingStudio.yue2.method.awaitingMirror', 'Waiting for the first sync from {{worker}}', { worker: trainingWorker })}
         </div>}
-        {job && <div className="mt-3"><Yue2JointRunChart job={job} totalSteps={job.total || 0} klTarget={ceiling} /></div>}
+        {job && <div className="mt-3"><Yue2SplitChart job={job} totalSteps={job.total || 0} options={runs.find(r => r.jobId === job.id)?.options} /></div>}
       </div>
 
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">

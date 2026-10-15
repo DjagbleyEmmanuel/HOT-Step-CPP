@@ -9,7 +9,8 @@ import { preferencesApi } from '../../services/preferencesApi';
 import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import { currentWorkerRef } from '../../services/trainingOperations';
 import * as preparationApi from '../../services/trainingPreparationApi';
-import { TrainingChart } from './TrainingChart';
+import { Yue2SplitChart } from './Yue2SplitChart';
+import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
@@ -62,7 +63,7 @@ try {
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
-type JointStepPoint = { step: number; loss?: number; ep: number; arKl?: number; narMse?: number; narRecon?: number; frozen?: boolean; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
+type JointStepPoint = Yue2Point;
 type JointMilestone = { epoch: number; loss: number; path: string };
 function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
@@ -548,6 +549,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [ladderNonce, setLadderNonce] = useState(0);
   const [resumeChoice, setResumeChoice] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
+  const [chartVram, setChartVram] = useState<number>();
   // AITK's joint runner emits step metrics without an epoch stream. Keep the
   // history here in the same step-domain shape used by the legacy YuE2 chart.
   // The job SSE endpoint replays its buffer, so this also reconstructs the
@@ -555,19 +557,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [stepHistory, setStepHistory] = useState<JointStepPoint[]>([]);
   // The KL stop reading at every step, for the chart: the same computation the
   // engine makes, so the line crosses the target where the run stops.
-  const klMode = form.targetKlMode ?? 'mean';
-  const chartSteps = useMemo(() => {
-    const kls: number[] = [];
-    return stepHistory.map(point => {
-      if (typeof point.arKl === 'number') kls.push(point.arKl);
-      const reading = typeof point.arKl === 'number' ? klStopReading(kls, klMode) : null;
-      const p = { ...point, loss: point.loss ?? Number.NaN };
-      return reading ? { ...p, klStop: reading.value } : p;
-    });
-  }, [stepHistory, klMode]);
   // The planner freezes at its KL target: from then on steps carry no loss.
   const frozenAt = useMemo(() => {
-    const first = stepHistory.findIndex(p => p.frozen || p.loss === undefined);
+    const first = stepHistory.findIndex(p => p.frozen);
     return first > 0 && !stepHistory[first - 1].frozen && stepHistory[first - 1].loss !== undefined ? stepHistory[first - 1].step : undefined;
   }, [stepHistory]);
   const [milestones, setMilestones] = useState<JointMilestone[]>([]);
@@ -657,6 +649,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     setLiveMetric(null);
+    setChartVram(undefined);
     setStepHistory([]);
     setMilestones([]);
     setJobLogs([]);
@@ -676,40 +669,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const stop = subscribeEventSource(jobStreamUrl(job.id), { message: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
-        if (item.type === 'metric' && item.metric === 'step') {
+        if (item.type === 'metric' && item.metric === 'vram') {
+          setChartVram(item.usedMb ?? item.vramMb ?? (item.totalMb !== undefined && item.freeMb !== undefined ? item.totalMb - item.freeMb : undefined));
+        } else if (item.type === 'metric' && item.metric === 'step') {
           setLiveMetric(item);
           if (typeof item.step === 'number' && Number.isFinite(item.step)) {
             setStepHistory(previous => {
-              const existing = previous.find(point => point.step === item.step);
-              const prior = previous.filter(point => point.step !== item.step);
-              const stepMs = typeof item.stepMs === 'number' ? item.stepMs : undefined;
-              if (typeof item.narRecon === 'number' && item.loss === undefined && item.stepMs === undefined) {
-                // Checkpoint meters: attach to the step's point.
-                const merged = { ...(existing ?? { step: item.step!, ep: item.step! }), narRecon: item.narRecon };
-                const withRecon = [...prior, merged].sort((a, b) => a.step - b.step).slice(-METRIC_CAP);
-                writeStored(metricKey, { steps: withRecon });
-                return withRecon;
-              }
-              const next = [...prior, { ...(existing?.narRecon !== undefined ? { narRecon: existing.narRecon } : {}), step: item.step!, ep: item.step!,
-                ...(typeof item.loss === 'number' && Number.isFinite(item.loss) ? { loss: item.loss } : {}),
-                ...(typeof item.narMse === 'number' ? { narMse: item.narMse } : {}),
-                ...(item.plannerFrozen ? { frozen: true } : {}),
-                ...(typeof item.arKl === 'number' ? { arKl: item.arKl } : {}),
-                ...(typeof item.gradNorm === 'number' ? { gradNorm: item.gradNorm } : {}),
-                // Cumulative training time from the server (survives preview
-                // pauses and resumes); wall clock since start only as a fallback.
-                ...(typeof item.trainMs === 'number' ? { elapsedMs: item.trainMs }
-                  : typeof job.startedAt === 'number' && typeof item.ts === 'number'
-                    ? { elapsedMs: Math.max(0, item.ts - job.startedAt) } : {}),
-                ...(stepMs !== undefined ? { stepMs } : {}) }];
-              next.sort((a, b) => a.step - b.step);
-              const capped = next.slice(-METRIC_CAP);
-              const mean = (pts: JointStepPoint[]) => { const v = pts.map(p => p.loss).filter((x): x is number => typeof x === 'number'); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined; };
-              const withMean = capped.map((point, index) => point.loss === undefined ? point : { ...point,
-                ma5: mean(capped.slice(Math.max(0, index - 4), index + 1)),
-                ...(index >= 19 ? { ma20: mean(capped.slice(index - 19, index + 1)) } : {}) });
-              writeStored(metricKey, { steps: withMean });
-              return withMean;
+              const next = reduceYue2Metric(previous, item, METRIC_CAP);
+              writeStored(metricKey, { steps: next });
+              return next;
             });
           }
         } else if (item.type === 'metric' && item.metric === 'milestone'
@@ -1792,29 +1760,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {!(ladderRunRec && blindRungs) && liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}
       </div>
-      {!(ladderRunRec && blindRungs) && stepHistory.length > 1 && (
+      {!(ladderRunRec && blindRungs) && stepHistory.length > 0 && (
         <div className="mt-3">
-          <TrainingChart
-            epochs={[]}
-            steps={chartSteps}
-            milestones={milestones}
-            target={form.stopMode === 'loss' ? (form.targetLoss ?? 0) : 0}
-            klTarget={form.stopMode === 'kl' ? (form.targetKl ?? 0) : 0}
-            klStopLabel={(form.targetKlMode ?? 'mean') === 'trend' ? 'KL trend (stop reading)' : 'KL 20-step mean (stop reading)'}
-            maxEpochs={form.steps}
-          />
+          <Yue2SplitChart points={stepHistory} milestones={milestones} totalSteps={job?.total ?? 0} vramMb={chartVram}
+            options={aitkRuns.find(r => r.jobId === job?.id)?.options} />
           {frozenAt !== undefined && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
             {t('trainingStudio.yue2.method.plannerFrozen', 'Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the loss and KL lines end here, the step counter and pace below keep moving.', { step: frozenAt })}
           </div>}
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
-            {frozenAt === undefined && <span>MA5 {stepHistory[stepHistory.length - 1].ma5?.toFixed(4) ?? '—'}</span>}
-            {frozenAt === undefined && <span>20-step stop mean {stepHistory[stepHistory.length - 1].ma20?.toFixed(4) ?? '—'}</span>}
-            {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
-            <span>{stepHistory[stepHistory.length - 1].step} / {form.steps} steps</span>
-            {stepHistory[stepHistory.length - 1].elapsedMs !== undefined && <span>elapsed {formatDurationMs(stepHistory[stepHistory.length - 1].elapsedMs!)}</span>}
-            {stepHistory[stepHistory.length - 1].stepMs !== undefined && <span>pace {(stepHistory.slice(-20).reduce((sum, point) => sum + (point.stepMs ?? 0), 0) / Math.max(1, stepHistory.slice(-20).filter(point => point.stepMs !== undefined).length) / 1000).toFixed(2)}s/step</span>}
-            {job?.status === 'running' && <span>{jointEta(stepHistory, form)}</span>}
-          </div>
+          <div className="text-[10px] text-zinc-500">{job?.status === 'running' && jointEta(stepHistory, form)}</div>
         </div>
       )}
       {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>

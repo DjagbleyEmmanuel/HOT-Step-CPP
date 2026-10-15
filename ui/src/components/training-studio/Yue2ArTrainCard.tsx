@@ -48,7 +48,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { Yue2StageCard } from './Yue2StageCard';
-import { TrainingChart } from './TrainingChart';
+import { Yue2SplitChart } from './Yue2SplitChart';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -1859,27 +1859,17 @@ export const Yue2ArTrainStageCard: React.FC<{
               ))}
             </div>
           )}
-          {trainStepSeries.length > 1 && (
+          {trainStepSeries.length > 0 && (
             <div className="mt-3">
               {/* Everything is mapped into a STEP x-domain: an AR run counts
                   songs, so the relay emits no epoch and the fractional-epoch
                   positions the store computes are all 0. target 0 hides the
                   target line — this trainer has no stop-on-loss mode. */}
-              <TrainingChart
-                epochs={[]}
-                steps={trainStepSeries.map(s => ({ ...s, ep: s.step }))}
-                milestones={trainMilestones
-                  .map(m => ({ ...m, epoch: stepFromSnapshot(m.path) }))
-                  .filter(m => m.epoch > 0)}
+              <Yue2SplitChart mode="ar" points={trainStepSeries.map(s => ({ ...s, ep: s.step }))}
+                milestones={trainMilestones.map(m => ({ ...m, epoch: stepFromSnapshot(m.path) })).filter(m => m.epoch > 0)}
                 evals={yue2ArEvalSeries.map(e => ({ ep: e.step, loss: e.loss }))}
-                target={0}
-              />
-              <p className="text-[10px] text-zinc-500 mt-1.5 leading-snug">
-                {t('trainingStudio.yue2ar.chartNote',
-                  'Faint line: the training loss, which falls whether the model is learning the style or '
-                  + 'memorising the songs. The green points are the held-out loss on the regulariser pack, '
-                  + 'which is the one that does not.')}
-              </p>
+                vramMb={yue2ArLive?.usedMb} totalSteps={activeJob.total} />
+              <p className="text-[10px] text-zinc-500 mt-1.5">{t('trainingStudio.split.grammarInfo', 'Validation on the minted token pack. It should stay roughly flat; rising means token-grammar damage.')}</p>
             </div>
           )}
         </div>
