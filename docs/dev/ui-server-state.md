@@ -37,10 +37,11 @@ Active jobs and VRAM poll at `ACTIVE_POLL_MS` (1.5 s) through `pollWhile`:
 refetchInterval: pollWhile<JobStatus>(job => job?.status === 'running'),
 ```
 
-`pollWhile` stops for good once the predicate fails (terminal stop). While
-fetches fail it doubles the interval per consecutive failure, capped at 30 s,
-and the next success resets it. Capability probes keep their existing down
-manifest behaviour.
+`pollWhile` stops for good once the predicate fails (terminal stop). A poll
+cycle is one fetch plus its retries. While cycles keep failing, the interval
+doubles per consecutive failed cycle (3 s, 6 s, 12 s, 24 s, then capped at
+30 s), and the next success resets it to 1.5 s. Capability probes keep their
+existing down manifest behaviour.
 
 ## Keys
 
@@ -92,17 +93,32 @@ in the component, so it re-renders when the epoch moves.
 
 ### Shared resources
 
-More than one area reads these. The owning area writes the query options and
-everyone else imports them, never a second `queryFn`.
+More than one area reads these. The contract is the key, the read and the
+cached shape, not another area's hooks. Any area may query a shared resource
+directly with its canonical key and canonical read below, so no Stage 2 slice
+waits on another. Several observers on one key still share one request and
+one cache entry.
 
-| Key | Resource | Owner |
-|---|---|---|
-| `sharedKeys.songs()` | library list, `songApi.list` (auth) | shell-queue |
-| `sharedKeys.song(id)` | one song, `songApi.get` (auth) | shell-queue |
-| `sharedKeys.plugins()` | `/api/plugins` registry | global-models |
-| `sharedKeys.capabilities(backend)` | engine capabilities per backend | global-models |
-| `sharedKeys.vram()` | `/api/logs/vram` used and total | global-models |
-| `sharedKeys.loadedModels()` | `/api/logs/models-loaded` | global-models |
+The cached value is the canonical read's result, exactly. Reshape it with
+`select` in the observer, never inside the `queryFn`: two `queryFn`s on one
+key that return different shapes would overwrite each other. The owner is the
+area that may change the read or the shape. It announces a change to every
+consumer before making it, and adds invalidation for the events it handles.
+
+| Key | Canonical read | Cached shape | Owner |
+|---|---|---|---|
+| `sharedKeys.songs()` | `songApi.list(token, { signal })` | `{ songs: Song[] }`, normalized | shell-queue |
+| `sharedKeys.song(id)` | `songApi.get(id, { signal })` | `{ song: Song }`, normalized | shell-queue |
+| `sharedKeys.plugins()` | `apiClient.get('/plugins', { signal })` | raw registry JSON | global-models |
+| `sharedKeys.capabilities(backend)` | `apiClient.get('/capabilities?backend=<id>', { signal })` | raw JSON | global-models |
+| `sharedKeys.vram()` | `apiClient.get('/logs/vram', { signal })` | raw JSON | global-models |
+| `sharedKeys.loadedModels()` | `apiClient.get('/logs/models-loaded', { signal })` | raw `{ loaded }` | global-models |
+
+The two song keys are auth-scoped: read `token` and `sessionEpoch` from
+`useAuth()`, build the key in render, and keep the token in the `queryFn`
+closure, never in the key. Polling cadence stays per observer
+(`refetchInterval`), so a consumer that wants faster VRAM updates sets its own
+interval without touching the owner's options.
 
 Each area keeps its own options, hooks and event mappings in
 `ui/src/queries/<area>/`, with resources named `<area>/<name>`. The areas are

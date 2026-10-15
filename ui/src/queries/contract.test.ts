@@ -31,15 +31,36 @@ test('at most two retries, with a capped exponential delay', () => {
   assert.deepEqual([0, 1, 2, 3, 10].map(retryDelay), [500, 1000, 2000, 4000, 4000]);
 });
 
-test('pollWhile stops at a terminal state and backs off while failing', () => {
+test('pollWhile: real fetches back off per failed cycle, reset on success, stop when terminal', async () => {
+  const client = createQueryClient();
+  const queryKey = ['hs', 'test/poll'];
+  let reply: () => { status: string } = () => ({ status: 'running' });
+  let calls = 0;
+  const cycle = () => client.fetchQuery({
+    queryKey, staleTime: 0, retryDelay: 1,
+    queryFn: async () => { calls++; return reply(); },
+  }).catch(() => undefined);
   const poll = pollWhile<{ status: string }>(d => d?.status === 'running', 1500);
-  const q = (data: { status: string } | undefined, fetchFailureCount = 0) =>
-    ({ state: { data, fetchFailureCount } }) as Parameters<typeof poll>[0];
-  assert.equal(poll(q({ status: 'running' })), 1500);
-  assert.equal(poll(q({ status: 'done' })), false);
-  assert.equal(poll(q({ status: 'running' }, 1)), 3000);
-  assert.equal(poll(q({ status: 'running' }, 2)), 6000);
-  assert.equal(poll(q({ status: 'running' }, 9)), ERROR_POLL_MAX_MS);
+  const interval = () => poll(client.getQueryCache().find({ queryKey })!);
+
+  await cycle();
+  assert.equal(interval(), 1500);
+  reply = () => { throw new ApiError(500, 'down', null); };
+  const backoff: Array<number | false> = [];
+  for (let i = 0; i < 5; i++) { await cycle(); backoff.push(interval()); }
+  assert.equal(calls, 1 + 5 * 3, 'each failed cycle used its two default retries');
+  assert.deepEqual(backoff, [3000, 6000, 12000, 24000, ERROR_POLL_MAX_MS]);
+
+  reply = () => ({ status: 'running' });
+  await cycle();
+  assert.equal(interval(), 1500, 'a success resets the backoff');
+  reply = () => { throw new ApiError(503, 'busy', null); };
+  await cycle();
+  assert.equal(interval(), 3000, 'counting restarts from the success');
+
+  reply = () => ({ status: 'done' });
+  await cycle();
+  assert.equal(interval(), false);
 });
 
 test('client: a 5xx read is retried twice, then fails without caching data', async () => {

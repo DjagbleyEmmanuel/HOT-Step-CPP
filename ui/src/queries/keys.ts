@@ -23,20 +23,23 @@ import { apiClient } from '../services/httpClient';
 
 export type Area = 'training-data' | 'training-runs' | 'global-models' | 'cover-lyrics' | 'studios' | 'shell-queue';
 
-/** Resources more than one area reads. Each has one owning area for its
- *  query options; everyone else imports those, never a second queryFn. */
+/** Resources more than one area reads. Any area may query one directly with
+ *  its canonical key and canonical read below, so no area waits on another's
+ *  hooks. The cached value is that read's result exactly; reshape it with
+ *  `select`, never inside the queryFn. The owner area is the one that changes
+ *  the read or the shape (docs/dev/ui-server-state.md). */
 export const SHARED = {
-  /** Library list, `songApi.list`. Auth. Owner: shell-queue. */
+  /** `songApi.list(token)`: `{ songs: Song[] }`, normalized. Auth. Owner: shell-queue. */
   songs: 'songs',
-  /** One song, `songApi.get`. Auth. Owner: shell-queue. */
+  /** `songApi.get(id)`: `{ song: Song }`, normalized. Auth. Owner: shell-queue. */
   song: 'song',
-  /** `/api/plugins` registry. Owner: global-models. */
+  /** `apiClient.get('/plugins')`: the raw registry JSON. Owner: global-models. */
   plugins: 'plugins',
-  /** Engine capabilities per backend. Owner: global-models. */
+  /** `apiClient.get('/capabilities?backend=<id>')`: raw JSON. Owner: global-models. */
   capabilities: 'capabilities',
-  /** `/api/logs/vram` used/total. Owner: global-models. */
+  /** `apiClient.get('/logs/vram')`: raw JSON. Owner: global-models. */
   vram: 'vram',
-  /** `/api/logs/models-loaded`, the VRAM dropdown list. Owner: global-models. */
+  /** `apiClient.get('/logs/models-loaded')`: raw `{ loaded }`. Owner: global-models. */
   loadedModels: 'loaded-models',
 } as const;
 export type SharedResource = typeof SHARED[keyof typeof SHARED];

@@ -43,14 +43,22 @@ export function retryDelay(attempt: number): number {
   return Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
 }
 
+// errorUpdateCount at each query's last success. fetchFailureCount can't
+// drive the backoff: it resets when every fetch starts, so it only ever
+// counts one cycle's retries.
+const failuresBefore = new WeakMap<object, number>();
+
 /** A `refetchInterval` for a job or status poll. Polls every `ms` while
  *  `isActive(data)` holds and stops for good once it doesn't (terminal stop).
- *  While fetches keep failing the interval doubles per consecutive failure,
- *  capped at ERROR_POLL_MAX_MS; the first success resets it. */
+ *  While poll cycles keep failing (each after its own retries) the interval
+ *  doubles per consecutive failed cycle, capped at ERROR_POLL_MAX_MS; the
+ *  next success resets it. */
 export function pollWhile<T>(isActive: (data: T | undefined) => boolean, ms = ACTIVE_POLL_MS) {
   return (query: Pick<Query<T>, 'state'>): number | false => {
     if (!isActive(query.state.data)) return false;
-    const failures = query.state.fetchFailureCount;
+    const { status, errorUpdateCount } = query.state;
+    if (status !== 'error') failuresBefore.set(query, errorUpdateCount);
+    const failures = errorUpdateCount - (failuresBefore.get(query) ?? 0);
     return failures > 0 ? Math.min(ms * 2 ** failures, ERROR_POLL_MAX_MS) : ms;
   };
 }
