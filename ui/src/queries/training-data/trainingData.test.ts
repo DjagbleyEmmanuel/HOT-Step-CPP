@@ -29,18 +29,22 @@ function fakeServer(routes: Record<string, unknown>) {
   const holds = new Set<string>();
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    // A route or hold may name the method ("PATCH /api/..."); a bare URL
+    // matches any method.
+    const methodUrl = `${init?.method ?? 'GET'} ${url}`;
     calls.push(url);
-    if (holds.has(url)) {
+    const key = methodUrl in routes || holds.has(methodUrl) ? methodUrl : url;
+    if (holds.has(key)) {
       await new Promise<void>((resolve, reject) => {
-        held.set(url, resolve);
+        held.set(key, resolve);
         init?.signal?.addEventListener('abort', () => {
-          aborted.push(url);
+          aborted.push(key);
           reject(new DOMException('aborted', 'AbortError'));
         });
       });
     }
-    if (!(url in routes)) return new Response(JSON.stringify({ error: 'nope' }), { status: 404 });
-    const reply = routes[url] as Reply;
+    if (!(key in routes)) return new Response(JSON.stringify({ error: 'nope' }), { status: 404 });
+    const reply = routes[key] as Reply;
     return new Response(JSON.stringify(reply.body), {
       status: reply.status ?? 200, headers: { 'content-type': 'application/json' },
     });
@@ -215,4 +219,123 @@ test('a job started on A is not adopted once the studio is on B', async () => {
   await start;
   assert.equal(useTrainingStore.getState().activeJob, null);
   assert.ok(!srv.calls.includes(`${A}/jobs/j1`), 'no adoption read for a scope that is gone');
+});
+
+const sample = (sampleId: string, caption: string) => ({
+  sampleId, relPath: `${sampleId}.wav`, caption, labelStatus: 'done', excluded: false, fileMissing: false,
+});
+
+test('a save that finishes after a dataset switch leaves the new dataset alone', async () => {
+  const srv = fakeServer({
+    [`${LOCAL}/datasets/A`]: { body: { ...ds('A'), samples: [sample('s1', 'old')] } },
+    [`${LOCAL}/datasets/B`]: { body: { ...ds('B'), samples: [sample('s1', 'old')] } },
+    [`PATCH ${LOCAL}/datasets/A/samples/s1`]: { body: { sample: sample('s1', 'same') } },
+  });
+  await useTrainingStore.getState().openDataset('A');
+  useTrainingStore.setState({ pendingEdits: { s1: { caption: 'same' } } });
+  srv.hold(`PATCH ${LOCAL}/datasets/A/samples/s1`);
+  const save = useTrainingStore.getState().flushSample('s1');
+  await tick();
+  assert.ok(useTrainingStore.getState().savingSampleIds.has('s1'));
+  await useTrainingStore.getState().openDataset('B');
+  assert.equal(useTrainingStore.getState().savingSampleIds.size, 0, "the switch leaves A's save behind");
+  // B has its own pending edit, same sample id and same value as A's save.
+  useTrainingStore.setState({ pendingEdits: { s1: { caption: 'same' } } });
+  srv.release(`PATCH ${LOCAL}/datasets/A/samples/s1`);
+  await save;
+  const s = useTrainingStore.getState();
+  assert.deepEqual(s.pendingEdits, { s1: { caption: 'same' } }, 'B keeps its pending edit');
+  assert.equal(s.samplesById.s1.caption, 'old', 'B shows its own row');
+  assert.equal(s.saveError, null);
+  // A's cached detail took the saved row, for when A is opened again.
+  const cachedA = queryClient.getQueryData(trainingQueries.dataset(null, 'A').queryKey);
+  assert.equal(cachedA?.samples[0].caption, 'same');
+});
+
+test("a failed save after a dataset switch does not clear the new dataset's state", async () => {
+  const srv = fakeServer({
+    [`${LOCAL}/datasets/A`]: { body: { ...ds('A'), samples: [sample('s1', 'old')] } },
+    [`${LOCAL}/datasets/B`]: { body: { ...ds('B'), samples: [sample('s1', 'old')] } },
+    [`PATCH ${LOCAL}/datasets/A/samples/s1`]: { body: { error: 'locked' }, status: 409 },
+  });
+  await useTrainingStore.getState().openDataset('A');
+  useTrainingStore.setState({ pendingEdits: { s1: { caption: 'x' } } });
+  srv.hold(`PATCH ${LOCAL}/datasets/A/samples/s1`);
+  const save = useTrainingStore.getState().flushSample('s1');
+  await tick();
+  await useTrainingStore.getState().openDataset('B');
+  useTrainingStore.setState({ pendingEdits: { s1: { caption: 'x' } }, savingSampleIds: new Set(['s1']) });
+  srv.release(`PATCH ${LOCAL}/datasets/A/samples/s1`);
+  await save;
+  const s = useTrainingStore.getState();
+  assert.deepEqual(s.pendingEdits, { s1: { caption: 'x' } });
+  assert.ok(s.savingSampleIds.has('s1'), "B's own save is still marked");
+  assert.equal(s.saveError, null);
+});
+
+test('loads use the cache while fresh; a mutation makes the next load read again', async () => {
+  const srv = fakeServer({
+    [`GET ${LOCAL}/datasets`]: { body: { datasets: [ds('a')] } },
+    [`POST ${LOCAL}/datasets`]: { body: { dataset: ds('new') } },
+  });
+  await useTrainingStore.getState().loadDatasets();
+  await useTrainingStore.getState().loadDatasets(); // tab return
+  assert.equal(srv.calls.length, 1, 'one read for two loads');
+  await useTrainingStore.getState().createDataset({} as never);
+  assert.equal(srv.calls.filter(u => u === `${LOCAL}/datasets`).length, 3, 'POST, then one fresh list read');
+  // The created detail is cached for its scope, so opening it reads nothing.
+  await useTrainingStore.getState().openDataset('new');
+  assert.equal(srv.calls.length, 3);
+});
+
+test('a rename updates the cache of the scope it was made in, even after the selection moved', async () => {
+  const srv = fakeServer({
+    [`GET ${A}/datasets`]: { body: { datasets: [{ ...ds('d'), name: 'old' }] } },
+    [`GET ${A}/datasets/d`]: { body: { ...ds('d'), name: 'old' } },
+    [`PATCH ${A}/datasets/d`]: { body: { dataset: { ...ds('d'), name: 'new' } } },
+    [`GET ${B}/datasets`]: { body: { datasets: [] } },
+    [`GET ${B}/capabilities`]: { body: {} },
+  });
+  setTrainingWorker('A');
+  useTrainingStore.setState({ trainingWorker: 'A' });
+  await useTrainingStore.getState().loadDatasets();
+  await useTrainingStore.getState().openDataset('d');
+  srv.hold(`PATCH ${A}/datasets/d`);
+  const rename = useTrainingStore.getState().patchDataset({ name: 'new' } as never);
+  await tick();
+  await useTrainingStore.getState().setTrainingWorker('B');
+  srv.release(`PATCH ${A}/datasets/d`);
+  await rename;
+  assert.equal(queryClient.getQueryData(trainingQueries.dataset('A', 'd').queryKey)?.name, 'new');
+  assert.equal(queryClient.getQueryData(trainingQueries.datasets('A').queryKey)?.[0].name, 'new');
+  assert.deepEqual(useTrainingStore.getState().datasets, [], "B's list is untouched");
+});
+
+test('a rename on the open dataset updates store and cache together', async () => {
+  fakeServer({
+    [`GET ${LOCAL}/datasets`]: { body: { datasets: [{ ...ds('d'), name: 'old' }] } },
+    [`GET ${LOCAL}/datasets/d`]: { body: { ...ds('d'), name: 'old' } },
+    [`PATCH ${LOCAL}/datasets/d`]: { body: { dataset: { ...ds('d'), name: 'new' } } },
+  });
+  await useTrainingStore.getState().loadDatasets();
+  await useTrainingStore.getState().openDataset('d');
+  await useTrainingStore.getState().patchDataset({ name: 'new' } as never);
+  const s = useTrainingStore.getState();
+  assert.equal(s.detail?.name, 'new');
+  assert.equal(s.datasets[0].name, 'new');
+  assert.equal(queryClient.getQueryData(trainingQueries.dataset(null, 'd').queryKey)?.name, 'new');
+});
+
+test('deleting a dataset drops its cached detail and refreshes the list', async () => {
+  const srv = fakeServer({
+    [`GET ${LOCAL}/datasets`]: { body: { datasets: [ds('d')] } },
+    [`GET ${LOCAL}/datasets/d`]: { body: ds('d') },
+    [`DELETE ${LOCAL}/datasets/d`]: { body: { ok: true } },
+  });
+  await useTrainingStore.getState().loadDatasets();
+  await useTrainingStore.getState().openDataset('d');
+  await useTrainingStore.getState().deleteDataset('d');
+  assert.equal(queryClient.getQueryData(trainingQueries.dataset(null, 'd').queryKey), undefined);
+  assert.equal(srv.calls.filter(u => u === `${LOCAL}/datasets`).length, 2, 'list read again after the delete');
+  assert.equal(useTrainingStore.getState().selectedDatasetId, null);
 });

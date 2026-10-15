@@ -7,7 +7,7 @@
 // and fetches finished adapters back to this PC's presets.
 
 import React, { useEffect, useState } from 'react';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Loader2, Server } from 'lucide-react';
 import { WorkersPanel } from './WorkersPanel';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,8 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { pullWorkerAdapters, type WorkerDispatch } from '../../services/trainingApi';
-import { trainingQueries } from '../../queries/training-data/queries';
+import { TD, trainingQueries } from '../../queries/training-data/queries';
+import { resourceKey } from '../../queries/keys';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-3';
 const HERE = '__here__';
@@ -24,6 +25,7 @@ const mb = (bytes: number) => `${(bytes / 1048576).toFixed(0)} MB`;
 
 export const TrainingWorkerBar: React.FC = () => {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const worker = useTrainingStore(s => s.trainingWorker);
   const setWorker = useTrainingStore(s => s.setTrainingWorker);
   // An unreadable list means no workers, as before.
@@ -48,8 +50,10 @@ export const TrainingWorkerBar: React.FC = () => {
   const queuedHere = dispatches.find(d => d.worker === worker)?.items.filter(i => i.status === 'queued').length ?? 0;
   useEffect(() => {
     if (!queuedHere) return;
+    void queryClient.invalidateQueries({ queryKey: resourceKey(TD.datasets, { worker }) });
+    void queryClient.invalidateQueries({ queryKey: resourceKey(TD.yue2Batches, { worker }) });
     void loadDatasets(); void loadBatches();
-  }, [queuedHere, loadDatasets, loadBatches]);
+  }, [queuedHere, worker, loadDatasets, loadBatches]);
 
   if (!workers.length && !worker) return null;
 

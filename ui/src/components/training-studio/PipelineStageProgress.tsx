@@ -64,7 +64,7 @@ export const PipelineStageProgress: React.FC<Props> = ({ item }) => {
     previous.current = useTrainingStore.getState().activeJob;
     // The pipeline runs on the worker selected now; adopt only while it still is.
     const worker = useTrainingStore.getState().trainingWorker;
-    void queryClient.fetchQuery({ ...trainingQueries.job(worker, jobId), staleTime: 0 }).then(
+    void queryClient.fetchQuery(trainingQueries.job(worker, jobId)).then(
       (job) => {
         if (cancelled || useTrainingStore.getState().trainingWorker !== worker) return;
         // BLANK THE CHART BEFORE ADOPTING. trainStepSeries is shared by both

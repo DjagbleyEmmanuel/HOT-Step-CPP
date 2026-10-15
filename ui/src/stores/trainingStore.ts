@@ -11,7 +11,8 @@ import * as preparationApi from '../services/trainingPreparationApi';
 import type { Yue2PreparationPayload } from '../services/trainingPreparationApi';
 import { snapshotFor, type TrainingWorkerRef } from '../services/trainingOperations';
 import { queryClient } from '../queries/client';
-import { resourceKey } from '../queries/keys';
+import { ACTIVE_POLL_MS } from '../queries/contract';
+import { resourceKey, type Resource } from '../queries/keys';
 import { cancelWorkerReads, TD, trainingQueries as tq, workerReads } from '../queries/training-data/queries';
 import { TRAINING_RECIPE_VERSION } from '../../../server/src/contracts/trainingRecipes';
 import { computeTrainingEta, type TrainingEta } from '../utils/trainingEta';
@@ -559,7 +560,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const worker = get().trainingWorker;
     set({ loading: true, error: null });
     try {
-      const datasets = await queryClient.fetchQuery({ ...tq.datasets(worker), staleTime: 0 });
+      const datasets = await queryClient.fetchQuery(tq.datasets(worker));
       // A list read for the worker the studio just left belongs to that
       // worker's cache entry, never to this one's store.
       if (get().trainingWorker === worker) set({ datasets, loading: false });
@@ -577,7 +578,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const isSwitch = get().selectedDatasetId !== id;
     set({ loading: true, error: null });
     try {
-      const detail = await queryClient.fetchQuery({ ...tq.dataset(worker, id), staleTime: 0 });
+      const detail = await queryClient.fetchQuery(tq.dataset(worker, id));
       if (superseded()) return;
       const { byId, order } = indexSamples(detail.samples);
       set({
@@ -592,6 +593,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
               selectedSampleIds: new Set<string>(),
               openSampleId: null,
               pendingEdits: {},
+              // A save still in flight belongs to the dataset being left.
+              savingSampleIds: new Set<string>(),
+              saveError: null,
               jobLog: [],
               // Per-dataset, exactly like closeDataset. The Preprocess panel's
               // own picker calls openDataset(), so without this A's variant
@@ -604,7 +608,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       });
       if (detail.activeJobId) {
         try {
-          const job = await queryClient.fetchQuery({ ...tq.job(worker, detail.activeJobId), staleTime: 0 });
+          const job = await queryClient.fetchQuery(tq.job(worker, detail.activeJobId));
           if (!superseded()) set({ activeJob: job });
         } catch { /* job may have just ended */ }
       } else if (isSwitch) {
@@ -618,6 +622,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   createDataset: async (input) => {
     const worker = get().trainingWorker;
     const detail = await trainingApi.createDataset(input, { worker });
+    queryClient.setQueryData(tq.dataset(worker, detail.id).queryKey, detail);
+    invalidate(TD.datasets, worker);
     if (get().trainingWorker !== worker) return detail.id;
     ++openSeq;
     const { byId, order } = indexSamples(detail.samples);
@@ -642,6 +648,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) return;
     try {
       const summary = await trainingApi.patchDataset(id, patch, { worker });
+      // The cache is updated for the scope the rename was made in, whatever
+      // is selected now; the store only while it still shows that worker.
+      queryClient.setQueryData(tq.dataset(worker, id).queryKey, d => d && { ...d, ...summary });
+      queryClient.setQueryData(tq.datasets(worker).queryKey, list => list?.map(d => (d.id === id ? { ...d, ...summary } : d)));
       if (get().trainingWorker !== worker) return;
       const detail = get().detail;
       set({
@@ -656,6 +666,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   deleteDataset: async (id) => {
     const worker = get().trainingWorker;
     await trainingApi.deleteDataset(id, { worker });
+    queryClient.removeQueries({ queryKey: resourceKey(TD.dataset, { worker }, id) });
+    invalidate(TD.datasets, worker);
     if (get().trainingWorker !== worker) return;
     if (get().selectedDatasetId === id) get().closeDataset();
     await get().loadDatasets();
@@ -667,6 +679,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const detail = await trainingApi.rescanDataset(id, { worker });
+      queryClient.setQueryData(tq.dataset(worker, id).queryKey, detail);
+      invalidate(TD.datasets, worker);
       if (!isCurrent(get, worker, id)) { set({ loading: false }); return; }
       const { byId, order } = indexSamples(detail.samples);
       set({ detail, samplesById: byId, sampleOrder: order, loading: false });
@@ -710,6 +724,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       try {
         const result = await trainingApi.bulkSetSamples(id, [sampleId], { excluded }, { worker });
         if (result.failed.length > 0) throw new Error(result.failed[0].error);
+        cacheSample(worker, id, { ...sample, excluded });
         if (!isCurrent(get, worker, id)) return;
         set({ samplesById: { ...get().samplesById, [sampleId]: { ...sample, excluded } }, saveError: null });
       } catch (err) {
@@ -750,6 +765,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id || ids.length === 0) return;
     try {
       await trainingApi.bulkSetSamples(id, ids, bulk, { worker });
+      invalidate(TD.dataset, worker, id);
       if (isCurrent(get, worker, id)) await get().openDataset(id);
     } catch (err) {
       if (isCurrent(get, worker, id)) set({ saveError: { sampleId: '', message: errMessage(err) } });
@@ -778,7 +794,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) { set({ preprocessStatus: null }); return; }
     set({ preprocessLoading: true });
     try {
-      const preprocessStatus = await queryClient.fetchQuery({ ...tq.preprocessStatus(worker, id), staleTime: 0 });
+      const preprocessStatus = await queryClient.fetchQuery(tq.preprocessStatus(worker, id));
       // A slow request must not overwrite a newer dataset's status — but it must
       // still clear the spinner, or a stale response landing last leaves it
       // spinning forever next to the "Tensor caches" heading.
@@ -799,6 +815,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) return;
     try {
       await trainingApi.deletePreprocessVariant(id, variantKey, { worker });
+      invalidate(TD.preprocessStatus, worker, id);
       if (!isCurrent(get, worker, id)) return;
       set({ error: null });
       await get().loadPreprocessStatus();
@@ -817,7 +834,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const seq = ++trainLmSeq;
     set({ trainLmLoading: true });
     try {
-      const trainLmStatus = await queryClient.fetchQuery({ ...tq.trainLmStatus(worker, id, query), staleTime: 0 });
+      const trainLmStatus = await queryClient.fetchQuery(tq.trainLmStatus(worker, id, query));
       // A superseded request must not win: a newer one is in flight and owns the
       // spinner. A slow request must not overwrite a newer dataset's status, but
       // it must still clear the spinner — same rule as loadPreprocessStatus.
@@ -919,7 +936,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const seq = ++trainDitSeq;
     set({ trainDitLoading: true });
     try {
-      const trainDitStatus = await queryClient.fetchQuery({ ...tq.trainDitStatus(worker, id, query), staleTime: 0 });
+      const trainDitStatus = await queryClient.fetchQuery(tq.trainDitStatus(worker, id, query));
       if (seq !== trainDitSeq) return;
       if (!isCurrent(get, worker, id)) { set({ trainDitLoading: false }); return; }
       set({ trainDitStatus, trainDitLoading: false });
@@ -943,7 +960,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const { trainingWorker: worker, selectedDatasetId: id } = get();
     if (!id) { set({ auditions: [] }); return; }
     try {
-      const res = await queryClient.fetchQuery({ ...tq.auditions(worker, id), staleTime: 0 });
+      const res = await queryClient.fetchQuery(tq.auditions(worker, id));
       // A slow read must not attribute one dataset's previews to the next.
       if (!isCurrent(get, worker, id)) return;
       set({ auditions: res.previews });
@@ -997,6 +1014,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!job) return;
     try {
       await trainingApi.cancelJob(job.id, { worker });
+      invalidate(TD.job, worker, job.id);
       if (get().trainingWorker !== worker || get().activeJob?.id !== job.id) return;
       set({ activeJob: { ...job, status: 'cancelled' } });
       // That status change unmounts the EventSource, so the server's terminal
@@ -1011,7 +1029,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const worker = get().trainingWorker;
     set({ pipelinesLoading: true });
     try {
-      const pipelines = await queryClient.fetchQuery({ ...tq.pipelines(worker), staleTime: 0 });
+      // Read by the Monitor's own interval poll: fresh for one poll period
+      // only, so a mount and a tick share a read but the poll never stalls.
+      const pipelines = await queryClient.fetchQuery({ ...tq.pipelines(worker), staleTime: ACTIVE_POLL_MS });
+      // A stage that moved changed some dataset on this worker. Structural
+      // sharing keeps an unchanged list the same object.
+      if (pipelines !== get().pipelines) invalidate(TD.datasets, worker);
       set(get().trainingWorker === worker ? { pipelines, pipelinesLoading: false } : { pipelinesLoading: false });
     } catch (err) {
       // Advisory — a failed poll must never blank the monitor panel mid-run.
@@ -1036,13 +1059,15 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   loadYue2Batches: async () => {
     const worker = get().trainingWorker;
     try {
-      const yue2Batches = await queryClient.fetchQuery({ ...tq.yue2Batches(worker), staleTime: 0 });
+      // Polled by the batch panel every 3 s; same rule as loadPipelines.
+      const yue2Batches = await queryClient.fetchQuery({ ...tq.yue2Batches(worker), staleTime: ACTIVE_POLL_MS });
       if (get().trainingWorker === worker) set({ yue2Batches });
     } catch (err) { console.warn('[Training] yue2 batches failed:', errMessage(err)); }
   },
   startYue2Batch: async (input) => {
     const worker = get().trainingWorker;
     const batch = await trainingApi.startYue2Batch(input, { worker });
+    invalidate(TD.yue2Batches, worker);
     if (get().trainingWorker === worker) {
       set({ yue2BatchDraft: null });
       await get().loadYue2Batches();
@@ -1054,6 +1079,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   addToYue2Batch: async (id, datasetIds) => {
     const worker = get().trainingWorker;
     await trainingApi.addToYue2Batch(id, datasetIds, { worker });
+    invalidate(TD.yue2Batches, worker);
     if (get().trainingWorker === worker) await get().loadYue2Batches();
   },
   cancelYue2Batch: (id) => workerCommand(set, get, t => trainingApi.cancelYue2Batch(id, t), 'loadYue2Batches'),
@@ -1061,6 +1087,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   startPipeline: async (input) => {
     const worker = get().trainingWorker;
     const pipeline = await trainingApi.startPipeline(input, { worker });
+    invalidate(TD.pipelines, worker);
     if (get().trainingWorker === worker) await get().loadPipelines();
     return pipeline;
   },
@@ -1129,6 +1156,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
           sampleOrder: order,
           pendingEdits: edits,
         });
+        const { trainingWorker, selectedDatasetId } = get();
+        if (selectedDatasetId) cacheSample(trainingWorker, selectedDatasetId, merged);
         break;
       }
 
@@ -1441,6 +1470,21 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 type SetState = (partial: Partial<TrainingState>) => void;
 type GetState = () => TrainingState;
 
+/** Mark a resource stale for the captured worker (and dataset/job id). The
+ *  next load refetches it; a mounted reader refetches at once. */
+function invalidate(resource: Resource, worker: string | null, id?: string): void {
+  void queryClient.invalidateQueries({ queryKey: resourceKey(resource, { worker }, id) });
+}
+
+/** Replace one sample row in the cached detail of the scope it belongs to. */
+function cacheSample(worker: string | null, datasetId: string, sample: TrainingSample): void {
+  queryClient.setQueryData(tq.dataset(worker, datasetId).queryKey, d => {
+    if (!d) return d;
+    const known = d.samples.some(s => s.sampleId === sample.sampleId);
+    return { ...d, samples: known ? d.samples.map(s => (s.sampleId === sample.sampleId ? sample : s)) : [...d.samples, sample] };
+  });
+}
+
 /** The run-scoped slices of one dataset, blanked. Shared by close and by an
  *  open that switches datasets. */
 function blankDatasetRuns() {
@@ -1484,6 +1528,9 @@ async function startJob<R extends { jobId: string }>(
   if (!id) return undefined;
   try {
     const res = await call(id, { worker });
+    // The dataset now has an active job, and its list row may show it.
+    invalidate(TD.dataset, worker, id);
+    invalidate(TD.datasets, worker);
     if (!isCurrent(get, worker, id)) return res;
     set({ jobLog: [], error: null, ...reset?.() });
     await adoptJob(set, get, worker, id, res.jobId);
@@ -1503,6 +1550,7 @@ async function workerCommand(
   const worker = get().trainingWorker;
   try {
     await call({ worker });
+    invalidate(reload === 'loadPipelines' ? TD.pipelines : TD.yue2Batches, worker);
     if (get().trainingWorker === worker) await get()[reload]();
   } catch (err) {
     if (get().trainingWorker === worker) set({ error: errMessage(err) });
@@ -1543,7 +1591,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
  * never opened, so the terminal refresh has to happen here instead.
  */
 async function adoptJob(set: SetState, get: GetState, worker: string | null, datasetId: string, jobId: string): Promise<void> {
-  const job = await queryClient.fetchQuery({ ...tq.job(worker, jobId), staleTime: 0 });
+  const job = await queryClient.fetchQuery(tq.job(worker, jobId));
   if (!isCurrent(get, worker, datasetId)) return;
   set({ activeJob: job });
   if (job.status !== 'queued' && job.status !== 'running') refreshAfterJob(get, job.id);
@@ -1659,23 +1707,29 @@ async function flushFields(set: SetState, get: GetState, sampleId: string, field
     return edits;
   };
 
+  // Completion writes only into the scope the save was made in. Switching
+  // worker or dataset reset the pending and saving state, so a late answer
+  // must not touch the new scope's rows, even one with the same sample id.
+  const finished = () => {
+    const done = new Set(get().savingSampleIds);
+    done.delete(sampleId);
+    return done;
+  };
   try {
     const sample = await trainingApi.patchSample(datasetId, sampleId, patch, { worker });
-    const done = new Set(get().savingSampleIds);
-    done.delete(sampleId);
+    cacheSample(worker, datasetId, sample);
+    if (!isCurrent(get, worker, datasetId)) return;
     set({
-      // The row belongs to the dataset it was saved on, not whatever is open now.
-      ...(isCurrent(get, worker, datasetId) ? { samplesById: { ...get().samplesById, [sampleId]: sample } } : {}),
+      samplesById: { ...get().samplesById, [sampleId]: sample },
       pendingEdits: dropFields(),
-      savingSampleIds: done,
+      savingSampleIds: finished(),
     });
   } catch (err) {
-    const done = new Set(get().savingSampleIds);
-    done.delete(sampleId);
+    if (!isCurrent(get, worker, datasetId)) return;
     set({
       pendingEdits: dropFields(),      // revert the optimistic value
-      savingSampleIds: done,
-      ...(isCurrent(get, worker, datasetId) ? { saveError: { sampleId, message: errMessage(err) } } : {}),
+      savingSampleIds: finished(),
+      saveError: { sampleId, message: errMessage(err) },
     });
   }
 }

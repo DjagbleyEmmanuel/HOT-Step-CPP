@@ -54,6 +54,9 @@ export const trainingQueries = {
   job: (worker: Worker, jobId: string) => queryOptions({
     queryKey: serverKey(TD.job, { worker, id: jobId }),
     queryFn: ({ queryKey, signal }) => api.getJob(jobId, { worker: workerOf(queryKey), signal }),
+    // A job's status is live: every read asks the server, concurrent reads
+    // still share one request.
+    staleTime: 0,
   }),
   preprocessStatus: (worker: Worker, id: string) => queryOptions({
     queryKey: serverKey(TD.preprocessStatus, { worker, id }),
