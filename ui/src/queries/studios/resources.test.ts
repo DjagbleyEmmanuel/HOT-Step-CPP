@@ -6,9 +6,44 @@ import { lyricsOptions } from './lyrics';
 import { waitForSnapshot } from './wait';
 import { serverKey } from '../keys';
 import { saveInstagenPrompt } from '../../services/inspireApi';
+import { QueryObserver } from '@tanstack/react-query';
+import { studioPluginsOptions } from './shared';
+import { sharedKeys } from '../keys';
+import { apiClient } from '../../services/httpClient';
+import type { PluginRegistry } from '../../types/pluginTypes';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('studio plugin selection shares the canonical request and preserves the full cached registry', async () => {
+  const original = globalThis.fetch;
+  const client = createQueryClient();
+  const registry: PluginRegistry = {
+    solvers: [{ name: 'test-solver', display: 'Test solver', description: 'Metadata stays cached', params: [] }],
+    schedulers: [], guidance: [], postprocess: [],
+  };
+  let calls = 0;
+  globalThis.fetch = async url => {
+    assert.equal(String(url), '/api/plugins');
+    calls++;
+    return json(registry);
+  };
+  const observer = new QueryObserver(client, {
+    ...studioPluginsOptions(), refetchInterval: false,
+    select: data => data.solvers.map(plugin => ({ name: plugin.name, display: plugin.display })),
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    const result = await client.fetchQuery({
+      queryKey: sharedKeys.plugins(),
+      queryFn: ({ signal }) => apiClient.get<PluginRegistry>('/plugins', { signal }),
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(result, registry);
+    assert.deepEqual(client.getQueryData(sharedKeys.plugins()), registry);
+    assert.deepEqual(observer.getCurrentResult().data, [{ name: 'test-solver', display: 'Test solver' }]);
+  } finally { unsubscribe(); globalThis.fetch = original; client.clear(); }
+});
 
 test('late project A response cannot replace project B, and project reads consume abort', async () => {
   const original = globalThis.fetch;

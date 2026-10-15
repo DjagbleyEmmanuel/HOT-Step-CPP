@@ -1,4 +1,5 @@
-import { usePluginRegistry } from '../../hooks/usePluginRegistry';
+import { useQuery } from '@tanstack/react-query';
+import { studioPluginsOptions } from '../../queries/studios/shared';
 // StormPage.tsx — Full-width STORM Streaming performance page
 // MDMAchine / A&E Concepts 2026
 
@@ -290,12 +291,16 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const [liveScheduler,    setLiveScheduler]    = usePersistedState('hs-storm-scheduler', gp.scheduler ?? '');
   const [liveGuidanceMode, setLiveGuidanceMode] = usePersistedState('hs-storm-guidance-mode', gp.guidanceMode ?? '');
   // Plugin registry for dropdowns
-  const { registry } = usePluginRegistry();
-  const pluginRegistry = {
-    solvers: registry.solvers.map(p => ({ name: p.name, display: p.display ?? p.name })),
-    schedulers: registry.schedulers.map(p => ({ name: p.name, display: p.display ?? p.name })),
-    guidance: registry.guidance.map(p => ({ name: p.name, display: p.display ?? p.name })),
-  };
+  const pluginsQuery = useQuery({
+    ...studioPluginsOptions(),
+    refetchInterval: false,
+    select: registry => ({
+      solvers: registry.solvers.map(p => ({ name: p.name, display: p.display ?? p.name })),
+      schedulers: registry.schedulers.map(p => ({ name: p.name, display: p.display ?? p.name })),
+      guidance: registry.guidance.map(p => ({ name: p.name, display: p.display ?? p.name })),
+    }),
+  });
+  const pluginRegistry = pluginsQuery.data ?? { solvers: [], schedulers: [], guidance: [] };
   // Live params from StormLiveControls (shared between seq + cont)
   const [liveParams, setLiveParams] = React.useState({ guidance_scale: gp.guidanceScale??7, inference_steps: gp.inferenceSteps??20, duration: 120, bpm: 120 });
   const [selectedSlot, setSelectedSlot] = React.useState<number | null>(null);

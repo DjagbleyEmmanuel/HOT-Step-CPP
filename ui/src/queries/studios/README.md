@@ -45,7 +45,7 @@ the job snapshot. EventSource and its flush timer close on unmount.
 | `repaint-studio/RepaintStudio.tsx` | Shared songs, source-keyed lyrics, workflow snapshots; region/lyric drafts stay local |
 | `insta-gen/InstaGenPanel.tsx` | Providers, prompt, workflow job/document and shared song detail queries; editable preview remains a form |
 | `insta-gen/InspirePreview.tsx` | Form props and types only |
-| `storm/StormPage.tsx` | Uses the shared plugin-registry consumer; no independent `/api/plugins` request |
+| `storm/StormPage.tsx` | Observes the canonical plugins key/read directly; dropdown projection uses `select` |
 | `storm/StormLiveControls.tsx` | LLM generation commands and audio controls |
 | `storm/AiContinuePresetModal.tsx` | Uses shared `PresetCollection`/`SettingDocument`; their Query adoption belongs to shell-queue's owned service files |
 | `assistant/AssistantPanel.tsx` | Provider query; chat remains a streaming command |
