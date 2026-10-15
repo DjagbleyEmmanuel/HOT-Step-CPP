@@ -188,6 +188,52 @@ inline ggml_tensor * slice_rows(ggml_context * ctx, ggml_tensor * x, int64_t fir
     return ggml_reshape_2d(ctx, ggml_cont(ctx, ggml_view_2d(ctx, x, width, x->ne[1], x->nb[1],
                                                        size_t(first) * sizeof(float))), width, x->ne[1]);
 }
+// Output rows [first, first + width) of a [in, out] weight: a contiguous view.
+inline ggml_tensor * weight_rows(ggml_context * ctx, ggml_tensor * w, int64_t first, int64_t width) {
+    GGML_ASSERT(first >= 0 && width > 0 && first + width <= w->ne[1]);
+    return ggml_view_2d(ctx, w, w->ne[0], width, w->nb[1], size_t(first) * w->nb[1]);
+}
+// YUE2_AITK_FUSED_SLICE=1 keeps the fused linear + output slices in bf16 mode.
+inline bool fused_slice() {
+    static const bool on = [] { const char * v = std::getenv("YUE2_AITK_FUSED_SLICE"); return v && *v && *v != '0'; }();
+    return on;
+}
+// A fused linear (q|k|v, gate|up) split into its outputs, each [width, S].
+// Over one fused GGUF weight with a LoRA (or no) adapter, each output is its
+// own GEMM over a row view of the weight, of the companion B and of the LoRA
+// B, with the same BF16 boundaries as linear(); the fused output is never
+// built, so neither are its slice copies nor, in the backward, the zero
+// canvas their gradients accumulate into. Anything else runs linear() and
+// slices it.
+inline std::vector<ggml_tensor *> linear_split(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
+                                               ggml_tensor * x, const Yue2AitkFusedLora * adapter,
+                                               const std::vector<int64_t> & widths) {
+    std::vector<ggml_tensor *> out;
+    if (strict_f32() || fused_slice() || w.dense || w.parts.size() != 1 || (adapter && adapter->is_lokr())) {
+        ggml_tensor * y = linear(ctx, w, x, adapter);
+        int64_t first = 0;
+        for (int64_t width : widths) { out.push_back(slice_rows(ctx, y, first, width)); first += width; }
+        return out;
+    }
+    GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols);
+    ggml_tensor * xr = round(ctx, x);
+    ggml_tensor * ca = w.frozen_a ? mm_f32(ctx, w.frozen_a, round(ctx, x)) : nullptr;
+    ggml_tensor * ax = adapter ? mm(ctx, adapter->a, round(ctx, x)) : nullptr;
+    int64_t first = 0;
+    for (int64_t width : widths) {
+        ggml_tensor * base = round(ctx, mm(ctx, weight_rows(ctx, w.parts[0], first, width), xr));
+        if (ca) base = round(ctx, ggml_add(ctx, base, round(ctx, mm_f32(ctx, weight_rows(ctx, w.frozen_b, first, width), ca))));
+        if (ax) {
+            ggml_tensor * delta = mm(ctx, weight_rows(ctx, adapter->b, first, width), ax);
+            delta = round(ctx, adapter->scale == 1.0f ? delta : ggml_scale(ctx, delta, adapter->scale));
+            base = round(ctx, ggml_add(ctx, base, delta));
+        }
+        out.push_back(base);
+        first += width;
+    }
+    GGML_ASSERT(first == w.rows);
+    return out;
+}
 inline ggml_tensor * join_halves(ggml_context * ctx, ggml_tensor * a, ggml_tensor * b) {
     GGML_ASSERT(ggml_are_same_shape(a, b));
     // CONCAT has no backward in this GGML revision. Accumulating disjoint
@@ -241,10 +287,10 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     GGML_ASSERT((prefix_k_canvas == nullptr) == (prefix_v_canvas == nullptr));
     h = round(ctx, h);
     ggml_tensor * n = rms(ctx, h, norms.input, c.rms_eps);
-    ggml_tensor * qkv = linear(ctx, w.qkv, n, adapters ? &adapters->qkv : nullptr);
-    ggml_tensor * q = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, 0, Q), D, c.heads, S, 1);
-    ggml_tensor * k = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, Q, KV), D, c.kv_heads, S, 1);
-    ggml_tensor * v = ggml_reshape_4d(ctx, slice_rows(ctx, qkv, Q+KV, KV), D, c.kv_heads, S, 1);
+    const std::vector<ggml_tensor *> qkv = linear_split(ctx, w.qkv, n, adapters ? &adapters->qkv : nullptr, {Q, KV, KV});
+    ggml_tensor * q = ggml_reshape_4d(ctx, qkv[0], D, c.heads, S, 1);
+    ggml_tensor * k = ggml_reshape_4d(ctx, qkv[1], D, c.kv_heads, S, 1);
+    ggml_tensor * v = ggml_reshape_4d(ctx, qkv[2], D, c.kv_heads, S, 1);
     q = rope(ctx, rms(ctx, q, norms.q, c.rms_eps), cosine, sine, positions);
     k = rope(ctx, rms(ctx, k, norms.k, c.rms_eps), cosine, sine, positions);
     q = ggml_permute(ctx, q, 0, 2, 1, 3);
@@ -306,9 +352,10 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
 #endif
     h = round(ctx, ggml_add(ctx, h, linear(ctx, w.output, attention, adapters ? &adapters->output : nullptr)));
     n = rms(ctx, h, norms.post_attention, c.rms_eps);
-    ggml_tensor * gu = linear(ctx, w.gate_up, n, adapters ? &adapters->gate_up : nullptr);
-    ggml_tensor * gate = silu_bf16(ctx, slice_rows(ctx, gu, 0, c.intermediate));
-    ggml_tensor * up = slice_rows(ctx, gu, c.intermediate, c.intermediate);
+    const std::vector<ggml_tensor *> gu = linear_split(ctx, w.gate_up, n, adapters ? &adapters->gate_up : nullptr,
+                                                       {c.intermediate, c.intermediate});
+    ggml_tensor * gate = silu_bf16(ctx, gu[0]);
+    ggml_tensor * up = gu[1];
     ggml_tensor * activation = mul_bf16(ctx, gate, up);
     out.hidden = round(ctx, ggml_add(ctx, h, linear(ctx, w.down, activation, adapters ? &adapters->down : nullptr)));
     return out;
