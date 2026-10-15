@@ -288,8 +288,6 @@ export async function smokeArtifact(zipArg, { outputParent = os.tmpdir(), timeou
     evidence.server = 'pass';
     const models = path.join(work, 'stub-models');
     writeStubs(models);
-    await smokeEngine(path.join(root, 'engine/ace-server.exe'), root, models, env, path.join(work, 'engine.log'), timeoutMs);
-    evidence.engine = 'pass';
     // Same defaults as the app when a marker is absent (server/src/index.ts).
     const marker = name => fs.readFileSync(path.join(root, 'engine', name), 'utf8').trim();
     const variant = fs.existsSync(path.join(root, 'engine/.variant')) ? marker('.variant') : 'cuda';
@@ -303,6 +301,8 @@ export async function smokeArtifact(zipArg, { outputParent = os.tmpdir(), timeou
     } else {
       runtimeDir = undefined;
     }
+    await smokeEngine(path.join(root, 'engine/ace-server.exe'), root, models, backendEnv, path.join(work, 'engine.log'), timeoutMs);
+    evidence.engine = 'pass';
     evidence.backends = await checkBackends(path.join(root, 'engine/ace-server.exe'), root, backendEnv, path.join(work, 'backend.log'), variant, timeoutMs);
     evidence.negative = await negativeChecks(root, backendEnv, work, variant, runtimeDir, timeoutMs);
     evidence.status = 'pass';
