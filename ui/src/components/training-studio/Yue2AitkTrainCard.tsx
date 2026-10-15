@@ -1,5 +1,5 @@
 import { YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_TUNED_KEYS, YUE2_JOINT_LORA_STOP, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_PRESETS, YUE2_JOINT_BASE_MATCHED_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
-import { YUE2_JOINT_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
+import { YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_FIXED_RECIPE_DROPOUTS } from '../../../../server/src/contracts/trainingRecipes';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -1230,21 +1230,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             info={t('trainingStudio.yue2.method.presetInfo', 'Fast, Balanced and Thorough are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Legacy is the previous recipe: one song per update, stopping once the planner has moved a set distance from the base model, so it can finish sooner, but its adapters scored lower by ear than the three new presets. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
           {form.method !== 'fixed-recipe' && !activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
-        <button type="button" disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
-          method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 32, alpha: 32,
-          optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
-          beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
-          stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
-          gradAccum: 1, arCropFrames: 0, narCropFrames: 1500, abcDropout: 1,
-          captionDropout: 0, textDropout: 0, lyricDropout: 0, bothDropout: 0,
-          lyricTiming: false, cursorWeight: 0, calibrated: false, autoRefine: false,
-        })); }} className={`mt-3 px-3 py-2 rounded-lg border text-xs font-semibold disabled:opacity-40 ${form.method === 'fixed-recipe'
-          ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
-          : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50'}`}>
-          Fixed recipe · bf16 LoRA
-        </button>
-        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method. Prepare a 0 LUFS cache before Start.</p>}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <button type="button" disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
+            method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 32, alpha: 32,
+            optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
+            beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
+            stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
+            gradAccum: 1, arCropFrames: 0, narCropFrames: 1500,
+            ...YUE2_JOINT_FIXED_RECIPE_DROPOUTS,
+            lyricTiming: false, cursorWeight: 0, calibrated: false, autoRefine: false,
+          })); }} className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${form.method === 'fixed-recipe'
+            ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+            : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
+            <span className="text-base font-bold">{t('trainingStudio.yue2.method.preset_fixed-recipe', 'HOT-Approved')}</span>
+            <span className="text-xs text-zinc-500">1500 × 1 {t('trainingStudio.yue2.method.presetFixedSong', 'song')}</span>
+          </button>
           {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
             onClick={() => setForm(previous => ({ ...previous,
               ...(previous.method === 'fixed-recipe' ? DEFAULT_FORM : {}), ...presetValues(p) }))}
@@ -1255,6 +1255,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
+        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method. Prepare a 0 LUFS cache before Start.</p>}
         {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}

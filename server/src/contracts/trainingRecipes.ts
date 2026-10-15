@@ -348,6 +348,10 @@ export const ACE_DIT_LOKR_EPOCHS = {
 export const YUE2_JOINT_LADDER_PREVIEW = { enabled: true, everySteps: 0, parallel: true, takes: 2, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
   previewMaxFrames: 7500, baseline: false, control: false };
 
+export const YUE2_JOINT_FIXED_RECIPE_DROPOUTS = {
+  abcDropout: 0.5, captionDropout: 0.5, textDropout: 0, lyricDropout: 0, bothDropout: 0,
+} as const;
+
 export const YUE2_JOINT_TUNED_KEYS = ['targetKl', 'targetLoss', 'targetKlMode', 'narExtraSteps', 'klWeight', 'captionDropout', 'plannerLrScale', 'narLrScale',
   'spikeFactor', 'spikeStop', 'spikeStopWindow', 'reconStop', 'reconStopWindow', 'reconTarget', 'lrSchedule', 'lrFloor', 'lrDecaySteps',
   'lrDecayShape', 'klOvershootMargin', 'lrCycleSteps', 'lrCycleMult', 'klCheckpointEvery', 'refineWarmup', 'rungAdaptiveLr', 'reconKeepDelta'] as const;

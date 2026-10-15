@@ -9,7 +9,7 @@ const SONG_SECTION = /^\s*\[[^\]]+\]\s*$/;
 const CUE = /^\s*\([^()]*\)\s*$/;
 const HEADER = /^\s*\[(Tags|Lyrics|Duration)\]\s*$/i;
 
-export const FIXED_RECIPE_CAPTION_GRAMMAR = 'fixed-recipe-v2';
+export const FIXED_RECIPE_CAPTION_GRAMMAR = 'fixed-recipe-v3';
 
 export function fixedRecipeTrigger(trigger: string | undefined, slug: string): string {
   return trigger?.trim() || slug;

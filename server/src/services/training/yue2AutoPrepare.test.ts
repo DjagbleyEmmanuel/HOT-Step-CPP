@@ -71,8 +71,8 @@ test('Fixed recipe automatically replaces the old grammar cache and then reuses 
   const first = await ensureYue2PreparedDataset(f.job(), options, f.prepare);
   assert.ok(first);
   const manifest = JSON.parse(fs.readFileSync(first, 'utf8'));
-  assert.equal(manifest.caption_grammar, 'fixed-recipe-v2');
-  manifest.caption_grammar = 'fixed-recipe';
+  assert.equal(manifest.caption_grammar, 'fixed-recipe-v3');
+  manifest.caption_grammar = 'fixed-recipe-v2';
   const oldText = JSON.stringify(manifest);
   fs.writeFileSync(first, oldText);
   // Give the old output a matching hash so the grammar check must reject it.

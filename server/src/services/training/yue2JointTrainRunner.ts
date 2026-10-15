@@ -15,6 +15,7 @@ import { yue2Unload } from '../backends/yue2/client.js';
 import { yue2StyleNormsForRun } from '../backends/yue2/scoreHealth.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR } from './fixedRecipeCaption.js';
+import { YUE2_JOINT_FIXED_RECIPE_DROPOUTS } from '../../contracts/trainingRecipes.js';
 import { getDataset } from './datasetsRepo.js';
 import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
@@ -313,7 +314,7 @@ export function applyFixedRecipe(body: Record<string, unknown>): Record<string, 
     stopMode: 'steps', targetLoss: undefined, targetKl: undefined,
     arLossWeight: 0.5, klWeight: 0.2, arTargets: 'tuned',
     gradAccum: 1, arCropFrames: 0, narCropFrames: 1500,
-    abcDropout: 1, captionDropout: 0, textDropout: 0, lyricDropout: 0, bothDropout: 0,
+    ...YUE2_JOINT_FIXED_RECIPE_DROPOUTS,
     lyricTiming: false, alignmentEnabled: false, cursorWeight: 0,
     narExtraSteps: 0, spikeFactor: 0, reconStop: 0, reconTarget: 0,
     planCheck: undefined, autoRefine: false, lrScale: 1,

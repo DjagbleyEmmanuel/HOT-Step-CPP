@@ -5,7 +5,8 @@ import { applyFixedRecipe, buildYue2JointTrainArgs, parseYue2JointEvent, parseYu
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 64, alpha: 256, adapterType: 'lokr',
     optimizer: 'prodigy', gradAccum: 8, arCropFrames: 500, narCropFrames: 0,
-    lrSchedule: 'wsd', lyricTiming: true, cursorWeight: 0.08, klWeight: 0 });
+    lrSchedule: 'wsd', lyricTiming: true, cursorWeight: 0.08, klWeight: 0,
+    abcDropout: 1, captionDropout: 0, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1 });
   assert.equal(recipe.rank, 32);
   assert.equal(recipe.alpha, 32);
   assert.equal(recipe.adapterType, 'lora');
@@ -22,12 +23,17 @@ test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   assert.equal(recipe.beta2, 0.999);
   assert.equal(recipe.lr, 1e-4);
   assert.equal(recipe.plannerLrScale, 0.5);
-  assert.equal(recipe.abcDropout, 1);
+  assert.equal(recipe.abcDropout, 0.5);
+  assert.equal(recipe.captionDropout, 0.5);
+  assert.deepEqual([recipe.textDropout, recipe.lyricDropout, recipe.bothDropout], [0, 0, 0]);
   assert.deepEqual([recipe.steps, recipe.seed, recipe.saveEvery], [1500, 42, 200]);
   assert.equal(recipe.arTargets, 'tuned');
   const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
     steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
-  const parity = buildYue2JointTrainArgs({ ...base, method: 'fixed-recipe' });
+  const parity = buildYue2JointTrainArgs({ ...base, ...recipe, method: 'fixed-recipe' });
+  assert.deepEqual(parity.slice(parity.indexOf('--abc-dropout'), parity.indexOf('--abc-dropout') + 4),
+    ['--abc-dropout', '0.5', '--caption-dropout', '0.5']);
+  for (const flag of ['--text-dropout', '--lyric-dropout', '--both-dropout', '--trigger']) assert.equal(parity.includes(flag), false);
   assert.equal(parity.includes('--nar-drift'), false);
   assert.deepEqual(parity.slice(parity.indexOf('--adam-eps'), parity.indexOf('--adam-eps') + 2), ['--adam-eps', '1e-6']);
   assert.deepEqual(parity.slice(-2), ['--companion', 'nar-v9.safetensors']);

@@ -103,7 +103,7 @@ export function buildYue2AitkPrepareArgs(o: ResolvedYue2AitkPrepareOptions): str
   for (const name of MODEL_NAMES) args.push('--model', `${name}=${o.models[name]}`);
   args.push('--lyric-timing', o.lyricTiming === false ? '0' : '1');
   // Fixed recipe prefixes the source caption in TS; native injection adds a wrapper.
-  if (o.trigger && o.captionGrammar !== 'fixed-recipe') args.push('--trigger', o.trigger);
+  if (o.trigger) args.push(o.captionGrammar === 'fixed-recipe' ? '--caption-dropout-trigger' : '--trigger', o.trigger);
   return args;
 }
 
