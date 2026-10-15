@@ -28,6 +28,11 @@ the install directory. Change it under Settings > Environment > **Adapters direc
 
 ## The adapters folder
 
+After deleting adapters, use **Settings > General > Adapters > Update adapter
+references** to clear their paths from Lyric Studio album presets. The result lists
+each changed preset and removed adapter. Live adapters and reference tracks stay in
+place. This cleanup runs only when clicked and never substitutes another adapter.
+
 The Training Studio writes into a fixed layout. Hand-installed files can sit at the top.
 
 ```

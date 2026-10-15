@@ -354,6 +354,11 @@ export const lireekApi = {
   listAllPresets: (options: ReadOptions = {}): Promise<{ presets: AlbumPreset[] }> =>
     api('/api/lireek/presets', options),
 
+  updateAdapterReferences: (): Promise<{
+    scanned: number; updated: number;
+    changes: Array<{ lyricsSetId: number; presetName: string; field: string; adapter: string }>;
+  }> => api('/api/lireek/presets/update-adapter-references', { method: 'POST' }),
+
   // ── Slop Detection ──────────────────────────────────────────────────────
   slopScan: (text: string): Promise<any> =>
     api('/api/lireek/slop-scan', { method: 'POST', body: { text } }),

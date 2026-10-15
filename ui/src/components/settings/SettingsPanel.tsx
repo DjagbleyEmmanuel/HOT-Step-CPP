@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
 import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { DataFolderPanel } from './DataFolderPanel';
+import { AdapterReferencesAction } from './AdapterReferencesAction';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -905,6 +906,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Tag size={16} className="settings-section-icon" />
           <span className="settings-section-title">{t('settings.general.adapters')}</span>
         </div>
+
+        <AdapterReferencesAction />
 
         <SettingRow
           id="setting-trigger-filename"

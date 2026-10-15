@@ -16,6 +16,13 @@ internals, cache-key construction, cross-arch research history) lives in
 
 ## Glossary (read first — no prior context assumed)
 
+Album-preset maintenance: Settings > General > Adapters > **Update adapter references**
+calls `POST /api/lireek/presets/update-adapter-references`. The service in
+`server/src/services/lireek/adapterReferences.ts` checks all five adapter columns in
+SQLite `album_presets`, clears missing weights in a transaction, and reports each
+preset and dropped path. It preserves live references and other columns. This is an
+explicit action, never a startup migration or a remapping operation.
+
 - **DiT** — Diffusion Transformer, the C++ model that denoises audio latents (32 layers on the XL base). Lives in `engine/src/dit.h` / `dit-graph.h`.
 - **LoRA** — low-rank adapter: two small matrices A, B whose product `B@A` is a delta added to a base weight. **LoKr** — LyCORIS Kronecker-product variant (`.lokr_w1/.lokr_w2` tensors). **DoRA** — adds a per-row multiplicative rescale; two on-disk namings, both supported in MERGE MODE ONLY: LyCORIS `dora_scale` (LoKr path) and PEFT `lora_magnitude_vector` (LoRA path, since 2026-07-19). With DoRA the delta carries only alpha/rank; user strength × group scale blends the decompose factor (`s = u·(m/‖W+Δ‖) + (1−u)`), so strength 0 does NOT fully disable a DoRA adapter.
 - **Delta (Δ)** — the full-size weight difference an adapter contributes: `W_adapted = W_base + scale·Δ`.

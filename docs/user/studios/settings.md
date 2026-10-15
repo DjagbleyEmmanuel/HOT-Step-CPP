@@ -42,6 +42,7 @@ it to snap that one field back. The reset persists like any other change — it 
 | Include latent file | Also downloads the `.hslat` latent file alongside each track, which can be reused for covers and remixing. |
 | Use filename as trigger word | Auto-injects the adapter's filename (minus the `.safetensors` extension) into the style description at generation time. |
 | Trigger word placement | Only shown when the trigger toggle above is on. Prepend, Append, or Replace, controlling where the trigger word lands relative to your style description. |
+| Update adapter references | Checks Lyric Studio album presets and clears references to deleted adapter weights. Lists each changed preset and removed adapter. Existing adapters, scales, and reference tracks are kept. Runs only when clicked. |
 
 ### Environment tab
 

@@ -34,6 +34,15 @@ app runs; see [Settings page and hot reload](#settings-page-and-hot-reload).
 
 ## Settings page and hot reload
 
+Settings > General > Adapters includes **Update adapter references**. This explicit
+command posts to `/api/lireek/presets/update-adapter-references` and clears missing
+adapter paths in SQLite's `album_presets`, returning each preset name, adapter field,
+and dropped path. It checks ACE files and PEFT/LoKR directories, MM3 paths under
+`<adapters>/mm3-lm-adapters`, and absolute YuE2 AR/NAR files. Other preset columns
+are preserved. It does not run at startup or change browser generation parameters.
+An unavailable adapter root or filesystem access error aborts the command; writes
+are transactional.
+
 `server/src/routes/settings.ts` exposes a whitelist of `.env` keys to the UI:
 
 | Endpoint | Does |
