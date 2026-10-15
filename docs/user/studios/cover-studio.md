@@ -183,9 +183,42 @@ are saved with the draft.
    score together. Advanced **Lyric Timing (C6)** ties each lyric block to its score section's
    timing; Off by default, Soft and Hard stay selectable but condition strength 1 with either on
    ruins lyric adherence. The reviewed full score stays available. Click
-   **Generate YuE2 cover**; queued renders keep all five choices, selected
-   pair, score and settings from that click
+   **Generate cover** on the **Prepare** tab for a one-shot render; queued renders
+   keep all five choices, selected pair, score and settings from that click
    even if the picker changes later.
+
+### Build by section
+
+For a one-shot cover, **Generate cover** renders the song in one go. Choose
+**Build by section** on **Prepare** to compare takes a few sections at a time.
+It opens the **Build** tab, using the approved score, lyrics and settings from
+Prepare. Finish preparing those before generating the first takes.
+
+1. Use the coloured section chips on the **Song** timeline as your build track.
+   Built sections have ticks and start times; the next section has an arrow.
+   Click the last section you want the next take to reach, or drag across sections
+   from the next one. The selected sections' lyrics appear beside the takes.
+2. Choose 1 to 10 takes, then press **Generate N takes of A → B**, with the
+   count and section names shown for your selection. Each take uses a fresh seed,
+   continues everything kept so far, and stops a little beyond the chosen range.
+   Builds also work with **Condition strength** values other than 1.
+3. Play each take to compare it. Preview starts four seconds before its first new
+   section, where available, so you can hear the join. Takes covering the first
+   section play from the beginning. Each card shows a waveform, playhead and the new part's length.
+   **Keep** adds that take to the build and advances to the next section. Use the
+   trash button to delete an unwanted candidate.
+4. Repeat for the remaining sections. **Play build** plays everything kept so far;
+   clicking a built section plays from its start. To undo a keep, open **Build
+   actions** and choose **Undo last keep**. A built section's undo button rolls
+   back far enough to build that section again.
+5. Click **Save song** to submit everything kept so far as an ordinary generation
+   job, even if some sections remain unbuilt. It uses the kept audio codes and
+   receives the usual post-processing, drift check and Library save.
+
+Once the first takes start, the build's settings, score and lyrics are fixed.
+Edits on Prepare do not change that build. Choose **Start over** in Build actions
+or beside **Build in progress** on Prepare to unlock them for a new build.
+**Open** on Prepare returns to the existing build.
 
 YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
 latent or BPM/key correction controls. The YuE2 score tempo and pitch controls
