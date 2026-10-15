@@ -54,9 +54,9 @@ const POLL_MS = 1500;
 const PREPARED_NAME: Partial<Record<Yue2PreparationStage, string>> = {
   latents: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric cursor spans',
 };
-/** The loudness a joint chain's cache must be cut at (0 base-matched and
+/** The loudness a joint chain cuts its cache at (0 base-matched and
  *  fixed-recipe, -14 tuned); undefined without a joint stage, which keeps
- *  whatever cache is there. */
+ *  whatever cache is there. Nothing refuses a cache at another level. */
 const cacheLufs = (snapshot: Snapshot): number | undefined => {
   const joint = snapshot.payload.recipes.joint;
   return joint ? yue2LoudnessForMethod(joint.overrides.method) : undefined;
@@ -159,10 +159,8 @@ export class Yue2PreparationPipeline {
     if (snapshot.payload.stages.length === 1 && snapshot.payload.stages[0] === 'joint') {
       const a = await this.adapter.artifacts(snapshot, workerUrl);
       const needed: Yue2PreparationStage[] = snapshot.payload.lyricTiming ? ['latents', 'codes', 'sheet', 'stems', 'align'] : ['latents', 'codes', 'sheet'];
-      const lufs = cacheLufs(snapshot);
-      const missing = needed.filter(stage => !this.skip(stage, a, lufs)).map(stage =>
-        stage === 'latents' && a.preprocess.done && lufs !== undefined && a.preprocess.loudnessLufs !== lufs
-          ? `latent cache at ${lufs === 0 ? 'loudness off (0 LUFS)' : `${lufs} LUFS`} for this method` : PREPARED_NAME[stage]);
+      // Loudness is not checked here: Start trains on the cache as cut.
+      const missing = needed.filter(stage => !this.skip(stage, a)).map(stage => PREPARED_NAME[stage]);
       if (missing.length) throw new Yue2PreparationConflict(`Prepare this dataset before starting joint training: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing. Use Perform all stages or the Prepare page.`);
     }
     await this.adapter.admission(snapshot, workerUrl);

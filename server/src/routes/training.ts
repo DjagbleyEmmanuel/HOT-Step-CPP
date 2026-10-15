@@ -3284,9 +3284,11 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
       return;
     }
 
-    // Loudness target: absent = the engine's -14 LUFS; 0 = off. It is part of
-    // the cache key, so a change re-encodes and drops codes/sheet/alignment.
-    let loudnessLufs: number | undefined;
+    // Loudness target: 0 = off, the default here since 2026-10-15 (every
+    // method but Legacy trains on an off cache); Legacy's chain asks for -14.
+    // It is part of the cache key, so a change re-encodes and drops
+    // codes/sheet/alignment.
+    let loudnessLufs = 0;
     if (b.loudnessLufs !== undefined && b.loudnessLufs !== null && b.loudnessLufs !== '') {
       const v = Number(b.loudnessLufs);
       if (!Number.isFinite(v) || v > 0 || v < -40) { res.status(400).json({ error: 'loudnessLufs must be 0 (off) or a target from -40 to 0 LUFS.' }); return; }
@@ -3298,7 +3300,7 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
       outDir,
       manifestPath: yue2PreprocessManifest(ds.slug),
       vaeVariant,
-      ...(loudnessLufs !== undefined ? { loudnessLufs } : {}),
+      loudnessLufs,
       clipSeconds: num('clipSeconds', D.clipSeconds, 1, 60),
       captionMode,
       defaultCaption,
@@ -3624,13 +3626,13 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         return;
       }
       const trigger = ds.customTag || ds.slug;
-      if (method === 'fixed-recipe' ? manifest.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR || manifest.loudness_lufs !== 0
+      if (method === 'fixed-recipe' ? manifest.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR
         : manifest.style_template !== 'upstream' || manifest.trigger !== trigger || !manifest.items.every((item: unknown) => {
           const style = item && typeof item === 'object' ? (item as Record<string, unknown>).style : undefined;
           return typeof style === 'string' && (style === trigger || style.startsWith(`${trigger}, in the style of ${trigger}. `));
         })) {
         res.status(400).json({ error: method === 'fixed-recipe'
-          ? 'Prepared dataset needs fixed-recipe caption grammar and loudness off. Reprepare with Fixed recipe selected.'
+          ? 'Prepared dataset needs fixed-recipe caption grammar. Reprepare with Fixed recipe selected.'
           : 'Prepared dataset does not contain this dataset trigger in its training styles. Reprepare with the current joint trainer.' });
         return;
       }

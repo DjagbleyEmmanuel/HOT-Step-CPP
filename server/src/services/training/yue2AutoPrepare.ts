@@ -39,8 +39,8 @@ function outputFingerprint(manifest: string, captionGrammar?: 'fixed-recipe'): s
   if (data.schema_version !== 1 || data.recipe_version !== 'aitk-yue2-2026-09-16' || !Array.isArray(data.items) || !data.items.length) {
     throw new Error('Invalid prepared dataset');
   }
-  if (captionGrammar === 'fixed-recipe' && (data.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR || data.loudness_lufs !== 0)) {
-    throw new Error('Prepared dataset has no Fixed recipe caption and loudness markers');
+  if (captionGrammar === 'fixed-recipe' && data.caption_grammar !== FIXED_RECIPE_CAPTION_GRAMMAR) {
+    throw new Error('Prepared dataset has no Fixed recipe caption marker');
   }
   // Prepared before 2026-09-20: no trigger-only prefixes, so caption dropout
   // (a card default) is refused by the engine. Stale, so it re-prepares.

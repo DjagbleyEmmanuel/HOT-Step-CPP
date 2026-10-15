@@ -246,7 +246,7 @@ test('joint alone trains on prepared inputs and refuses missing preparation befo
   } finally { g.cleanup(); }
 });
 
-test('a joint chain re-cuts a cache at the wrong loudness for its method; direct Start refuses it', async () => {
+test('a joint chain re-cuts a cache at the wrong loudness for its method; direct Start trains on it as cut', async () => {
   const cut = artifacts();
   cut.preprocess = { done: true, captionModeOk: true, loudnessLufs: -14 };
   cut.tokenize.done = true; cut.sheet.done = true;
@@ -258,9 +258,11 @@ test('a joint chain re-cuts a cache at the wrong loudness for its method; direct
   };
   const f = fixture({ artifacts: cut });
   try {
-    await assert.rejects(f.runner.start(fixed(['joint'], 'direct'), { joint: {} }), /latent cache at loudness off \(0 LUFS\)/);
+    const direct = await f.runner.start(fixed(['joint'], 'direct'), { joint: {} });
+    await until(() => f.runner.get(direct.id)?.status === 'done');
+    assert.deepEqual(f.started.map(x => x.stage), ['joint']);
     const run = await f.runner.start(fixed(['latents', 'codes', 'sheet', 'joint'], 'chain'), { joint: {} });
     await until(() => f.runner.get(run.id)?.status === 'done');
-    assert.deepEqual(f.started[0], { stage: 'latents', worker: 'local', workerUrl: null, body: { captionMode: 'yue2', loudnessLufs: 0 } });
+    assert.deepEqual(f.started[1], { stage: 'latents', worker: 'local', workerUrl: null, body: { captionMode: 'yue2', loudnessLufs: 0 } });
   } finally { f.cleanup(); }
 });

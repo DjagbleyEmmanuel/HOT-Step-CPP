@@ -111,13 +111,7 @@ export function validateYue2AitkPrepareOptions(o: ResolvedYue2AitkPrepareOptions
   if (o.trigger !== undefined && (!o.trigger.trim() || o.trigger.length > 128 || /[\r\n\0]/.test(o.trigger))) return 'trigger must be a nonempty single-line phrase of at most 128 characters';
   const manifestError = regularFile(o.legacyManifest, 'legacy manifest', MAX_MANIFEST_BYTES);
   if (manifestError) return manifestError;
-  if (o.captionGrammar === 'fixed-recipe') {
-    if (o.lyricTiming !== false) return 'Fixed recipe preparation needs lyric timing off.';
-    try {
-      const legacy = JSON.parse(fs.readFileSync(o.legacyManifest, 'utf8')) as { loudness_target_lufs?: unknown };
-      if (legacy.loudness_target_lufs !== 0) return 'Fixed recipe needs a YuE2 cache cut with loudness off (0 LUFS).';
-    } catch { return 'Fixed recipe needs a valid YuE2 cache manifest.'; }
-  }
+  if (o.captionGrammar === 'fixed-recipe' && o.lyricTiming !== false) return 'Fixed recipe preparation needs lyric timing off.';
   const checkpointError = regularFile(o.checkpoint, 'raw ConvRot checkpoint');
   if (checkpointError) return checkpointError;
   const tokenizerError = fileOrDirectory(o.tokenizer, 'tokenizer');
@@ -238,7 +232,6 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
     if (value.schema_version !== 1 || !Array.isArray(value.items)) throw new Error('Preparation wrote an invalid schema-1 dataset manifest');
     if (o.captionGrammar === 'fixed-recipe') {
       value.caption_grammar = FIXED_RECIPE_CAPTION_GRAMMAR;
-      value.loudness_lufs = 0;
       fs.writeFileSync(manifest, JSON.stringify(value));
     }
     job.done = 1; emitProgress(job);
