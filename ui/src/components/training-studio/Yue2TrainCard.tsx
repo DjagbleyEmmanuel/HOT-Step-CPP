@@ -226,50 +226,20 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
 
       {!blocked && (
         <>
-          {/* What the FLAT scan sees, beside what the dataset holds. The engine
-              takes --audio <folder> and no manifest, so subfolders and the
-              dataset's excluded rows genuinely cannot reach it — and a user
-              training on tracks they excluded, without being told, is the
-              failure worth spending three lines on. */}
-          <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
-            {t('trainingStudio.yue2.ppScan',
-              '{{files}} audio file(s) directly in the source folder; the dataset has {{samples}} sample(s)'
-              + '{{excluded}}.',
-              {
-                files: status.scannableFiles,
-                samples: status.datasetSamples,
-                excluded: status.datasetExcluded > 0
-                  ? t('trainingStudio.yue2.ppExcluded', ' and {{n}} excluded', { n: status.datasetExcluded })
-                  : '',
-              })}
-            {cache && (
-              <>
-                {' '}
-                <span className="text-emerald-500">
-                  {t('trainingStudio.yue2.ppCache',
-                    'Cached: {{clips}} clip(s) of {{frames}} frames from {{sources}} track(s).',
-                    { clips: cache.clips, frames: cache.clipFrames, sources: cache.sources })}
-                </span>
-                {(cache.skipped > 0 || cache.failed > 0) && (
-                  <span className="text-amber-500">
-                    {' '}
-                    {t('trainingStudio.yue2.ppCacheProblems', '{{skipped}} skipped, {{failed}} failed.',
-                      { skipped: cache.skipped, failed: cache.failed })}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
-          {(status.scannableFiles !== status.datasetSamples || status.recursive) && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
-              <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
-              <span>
-                {t('trainingStudio.yue2.ppFlatScan',
-                  'This stage scans the source folder FLAT. Subfolders are not searched whatever the '
-                  + 'dataset\'s recursive setting says, and rows excluded in the dataset are still '
-                  + 'encoded — the engine takes a folder, not the dataset manifest.')}
+          {cache && (
+            <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+              <span className="text-emerald-500">
+                {t('trainingStudio.yue2.ppCache',
+                  'Cached: {{clips}} clip(s) of {{frames}} frames from {{sources}} track(s).',
+                  { clips: cache.clips, frames: cache.clipFrames, sources: cache.sources })}
               </span>
+              {(cache.skipped > 0 || cache.failed > 0) && (
+                <span className="text-amber-500">
+                  {' '}
+                  {t('trainingStudio.yue2.ppCacheProblems', '{{skipped}} skipped, {{failed}} failed.',
+                    { skipped: cache.skipped, failed: cache.failed })}
+                </span>
+              )}
             </div>
           )}
 
