@@ -1,7 +1,7 @@
 # release/build-release.ps1 — Build a complete portable release of HOT-Step CPP
 #
 # Usage:
-#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda]
+#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda] [-BuildBackend all]
 #
 # Produces:
 #   release/out/HOT-Step-CPP-v{version}-win-x64-{variant}.zip
@@ -16,11 +16,20 @@ param(
     [string]$Version = "0.0.0",
     [switch]$SkipEngine,
     [switch]$SkipUI,
-    [string]$Variant = "cuda",       # cuda, vulkan, cpu
+    [ValidateSet("cuda", "vulkan", "cpu")]
+    [string]$Variant = "cuda",       # Packaged backend
+    [ValidateSet("all", "cuda", "vulkan", "cpu")]
+    [string]$BuildBackend = "all",   # Backends to compile
     [string]$NodeVersion = "24.18.0" # Node.js LTS version to bundle
 )
 
 $ErrorActionPreference = "Stop"
+# Reject mismatches before downloads, staging cleanup or builds, including SkipEngine.
+if ($BuildBackend -ne "all" -and $BuildBackend -ne $Variant) {
+    throw "BuildBackend '$BuildBackend' must match Variant '$Variant', or use BuildBackend 'all'."
+}
+$buildCuda = if ($BuildBackend -in @("all", "cuda")) { "ON" } else { "OFF" }
+$buildVulkan = if ($BuildBackend -in @("all", "vulkan")) { "ON" } else { "OFF" }
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ReleaseDir = Join-Path $ProjectRoot "release"
 $StagingDir = Join-Path $ReleaseDir "staging"
@@ -79,10 +88,7 @@ if (-not $SkipEngine) {
     # Use buildall.cmd for multi-arch release builds
     $buildScript = Join-Path $engineDir "buildall.cmd"
 
-    # For release builds, we want static MSVC runtime and multi-arch CUDA
-    # buildall.cmd already does multi-arch + Vulkan.
-    # We modify the cmake flags by setting them before calling the script.
-    Write-Host "  Running buildall.cmd with static runtime..."
+    Write-Host "  Running buildall.cmd ($BuildBackend) with static runtime..."
 
     # Smart CMake cache handling: only clear if build flags have changed.
     # Deleting CMakeCache.txt forces a full reconfigure -> full rebuild of ALL
@@ -96,12 +102,13 @@ if (-not $SkipEngine) {
         $cacheContent = Get-Content $cacheFile -Raw
         $requiredFlags = @{
             "HOT_STEP_STATIC_RUNTIME:BOOL=ON" = "Static runtime (/MT)"
-            "GGML_CUDA:BOOL=ON"               = "CUDA backend"
-            "GGML_VULKAN:BOOL=ON"             = "Vulkan backend"
+            "GGML_CUDA:BOOL=$buildCuda"        = "CUDA backend"
+            "GGML_VULKAN:BOOL=$buildVulkan"    = "Vulkan backend"
+            "GGML_BACKEND_DL:BOOL=ON"         = "Dynamic backend loading"
             "GGML_CPU_ALL_VARIANTS:BOOL=ON"   = "CPU all variants"
         }
         foreach ($flag in $requiredFlags.Keys) {
-            if ($cacheContent -notmatch [regex]::Escape($flag)) {
+            if ($cacheContent -notmatch ("(?m)^" + [regex]::Escape($flag) + "\r?$")) {
                 Write-Host "  Cache mismatch: $($requiredFlags[$flag]) ($flag)" -ForegroundColor Yellow
                 $needsCacheClear = $true
             }
@@ -118,14 +125,16 @@ if (-not $SkipEngine) {
 
     # Set cmake flags for the build
     # buildall.cmd runs cmake with its own flags, so we override via env
+    $previousCmakeExtra = $env:RELEASE_CMAKE_EXTRA
     $env:RELEASE_CMAKE_EXTRA = "-DHOT_STEP_STATIC_RUNTIME=ON"
 
     Push-Location $engineDir
     try {
-        # buildall.cmd handles vcvars, ORT download, and multi-config build
-        cmd /c "buildall.cmd"
+        # Use the absolute path even when current-directory executable lookup is disabled.
+        & $buildScript $BuildBackend
         if ($LASTEXITCODE -ne 0) { throw "Engine build failed (exit code $LASTEXITCODE)" }
     } finally {
+        $env:RELEASE_CMAKE_EXTRA = $previousCmakeExtra
         Pop-Location
     }
 

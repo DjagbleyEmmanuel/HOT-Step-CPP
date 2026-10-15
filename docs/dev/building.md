@@ -92,7 +92,7 @@ Other Windows scripts in `engine/`:
 |---|---|---|
 | `buildcuda.cmd` | `cmake .. -DGGML_CUDA=ON`, every run | Rarely; `build.cmd` supersedes it |
 | `buildvulkan.cmd` | `cmake .. -DGGML_VULKAN=ON`, every run | Vulkan backend work |
-| `buildall.cmd` | CUDA, Vulkan and all CPU variants, every run | Release-style build. `install.bat` calls this one |
+| `buildall.cmd [all\|cuda\|vulkan\|cpu]` | Defaults to CUDA, Vulkan and all CPU variants | Release-style build. A single backend disables the other GPU backend; all CPU variants remain enabled. `install.bat` uses the default |
 
 All of them build into the same `engine/build/` folder. The scripts that reconfigure on
 every run change the CMake cache, and switching between them can force a large part of the
@@ -333,8 +333,30 @@ To build a package locally:
 
 | Platform | Command |
 |---|---|
-| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI]`, output in `release/out/` |
+| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda\|vulkan\|cpu] [-BuildBackend all\|cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI]`, output in `release/out/` |
 | macOS | `./package-release.sh [--skip-build] [--version=1.2.0]`, output `HOT-Step-CPP-v<version>-macOS-arm64.tar.gz` |
+
+`-BuildBackend` defaults to `all`, preserving the local build of CUDA, Vulkan and CPU
+backends. `-Variant` chooses the archive name and packaged GPU DLL. For a local CPU-only
+release test, use `-Variant cpu -BuildBackend cpu`; use matching `cuda` or `vulkan`
+values for those backends. A single build backend must match `-Variant`, including
+with `-SkipEngine`, and mismatches fail before staging is changed.
+
+| Build backend | GGML_CUDA | GGML_VULKAN | Packaged GPU DLL |
+|---|---|---|---|
+| `all` | ON | ON | `ggml-cuda.dll`, `ggml-vulkan.dll` or neither, selected by `-Variant` |
+| `cuda` | ON | OFF | `ggml-cuda.dll` |
+| `vulkan` | OFF | ON | `ggml-vulkan.dll` |
+| `cpu` | OFF | OFF | None |
+
+All selections enable `GGML_CPU_ALL_VARIANTS`, `GGML_BACKEND_DL` and the static MSVC
+runtime. Packages include the shared ggml DLLs and `ggml-cpu-*.dll` variants, and copy
+only the selected GPU DLL even if older build outputs remain. Cache validation checks
+both enabled and disabled backends; a mismatch clears `CMakeCache.txt` before configure.
+The batch script is called by absolute path, and configure or build failures stop packaging.
+`-SkipEngine` bypasses build and cache checks and requires matching existing binaries.
+CUDA selections use the installed toolkit. They do not choose CI's `cuda13.1`, `cuda12.8`
+or `cuda12-volta` matrix entries. Local builds still need separate approval.
 
 ## Build problems
 
