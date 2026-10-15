@@ -10,26 +10,30 @@
 // one job at a time can own a dataset — so the two cards share every gate above
 // and differ only in which slice of the store they read.
 
-import React, { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Check, Copy, Cpu, Database, FileCode2, Flag, Headphones, Layers, Loader2, PauseCircle, Target, Waves, XCircle,
 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useRunEvents } from '../../queries/training-runs/hooks';
+import { runQueries } from '../../queries/training-runs/queries';
 import type { TrainDitOptions, TrainLmOptions } from '../../services/trainingApi';
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs, totalEpochMs } from '../../utils/trainingEta';
 import { AuditionCard, type MilestoneAuditionRequest } from './AuditionCard';
 import { JobProgress } from './JobProgress';
+import { Mm3TrainCard } from './Mm3TrainCard';
+import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
-import { Mm3TrainCard } from './Mm3TrainCard';
-import { Yue2TrainStages } from './Yue2TrainStages';
-import { Yue2OptimisePanel } from './Yue2OptimisePanel';
-import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
-import { assertRecipeWorker, getTrainingRecipe, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
+import { Yue2OptimisePanel } from './Yue2OptimisePanel';
+import { Yue2TrainStages } from './Yue2TrainStages';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const STATUS_RELOAD_DEBOUNCE_MS = 400;
@@ -63,15 +67,11 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   const detail = useTrainingStore(s => s.detail);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
   const activeJob = useTrainingStore(s => s.activeJob);
-  const error = useTrainingStore(s => s.error);
-  const trainLmStatus = useTrainingStore(s => s.trainLmStatus);
-  const trainLmLoading = useTrainingStore(s => s.trainLmLoading);
+  const storeError = useTrainingStore(s => s.error);
   const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainLmLast = useTrainingStore(s => s.trainLmLast);
   const trainLmSkippedLong = useTrainingStore(s => s.trainLmSkippedLong);
   const trainLmVram = useTrainingStore(s => s.trainLmVram);
-  const trainDitStatus = useTrainingStore(s => s.trainDitStatus);
-  const trainDitLoading = useTrainingStore(s => s.trainDitLoading);
   const trainDitEpochs = useTrainingStore(s => s.trainDitEpochs);
   const trainDitLast = useTrainingStore(s => s.trainDitLast);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
@@ -79,10 +79,7 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
   const openDataset = useTrainingStore(s => s.openDataset);
   const setPhase = useTrainingStore(s => s.setPhase);
-  const loadCapabilities = useTrainingStore(s => s.loadCapabilities);
-  const loadTrainLmStatus = useTrainingStore(s => s.loadTrainLmStatus);
   const startTrainLm = useTrainingStore(s => s.startTrainLm);
-  const loadTrainDitStatus = useTrainingStore(s => s.loadTrainDitStatus);
   const startTrainDit = useTrainingStore(s => s.startTrainDit);
   const trainingWorker = useTrainingStore(s => s.trainingWorker);
 
@@ -90,12 +87,13 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   // K1: LoKR is the form's initial state — Rob's validated default preference.
   const [ditForm, setDitForm] = useState<TrainDitFormState>(TRAIN_DIT_LOKR_DEFAULTS);
   const lmRecipeRef = useRef(TRAIN_LM_DEFAULTS);
+  const lmRecipe = useQuery(runQueries.recipe<TrainLmFormState>(trainingWorker, 'ace-lm'));
+  const ditRecipe = useQuery(runQueries.recipe<TrainDitFormState>(trainingWorker, 'ace-dit'));
   const ditRecipeRef = useRef(TRAIN_DIT_LOKR_DEFAULTS);
 
   // Refresh untouched fields from Node. A field edited while the request is
   // in flight stays local; resets still use the shared recipe seed.
   useEffect(() => {
-    let live = true;
     const apply = <T extends object>(current: T, seed: T, incoming: T): T => {
       const next = { ...current } as Record<string, unknown>;
       for (const [key, value] of Object.entries(incoming)) {
@@ -103,24 +101,21 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
       }
       return next as T;
     };
-    void getTrainingRecipe<TrainLmFormState>('ace-lm').then(recipe => {
-      if (live) { setForm(current => apply(current, lmRecipeRef.current, (recipe.resolved ?? recipe.builtin))); lmRecipeRef.current = recipe.resolved ?? recipe.builtin; }
-    }).catch(err => { if (live) useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); });
-    void getTrainingRecipe<TrainDitFormState>('ace-dit').then(recipe => {
-      if (live) { setDitForm(current => apply(current, ditRecipeRef.current, (recipe.resolved ?? recipe.builtin))); ditRecipeRef.current = recipe.resolved ?? recipe.builtin; }
-    }).catch(err => { if (live) useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); });
-    return () => { live = false; };
-  }, [trainingWorker]);
+    const lm = lmRecipe.data;
+    if (lm) {
+      setForm(current => apply(current, lmRecipeRef.current, lm.resolved ?? lm.builtin));
+      lmRecipeRef.current = lm.resolved ?? lm.builtin;
+    }
+    const dit = ditRecipe.data;
+    if (dit) {
+      setDitForm(current => apply(current, ditRecipeRef.current, dit.resolved ?? dit.builtin));
+      ditRecipeRef.current = dit.resolved ?? dit.builtin;
+    }
+  }, [trainingWorker, lmRecipe.data, ditRecipe.data]);
   const [starting, setStarting] = useState(false);
   const [ditStarting, setDitStarting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [ditCopied, setDitCopied] = useState(false);
-  // True from the instant the status debounce is armed until that read settles.
-  // `trainLmLoading` only turns true INSIDE loadTrainLmStatus, i.e. 400 ms after
-  // mount, and until then both it and `trainLmStatus` are falsy — the spinner and
-  // the needs-preprocess gate below are both skipped and the fully enabled form
-  // renders for that window. Seeded true so the hole never exists.
-  const [statusPending, setStatusPending] = useState(true);
   // A milestone badge cannot start an audition on its own — the prompt lives in
   // the AuditionCard. Clicking one hands the milestone dir down; the nonce lets
   // a repeat click on the SAME milestone re-trigger.
@@ -132,14 +127,6 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
       nonce: (prev?.nonce ?? 0) + 1,
     }));
   };
-  // Same hole on the DiT side, and it is worse there: with trainDitStatus null the
-  // card's `variantKey === ''` gate is falsy, so the form rendered fully enabled
-  // with an EMPTY base-model chip, and handleStartDit then omits variantKey and
-  // lets the server silently pick newestVariantKey. Reachable via the 400 ms
-  // debounce, via openDataset() nulling the status on a dataset switch, and
-  // durably whenever GET /train-dit fails (loadTrainDitStatus swallows the error).
-  const [ditStatusPending, setDitStatusPending] = useState(true);
-
   const tl = capabilities?.trainLm;
   const jobKind = activeJob?.kind;
   const jobStatus = activeJob?.status;
@@ -160,77 +147,26 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     if (slug) setDitForm(f => ({ ...f, adapterName: slug }));
   }, [slug]);
 
-  // Adapter name and size both change where the run would write, so the status
-  // card follows them. Debounced — the name is a text input.
+  // Only form inputs debounce. Query owns the status and its pending/error state.
   const { lmSize, adapterName } = form;
-  // Read by the terminal-job effect below without joining its dep array.
-  const statusQueryRef = useRef({ lmSize, adapterName });
-  statusQueryRef.current = { lmSize, adapterName };
-  const statusQuery = () => {
-    const { lmSize: sz, adapterName: nm } = statusQueryRef.current;
-    return { lmSize: sz, ...(nm.trim() ? { adapterName: nm.trim() } : {}) };
-  };
-
-  useEffect(() => {
-    if (!selectedDatasetId) return;
-    setStatusPending(true);
-    const handle = window.setTimeout(() => {
-      void loadTrainLmStatus({
-        lmSize,
-        ...(adapterName.trim() ? { adapterName: adapterName.trim() } : {}),
-      }).finally(() => setStatusPending(false));
-    }, STATUS_RELOAD_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [selectedDatasetId, lmSize, adapterName, loadTrainLmStatus]);
-
-  // A finished job wrote the adapter dir and un-suspended the engine.
-  //
-  // lmSize/adapterName are deliberately NOT in the dep array (the proven sibling
-  // PreprocessPanel does the same): `activeJob` is never cleared when a job ends,
-  // so after any run jobKind/jobStatus stay terminal and every keystroke in the
-  // adapter-name box would re-fire this body — an undebounced status GET plus a
-  // /capabilities call, and /capabilities does a live /props round-trip to
-  // ace-server. They are read through a ref instead.
-  useEffect(() => {
-    if (jobKind !== 'train-lm' || !jobStatus) return;
-    if (jobStatus === 'queued' || jobStatus === 'running') return;
-    void loadTrainLmStatus(statusQuery());
-    void loadCapabilities();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, jobKind, jobStatus, loadTrainLmStatus, loadCapabilities]);
-
-  // ── The same two effects for the DiT adapter ──────────────────────────────
-  // Its status is also what supplies the read-only base-model chip, so it loads
-  // even when the DiT card is never expanded.
   const ditAdapterName = ditForm.adapterName;
-  const ditQueryRef = useRef(ditAdapterName);
-  ditQueryRef.current = ditAdapterName;
-  const ditStatusQuery = () => {
-    const nm = ditQueryRef.current.trim();
-    return nm ? { adapterName: nm } : {};
-  };
-
+  const [debounced, setDebounced] = useState({ lmSize, adapterName, ditAdapterName });
   useEffect(() => {
-    if (!selectedDatasetId) return;
-    setDitStatusPending(true);
-    const handle = window.setTimeout(() => {
-      void loadTrainDitStatus(ditAdapterName.trim() ? { adapterName: ditAdapterName.trim() } : {})
-        .finally(() => setDitStatusPending(false));
-    }, STATUS_RELOAD_DEBOUNCE_MS);
+    const handle = window.setTimeout(() => setDebounced({ lmSize, adapterName, ditAdapterName }), STATUS_RELOAD_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [selectedDatasetId, ditAdapterName, loadTrainDitStatus]);
-
-  useEffect(() => {
-    if (jobKind !== 'train-dit' || !jobStatus) return;
-    if (jobStatus === 'queued' || jobStatus === 'running') return;
-    // ditStatusQuery reads the adapter name through a ref, deliberately: it must
-    // not join this dep array. `activeJob` is never cleared when a job ends, so
-    // after any run jobKind/jobStatus stay terminal and every keystroke in the
-    // name box would re-fire an undebounced status GET plus a /capabilities call
-    // — and /capabilities does a live /props round-trip to ace-server.
-    void loadTrainDitStatus(ditStatusQuery());
-    void loadCapabilities();
-  }, [jobId, jobKind, jobStatus, loadTrainDitStatus, loadCapabilities]);
+  }, [lmSize, adapterName, ditAdapterName]);
+  const lmQuery = useQuery({ ...trainingQueries.trainLmStatus(trainingWorker, selectedDatasetId ?? '', {
+    lmSize: debounced.lmSize, adapterName: debounced.adapterName.trim() || undefined }), enabled: !!selectedDatasetId });
+  const ditQuery = useQuery({ ...trainingQueries.trainDitStatus(trainingWorker, selectedDatasetId ?? '', {
+    adapterName: debounced.ditAdapterName.trim() || undefined }), enabled: !!selectedDatasetId });
+  const error = storeError || lmQuery.error?.message || ditQuery.error?.message || lmRecipe.error?.message || ditRecipe.error?.message || null;
+  const trainLmStatus = lmQuery.data ?? null;
+  const trainDitStatus = ditQuery.data ?? null;
+  const trainLmLoading = lmQuery.isPending;
+  const trainDitLoading = ditQuery.isPending;
+  const statusPending = lmQuery.isPending || lmSize !== debounced.lmSize || adapterName !== debounced.adapterName;
+  const ditStatusPending = ditQuery.isPending || ditAdapterName !== debounced.ditAdapterName;
+  useRunEvents(jobId, trainingWorker);
 
   const patchForm = (patch: Partial<TrainLmFormState>) => setForm(f => ({ ...f, ...patch }));
   const patchDitForm = (patch: Partial<TrainDitFormState>) => setDitForm(f => ({ ...f, ...patch }));

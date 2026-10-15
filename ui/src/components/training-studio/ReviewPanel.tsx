@@ -1,18 +1,20 @@
 // ReviewPanel.tsx — "Awaiting review": every YuE2 refinement ladder with
 // rung previews, across datasets, with how many rungs still have no score.
 // A batch trains, refines and renders overnight; this is the morning list.
-import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ListChecks, RefreshCw } from 'lucide-react';
-import { useTrainingStore } from '../../stores/trainingStore';
-import {
-  getWorkerMirror, listYue2BatchesLocal, listYue2Review, syncWorkerMirror,
-  type MirrorStatus, type Yue2BatchSummary, type Yue2ReviewRow,
-} from '../../services/trainingApi';
-import { formatBytes } from '../../services/stemStudioApi';
-import { finishReviewBatch, getReviewLadder, pickFromLadder, type ReviewPick } from '../../services/trainingReviewApi';
-import { Toggle } from '../shared/Toggle';
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { runCommand, runQueries } from '../../queries/training-runs/queries';
+import { formatBytes } from '../../services/stemStudioApi';
+import {
+  syncWorkerMirror,
+  type Yue2ReviewRow
+} from '../../services/trainingApi';
+import { finishReviewBatch, pickFromLadder, type ReviewPick } from '../../services/trainingReviewApi';
+import { useTrainingStore } from '../../stores/trainingStore';
+import { Toggle } from '../shared/Toggle';
 
 /** Scored, not-yet-finished, not-already-queued rows eligible for "Finish
  *  scored". A worker-origin row is eligible too: the mirror has already
@@ -28,29 +30,19 @@ export const ReviewPanel: React.FC = () => {
   const setPhase = useTrainingStore(s => s.setPhase);
   const setRefineLadderRun = useTrainingStore(s => s.setRefineLadderRun);
   const trainingWorker = useTrainingStore(s => s.trainingWorker);
-  const [rows, setRows] = useState<Yue2ReviewRow[]>([]);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const load = async () => {
-    setLoading(true); setError('');
-    try { setRows((await listYue2Review()).rows); } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { void load(); const id = window.setInterval(() => void load(), 30_000); return () => window.clearInterval(id); }, []);
-  // Worker runs reach this machine's index through the server's background
-  // mirror; this line only shows how far behind it is and can nudge it.
-  const [mirror, setMirror] = useState<MirrorStatus | null>(null);
+  const client = useQueryClient();
+  const reviewQuery = useQuery(runQueries.review());
+  const rows = reviewQuery.data?.rows ?? [];
+  const [commandError, setError] = useState('');
+  const loading = reviewQuery.isFetching;
+  const load = () => reviewQuery.refetch();
+  const mirrorQuery = useQuery({ ...runQueries.mirror(trainingWorker ?? ''), enabled: !!trainingWorker });
+  const mirror = mirrorQuery.data ?? null;
   const [syncing, setSyncing] = useState(false);
-  useEffect(() => {
-    setMirror(null);
-    if (!trainingWorker) return;
-    const poll = () => getWorkerMirror(trainingWorker).then(setMirror).catch(() => { /* keep the last status */ });
-    void poll(); const id = window.setInterval(poll, 15_000); return () => window.clearInterval(id);
-  }, [trainingWorker]);
   const syncNow = async () => {
     if (!trainingWorker) return;
     setSyncing(true);
-    try { setMirror(await syncWorkerMirror(trainingWorker)); await load(); }
+    try { await runCommand(client, trainingWorker, () => syncWorkerMirror(trainingWorker)); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setSyncing(false); }
   };
@@ -63,9 +55,9 @@ export const ReviewPanel: React.FC = () => {
   // Finish always runs on this machine, so its batch is read from the local
   // base — the store's `yue2Batches` tracks job control on "Train on" worker
   // and would never see this one.
-  const [batches, setBatches] = useState<Yue2BatchSummary[]>([]);
-  const loadBatches = async () => { try { setBatches(await listYue2BatchesLocal()); } catch { /* keep the last list */ } };
-  useEffect(() => { void loadBatches(); const id = window.setInterval(() => void loadBatches(), 10_000); return () => window.clearInterval(id); }, []);
+  const batchesQuery = useQuery(runQueries.localBatches());
+  const batches = batchesQuery.data ?? [];
+  const error = commandError || reviewQuery.error?.message || mirrorQuery.error?.message || batchesQuery.error?.message || '';
   const queued = new Set(batches.filter(b => b.status === 'running' || b.status === 'paused')
     .flatMap(b => b.items.filter(i => i.refineRun && (i.status === 'pending' || i.status === 'running')).map(i => i.refineRun)));
   const finishable = selectFinishable(rest, queued);
@@ -80,7 +72,7 @@ export const ReviewPanel: React.FC = () => {
     if (finishOpen) { setFinishOpen(false); setApproved([]); return; }
     setPreparing(true); setError('');
     try {
-      const ladders = await Promise.all(finishable.map(r => getReviewLadder(r.datasetId, r.refineRun)));
+      const ladders = await Promise.all(finishable.map(r => client.fetchQuery({ ...runQueries.ladder(r.datasetId, r.refineRun), staleTime: 0 })));
       setApproved(ladders.map((ladder, index) => {
         if (!ladder.best || ladder.best.overall === null) throw new Error('A ladder has no fully scored rung. Reload Review before finishing.');
         return { pick: pickFromLadder(ladder, ladder.best.step), name: finishable[index].datasetName,
@@ -95,9 +87,8 @@ export const ReviewPanel: React.FC = () => {
     setFinishing(true); setError('');
     try {
       const picks = approved.filter(item => !skip[item.pick.runId]).map(item => item.pick);
-      await finishReviewBatch(picks, knee);
+      await runCommand(client, null, () => finishReviewBatch(picks, knee));
       setFinishOpen(false); setApproved([]); setSkip({});
-      await loadBatches();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setFinishing(false); }
   };

@@ -36,8 +36,8 @@ export interface ReviewPick {
   blindLabel?: string;
 }
 
-export const getReviewLadder = (datasetId: string, runId: string) =>
-  trainingOperation<ReviewLadder>('review', `/ladder/${encodeURIComponent(datasetId)}/${encodeURIComponent(runId)}`);
+export const getReviewLadder = (datasetId: string, runId: string, opts: { signal?: AbortSignal } = {}) =>
+  trainingOperation<ReviewLadder>('review', `/ladder/${encodeURIComponent(datasetId)}/${encodeURIComponent(runId)}`, opts);
 
 export function pickFromLadder(ladder: ReviewLadder, step: number): ReviewPick {
   const fact = ladder.facts.find(item => item.step === step);

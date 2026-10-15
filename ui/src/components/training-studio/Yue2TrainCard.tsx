@@ -1,6 +1,3 @@
-import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
-import { Yue2OptimizerFields } from './Yue2OptimizerFields';
-import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2TrainCard.tsx — Training Studio phase 3, YuE2 branch: stages 1 and 4.
 //
 // Two of the five YuE2 stages Yue2TrainStages.tsx renders in order: stage 1,
@@ -30,25 +27,31 @@ import type { Yue2OptimOptions } from '../../services/trainingApi';
 // services/backends/yue2, is shipped by the status route, and is never
 // retyped, truncated or paraphrased on this side.
 
-import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, ChevronDown, ChevronRight, Cpu, FileCode2, History, Loader2, PauseCircle,
   Play,
 } from 'lucide-react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useReload } from '../../queries/training-runs/hooks';
+import { runQueries } from '../../queries/training-runs/queries';
+import type { Yue2OptimOptions } from '../../services/trainingApi';
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 
 import {
-  estimateYue2PeakMb, listYue2Runs,
+  estimateYue2PeakMb,
   type Yue2CaptionMode, type Yue2NarTarget, type Yue2PresetName, type Yue2RunSummary,
-  type Yue2Status, type Yue2TrainRequest,
+  type Yue2Status, type Yue2TrainRequest
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs } from '../../utils/trainingEta';
-import { JobProgress } from './JobProgress';
-import { Yue2SplitChart } from './Yue2SplitChart';
+import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
+import { JobProgress } from './JobProgress';
+import { Yue2SplitChart } from './Yue2SplitChart';
 import { Yue2StageCard } from './Yue2StageCard';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
@@ -487,20 +490,13 @@ const OUTCOME: Record<Yue2RunSummary['outcome'], { label: string; tone: string }
  *  picking which rung to load — the adapter picker takes the file path. */
 export const Yue2RunsList: React.FC<{ datasetId: string; reloadKey: unknown }> = ({ datasetId, reloadKey }) => {
   const { t } = useTranslation();
-  const [runs, setRuns] = useState<Yue2RunSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery(runQueries.narRuns(datasetId));
+  const runs = query.data?.runs ?? null;
+  const error = query.error?.message ?? null;
+  useReload(runQueries.narRuns(datasetId).queryKey, reloadKey);
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
 
-  React.useEffect(() => {
-    let cancelled = false;
-    listYue2Runs(datasetId)
-      .then(r => { if (!cancelled) { setRuns(r.runs); setError(null); } })
-      .catch(err => {
-        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setRuns([]); }
-      });
-    return () => { cancelled = true; };
-  }, [datasetId, reloadKey]);
 
   if (error) return <div className={`${CARD} text-xs text-rose-500`}>{error}</div>;
   if (!runs || runs.length === 0) return null;

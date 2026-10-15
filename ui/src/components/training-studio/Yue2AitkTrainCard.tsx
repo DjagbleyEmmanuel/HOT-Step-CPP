@@ -1,49 +1,44 @@
-import { YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_TUNED_KEYS, YUE2_JOINT_LORA_STOP, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_PRESETS, YUE2_JOINT_BASE_MATCHED_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
-import { YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_FIXED_RECIPE_DROPOUTS } from '../../../../server/src/contracts/trainingRecipes';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { YUE2_JOINT_BASE_MATCHED_DEFAULTS, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_FIXED_RECIPE_DROPOUTS, YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LORA_STOP, YUE2_JOINT_PRESETS, YUE2_JOINT_TUNED_KEYS } from '../../../../server/src/contracts/trainingRecipes';
+import { pollWhile } from '../../queries/contract';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useJobSelection, useReload, useScopedId } from '../../queries/training-runs/hooks';
+import { runCommand, runQueries } from '../../queries/training-runs/queries';
 
-import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
-import { preferencesApi } from '../../services/preferencesApi';
-import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
-import { currentWorkerRef } from '../../services/trainingOperations';
-import * as preparationApi from '../../services/trainingPreparationApi';
-import { Yue2SplitChart } from './Yue2SplitChart';
-import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Yue2LadderReview } from './Yue2LadderReview';
-import { Yue2OptimizerFields } from './Yue2OptimizerFields';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { settingsApi } from '../../services/api';
+import { preferencesApi } from '../../services/preferencesApi';
+import { subscribeEventSource } from '../../services/sharedEventSource';
 import {
   cancelJob,
   captionMissingYue2,
-  getJob,
-  getYue2AitkPrepare,
-  listYue2AitkRuns,
-  listYue2JointPreviewsLocal,
-  listJobs,
+  dispatchYue2Batch,
   jobStreamUrl,
   pickLadderRun,
   startYue2AitkPrepare,
-  type Yue2AitkPrepareRequest,
   type TrainingJobSummary,
   type TrainingMetricEvent,
   type TrainingStreamEvent,
-  type Yue2AitkRunRecord,
-  type Yue2JointTrainRequest,
-  type Yue2JointBaseInfo,
+  type Yue2AitkPrepareRequest,
   type Yue2JointPreviewOptions,
-  type Yue2JointPreviewRecord,
+  type Yue2JointTrainRequest
 } from '../../services/trainingApi';
-import { dispatchYue2Batch, listTrainingWorkers, type TrainingWorkerStatus } from '../../services/trainingApi';
-import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
+import { currentWorkerRef } from '../../services/trainingOperations';
+import * as preparationApi from '../../services/trainingPreparationApi';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { subscribeEventSource } from '../../services/sharedEventSource';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
+import { formatMB, yue2AdapterHalfBytes } from '../../utils/yue2AdapterSize';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { Yue2LadderReview } from './Yue2LadderReview';
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
+import { Yue2SplitChart } from './Yue2SplitChart';
+import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
+import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
+import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
 export const FORM_KEY = 'hs-yue2-aitk-form:';
@@ -421,8 +416,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const latestLyricTiming = useRef(lyricTiming);
   latestLyricTiming.current = lyricTiming;
   const presetLoadRequest = useRef(0);
-  const [job, setJob] = useState<TrainingJobSummary | null>(null);
-  const [jointPipelineId, setJointPipelineId] = useState('');
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
+  const [job, setJob] = useJobSelection(trainingWorker, datasetId);
+  const [jointPipelineId, setJointPipelineId] = useScopedId(trainingWorker, datasetId);
   // Tracks with no .yue2.txt are re-captioned from the audio before training
   // (on by default): otherwise they train on the long ACE caption. Gemini's
   // model list is the live one the Label panel uses.
@@ -438,21 +434,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [captioning, setCaptioning] = useState<TrainingJobSummary | null>(null);
   const captionMissing = async () => {
     if (!autoCaption) return;
-    const started = await captionMissingYue2(datasetId, autoCaption);
+    const started = await runCommand(client, trainingWorker, () => captionMissingYue2(datasetId, autoCaption, { worker: trainingWorker }));
     if (!started.jobId) return;
-    let j = await getJob(started.jobId);
+    let j = await client.fetchQuery(trainingQueries.job(trainingWorker, started.jobId));
     setCaptioning(j);
     while (j.status === 'queued' || j.status === 'running') {
       await new Promise(r => setTimeout(r, 1500));
-      j = await getJob(started.jobId);
+      j = await client.fetchQuery(trainingQueries.job(trainingWorker, started.jobId));
       setCaptioning(j);
     }
     setCaptioning(null);
     if (j.status !== 'done') throw new Error(`Captioning failed: ${j.error || j.status}`);
-    const left = (await captionMissingYue2(datasetId, { checkOnly: true })).missing ?? 0;
+    const left = (await captionMissingYue2(datasetId, { checkOnly: true }, { worker: trainingWorker })).missing ?? 0;
     if (left) throw new Error(`${left} track(s) still have no YuE2 caption after captioning; see the Label log on the Dataset page. Not training on the ACE captions.`);
   };
-  const [error, setError] = useState('');
+  const [commandError, setError] = useState('');
   const [starting, setStarting] = useState(false);
   // Saved presets keep their names and settings; only the leftover tuned-era
   // learning rate (see the 2026-09-28 reset) is dropped from them, once.
@@ -492,16 +488,18 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     return legacyManifest ? { ...saved, legacyManifest } : saved;
   };
   const [prepare, setPrepare] = useState<PrepareForm>(readPrepare);
-  const [bases, setBases] = useState<Yue2JointBaseInfo[]>([]);
-  const [defaultBase, setDefaultBase] = useState('');
-  const [defaultDevice, setDefaultDevice] = useState('');
-  const [nvidiaGpus, setNvidiaGpus] = useState<Array<{ index: number; uuid: string; name: string; memoryMB: number }>>([]);
-  const [prepareJob, setPrepareJob] = useState<TrainingJobSummary | null>(null);
+  const prepareQuery = useQuery(runQueries.prepare(trainingWorker, datasetId));
+  const bases = prepareQuery.data?.bases ?? [];
+  const defaultBase = prepareQuery.data?.defaultBase ?? '';
+  const defaultDevice = prepareQuery.data?.defaultDevice ?? '';
+  const gpuQuery = useQuery({ ...runQueries.gpus(), enabled: defaultDevice === 'CUDA0' });
+  const nvidiaGpus = gpuQuery.data?.gpus ?? [];
+  const [prepareJob, setPrepareJob] = useJobSelection(trainingWorker, datasetId);
   const [prepareManifest, setPrepareManifest] = useState('');
   const [appliedPrepareJobId, setAppliedPrepareJobId] = useState(() => readStored<string>(`${PREP_KEY}${datasetId}:applied`, ''));
-  const [defaultsAvailable, setDefaultsAvailable] = useState<boolean | null>(null);
-  const [missingDefaults, setMissingDefaults] = useState<string[]>([]);
-  const [defaultsRevision, setDefaultsRevision] = useState(0);
+  const defaultsAvailable = prepareQuery.data ? !!prepareQuery.data.defaults : null;
+  const missingDefaults = prepareQuery.data?.missing ?? [];
+  const refreshDefaults = () => { void prepareQuery.refetch(); };
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
   const datasets = useTrainingStore(s => s.datasets);
@@ -510,14 +508,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const setPhase = useTrainingStore(s => s.setPhase);
   const [batchStarting, setBatchStarting] = useState(false);
   const [batchClearCache, setBatchClearCache] = useState(false);
-  const trainingWorker = useTrainingStore(s => s.trainingWorker);
   const setTrainingWorker = useTrainingStore(s => s.setTrainingWorker);
-  const [workers, setWorkers] = useState<TrainingWorkerStatus[]>([]);
+  const workersQuery = useQuery({ ...trainingQueries.workers(), enabled: !!batchDraft?.length && !trainingWorker });
+  const workers = workersQuery.data ?? [];
   const [runOn, setRunOn] = useState('');
-  useEffect(() => {
-    if (!batchDraft?.length || trainingWorker) return;
-    void listTrainingWorkers().then(setWorkers).catch(() => setWorkers([]));
-  }, [!!batchDraft?.length, trainingWorker]);
   // A batch draft turns this card into the recipe editor for N datasets: the
   // form is the same, Start sends it to the server-side batch instead of one
   // run, and the per-dataset paths are resolved per item by the runner.
@@ -534,7 +528,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       if (runOn) {
-        await dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe });
+        await runCommand(client, trainingWorker, () => dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe }));
         setBatchDraft(null);
         await setTrainingWorker(runOn);
         return;
@@ -545,8 +539,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBatchStarting(false); }
   };
-  const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
-  const [ladderNonce, setLadderNonce] = useState(0);
+  const client = useQueryClient();
+  const runsQuery = useQuery({ ...runQueries.jointRuns(datasetId),
+    refetchInterval: pollWhile<Awaited<ReturnType<typeof import('../../services/trainingApi').listYue2AitkRuns>>>(data =>
+      !data || data.runs.some(run => run.live) || job?.status === 'queued' || job?.status === 'running', 5000) });
+  const aitkRuns = runsQuery.data?.runs ?? [];
   const [resumeChoice, setResumeChoice] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
   const [chartVram, setChartVram] = useState<number>();
@@ -565,7 +562,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [milestones, setMilestones] = useState<JointMilestone[]>([]);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
   const [showJobLogs, setShowJobLogs] = useState(false);
-  const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
+
 
   useEffect(() => {
     // The dataset's own manifest always wins, including when it arrives late.
@@ -575,15 +572,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   }, [legacyManifest, prepare.legacyManifest]);
 
   useEffect(() => {
-    let cancelled = false;
-    void getYue2AitkPrepare(datasetId).then(result => {
-      const defaults = result.defaults;
-      if (cancelled) return;
-      setBases(result.bases ?? []);
-      setDefaultBase(result.defaultBase ?? '');
-      setDefaultDevice(result.defaultDevice ?? '');
-      setDefaultsAvailable(!!defaults);
-      setMissingDefaults(result.missing ?? []);
+      const defaults = prepareQuery.data?.defaults;
       if (!defaults) return;
       // A saved path with the default's file name in another folder is the same
       // model from before a data-folder move, so the installed default wins.
@@ -595,29 +584,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => key !== 'models' && takeDefault(previous[key as keyof PrepareForm], value))),
         models: { ...previous.models, ...Object.fromEntries(Object.entries(defaults.models ?? {}).filter(([key, value]) => takeDefault(previous.models[key as keyof PrepareForm['models']], value))) },
       }));
-    }).catch(() => { /* Defaults are advisory; manual paths remain available. */ });
-    return () => { cancelled = true; };
-  }, [datasetId, defaultsRevision]);
+  }, [datasetId, trainingWorker, prepareQuery.data]);
 
-  useEffect(() => {
-    if (defaultDevice !== 'CUDA0') return;
-    let cancelled = false;
-    void settingsApi.getGpus().then(({ gpus }) => { if (!cancelled) setNvidiaGpus(gpus); })
-      .catch(() => { if (!cancelled) setNvidiaGpus([]); });
-    return () => { cancelled = true; };
-  }, [defaultDevice]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => listYue2AitkRuns(datasetId).then(result => {
-      if (cancelled) return;
-      setAitkRuns(result.runs);
-    }).catch(() => { /* the ladder keeps its last list */ });
-    void refresh();
-    const running = job?.status === 'queued' || job?.status === 'running';
-    const timer = running ? window.setInterval(refresh, 5000) : undefined;
-    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, job?.id, job?.status, ladderNonce]);
+  useReload(runQueries.jointRuns(datasetId).queryKey, `${job?.id ?? ''}:${job?.status ?? ''}`);
   // The ladder shown under the run: the run picked (on the Review page or in
   // the ladder's run list), else the run this card's job made, else the live
   // one, else the newest. Its previews are fetched for that run.
@@ -632,20 +601,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const ladderRunId = ladderRunRec?.jobId;
   const awaitingMirror = !ladderRunRec && !!activeJob && !!trainingWorker;
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!ladderRunId) { setJointPreviews([]); return; }
-    const refresh = () => listYue2JointPreviewsLocal(datasetId, ladderRunId)
-      .then(result => { if (!cancelled) setJointPreviews(result.previews); })
-      .catch(() => { if (!cancelled) setJointPreviews([]); });
-    void refresh();
-    // Previews land while the run trains and for a while after it ends
-    // (the parallel chain drains), so keep polling a live or just-finished run.
-    const fresh = typeof job?.finishedAt === 'number' && Date.now() - job.finishedAt < 30 * 60_000;
-    const timer = job?.status === 'queued' || job?.status === 'running' || fresh || ladderRunRec?.live
-      ? window.setInterval(refresh, 5000) : undefined;
-    return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, ladderRunId, job?.status, ladderNonce]);
+  const previewsQuery = useQuery({ ...runQueries.previews(datasetId, ladderRunId ?? ''), enabled: !!ladderRunId,
+    refetchInterval: pollWhile(() => !!ladderRunRec?.live || job?.status === 'queued' || job?.status === 'running'
+      || typeof job?.finishedAt === 'number' && Date.now() - job.finishedAt < 30 * 60_000, 5000) });
+  const jointPreviews = previewsQuery.data?.previews ?? [];
 
   useEffect(() => {
     setLiveMetric(null);
@@ -666,7 +625,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
     if (savedMilestones.length) setMilestones(savedMilestones);
-    const stop = subscribeEventSource(jobStreamUrl(job.id), { message: data => {
+    const stop = subscribeEventSource(jobStreamUrl(job.id, { worker: trainingWorker }), { message: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
         if (item.type === 'metric' && item.metric === 'vram') {
@@ -700,7 +659,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       } catch { /* Ignore malformed replay frames; polling remains authoritative. */ }
     } });
     return stop;
-  }, [job?.id, job?.startedAt]);
+  }, [trainingWorker, job?.id, job?.startedAt]);
 
   useEffect(() => {
     setForm(readStoredForm(datasetId));
@@ -718,13 +677,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const restore = async () => {
       if (storedPrepareId) {
         try {
-          const restored = await getJob(storedPrepareId);
+          const restored = await client.fetchQuery(trainingQueries.job(trainingWorker, storedPrepareId));
           if (!cancelled && isPrepareJob(restored, datasetId)) setPrepareJob(restored);
         } catch { /* Fall back to the job list below. */ }
       }
       if (storedId) {
         try {
-          const restored = await getJob(storedId);
+          const restored = await client.fetchQuery(trainingQueries.job(trainingWorker, storedId));
           if (!cancelled && isJointJob(restored, datasetId)) {
             setJob(restored);
             return;
@@ -732,7 +691,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         } catch { /* Fall back to the dataset job list. */ }
       }
       try {
-        const result = await listJobs(datasetId);
+        const result = await client.fetchQuery(runQueries.jobs(trainingWorker, datasetId));
         const latestPrepare = result
           .filter(item => isPrepareJob(item, datasetId))
           .sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -751,7 +710,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     };
     void restore();
     return () => { cancelled = true; };
-  }, [datasetId]);
+  }, [datasetId, trainingWorker]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -782,58 +741,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     writeStored(`${JOB_KEY}${datasetId}`, storeJob.id);
   }, [datasetId, storeJob?.id]);
 
-  useEffect(() => {
-    if (!job || !['queued', 'running'].includes(job.status)) return;
-    const id = job.id;
-    const timer = window.setInterval(() => {
-      void getJob(id).then(next => {
-        if (next.datasetId === datasetId) setJob(next);
-      }).catch(err => setError(err instanceof Error ? err.message : String(err)));
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [datasetId, job?.id, job?.status]);
 
-  useEffect(() => {
-    if (!jointPipelineId) return;
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const pipeline = await preparationApi.getYue2Preparation(jointPipelineId);
-        const current = await preparationApi.getYue2PreparationJob<TrainingJobSummary>(jointPipelineId);
-        if (cancelled) return;
-        if (current && isJointJob(current, datasetId)) {
-          setJob(current);
-          writeStored(`${JOB_KEY}${datasetId}`, current.id);
-        }
-        if (['done', 'failed', 'cancelled', 'interrupted'].includes(pipeline.status)) {
-          if (pipeline.error) setError(pipeline.error);
-          setJointPipelineId('');
-        }
-      } catch (err) {
-        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setJointPipelineId(''); }
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1500);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [datasetId, jointPipelineId]);
 
+  const pipelineQuery = useQuery({ ...runQueries.preparation(jointPipelineId), enabled: !!jointPipelineId });
+  const pipelineJobQuery = useQuery({ ...runQueries.preparationJob(jointPipelineId), enabled: !!jointPipelineId,
+    refetchInterval: pollWhile(() => !!jointPipelineId) });
   useEffect(() => {
-    if (!prepareJob || !['queued', 'running'].includes(prepareJob.status)) return;
-    const id = prepareJob.id;
-    const timer = window.setInterval(() => {
-      void getJob(id).then(next => {
-        if (next.datasetId === datasetId) {
-          setPrepareJob(next);
-          if (next.status === 'done' && prepareManifest && appliedPrepareJobId !== next.id) {
-            setForm(previous => ({ ...previous, checkpoint: previous.method === 'fixed-recipe' ? '' : prepare.checkpoint, dataset: prepareManifest }));
-            setAppliedPrepareJobId(next.id);
-          }
-        }
-      }).catch(err => setError(err instanceof Error ? err.message : String(err)));
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [datasetId, prepareJob?.id, prepareJob?.status, prepareManifest, prepare.checkpoint, appliedPrepareJobId]);
+    const current = pipelineJobQuery.data;
+    if (current && isJointJob(current, datasetId)) {
+      setJob(current);
+      writeStored(`${JOB_KEY}${datasetId}`, current.id);
+    }
+    const pipeline = pipelineQuery.data;
+    if (pipeline && ['done', 'failed', 'cancelled', 'interrupted'].includes(pipeline.status)) {
+      if (pipeline.error) setError(pipeline.error);
+      setJointPipelineId('');
+    }
+  }, [datasetId, jointPipelineId, pipelineQuery.data, pipelineJobQuery.data]);
+
+
+
 
   useEffect(() => {
     if (prepareJob?.status === 'done' && prepareManifest && appliedPrepareJobId !== prepareJob.id) {
@@ -959,7 +886,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const request = await captureJointRequest();
       const pipeline = await submitJointStart(datasetId, request, {
         getContext: preparationApi.getYue2PreparationContext,
-        start: preparationApi.startYue2Preparation,
+        start: snapshot => runCommand(client, trainingWorker, () => preparationApi.startYue2Preparation(snapshot)),
       }, undefined, worker);
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
@@ -980,12 +907,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (presetLoadGate.current.pending) return;
     setStarting(true); setError('');
     try {
-      const result = await startYue2AitkPrepare(datasetId, { ...prepare,
+      const result = await runCommand(client, trainingWorker, () => startYue2AitkPrepare(datasetId, { ...prepare,
         lyricTiming: form.method === 'fixed-recipe' ? false : lyricTiming,
-        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}) });
+        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}) }, { worker: trainingWorker }));
       setPrepareManifest(result.manifest);
       setAppliedPrepareJobId('');
-      setPrepareJob(await getJob(result.jobId));
+      setPrepareJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setStarting(false); }
@@ -995,10 +922,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setError('');
     try {
       if (jointPipelineId) {
-        await preparationApi.commandYue2Preparation(jointPipelineId, 'cancel');
+        await runCommand(client, trainingWorker, () => preparationApi.commandYue2Preparation(jointPipelineId, 'cancel'));
       } else if (job) {
-        await cancelJob(job.id);
-        setJob(await getJob(job.id));
+        await runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker }));
+        setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, job.id)));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1008,12 +935,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (!prepareJob) return;
     setError('');
     try {
-      await cancelJob(prepareJob.id);
-      setPrepareJob(await getJob(prepareJob.id));
+      await runCommand(client, trainingWorker, () => cancelJob(prepareJob.id, { worker: trainingWorker }));
+      setPrepareJob(await client.fetchQuery(trainingQueries.job(trainingWorker, prepareJob.id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
+  const error = commandError || prepareQuery.error?.message || runsQuery.error?.message || previewsQuery.error?.message || pipelineQuery.error?.message || pipelineJobQuery.error?.message || '';
   const selectResume = (value: string) => {
     setResumeChoice(value);
     if (!value) { setForm(previous => ({ ...previous, resume: '', dataset: '' })); return; }
@@ -1167,7 +1095,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {(defaultsAvailable === false || missingDefaults.length > 0) && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.defaultsMissing', 'Model paths were not found automatically. Install the YuE2 training assets in Model Manager or enter their paths here.')} {missingDefaults.join('; ')}</p>}
         <details className="mt-3">
           <summary className="cursor-pointer text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.advancedPaths', 'Advanced paths and provenance')}</summary>
-        <button type="button" disabled={active || preparing || starting || yue2RunAllActive} onClick={() => setDefaultsRevision(value => value + 1)} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
+        <button type="button" disabled={active || preparing || starting || yue2RunAllActive} onClick={() => refreshDefaults()} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.legacyManifest', 'Existing YuE2 manifest'), 'legacyManifest', 'text', prepare, value => setPrepare(previous => ({ ...previous, legacyManifest: value })),
             t('trainingStudio.yue2.method.legacyManifestInfo', 'On-disk path to the legacy YuE2 manifest that native preparation converts from. Usually filled in automatically from the dataset; set it by hand only to prepare from a different manifest.'))}
@@ -1800,7 +1728,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: two 300 s draft takes of the dataset\'s first sung track per rung. Take 1 uses the same seed on every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Take 2 uses a new random seed each time, so it is a song no other rung made; it shows how the checkpoint does on a fresh draw, and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
           renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 2, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
-          onChanged={() => setLadderNonce(n => n + 1)} onError={setError} idPrefix="train-rung" />
+          onError={setError} idPrefix="train-rung" />
       </div>}
     </div>
   );

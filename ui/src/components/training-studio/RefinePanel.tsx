@@ -7,20 +7,30 @@
 // listening ladder: resume the finished run with the planner live (the
 // decoder rides along; it never decays), save a checkpoint every 0.1 KL up to
 // a ceiling, render a preview per rung, pick the last good one.
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Toggle } from '../settings/SettingsPrimitives';
-import { useTrainingStore } from '../../stores/trainingStore';
-import { decideReviewUse, getReviewLadder, pickFromLadder } from '../../services/trainingReviewApi';
-import { Yue2SplitChart } from './Yue2SplitChart';
+import { pollWhile } from '../../queries/contract';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useJobSelection, useRunJob } from '../../queries/training-runs/hooks';
+import { runCommand, runQueries } from '../../queries/training-runs/queries';
 import {
-  cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, listYue2JointPreviewsLocal, yue2RungScoresExportUrl, deleteYue2AitkRun,
-  setYue2ReviewComplete, type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
+  cancelJob,
+  deleteYue2AitkRun,
+  setYue2ReviewComplete,
+  startYue2JointTrain,
+  yue2RungScoresExportUrl,
+  type Yue2AitkRunRecord,
+  type Yue2JointTrainRequest
 } from '../../services/trainingApi';
+import { decideReviewUse, pickFromLadder } from '../../services/trainingReviewApi';
+import { useTrainingStore } from '../../stores/trainingStore';
+import { Toggle } from '../settings/SettingsPrimitives';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 import { Yue2LadderReview, type Yue2LadderReviewHandle } from './Yue2LadderReview';
+import { Yue2SplitChart } from './Yue2SplitChart';
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
 
@@ -30,7 +40,9 @@ export const RefinePanel: React.FC = () => {
   const detail = useTrainingStore(s => s.detail);
   const datasetId = useTrainingStore(s => s.selectedDatasetId);
   const datasetName = useTrainingStore(s => s.datasets.find(d => d.id === s.selectedDatasetId)?.name);
-  const [runs, setRuns] = useState<Yue2AitkRunRecord[]>([]);
+  const client = useQueryClient();
+  const runsQuery = useQuery({ ...runQueries.jointRuns(datasetId ?? ''), enabled: !!datasetId });
+  const runs = runsQuery.data?.runs ?? [];
   const [source, setSource] = useState('');
   const [ceiling, setCeiling] = useState(2.0);
   const [rung, setRung] = useState(0.1);
@@ -59,14 +71,17 @@ export const RefinePanel: React.FC = () => {
   // navigation away from this tab and back.
   const narJob = useTrainingStore(s => s.refineNarJob);
   const setNarJob = useTrainingStore(s => s.setRefineNarJob);
-  const [job, setJob] = useState<TrainingJobSummary | null>(null);
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
+  const [job, setJob] = useJobSelection(narJob ? null : trainingWorker, datasetId);
   // The review page hands over a ladder by calling setRefineLadderRun; this IS
   // the tab's selection, so it survives navigating away and back.
   const ladderRun = useTrainingStore(s => s.refineLadderRun);
-  const trainingWorker = useTrainingStore(s => s.trainingWorker);
   const setLadderRun = useTrainingStore(s => s.setRefineLadderRun);
-  const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
-  const [error, setError] = useState('');
+  const previewsQuery = useQuery({ ...runQueries.previews(datasetId ?? '', ladderRun ?? ''), enabled: !!datasetId && !!ladderRun,
+    refetchInterval: pollWhile(() => job?.status === 'queued' || job?.status === 'running', 5000) });
+  const previews = previewsQuery.data?.previews ?? [];
+  const [commandError, setError] = useState('');
+  const error = commandError || runsQuery.error?.message || previewsQuery.error?.message || '';
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState('');
 
@@ -75,11 +90,9 @@ export const RefinePanel: React.FC = () => {
   // follow-up) steals the selection once, even while some other run is
   // currently picked, without fighting the user's own picks afterwards.
   const lastAutoSelectedLive = useRef('');
-  const refreshRuns = async () => {
-    if (!datasetId) return;
-    try {
-      const r = await listYue2AitkRuns(datasetId);
-      setRuns(r.runs);
+  useEffect(() => {
+      const r = runsQuery.data;
+      if (!r) return;
       if (r.activeJob?.kind === 'yue2-joint-train') setJob(r.activeJob);
       const live = r.runs.find(x => x.live);
       if (live && live.jobId !== lastAutoSelectedLive.current) {
@@ -95,32 +108,9 @@ export const RefinePanel: React.FC = () => {
         if (next) setLadderRun(next);
         if (live && next === live.jobId) lastAutoSelectedLive.current = live.jobId;
       }
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-  };
-  useEffect(() => { void refreshRuns(); }, [datasetId]);
-  // A decoder follow-up may have finished while this panel was unmounted; pick
-  // its job back up so the "when it ends" effect below still fires.
-  useEffect(() => {
-    if (!narJob) return;
-    if (job && job.id === narJob.jobId) return;
-    void getJob(narJob.jobId).then(setJob).catch(() => {});
-  }, [narJob?.jobId]);
-  // Poll the refine job while it runs; refresh the ladder as rungs land.
-  useEffect(() => {
-    if (!job || (job.status !== 'running' && job.status !== 'queued')) return;
-    const id = window.setInterval(() => {
-      void getJob(job.id).then(next => { setJob(next); void refreshRuns(); }).catch(() => {});
-      // Rung previews land while the job runs: keep the ladder's players current.
-      if (datasetId && ladderRun) void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
-    }, 5000);
-    return () => window.clearInterval(id);
-  }, [job?.id, job?.status, datasetId, ladderRun]);
-  useEffect(() => {
-    if (!datasetId || !ladderRun) { setPreviews([]); return; }
-    let cancelled = false;
-    void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => { if (!cancelled) setPreviews(r.previews); }).catch(() => { if (!cancelled) setPreviews([]); });
-    return () => { cancelled = true; };
-  }, [datasetId, ladderRun, job?.status]);
+  }, [runsQuery.data, datasetId, trainingWorker, ladderRun]);
+  const observedNar = useRunJob(null, narJob?.jobId);
+  useEffect(() => { if (observedNar.data) setJob(observedNar.data); }, [observedNar.data]);
 
   const finished = useMemo(() => runs.filter(r => !r.live && !r.resumeError && r.checkpoints.some(c => !!c.optimizerPath)), [runs]);
   const lastOf = (r: Yue2AitkRunRecord) => r.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
@@ -144,10 +134,9 @@ export const RefinePanel: React.FC = () => {
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
         preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, ...draftOpts } } as unknown as Yue2JointTrainRequest;
-      const result = await startYue2JointTrain(datasetId, request);
-      setJob(await getJob(result.jobId));
+      const result = await runCommand(client, trainingWorker, () => startYue2JointTrain(datasetId, request, { worker: trainingWorker }));
+      setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
       setLadderRun(result.jobId);
-      await refreshRuns();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }
   };
@@ -157,10 +146,9 @@ export const RefinePanel: React.FC = () => {
     if (!window.confirm(t('trainingStudio.refine.deleteConfirm', 'Delete this run and its {{n}} checkpoint(s) from disk? Scores you entered are kept.', { n: run.checkpoints.length }))) return;
     setError('');
     try {
-      await deleteYue2AitkRun(datasetId, jobId);
+      await runCommand(client, null, () => deleteYue2AitkRun(datasetId, jobId));
       if (source === jobId) setSource('');
       if (ladderRun === jobId) setLadderRun('');
-      await refreshRuns();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
   // Short enough to survive the picker's middle-ellipsis (about 40 chars).
@@ -178,11 +166,11 @@ export const RefinePanel: React.FC = () => {
     if (!datasetId || !ladderRun) return true;
     setError(''); setCleanupNote('');
     try {
-      const ladder = await getReviewLadder(datasetId, ladderRun);
+      const ladder = await client.fetchQuery({ ...runQueries.ladder(datasetId, ladderRun), staleTime: 0 });
       const pick = pickFromLadder(ladder, step);
       if (pick.checkpointDir !== _dir) throw new Error('The selected checkpoint changed. Reload the ladder.');
-      const decision = await decideReviewUse(pick, narFurther, { budget: narBudget, lrScale: narLrScale,
-        keepDelta: narKeepDelta, target: narTarget === '' ? null : narTarget, knee: narKnee });
+      const decision = await runCommand(client, null, () => decideReviewUse(pick, narFurther, { budget: narBudget, lrScale: narLrScale,
+        keepDelta: narKeepDelta, target: narTarget === '' ? null : narTarget, knee: narKnee }));
       if (decision.outcome === 'skip') return false;
       if (decision.outcome === 'reject') {
       // Remote-origin NAR further training isn't supported yet (Reviewer/
@@ -198,7 +186,7 @@ export const RefinePanel: React.FC = () => {
       // Node admitted the captured decoder continuation after rechecking the rung.
       if (!decision.jobId) throw new Error('The review server did not start decoder training.');
       setNarJob({ jobId: decision.jobId, step });
-      setJob(await getJob(decision.jobId));
+      setJob(await client.fetchQuery(trainingQueries.job(null, decision.jobId)));
       setCleanupNote(t('trainingStudio.refine.narStarted', 'Decoder training on from step {{step}}; the adapter is linked when it stops.', { step }));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     return true;
@@ -211,11 +199,10 @@ export const RefinePanel: React.FC = () => {
     const pending = narJob; setNarJob(null);
     void (async () => {
       try {
-        const r = await listYue2AitkRuns(datasetId);
+        const r = await client.fetchQuery({ ...runQueries.jointRuns(datasetId), staleTime: 0 });
         const run = r.runs.find(x => x.jobId === pending.jobId);
         const last = run?.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];
         if (!run || !last) { setError(t('trainingStudio.refine.narNoCheckpoint', 'The decoder run left no complete checkpoint.')); return; }
-        setRuns(r.runs);
         setLadderRun(run.jobId);
         await ladderRef.current?.finishPick(run.jobId, last.dir, last.step);
       } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
@@ -227,8 +214,7 @@ export const RefinePanel: React.FC = () => {
   const toggleReviewed = async () => {
     if (!datasetId || !ladderRun) return;
     try {
-      await setYue2ReviewComplete(datasetId, ladderRun, !runs.find(r => r.jobId === ladderRun)?.reviewComplete);
-      await refreshRuns();
+      await runCommand(client, null, () => setYue2ReviewComplete(datasetId, ladderRun, !runs.find(r => r.jobId === ladderRun)?.reviewComplete));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
 
@@ -345,7 +331,7 @@ export const RefinePanel: React.FC = () => {
             {busy || active ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             {active ? t('trainingStudio.refine.running', 'Refining…') : t('trainingStudio.refine.start', 'Start refinement')}
           </button>
-          {active && <button type="button" onClick={() => { if (job) void cancelJob(job.id).then(() => getJob(job.id)).then(setJob); }} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.refine.stop', 'Stop')}</button>}
+          {active && <button type="button" onClick={() => { if (job) void runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker })).then(() => client.fetchQuery(trainingQueries.job(trainingWorker, job.id))).then(setJob); }} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.refine.stop', 'Stop')}</button>}
           {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{job.total ? ` · step ${job.done} / ${job.total}` : ''}</span>}
         </div>
         {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}
@@ -389,7 +375,7 @@ export const RefinePanel: React.FC = () => {
         {cleanupNote && <div className="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
         <Yue2LadderReview ref={ladderRef} datasetId={datasetId} datasetName={datasetName} run={ladderRunRec} previews={previews}
           renderOpts={{ seconds, takes, draft }} onUse={onUse} onPicked={setPicked} onError={setError} idPrefix="refine-rung"
-          onChanged={() => { void refreshRuns(); if (datasetId && ladderRun) void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {}); }} />
+          />
       </div>
 
     </div>

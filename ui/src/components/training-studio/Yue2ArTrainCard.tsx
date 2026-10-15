@@ -1,6 +1,3 @@
-import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
-import { Yue2OptimizerFields } from './Yue2OptimizerFields';
-import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half: stages 2,
 // 3, 5 and 7.
 //
@@ -24,22 +21,29 @@ import type { Yue2OptimOptions } from '../../services/trainingApi';
 // every stage; repeating the same text a second time on one screen teaches
 // people to skip it.
 
+import { useQuery } from '@tanstack/react-query';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
-import { followNoteInBox } from '../../utils/abcFollow';
-import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, History, Loader2, Mic2,
   Package, PauseCircle, Play, Scissors, Waves,
 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { pollWhile } from '../../queries/contract';
+import { useReload } from '../../queries/training-runs/hooks';
+import { runQueries } from '../../queries/training-runs/queries';
+import type { Yue2OptimOptions } from '../../services/trainingApi';
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
+import { followNoteInBox } from '../../utils/abcFollow';
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 
 import {
-  getYue2SheetSource, listYue2ArRuns, listYue2SheetSources, sampleAudioUrl,
+  sampleAudioUrl,
   type Yue2AlignRequest, type Yue2ArAttn, type Yue2ArLrScheduler, type Yue2ArRunSummary,
   type Yue2ArStatus, type Yue2ArTarget, type Yue2ArTrainRequest, type Yue2SheetRequest,
-  type Yue2SheetSourceDetail, type Yue2SheetSourceStatus, type Yue2StyleTemplate,
-  type Yue2TokenizeRequest,
+  type Yue2StyleTemplate,
+  type Yue2TokenizeRequest
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
@@ -47,8 +51,8 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
-import { Yue2StageCard } from './Yue2StageCard';
 import { Yue2SplitChart } from './Yue2SplitChart';
+import { Yue2StageCard } from './Yue2StageCard';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -482,12 +486,17 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
 function Yue2SheetPreview({ datasetId, reloadKey, live }: { datasetId: string; reloadKey: number; live: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [sources, setSources] = useState<Yue2SheetSourceStatus[] | null>(null);
-  const [listError, setListError] = useState('');
+  const worker = useTrainingStore(s => s.trainingWorker);
+  const sourcesQuery = useQuery({ ...runQueries.sources(worker, datasetId), enabled: open,
+    refetchInterval: pollWhile(() => live, 5000) });
+  const sources = sourcesQuery.data?.sources ?? null;
+  const listError = sourcesQuery.error?.message ?? '';
   const [selected, setSelected] = useState('');
-  const [detail, setDetail] = useState<Yue2SheetSourceDetail | null>(null);
-  const [detailError, setDetailError] = useState('');
-  const [loadingDetail, setLoadingDetail] = useState(false);
+  const detailQuery = useQuery({ ...runQueries.source(worker, datasetId, selected), enabled: open && !!selected });
+  const detail = detailQuery.data ?? null;
+  const detailError = detailQuery.error?.message ?? '';
+  const loadingDetail = detailQuery.isPending;
+  useReload(runQueries.sources(worker, datasetId).queryKey, reloadKey);
   // Two nested refs, not one. abcjs's `responsive: 'resize'` mode renders
   // straight into whatever element it's given and reaches into that SAME
   // element's inline style to install a padding-bottom aspect-ratio hack
@@ -504,53 +513,10 @@ function Yue2SheetPreview({ datasetId, reloadKey, live }: { datasetId: string; r
   const audioControlRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    listYue2SheetSources(datasetId)
-      .then(r => {
-        if (cancelled) return;
-        setSources(r.sources);
-        setListError('');
-        setSelected(prev => {
-          if (prev && r.sources.some(s => s.name === prev && s.ok)) return prev;
-          return r.sources.find(s => s.ok)?.name ?? '';
-        });
-      })
-      .catch(err => { if (!cancelled) setListError(err?.message || String(err)); });
-    return () => { cancelled = true; };
-  }, [open, datasetId, reloadKey]);
-
-  // While the job is running, the manifest gets rewritten after every source
-  // finishes, so poll the same list route instead of waiting for the job to
-  // finish and bump reloadKey. Merges rather than replaces so the selection
-  // above doesn't get yanked mid-poll.
-  useEffect(() => {
-    if (!open || !live) return;
-    const id = setInterval(() => {
-      listYue2SheetSources(datasetId)
-        .then(r => {
-          setSources(r.sources);
-          setSelected(prev => {
-            if (prev && r.sources.some(s => s.name === prev && s.ok)) return prev;
-            return r.sources.find(s => s.ok)?.name ?? prev;
-          });
-        })
-        .catch(() => { /* next poll retries */ });
-    }, 5000);
-    return () => clearInterval(id);
-  }, [open, live, datasetId]);
-
-  useEffect(() => {
-    if (!open || !selected) return;
-    let cancelled = false;
-    setLoadingDetail(true);
-    setDetailError('');
-    getYue2SheetSource(datasetId, selected)
-      .then(d => { if (!cancelled) setDetail(d); })
-      .catch(err => { if (!cancelled) { setDetail(null); setDetailError(err?.message || String(err)); } })
-      .finally(() => { if (!cancelled) setLoadingDetail(false); });
-    return () => { cancelled = true; };
-  }, [open, selected, datasetId]);
+    if (!sources) return;
+    setSelected(prev => sources.some(source => source.name === prev && source.ok)
+      ? prev : sources.find(source => source.ok)?.name ?? '');
+  }, [sources, worker, datasetId]);
 
   // The fetch above never clears a stale `detail` synchronously on unmount of
   // interest (that would be a setState-in-effect lint violation) — this
@@ -1070,20 +1036,13 @@ export const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; rel
   { datasetId, pickStep, reloadKey },
 ) => {
   const { t } = useTranslation();
-  const [runs, setRuns] = useState<Yue2ArRunSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery(runQueries.arRuns(datasetId));
+  const runs = query.data?.runs ?? null;
+  const error = query.error?.message ?? null;
+  useReload(runQueries.arRuns(datasetId).queryKey, reloadKey);
   const [open, setOpen] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
 
-  React.useEffect(() => {
-    let cancelled = false;
-    listYue2ArRuns(datasetId)
-      .then(r => { if (!cancelled) { setRuns(r.runs); setError(null); } })
-      .catch(err => {
-        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setRuns([]); }
-      });
-    return () => { cancelled = true; };
-  }, [datasetId, reloadKey]);
 
   if (error) return <div className={`${CARD} text-xs text-rose-500`}>{error}</div>;
   if (!runs || runs.length === 0) return null;

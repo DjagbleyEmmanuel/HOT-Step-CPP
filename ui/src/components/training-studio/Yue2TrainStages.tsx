@@ -24,20 +24,26 @@
 // The preflight line is advisory; the server checks current artifacts before
 // each accepted stage. The status panel polls the durable command on reconnect.
 
-import React, { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ListChecks, Loader2, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { pollWhile } from '../../queries/contract';
+import { runCommand, runQueries } from '../../queries/training-runs/queries';
+import type { Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 
+import { commandYue2Preparation } from '../../services/trainingPreparationApi';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { commandYue2Preparation, listYue2Preparations, type Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 import { Toggle } from '../shared/Toggle';
-import {
-  Yue2StemsCard, Yue2AlignCard, Yue2SheetCard, Yue2TokenizeCard,
-} from './Yue2ArTrainCard';
-import { Yue2PreprocessCard } from './Yue2TrainCard';
-import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
+import {
+  Yue2AlignCard, Yue2SheetCard,
+  Yue2StemsCard,
+  Yue2TokenizeCard,
+} from './Yue2ArTrainCard';
 import { Yue2ClearPreparedCard } from './Yue2ClearPreparedCard';
+import { Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 
@@ -154,25 +160,15 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
   const jointStartRef = React.useRef<(() => Promise<Record<string, unknown>>) | null>(null);
   const exposeJointStart = React.useCallback((fn: () => Promise<Record<string, unknown>>) => { jointStartRef.current = fn; }, []);
   const [captureError, setCaptureError] = useState<string | null>(null);
-  const [preparation, setPreparation] = useState<Yue2PreparationSummary | null>(null);
-  useEffect(() => {
-    let live = true;
-    const refresh = async () => {
-      try {
-        const list = await listYue2Preparations(datasetId);
-        if (live) setPreparation(list[0] ?? null);
-      } catch (error) {
-        if (live) setCaptureError(error instanceof Error ? error.message : String(error));
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 1500);
-    return () => { live = false; window.clearInterval(timer); };
-  }, [datasetId]);
+  const client = useQueryClient();
+  const preparationQuery = useQuery({ ...runQueries.preparations(datasetId),
+    refetchInterval: pollWhile<Yue2PreparationSummary[]>(data => yue2RunAllActive || !data
+      || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))) });
+  const preparation = preparationQuery.data?.[0] ?? null;
   const controlPreparation = async (action: 'pause' | 'resume' | 'cancel' | 'retry') => {
     if (!preparation) return;
     setCaptureError(null);
-    try { setPreparation(await commandYue2Preparation(preparation.id, action)); }
+    try { await runCommand(client, null, () => commandYue2Preparation(preparation.id, action)); }
     catch (error) { setCaptureError(error instanceof Error ? error.message : String(error)); }
   };
   const startJointChain = async () => {
