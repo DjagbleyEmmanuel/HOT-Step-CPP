@@ -185,8 +185,9 @@ struct Yue2Request {
     // With codec_ids: keep composing after them instead of stopping. The
     // supplied codes are a prefix (a saved render cut at a section boundary),
     // prefilled under the unchanged prompt and score; sampling picks up at
-    // frame codec_ids.size(). Needs a single song, cfg_scale 1 and no
-    // semantic_retries.
+    // frame codec_ids.size(). No semantic_retries. A batch (lm_batch_size or
+    // "songs", up to YUE2_MAX_LM_BATCH) gives every song the same prefix;
+    // each song composes on with its own seed.
     bool continue_codec_ids = false;
 
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────

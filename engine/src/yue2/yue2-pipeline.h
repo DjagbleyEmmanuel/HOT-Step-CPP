@@ -625,11 +625,14 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     Yue2ArKvCache & cache = *cache_out;
     const int64_t supplied_n = (int64_t) req.codec_ids.size();
-    if (supplied_n > 0 && B != 1) {
+    const bool resume = supplied_n > 0 && req.continue_codec_ids;
+    // A round trip is not sampled, so a batch would render one stream B
+    // times. A resumed batch gives every song the same prefix and lets each
+    // song's own seed compose what follows.
+    if (supplied_n > 0 && !resume && B != 1) {
         if (err) *err = "codec_ids needs a single song (the stream is not sampled)";
         return false;
     }
-    const bool resume = supplied_n > 0 && req.continue_codec_ids;
     if (resume && req.semantic_retries > 0) {
         if (err) *err = "continue_codec_ids cannot be combined with semantic_retries (a retry redraws the whole stream)";
         return false;
@@ -648,17 +651,19 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         cap[(size_t) b] = yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
         max_cap         = std::max(max_cap, cap[(size_t) b]);
     }
-    if (resume && supplied_n >= std::min<int64_t>(cap[0], sp.max_tokens)) {
-        if (err) *err = "continue_codec_ids: the " + std::to_string(supplied_n) + "-frame prefix already reaches the stage cap of " +
-                        std::to_string(std::min<int64_t>(cap[0], sp.max_tokens)) + " frames";
-        return false;
+    for (int b = 0; resume && b < B; b++) {
+        if (supplied_n >= std::min<int64_t>(cap[(size_t) b], sp.max_tokens)) {
+            if (err) *err = "continue_codec_ids: the " + std::to_string(supplied_n) + "-frame prefix already reaches the stage cap of " +
+                            std::to_string(std::min<int64_t>(cap[(size_t) b], sp.max_tokens)) + " frames";
+            return false;
+        }
     }
     // Rows per set: the prompt plus the longest stream any set may reach.
     const int64_t rows = max_prefix + std::max<int64_t>(max_cap, supplied_n) + 4;
     // The spare slot for compaction. Without room for it the stage still
     // runs; ended streams just stay in the decode.
     bool compact = false;
-    if (B > 1 && supplied_n == 0) {
+    if (B > 1 && (supplied_n == 0 || resume)) {
         std::string spare_err;
         compact = yue2_ar_kv_cache_alloc(m, rows, &cache, &spare_err, S + per);
         if (!compact) fprintf(stderr, "[YuE2] no room for the spare set (%s): ended songs stay in the decode\n", spare_err.c_str());
@@ -674,18 +679,17 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     // Prefill every set. A prompt identical to an earlier set's is copied
     // rather than forwarded again (cot=off: every song shares one prompt; a
     // retry pass: every draw of a song shares its prompt).
+    auto prompt_of = [&](int s) -> const std::vector<int32_t> & {
+        const int b = s / per;
+        return use_cfg && s == songs[(size_t) b].neg_set ? neg_prefix[(size_t) b] : songs[(size_t) b].prefix_ids;
+    };
     int64_t            W = 0;
     std::vector<float> logits;  // [S, W]
     for (int s = 0; s < S; s++) {
-        const int  b   = s / per;
-        const bool neg = use_cfg && (s == songs[(size_t) b].neg_set);
-        const std::vector<int32_t> & ids = neg ? neg_prefix[(size_t) b] : songs[(size_t) b].prefix_ids;
+        const std::vector<int32_t> & ids = prompt_of(s);
         int twin = -1;
         for (int t = 0; t < s; t++) {
-            const int  tb   = t / per;
-            const bool tneg = use_cfg && (t == songs[(size_t) tb].neg_set);
-            const std::vector<int32_t> & tids = tneg ? neg_prefix[(size_t) tb] : songs[(size_t) tb].prefix_ids;
-            if (tids == ids) {
+            if (prompt_of(t) == ids) {
                 twin = t;
                 break;
             }
@@ -713,8 +717,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     if (supplied_n > 0) {
         // Round trip: forward the supplied stream teacher-forced, exactly the
         // rows sampling would have left in the cache, and skip the draw.
-        // continue_codec_ids keeps the last row's logits and samples on.
-        Yue2SongState & sg = songs[0];
+        // continue_codec_ids keeps the last row's logits and samples on, and
+        // every song of a resumed batch starts from the same prefix.
         supplied_ids.reserve((size_t) supplied_n);
         for (int32_t c : req.codec_ids) supplied_ids.push_back(c + YUE2_CODEC_OFFSET);
         if (resume && lsched.on) {
@@ -722,18 +726,22 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             // prefix is replayed through the scheduled decode one frame at a
             // time, as sampling would have run it: token i under the spans
             // due at frame i + 1. A plain prefill would build unmasked rows.
-            sg.codec_ids.clear();
+            // The schedule needs one shared prompt and no guidance (checked
+            // above), so every set replays the same frame under the same spans.
+            std::vector<int32_t> frame_ids((size_t) S);
             for (int64_t i = 0; i < supplied_n; i++) {
                 if (cancel && cancel->load()) {
                     if (err) *err = "cancelled";
                     yue2_ar_kv_cache_free(&cache);
                     return false;
                 }
-                sg.codec_ids.push_back(req.codec_ids[(size_t) i]);
                 cache.prompt_bias.assign((size_t) S, {});
-                yue2_schedule_spans(lsched, lsched_rows, (double) sg.codec_ids.size() * 0.04,
-                                    &cache.prompt_bias[(size_t) sg.cond_set]);
-                if (!yue2_ar_decode_batch(m, cache, &supplied_ids[(size_t) i], &logits, err, S)) {
+                for (const Yue2SongState & sg : songs) {
+                    yue2_schedule_spans(lsched, lsched_rows, (double) (i + 1) * 0.04,
+                                        &cache.prompt_bias[(size_t) sg.cond_set]);
+                }
+                std::fill(frame_ids.begin(), frame_ids.end(), supplied_ids[(size_t) i]);
+                if (!yue2_ar_decode_batch(m, cache, frame_ids.data(), &logits, err, S)) {
                     yue2_ar_kv_cache_free(&cache);
                     return false;
                 }
@@ -742,12 +750,32 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             // Under guidance the negative set decodes the same sampled frames
             // as the positive one (the decode loop feeds both the one draw),
             // so a resumed stream prefills it too; each set's last row is the
-            // next frame's logits, in set order as the blend reads them.
+            // next frame's logits, in set order as the blend reads them. A set
+            // whose prompt matches an earlier one's gets that set's rows and
+            // logits copied instead of a second prefill.
             const std::vector<int64_t> keep = resume ? std::vector<int64_t>{ supplied_n - 1 } : std::vector<int64_t>{};
-            std::vector<int> sets = { (int) sg.cond_set };
-            if (resume && use_cfg) sets.push_back((int) sg.neg_set);
+            std::vector<int> sets;
+            if (resume) {
+                for (int s = 0; s < S; s++) sets.push_back(s);
+            } else {
+                sets.push_back((int) songs[0].cond_set);
+            }
             std::vector<float> next_rows(resume ? (size_t) S * (size_t) W : 0);
-            for (int set : sets) {
+            for (size_t k = 0; k < sets.size(); k++) {
+                const int set  = sets[k];
+                int       twin = -1;
+                for (size_t t = 0; t < k && twin < 0; t++) {
+                    if (prompt_of(sets[t]) == prompt_of(set)) twin = sets[t];
+                }
+                if (twin >= 0) {
+                    if (!yue2_ar_kv_cache_copy_set(m, cache, twin, set, cache.filled[(size_t) twin], err)) {
+                        yue2_ar_kv_cache_free(&cache);
+                        return false;
+                    }
+                    std::copy(next_rows.begin() + (size_t) twin * (size_t) W, next_rows.begin() + (size_t) (twin + 1) * (size_t) W,
+                              next_rows.begin() + (size_t) set * (size_t) W);
+                    continue;
+                }
                 Yue2ArForwardResult pre;
                 if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, set)) {
                     yue2_ar_kv_cache_free(&cache);
@@ -757,10 +785,10 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             }
             if (resume) logits = std::move(next_rows);
         }
-        sg.codec_ids = req.codec_ids;
+        for (Yue2SongState & sg : songs) sg.codec_ids = req.codec_ids;
         if (resume) {
-            fprintf(stderr, "[YuE2] continuing after a %lld-frame codec prefix (hash %016llx)\n", (long long) supplied_n,
-                    (unsigned long long) yue2_token_hash(sg.codec_ids));
+            fprintf(stderr, "[YuE2] continuing %d song(s) after a %lld-frame codec prefix (hash %016llx)\n", B,
+                    (long long) supplied_n, (unsigned long long) yue2_token_hash(req.codec_ids));
         }
     }
     if (supplied_n > 0 && !resume) {
@@ -790,8 +818,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     if (resume) {
         // Frame clock, caps, min_tokens and the repetition window all carry on
         // from the prefix as if this stream had sampled it.
-        history[0] = supplied_ids;
-        step       = supplied_n;
+        for (auto & h : history) h = supplied_ids;
+        step = supplied_n;
     }
     for (; step < sp.max_tokens; step++) {
         if (cancel && cancel->load()) {
@@ -983,11 +1011,14 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     }
 
     cache.prompt_bias.clear();
-    if (resume && (songs[0].codec_ids.size() < req.codec_ids.size() ||
-                   !std::equal(req.codec_ids.begin(), req.codec_ids.end(), songs[0].codec_ids.begin()))) {
-        if (err) *err = "continue_codec_ids: the composed stream does not start with the supplied prefix (internal error)";
-        yue2_ar_kv_cache_free(&cache);
-        return false;
+    for (int b = 0; resume && b < B; b++) {
+        const std::vector<int32_t> & got = songs[(size_t) b].codec_ids;
+        if (got.size() < req.codec_ids.size() || !std::equal(req.codec_ids.begin(), req.codec_ids.end(), got.begin())) {
+            if (err) *err = "continue_codec_ids: song " + std::to_string(songs[(size_t) b].src_song) +
+                            "'s composed stream does not start with the supplied prefix (internal error)";
+            yue2_ar_kv_cache_free(&cache);
+            return false;
+        }
     }
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
