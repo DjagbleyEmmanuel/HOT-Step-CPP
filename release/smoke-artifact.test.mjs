@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { runCommand, smokeArtifact, smokeEngine, writeStubs } from './smoke-artifact.mjs';
+import { assertBackends, cudaRuntimeFiles, cudaRuntimeKey, runCommand, smokeArtifact, smokeEngine, writeStubs } from './smoke-artifact.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, 'out');
@@ -102,4 +102,52 @@ test('archive rejects checkout extraction and missing packaged runtime', { skip:
     console.log = original;
     if (evidence) fs.rmSync(evidence, { recursive: true, force: true });
   }
+});
+
+// --backend-check reports as ace-server prints them, reduced to what the policy reads.
+const cpuReg = { name: 'CPU', module: 'C:\e\ggml-cpu.dll', devices: [{ name: 'CPU', type: 'cpu' }] };
+const report = (extra = {}) => ({
+  registered: [cpuReg], selected: 'CPU', cpu: { initialised: true, description: 'Test CPU ', module: cpuReg.module },
+  files: [{ file: 'ggml-cpu.dll', registered: true }], log: [], ...extra,
+});
+const cudaFile = extra => ({ files: [{ file: 'ggml-cpu.dll', registered: true }, { file: 'ggml-cuda.dll', registered: false, ...extra }] });
+const missing = (dll, chain = dll) => ({ load_error: '126: The specified module could not be found.', missing: { dll, chain, error: '126: not found' } });
+
+const policy = [
+  ['cpu passes', 'cpu', report(), null],
+  ['cpu not initialised', 'cpu', report({ cpu: { initialised: false } }), /CPU backend did not initialise/],
+  ['nothing selected', 'cpu', report({ selected: '' }), /no backend selected/],
+  ['cuda registered with no device', 'cuda', report({ registered: [{ name: 'CUDA', devices: [] }, cpuReg], files: [{ file: 'ggml-cuda.dll', registered: true }],
+    log: ['ggml_cuda_init: failed to initialize CUDA: CUDA driver version is insufficient for CUDA runtime version'] }), null],
+  ['cuda package DLL missing', 'cuda', report(), /package DLL ggml-cuda.dll is missing/],
+  ['cuda runtime DLL missing', 'cuda', report(cudaFile(missing('cublasLt64_13.dll', 'cublas64_13.dll -> cublasLt64_13.dll'))), /missing cublas64_13.dll -> cublasLt64_13.dll/],
+  ['cuda driver absent', 'cuda', report(cudaFile(missing('nvcuda.dll'))), null],
+  ['bare error 126', 'cuda', report(cudaFile({ load_error: '126: The specified module could not be found.' })), /no missing import found/],
+  ['ABI: missing export', 'cuda', report(cudaFile({ load_error: '127: The specified procedure could not be found.' })), /127/],
+  ['loads but never registers', 'cuda', report(cudaFile({ init_ok: false })), /loaded but did not register/],
+  ['vulkan without a driver', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, init_ok: false, vk_create_instance: -9 }] }), null],
+  ['vulkan loader absent', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, ...missing('vulkan-1.dll') }] }), null],
+  ['vulkan init fails with a driver', 'vulkan', report({ files: [{ file: 'ggml-vulkan.dll', registered: false, init_ok: false, vk_create_instance: 0 }] }), /did not register/],
+  ['driver DLL excuses only the expected GPU', 'cpu', report({ files: [{ file: 'ggml-cuda.dll', registered: false, ...missing('nvcuda.dll') }] }), /ggml-cuda.dll failed to load/],
+  ['CPU variant DLL fails to load', 'vulkan', report({ registered: [{ name: 'Vulkan', devices: [] }, cpuReg],
+    files: [{ file: 'ggml-vulkan.dll', registered: true }, { file: 'ggml-cpu-haswell.dll', registered: false, ...missing('VCOMP140.DLL') }] }), /ggml-cpu-haswell.dll failed to load/],
+];
+for (const [name, variant, input, failure] of policy) {
+  test(`backend policy: ${name}`, () => {
+    const [, failures] = assertBackends(input, variant);
+    if (failure) assert.match(failures.join('; '), failure);
+    else assert.deepEqual(failures, []);
+  });
+}
+
+test('CUDA runtime comes from the registry pack and keys on its entries', () => {
+  const registry = JSON.parse(fs.readFileSync(path.join(here, '../server/src/data/model-registry.json'), 'utf8'));
+  assert.deepEqual(cudaRuntimeFiles(registry, 13).map(f => f.filename).sort(), ['cublas64_13.dll', 'cublasLt64_13.dll', 'cudart64_13.dll']);
+  assert.deepEqual(cudaRuntimeFiles(registry, 12).map(f => f.filename).sort(), ['cublas64_12.dll', 'cublasLt64_12.dll', 'cudart64_12.dll']);
+  const key = cudaRuntimeKey(registry, 13);
+  const edited = structuredClone(registry);
+  edited.files.find(f => f.id === 'cuda-rt-cudart').sizeBytes += 1;
+  assert.notEqual(cudaRuntimeKey(edited, 13), key);
+  edited.files.push({ id: 'unrelated', filename: 'x.gguf' });
+  assert.equal(cudaRuntimeKey(edited, 12), cudaRuntimeKey(registry, 12));
 });

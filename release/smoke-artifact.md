@@ -21,7 +21,7 @@ download CUDA runtimes. The engine is then launched separately with four
 header-only GGUF stubs and a free localhost port. It must serve `/health`,
 `/props`, `/plugins` and `/props` again, then remain alive for two seconds.
 Requests have two-second deadlines. These checks do not load models or test
-GPU inference or GGML backend loading.
+GPU inference.
 
 The server and engine run with only Windows system directories on `PATH`, so
 toolkit or build-tree directories cannot supply missing packaged DLLs. The
@@ -31,11 +31,74 @@ is part of what is tested. Each command is awaited and reaped. On timeout or
 interruption, Windows `taskkill /PID <owned-pid> /T /F` kills its process tree.
 No dev stack, launcher or GPU job is started.
 
+## Backend check
+
+After the endpoint smoke, the gate runs `ace-server --backend-check`. The
+engine loads its GGML backends as it would for a generation, without models,
+and prints a JSON report: each registered backend with its module and devices,
+the backend it would select, a CPU backend init, and each `ggml-*.dll` beside
+the exe. For a DLL that did not register, the report gives the Windows load
+error and follows the import chain to the first DLL that will not load. A
+Vulkan backend that loads but returns no registration also gets a direct
+`vkCreateInstance` result. Release GGML loads backends silently, so without
+this a missing dependency looks the same as a machine with no GPU.
+
+`engine/.variant` sets the expectation, defaulting to `cuda` as the app does.
+The check fails unless the CPU backend initialises and a backend is selected.
+The expected GPU backend (`ggml-cuda.dll` or `ggml-vulkan.dll`) must register,
+with any number of devices, or fail for an identified missing driver: an absent
+`nvcuda.dll` or `vulkan-1.dll`, or `VK_ERROR_INCOMPATIBLE_DRIVER`. Anything
+else fails: a missing package DLL, a missing runtime DLL, a missing export, a
+bare error 126 with no missing import found, or a crash. A CPU variant DLL that
+fails to load also fails the check.
+
+CUDA archives do not ship the CUDA runtime. The gate provisions it the way the
+app does: `engine/.cuda-version` selects the registry's `cuda-runtime` or
+`cuda12-runtime` pack, each file is downloaded from Hugging Face at its
+`repo`/`repoPath` and checked against `sizeBytes`, and the folder goes first on
+`PATH`. Pass a cache folder as the fourth argument to reuse downloads; files of
+the right size are not fetched again. Without one, the files go under the
+evidence directory's isolated `data/tools/runtime`.
+
+Negative checks then run on the same extraction, and each must fail: the GPU
+backend DLL removed (every `ggml-cpu*.dll` for the CPU archive), and for CUDA a
+copy of the runtime folder without its largest DLL (cuBLASLt). The cache folder
+itself is never modified. A negative check that passes fails the gate.
+
+### Runtime cache for CI
+
+The pack is about 533 MB for CUDA 13 and 807 MB for CUDA 12. Key the cache on
+the registry entries, so model edits elsewhere in the registry keep it warm:
+
+```yaml
+- name: CUDA runtime cache key
+  if: startsWith(matrix.variant, 'cuda')
+  id: cuda-runtime
+  shell: pwsh
+  run: |
+    $major = '${{ matrix.cuda_version }}'.Split('.')[0]
+    "major=$major" >> $env:GITHUB_OUTPUT
+    "key=$(node release/smoke-artifact.mjs runtime-key $major)" >> $env:GITHUB_OUTPUT
+- name: CUDA runtime cache
+  if: startsWith(matrix.variant, 'cuda')
+  uses: actions/cache@v4
+  with:
+    path: ${{ runner.temp }}/cuda-runtime-${{ steps.cuda-runtime.outputs.major }}
+    key: ${{ steps.cuda-runtime.outputs.key }}
+```
+
+Then pass `${{ runner.temp }}/cuda-runtime-<major>` as the fourth argument.
+`node release/smoke-artifact.mjs runtime-fetch <major> <dir>` fills a folder
+without running the gate and prints the bytes and seconds taken.
+
+## Evidence
+
 The printed evidence directory is retained on success and failure. It contains
 `result.json`, `extract.log`, `server.log`, and, once the server passes,
-`engine.log`, plus the extraction and isolated test state. Upload that directory
+`engine.log`, `backend.log` and one `backend-negative-*.log` per negative
+check, plus the extraction and isolated test state. Upload that directory
 as CI failure evidence, or inspect it locally and delete it when finished.
 `server.log` includes the existing smoke helper's last 40 server output lines
-on failure. Exit 0 means both checks passed; any extraction, boot, HTTP or
-cleanup failure returns nonzero. Workflow wiring and the owning developer docs
+on failure. Exit 0 means every check passed; any extraction, boot, HTTP, backend,
+download or cleanup failure returns nonzero. Workflow wiring and the owning developer docs
 are handled by the release workflow slice.
