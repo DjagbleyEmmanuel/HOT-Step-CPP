@@ -375,13 +375,13 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     writeStored(`${FORM_KEY}${datasetId}`, stored);
     writeStored(resetAll, 1);
   }
-  // 2026-09-30 (Rob): two takes per rung, a fixed-seed one to compare rungs
-  // like for like and a random-seed one that is a new song every rung.
-  const twoTakes = `${FORM_KEY}${datasetId}:defaults-ladder-two-takes-2026-09-30`;
-  if (typeof window !== 'undefined' && !window.localStorage.getItem(twoTakes)) {
-    stored.preview = { ...LADDER_PREVIEW, ...stored.preview, takes: 2 };
+  // 2026-10-15: one take per rung by default (was two since 2026-09-30); the
+  // count is now a field in the previews section.
+  const oneTake = `${FORM_KEY}${datasetId}:defaults-ladder-one-take-2026-10-15`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(oneTake)) {
+    stored.preview = { ...LADDER_PREVIEW, ...stored.preview, takes: 1 };
     writeStored(`${FORM_KEY}${datasetId}`, stored);
-    writeStored(twoTakes, 1);
+    writeStored(oneTake, 1);
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
   return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' || stored.method === 'fixed-recipe' ? stored.method : 'base-matched' };
@@ -1232,7 +1232,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <button type="button" disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
-            method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 32, alpha: 32,
+            method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 64, alpha: 64,
+            steps: 1500, saveEvery: 200, seed: 42,
             optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
             beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
             stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
@@ -1255,7 +1256,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
-        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method. Prepare a 0 LUFS cache before Start.</p>}
+        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method. It needs a cache cut with loudness off (0 LUFS): Perform all stages above re-cuts it; direct Start does not.</p>}
         {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}
@@ -1664,6 +1665,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'),
             !fieldLocked('seed') && form.preview.seed !== LADDER_PREVIEW.seed
               ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: LADDER_PREVIEW.seed } }))
+              : undefined)}
+          {field(t('trainingStudio.yue2.method.previewTakes', 'Takes per checkpoint'), 'takes', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, takes: Math.max(1, Math.min(4, Math.round(Number(value)) || 1)) } })),
+            t('trainingStudio.yue2.method.previewTakesInfo', 'How many preview tracks each checkpoint renders, 1 to 4. Take 1 uses the preview seed, so it compares like for like across checkpoints; every extra take uses a fresh random seed. Each take adds its render time to every checkpoint.'), t('trainingStudio.yue2.method.previewTakesMeta', 'default 1'),
+            !busy && (form.preview.takes ?? 1) !== LADDER_PREVIEW.takes
+              ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, takes: LADDER_PREVIEW.takes } }))
               : undefined)}
           <label className="flex flex-col gap-1 md:col-span-2">
             <ParamLabel label={t('trainingStudio.yue2.method.previewLyrics', 'Preview lyrics')}

@@ -3,12 +3,12 @@ import test from 'node:test';
 import { applyFixedRecipe, buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
 
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
-  const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 64, alpha: 256, adapterType: 'lokr',
+  const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 16, alpha: 256, adapterType: 'lokr',
     optimizer: 'prodigy', gradAccum: 8, arCropFrames: 500, narCropFrames: 0,
     lrSchedule: 'wsd', lyricTiming: true, cursorWeight: 0.08, klWeight: 0,
     abcDropout: 1, captionDropout: 0, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1 });
-  assert.equal(recipe.rank, 32);
-  assert.equal(recipe.alpha, 32);
+  assert.equal(recipe.rank, 64);
+  assert.equal(recipe.alpha, 64);
   assert.equal(recipe.adapterType, 'lora');
   assert.equal(recipe.optimizer, 'adamw-lm');
   assert.equal(recipe.gradAccum, 1);

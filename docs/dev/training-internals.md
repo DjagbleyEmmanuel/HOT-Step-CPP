@@ -8,7 +8,7 @@ can place individual children elsewhere.
 
 ## YuE2 joint training
 
-The opt-in `fixed-recipe` method uses the bf16 LM base, rank-32 LoRA at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing, and a cache cut with loudness off. The server forces these values even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.
+The opt-in `fixed-recipe` method uses the bf16 LM base, rank-64 LoRA (alpha 64) at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing, and a cache cut with loudness off. The server forces these values even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.
 
 The method's preparation mode removes lyric cues, keeps unsupported section headings in Title case, then applies its caption parser and NFC normalization. The style starts with the bare trigger word, or the dataset slug when no trigger is set, without duplicating an existing prefix. Native trigger injection stays off to avoid its "in the style of" wrapper. Preparation writes an isolated prepared-dataset cache index and marks the output manifest with `caption_grammar: fixed-recipe-v2` and `loudness_lufs: 0`; the start path rejects a manifest without both markers. Older prepared datasets are automatically re-prepared on the next automatic preparation. Caption cleanup uses a temporary copy of the legacy manifest, leaving the old method cache index alone.
 
@@ -149,9 +149,11 @@ instruction with no headers (`protocol.py` `negative_prefix`; its off form has n
 so the suffix opens with MUSIC_START). `ace-train yue2-batch-check` is a CPU self-check of these
 layouts and of `--ar-targets base`. Loudness: `yue2-preprocess --loudness-lufs` (0 = off) is now
 passed by the server (`loudnessLufs` on the cache route); `yue2LoudnessForMethod` gives -14 for
-tuned and 0 for base-matched, and the batch chain's cache stage re-cuts a dataset at the other
-level (the target is part of the latent key, so the manifest is rewritten and codes/sheet/align
-run again). The manifest always carries `loudness_target_lufs` now, 0 included, so an off cache
+tuned and 0 for base-matched and fixed-recipe. The batch chain's cache stage, and the single-dataset
+preparation pipeline when it carries a joint stage (`cacheLufs` in `yue2PreparationPipeline.ts`),
+re-cut a dataset at the other level (the target is part of the latent key, so the manifest is
+rewritten and codes/sheet/align run again). A direct Start (joint stage alone) refuses a cache at
+the wrong level, and a prepare-only chain keeps the engine's -14 default. The manifest always carries `loudness_target_lufs` now, 0 included, so an off cache
 is not mistaken for a pre-normalisation one. Not matched: the report's two no-semantic-token
 tasks (no published layout; our inference never runs them) and its flow-time distribution
 (unstated).

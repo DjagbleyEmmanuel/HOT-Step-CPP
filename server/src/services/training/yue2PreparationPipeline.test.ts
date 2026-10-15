@@ -245,3 +245,22 @@ test('joint alone trains on prepared inputs and refuses missing preparation befo
     assert.deepEqual(g.started[0].body, { steps: 7 });
   } finally { g.cleanup(); }
 });
+
+test('a joint chain re-cuts a cache at the wrong loudness for its method; direct Start refuses it', async () => {
+  const cut = artifacts();
+  cut.preprocess = { done: true, captionModeOk: true, loudnessLufs: -14 };
+  cut.tokenize.done = true; cut.sheet.done = true;
+  const fixed = (stages: Yue2PreparationPayload['stages'], key: string) => {
+    const s = snapshot(stages, 'train-after-preparation', key);
+    s.payload.lyricTiming = false;
+    s.payload.recipes = { joint: { version: 1, overrides: { method: 'fixed-recipe' } } };
+    return s;
+  };
+  const f = fixture({ artifacts: cut });
+  try {
+    await assert.rejects(f.runner.start(fixed(['joint'], 'direct'), { joint: {} }), /latent cache at loudness off \(0 LUFS\)/);
+    const run = await f.runner.start(fixed(['latents', 'codes', 'sheet', 'joint'], 'chain'), { joint: {} });
+    await until(() => f.runner.get(run.id)?.status === 'done');
+    assert.deepEqual(f.started[0], { stage: 'latents', worker: 'local', workerUrl: null, body: { captionMode: 'yue2', loudnessLufs: 0 } });
+  } finally { f.cleanup(); }
+});

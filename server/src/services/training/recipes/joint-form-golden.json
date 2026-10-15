@@ -32,7 +32,7 @@
       "enabled": true,
       "everySteps": 0,
       "parallel": true,
-      "takes": 2,
+      "takes": 1,
       "odeSteps": 12,
       "narCacheRatio": 0,
       "seconds": 300,

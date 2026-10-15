@@ -12,6 +12,7 @@ import { getDataset } from './datasetsRepo.js';
 import { activeJobForDataset, cancelJob } from './labelingQueue.js';
 import { hasActivePipeline, registerYue2PreparationActivity } from './pipelineRunner.js';
 import { hasActiveBatch } from './yue2BatchRunner.js';
+import { yue2LoudnessForMethod } from './yue2Train.js';
 import { pushDataset, workerFetch } from './trainingWorkers.js';
 
 type Snapshot = TrainingSnapshot<Yue2PreparationPayload>;
@@ -20,7 +21,7 @@ type StageStatus = Yue2PreparationStageStatus['status'];
 type JobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface Yue2PreparationArtifacts {
-  preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean };
+  preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean; loudnessLufs?: number | null };
   tokenize: { done: boolean };
   sheet: { done: boolean };
   align: { done: boolean; stemsReady: number };
@@ -52,6 +53,13 @@ const ORDER: readonly Yue2PreparationStage[] = ['latents', 'codes', 'sheet', 'st
 const POLL_MS = 1500;
 const PREPARED_NAME: Partial<Record<Yue2PreparationStage, string>> = {
   latents: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric cursor spans',
+};
+/** The loudness a joint chain's cache must be cut at (0 base-matched and
+ *  fixed-recipe, -14 tuned); undefined without a joint stage, which keeps
+ *  whatever cache is there. */
+const cacheLufs = (snapshot: Snapshot): number | undefined => {
+  const joint = snapshot.payload.recipes.joint;
+  return joint ? yue2LoudnessForMethod(joint.overrides.method) : undefined;
 };
 const terminal = (s: Status) => s === 'done' || s === 'failed' || s === 'cancelled' || s === 'interrupted';
 const active = (s: Status) => !terminal(s);
@@ -151,7 +159,10 @@ export class Yue2PreparationPipeline {
     if (snapshot.payload.stages.length === 1 && snapshot.payload.stages[0] === 'joint') {
       const a = await this.adapter.artifacts(snapshot, workerUrl);
       const needed: Yue2PreparationStage[] = snapshot.payload.lyricTiming ? ['latents', 'codes', 'sheet', 'stems', 'align'] : ['latents', 'codes', 'sheet'];
-      const missing = needed.filter(stage => !this.skip(stage, a)).map(stage => PREPARED_NAME[stage]);
+      const lufs = cacheLufs(snapshot);
+      const missing = needed.filter(stage => !this.skip(stage, a, lufs)).map(stage =>
+        stage === 'latents' && a.preprocess.done && lufs !== undefined && a.preprocess.loudnessLufs !== lufs
+          ? `latent cache at ${lufs === 0 ? 'loudness off (0 LUFS)' : `${lufs} LUFS`} for this method` : PREPARED_NAME[stage]);
       if (missing.length) throw new Yue2PreparationConflict(`Prepare this dataset before starting joint training: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing. Use Perform all stages or the Prepare page.`);
     }
     await this.adapter.admission(snapshot, workerUrl);
@@ -281,7 +292,7 @@ export class Yue2PreparationPipeline {
         if (source.revision !== await this.adapter.sourceRevision(r.snapshot)) throw new Error('Dataset sources changed during preparation');
         const artifacts = await this.adapter.artifacts(r.snapshot, r.workerUrl);
         if (r.cancelRequested) break;
-        if (this.skip(stage.stage, artifacts)) {
+        if (this.skip(stage.stage, artifacts, cacheLufs(r.snapshot))) {
           stage.status = 'skipped'; this.write(r); continue;
         }
         stage.status = 'running'; this.write(r);
@@ -322,9 +333,10 @@ export class Yue2PreparationPipeline {
     }
   }
 
-  private skip(stage: Yue2PreparationStage, a: Yue2PreparationArtifacts): boolean {
+  private skip(stage: Yue2PreparationStage, a: Yue2PreparationArtifacts, lufs?: number): boolean {
     switch (stage) {
-      case 'latents': return a.preprocess.done && a.preprocess.captionModeOk && !a.preprocess.captionsStale;
+      case 'latents': return a.preprocess.done && a.preprocess.captionModeOk && !a.preprocess.captionsStale
+        && (lufs === undefined || a.preprocess.loudnessLufs === lufs);
       case 'codes': return a.tokenize.done;
       case 'sheet': return a.sheet.done;
       case 'stems': return a.align.stemsReady > 0;
@@ -336,7 +348,10 @@ export class Yue2PreparationPipeline {
   }
 
   private body(r: RecordFile, stage: Yue2PreparationStage, a: Yue2PreparationArtifacts): Record<string, unknown> {
-    if (stage === 'latents') return { captionMode: 'yue2' };
+    if (stage === 'latents') {
+      const lufs = cacheLufs(r.snapshot);
+      return { captionMode: 'yue2', ...(lufs !== undefined ? { loudnessLufs: lufs } : {}) };
+    }
     const form = stage === 'nar' || stage === 'ar' ? r.snapshot.payload.recipes[stage] : undefined;
     const formTrigger = form && Object.hasOwn(form.overrides, 'trigger') ? form.overrides.trigger : undefined;
     const trigger = typeof formTrigger === 'string' ? formTrigger.trim() : r.snapshot.payload.trigger.trim();
