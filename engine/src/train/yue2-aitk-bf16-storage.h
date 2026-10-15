@@ -1,11 +1,12 @@
 #pragma once
 
-// BF16 activation storage (on by default; YUE2_AITK_BF16_STORAGE=0 is the
-// rollback). The block graph is built and differentiated exactly as before, in F32. This pass then stores every
-// BF16_ROUND output as BF16, along with the views and conts that only reread
-// it. Every other node keeps its F32 output, so each op does the same F32
-// maths on the same values; only the bytes it reads shrink. Gradient sums stay
-// F32 because ADD/ACC outputs are never retyped.
+// BF16 activation storage (on by default on CUDA, the only backend with the
+// BF16-source kernels; YUE2_AITK_BF16_STORAGE=0 is the rollback). The block
+// graph is built and differentiated exactly as before, in F32. This pass then
+// stores every BF16_ROUND output as BF16, along with the views and conts that
+// only reread it. Every other node keeps its F32 output, so each op does the
+// same F32 maths on the same values; only the bytes it reads shrink. Gradient
+// sums stay F32 because ADD/ACC outputs are never retyped.
 //
 // Construction-time byte metadata (nb, view offsets) follows each retyped
 // tensor's element size. Tensors read back or handed on as F32 (block output,

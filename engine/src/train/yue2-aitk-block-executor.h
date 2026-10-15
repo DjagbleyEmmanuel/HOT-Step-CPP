@@ -6,6 +6,7 @@
 
 #include "yue2-aitk-graph.h"
 #include "yue2-aitk-host-profile.h"
+#include "yue2-aitk-backend.h"
 #include "yue2-aitk-bf16-storage.h"
 
 #include <cmath>
@@ -232,7 +233,7 @@ public:
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.key, rows(capture_k)));
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.value, rows(capture_v)));
         }
-        if (yue2_aitk_bf16_storage::enabled())
+        if (yue2_aitk_bf16_storage::enabled() && yue2_aitk_is_cuda(backend))
             yue2_aitk_bf16_storage::apply(graph, {hidden_copy ? nullptr : out.hidden, key_cont, value_cont});
         lap.mark("fwd: graph build");
         if (!supports_all(backend, graph, error)) return false;
@@ -335,7 +336,7 @@ public:
                 ggml_set_output(store); ggml_build_forward_expand(graph, store);
             }
         }
-        if (yue2_aitk_bf16_storage::enabled())
+        if (yue2_aitk_bf16_storage::enabled() && yue2_aitk_is_cuda(backend))
             yue2_aitk_bf16_storage::apply(graph, {device_dx ? nullptr : ggml_graph_get_grad(graph, h)});
         if(!supports_all(backend,graph,error)) return false;
         lap.mark("bwd: supports_op scan");
