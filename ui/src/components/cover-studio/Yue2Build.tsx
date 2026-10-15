@@ -48,6 +48,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, take, token!)),
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, token!, section)),
     remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, take, token!)),
+    cancel: () => call(() => yue2CoverApi.buildCancel(live!.id, token!)),
     startOver: () => { setSessionId(''); setError(''); },
   };
 }
@@ -79,6 +80,7 @@ interface PageProps {
   busy: boolean;
   error: string;
   onGenerate: (to: number, count: number) => void;
+  onCancel: () => void;
   onKeep: (take: string) => void;
   onDelete: (take: string) => void;
   onUndo: (section?: number) => void;
@@ -104,6 +106,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const range = to !== null && to >= next && to < p.sections.length ? to : null;
   const candidates = s?.takes.filter(t => t.from === next) ?? [];
   const waiting = s?.pending.reduce((n, x) => n + x.count, 0) ?? 0;
+  const chunk = s?.pending[0];
+  const chunkStage = ({ starting: 'Starting', semantic: 'Composing', plan: 'Planning', nar: 'Rendering', vae: 'Decoding audio', aligning: 'Aligning lyrics' } as Record<string, string>)[chunk?.phase ?? ''] ?? 'Rendering';
   const done = next >= p.sections.length;
 
   useEffect(() => { setTo(null); }, [next]);
@@ -221,7 +225,14 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               </div>;
             })}
             {waiting > 0 && <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 px-3 py-3 text-xs text-amber-600">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />{waiting} take{waiting > 1 ? 's' : ''} rendering…</div>}
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span role="status" className="flex-1">
+                {chunk?.activeCount ? `${chunkStage} ${chunk.activeCount} take${chunk.activeCount > 1 ? 's' : ''}: ${chunk.progress ?? 0}%` : 'Queued'}
+                {` · ${waiting} take${waiting > 1 ? 's' : ''} remaining`}
+              </span>
+              <button type="button" onClick={p.onCancel} disabled={p.busy}
+                className="rounded px-2 py-1 font-semibold hover:bg-amber-500/10 disabled:opacity-40">Cancel</button>
+            </div>}
             {!candidates.length && !waiting && !done && <p className="text-xs text-zinc-500">No takes yet. Choose sections on the timeline, then generate.</p>}
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
@@ -231,7 +242,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}
                   options={Array.from({ length: 10 }, (_, k) => ({ value: k + 1, label: String(k + 1) }))} />
               </div>
-              <button type="button" onClick={() => range !== null && p.onGenerate(range, count)} disabled={range === null || p.busy || !!p.blocked}
+              <button type="button" onClick={() => range !== null && p.onGenerate(range, count)} disabled={range === null || p.busy || waiting > 0 || !!p.blocked}
                 className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
                 {range === null ? 'Choose sections on the timeline' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
             </div>

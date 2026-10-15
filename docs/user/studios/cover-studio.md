@@ -203,6 +203,10 @@ Prepare. Finish preparing those before generating the first takes.
    continues everything kept so far, and stops a little beyond the chosen range.
    Takes render in groups of up to four, with one audio result per seed. Ten
    takes run as 4 + 4 + 2, and each group finishes before the next starts.
+   The pending row shows the running group's shared stage and percentage, plus
+   the total takes remaining. **Cancel** stops that group and skips later groups;
+   earlier completed takes stay available. Wait for the pending row to clear
+   before generating again.
    If a group fails or returns a missing or mismatched track, none of that
    group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.

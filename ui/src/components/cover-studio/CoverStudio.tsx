@@ -1241,7 +1241,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error}
-      onGenerate={generateBuildTakes} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
+      onGenerate={generateBuildTakes} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
       onBack={() => setBuildMode(false)} />;
   };

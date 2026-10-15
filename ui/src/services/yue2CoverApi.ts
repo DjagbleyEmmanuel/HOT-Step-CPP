@@ -126,7 +126,7 @@ export interface Yue2BuildSession {
   sections: Array<{ label: string; startBar: number }>;
   takes: Yue2BuildTake[];
   kept: string[];
-  pending: Array<{ from: number; to: number; count: number }>;
+  pending: Array<{ from: number; to: number; count: number; activeCount?: number; phase?: string; progress?: number }>;
   error: string | null;
   params: Record<string, unknown>;
 }
@@ -160,6 +160,8 @@ export const yue2CoverApi = {
   buildGet: (id: string, token: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, token, options),
   buildGenerate: (id: string, to: number, count: number, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ to, count }) }),
+  buildCancel: (id: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/cancel`, token, { method: 'POST' }),
   buildKeep: (id: string, take: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/keep`, token, { method: 'POST', body: JSON.stringify({ take }) }),
   /** Drops the last kept take, or every kept take from `section` on. */
