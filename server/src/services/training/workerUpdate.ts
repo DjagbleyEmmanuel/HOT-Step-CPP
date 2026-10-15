@@ -17,7 +17,7 @@ import { stopAceServer } from '../aceEngineProcess.js';
 import { gpuLaneBusy, gpuLaneDepth } from '../generation/gpuLane.js';
 
 const git = (args: string[], cwd = PROJECT_ROOT) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 15000, windowsHide: true }).trim();
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000, windowsHide: true }).trim();
 export const startupCommit = (() => { try { return git(['rev-parse', 'HEAD']); } catch { return ''; } })();
 export const currentCommit = () => git(['rev-parse', 'HEAD']);
 export const dirtyCheckout = () => { try { return !!git(['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none']); } catch { return false; } };
