@@ -3,7 +3,7 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, MoreHorizontal, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, MoreHorizontal, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -72,11 +72,12 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
 }
 
 /** Peak bars of a take's new part, with a playhead while it plays. */
-function Waveform({ peaks, progress, colour }: { peaks: number[]; progress: number | null; colour: string }) {
+function Waveform({ peaks, progress, colour, onSeek }: { peaks: number[]; progress: number | null; colour: string; onSeek: (fraction: number) => void }) {
   if (!peaks.length) return <div className="h-10 flex-1 rounded bg-zinc-200/50 dark:bg-white/5" />;
   const w = 100 / peaks.length;
   return (
-    <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-10 flex-1">
+    <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-10 flex-1 cursor-pointer"
+      onClick={e => { const r = e.currentTarget.getBoundingClientRect(); if (r.width) onSeek(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))); }}>
       {peaks.map((p, i) => <rect key={i} x={i * w + w * 0.15} width={w * 0.7} y={20 - Math.max(0.5, p * 19)} height={Math.max(1, p * 38)}
         fill={progress !== null && i / peaks.length <= progress ? colour : '#a1a1aa'} />)}
       {progress !== null && <line x1={progress * 100} x2={progress * 100} y1={0} y2={40} stroke={colour} strokeWidth={0.6} />}
@@ -116,6 +117,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState<{ key: string; from: number; to: number } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [paused, setPaused] = useState(true);
+  const generation = useRef(0);
   const [to, setTo] = useState<number | null>(null);
   const [count, setCount] = useState(3);
   const [menu, setMenu] = useState(false);
@@ -138,16 +141,46 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     return () => window.removeEventListener('pointerup', up);
   }, []);
 
-  /** Plays `url` from `from` seconds; the playhead covers [from, to]. */
-  const play = (key: string, url: string, from: number, to: number) => {
+  /** Stops playback and releases the audio element. */
+  const stop = () => {
+    generation.current++;
+    const audio = audioRef.current;
+    if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
+    setPlaying(null); setProgress(null);
+  };
+  /** Plays `url` from `at` seconds; the playhead covers [from, to]. */
+  const start = (key: string, url: string, from: number, to: number, at = from) => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playing?.key === key) { audio.pause(); setPlaying(null); setProgress(null); return; }
+    const mine = ++generation.current;
     audio.src = url;
-    audio.currentTime = Math.max(0, from);
-    void audio.play();
+    audio.currentTime = Math.max(0, at);
     setPlaying({ key, from, to });
+    setProgress(Math.min(1, Math.max(0, (at - from) / Math.max(0.1, to - from))));
+    audio.play().catch(() => { if (generation.current === mine) stop(); });
   };
+  /** Play, pause and resume for `key`; a different `key` starts it from the top. */
+  const toggle = (key: string, url: string, from: number, to: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing?.key !== key) return start(key, url, from, to);
+    if (!audio.paused) { audio.pause(); return; }
+    const mine = ++generation.current;
+    audio.play().catch(() => { if (generation.current === mine) stop(); });
+  };
+  /** Seeks within [from, to] of a take, keeping it paused if it is; starts it if idle. */
+  const seek = (key: string, url: string, from: number, to: number, fraction: number) => {
+    const audio = audioRef.current;
+    const at = from + fraction * (to - from);
+    if (!audio || playing?.key !== key) return start(key, url, from, to, at);
+    audio.currentTime = at;
+    setProgress(fraction);
+  };
+  // Playback ends with the build it belongs to: a session change or leaving the page.
+  useEffect(() => stop, [s?.id]);
+  const keep = (take: string) => { stop(); p.onKeep(take); };
+  const undo = (section?: number) => { stop(); p.onUndo(section); };
+  const remove = (take: string) => { if (playing?.key === take) stop(); p.onDelete(take); };
   const takeWindow = (take: Yue2BuildTake) => {
     const start = (take.starts[take.from] ?? 0) / FPS;
     return { from: Math.max(0, start - (take.from ? LEAD_IN : 0)), to: take.frames / FPS, newPart: take.frames / FPS - start };
@@ -162,6 +195,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       <audio ref={audioRef} className="hidden" onEnded={() => { setPlaying(null); setProgress(null); }}
+        onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
         onTimeUpdate={e => { if (playing) setProgress(Math.min(1, Math.max(0, (e.currentTarget.currentTime - playing.from) / Math.max(0.1, playing.to - playing.from)))); }} />
       {/* Top bar: what is being built and how. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-white/10 px-4 py-2">
@@ -176,7 +210,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             className="rounded p-1.5 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10 disabled:opacity-40"><MoreHorizontal className="w-4 h-4" /></button>
           {menu && s && <div className="absolute right-0 top-8 z-20 w-44 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900 py-1 text-xs shadow-xl"
             onMouseLeave={() => setMenu(false)}>
-            <button type="button" disabled={!s.kept.length} onClick={() => { setMenu(false); p.onUndo(); }}
+            <button type="button" disabled={!s.kept.length} onClick={() => { setMenu(false); undo(); }}
               className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Undo last keep</button>
             <button type="button" onClick={() => { setMenu(false); p.onStartOver(); }}
               className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-zinc-100 dark:hover:bg-white/5">Start over</button>
@@ -195,9 +229,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-3 space-y-2">
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-semibold uppercase tracking-wide">Song</span>
-          <button type="button" disabled={!spine} onClick={() => spine && play('build', spine.audioUrl, 0, spine.frames / FPS)}
+          <button type="button" disabled={!spine} onClick={() => spine && toggle('build', spine.audioUrl, 0, spine.frames / FPS)}
             className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-            {playing?.key === 'build' ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
+            {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
           <span className="ml-auto">{done ? 'Every section is built.' : `Click or drag across sections from ${p.sections[next]?.label} to choose what to build next.`}</span>
         </div>
         <div className="flex gap-1 select-none">
@@ -208,13 +242,13 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               backgroundColor: built ? `${colours[i]}55` : picked ? `${colours[i]}33` : `${colours[i]}12` }}
               onPointerDown={() => { if (!built) { dragging.current = true; setTo(Math.max(next, i)); } }}
               onPointerEnter={() => { if (dragging.current && !built) setTo(Math.max(next, i)); }}
-              onClick={() => { if (built && spine && start != null) play(`s${i}`, spine.audioUrl, start / FPS, spine.frames / FPS); }}
+              onClick={() => { if (built && spine && start != null) toggle(`s${i}`, spine.audioUrl, start / FPS, spine.frames / FPS); }}
               title={built ? `Play the build from ${section.label}` : `Build up to ${section.label}`}
               className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
                 {built ? '✓ ' : i === next ? '→ ' : ''}{section.label}</p>
               <p className="truncate text-[10px] text-zinc-500">{built ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${bars(i)} bars`}</p>
-              {built && <button type="button" onClick={e => { e.stopPropagation(); p.onUndo(i); }}
+              {built && <button type="button" onClick={e => { e.stopPropagation(); undo(i); }}
                 title={`Undo back to ${section.label}, to build it again`}
                 className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-500 hover:text-pink-500 group-hover:block"><RotateCcw className="w-3 h-3" /></button>}
             </div>;
@@ -238,14 +272,16 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               const colour = colours[take.from] ?? '#ec4899';
               return <div key={take.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
                 <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200">Take {i + 1}</span>
-                <button type="button" onClick={() => play(take.id, take.audioUrl, win.from, win.to)} aria-label={`Play take ${i + 1}`}
+                <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
                   className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
-                  {playing?.key === take.id ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
-                <Waveform peaks={take.peaks ?? []} progress={playing?.key === take.id ? progress : null} colour={colour} />
+                  {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
+                {playing?.key === take.id && <button type="button" onClick={stop} aria-label={`Stop take ${i + 1}`}
+                  className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500"><Square className="w-3.5 h-3.5" /></button>}
+                <Waveform peaks={take.peaks ?? []} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />
                 <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
-                <button type="button" onClick={() => p.onKeep(take.id)} disabled={p.busy}
+                <button type="button" onClick={() => keep(take.id)} disabled={p.busy}
                   className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Keep</button>
-                <button type="button" onClick={() => p.onDelete(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
+                <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
                   className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
               </div>;
             })}

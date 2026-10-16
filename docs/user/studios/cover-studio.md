@@ -213,6 +213,9 @@ Prepare. Finish preparing those before generating the first takes.
 3. Play each take to compare it. Preview starts four seconds before its first new
    section, where available, so you can hear the join. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
+   The play button pauses and resumes from the same spot; **Stop** resets. Click the
+   waveform to seek within the preview, lead-in included. Playback stops when you
+   keep, delete the take being played, undo, or leave the page.
    **Keep** adds that take to the build and advances to the next section. Use the
    trash button to delete an unwanted candidate.
 4. Repeat for the remaining sections. **Play build** plays everything kept so far;
