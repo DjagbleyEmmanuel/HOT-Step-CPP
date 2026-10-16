@@ -67,7 +67,7 @@ export const COVER_AR_DEFAULT = 0.6;
 export const clampCoverAr = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(10, v)) : COVER_AR_DEFAULT;
 export const CoverArStrength: React.FC<{ value: number; onChange: (v: number) => void; locked?: boolean }> = ({ value, onChange, locked }) =>
   <EditableSlider label="AR strength" value={value} min={0} max={10} step={0.05}
-    onChange={v => onChange(clampCoverAr(v))} defaultValue={COVER_AR_DEFAULT}
+    onChange={v => onChange(clampCoverAr(v))} defaultValue={COVER_AR_DEFAULT} autoLabel=""
     tooltip="How hard the AR adapter steers the musical plan, for covers only (the adapter picker's AR scale is ignored here). Values above 0.6 hurt adherence to the score: on one seed, 1.0 matched 11% of chords against 89% at 0.6."
     disabled={locked} disabledReason={locked ? 'This build keeps the strength it started with. Start over to change it.' : undefined} />;
 

@@ -8,6 +8,7 @@ import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../s
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
 import { CoverArStrength } from './Yue2CoverPanel';
+import { persist, restore } from './coverStudioUtils';
 
 const FPS = 25;
 // A take plays from this long before its first section, so the join is heard.
@@ -16,6 +17,22 @@ const clock = (seconds: number) => {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
+
+const savedBuildListeners = new Set<(id: string) => void>();
+/** Mounted Cover Studios subscribe here so a Save that finishes after they
+ *  were rebuilt (the user left and came back) still clears the build. */
+export function onBuildSaved(listener: (id: string) => void) {
+  savedBuildListeners.add(listener);
+  return () => { savedBuildListeners.delete(listener); };
+}
+/** A Save song finished: forget build `id`, unless a newer build has replaced it.
+ *  Lives outside the component because the Save outlives it. */
+export function finishSavedBuild(id: string): boolean {
+  if (restore<string>('buildSessionId', '') !== id) return false;
+  persist('buildSessionId', '');
+  savedBuildListeners.forEach(l => l(id));
+  return true;
+}
 
 /** The first section not yet built. */
 export function buildNext(session: Yue2BuildSession | null): number {

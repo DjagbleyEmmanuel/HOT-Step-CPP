@@ -56,7 +56,7 @@ import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ScorePlanReview } from './ScorePlanReview';
-import { Yue2BuildPage, buildNext, useYue2Build } from './Yue2Build';
+import { Yue2BuildPage, buildNext, finishSavedBuild, onBuildSaved, useYue2Build } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
@@ -194,8 +194,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The Build page (true) or the Prepare page (false).
   const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
   const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
-  const buildSessionIdRef = useRef(buildSessionId);
-  buildSessionIdRef.current = buildSessionId;
+  useEffect(() => onBuildSaved(id => setBuildSessionId(cur => cur === id ? '' : cur)), []);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
@@ -1222,7 +1221,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         const outcome = await pollJobAsync(res.jobId, qId);
         // Only a saved song starts the next build, and only if this build is
         // still the open one; any other outcome keeps it for a retry.
-        if (outcome === 'succeeded' && buildSessionIdRef.current === sessionId) setBuildSessionId('');
+        if (outcome === 'succeeded') finishSavedBuild(sessionId);
       } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
       finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
     });
