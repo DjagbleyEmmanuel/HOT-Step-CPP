@@ -218,7 +218,7 @@ loss into a build failure.
 
 ## Procedure 4 — Smoke-testing after a rebuild
 
-Relaunch with `dev.bat` (detached), confirm the app answers at `http://localhost:3000/api/health`,
+Relaunch with `pwsh -NoProfile -File tools\detach.ps1 dev.bat` (a plain `dev.bat` or `Start-Process` launch dies when your agent run ends; see AGENTS.md), confirm the app answers at `http://localhost:3000/api/health`,
 then probe the engine directly. **ace-server takes a few seconds to come up after `dev.bat` returns** (the script just `start`s detached windows) — retry `/health`
 for up to ~30 s; connection refused immediately after launch is normal, not a build failure.
 (Use `curl.exe` to be safe — in legacy Windows PowerShell 5.1 bare `curl` is an alias for
