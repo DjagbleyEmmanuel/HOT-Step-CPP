@@ -11,10 +11,25 @@ are downloaded after deployment. This guide covers GPU Pods, not Serverless work
 > access layer in front of the app before exposing sensitive data or sharing access.
 > Enabling the HTTP port alone does not add authentication.
 
+## Pull the published image
+
+From the next release containing this workflow, the separate `RunPod image`
+workflow publishes `ghcr.io/scragnog/hot-step-cpp:vX.Y.Z` and `:latest` on `v*`
+tag pushes. Wait for that workflow to succeed before pulling. Replace `vX.Y.Z`
+with the release tag you want:
+
+```sh
+docker pull ghcr.io/scragnog/hot-step-cpp:vX.Y.Z
+```
+
+Use that image in the RunPod template below, or `:latest` for the most recently
+completed image build. Prefer a version tag for repeatable deployments. The
+published image uses the portable CUDA architectures and build arguments below.
+Models are downloaded after deployment, and data persists under `/workspace`.
+
 ## Build and publish your image
 
-This project does not publish a RunPod image yet. Build from this repository and
-push to a registry you control. Use a Linux x86_64 Docker builder with enough disk
+To build your own image, use a Linux x86_64 Docker builder with enough disk
 space for the CUDA build layers. On Apple Silicon, use a remote x86_64 builder;
 building CUDA under emulation is slow. The recursive clone must initialize
 `engine/ggml` and `engine/vendor/vst3sdk` before the build.
