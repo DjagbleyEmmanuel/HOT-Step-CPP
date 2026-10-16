@@ -142,12 +142,11 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   }, []);
 
   /** Stops playback and releases the audio element. */
-  const stop = () => {
+  const release = (audio: HTMLAudioElement | null) => {
     generation.current++;
-    const audio = audioRef.current;
     if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
-    setPlaying(null); setProgress(null);
   };
+  const stop = () => { release(audioRef.current); setPlaying(null); setProgress(null); };
   /** Plays `url` from `at` seconds; the playhead covers [from, to]. */
   const start = (key: string, url: string, from: number, to: number, at = from) => {
     const audio = audioRef.current;
@@ -164,7 +163,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     const audio = audioRef.current;
     if (!audio) return;
     if (playing?.key !== key) return start(key, url, from, to);
-    if (!audio.paused) { audio.pause(); return; }
+    if (!audio.paused) { generation.current++; audio.pause(); return; }
     const mine = ++generation.current;
     audio.play().catch(() => { if (generation.current === mine) stop(); });
   };
@@ -177,7 +176,11 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     setProgress(fraction);
   };
   // Playback ends with the build it belongs to: a session change or leaving the page.
-  useEffect(() => stop, [s?.id]);
+  // React clears the ref before this cleanup runs on unmount, so hold the element.
+  useEffect(() => {
+    const audio = audioRef.current;
+    return () => { release(audio); setPlaying(null); setProgress(null); };
+  }, [s?.id]);
   const keep = (take: string) => { stop(); p.onKeep(take); };
   const undo = (section?: number) => { stop(); p.onUndo(section); };
   const remove = (take: string) => { if (playing?.key === take) stop(); p.onDelete(take); };
