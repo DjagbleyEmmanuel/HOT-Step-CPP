@@ -86,6 +86,7 @@ tools/codegraph/node_modules/
 !tools/listening-save.test.mjs
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
+!tools/yue2-vae-train/
 !tools/onnx-export/
 !tools/mcp-lyricstudio/
 tools/mcp-lyricstudio/node_modules/
