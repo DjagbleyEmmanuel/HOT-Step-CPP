@@ -12,6 +12,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      cpu_generation_trial:
+        description: 'Non-gating CPU trial: download 3.3 GB and attempt 10 seconds of audio'
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -747,6 +752,192 @@ jobs:
             release/out/*.zip
             release/out/*.sha256
           if-no-files-found: error
+
+  # Opt-in measurement only. Release creation does not depend on this job.
+  cpu-generation-trial:
+    if: github.event_name == 'workflow_dispatch' && inputs.cpu_generation_trial
+    needs: [prepare, build-windows]
+    runs-on: windows-2022
+    timeout-minutes: 25
+    continue-on-error: true
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-win-cpu
+          path: ${{ runner.temp }}/cpu-archive
+
+      - name: Prepare checksummed CPU archive
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "HOT-Step-CPP-v$env:RELEASE_VERSION-win-x64-cpu.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "cpu-archive/$name"
+          $sidecar = (Get-Content -LiteralPath "$archive.sha256" -Raw).Trim()
+          if ($sidecar -notmatch ('^([0-9a-fA-F]{64})  ' + [regex]::Escape($name) + '$')) { throw 'Invalid checksum sidecar' }
+          $expected = $Matches[1]
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) { throw 'CPU archive checksum mismatch' }
+          $root = Join-Path $env:RUNNER_TEMP 'HOT Step CPU trial'
+          New-Item -ItemType Directory -Path "$root/evidence", "$root/models" -Force | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath "$root/app"
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors |
+            ConvertTo-Json | Set-Content "$root/evidence/cpu.json"
+          "CPU_TRIAL_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: Download trial models (ten-minute budget, no cache)
+        timeout-minutes: 11
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $env:CPU_TRIAL_ROOT
+          $ids = @('lm-0.6b-q80', 'dit-std-base-q4km', 'embedding-q8', 'vae-bf16')
+          $registry = Get-Content server/src/data/model-registry.json -Raw | ConvertFrom-Json
+          $models = @($ids | ForEach-Object {
+            $id = $_
+            $match = @($registry.files | Where-Object id -eq $id)
+            if ($match.Count -ne 1) { throw "Missing or ambiguous model $id" }
+            $match[0]
+          })
+          if (($models | Measure-Object sizeBytes -Sum).Sum -ne 3277122752) { throw 'Trial model budget changed' }
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          $result = [ordered]@{ status = 'failed'; seconds = 0; bytes = 0; models = @() }
+          try {
+            foreach ($model in $models) {
+              $remaining = [math]::Floor(600 - $clock.Elapsed.TotalSeconds)
+              if ($remaining -le 0) { throw 'Download budget exhausted' }
+              $path = Join-Path "$root/models" $model.filename
+              $url = "https://huggingface.co/$($model.repo)/resolve/main/$($model.filename)"
+              $timer = [Diagnostics.Stopwatch]::StartNew()
+              & curl.exe --fail --location --silent --show-error --connect-timeout 30 --max-time $remaining --output $path $url
+              if ($LASTEXITCODE -ne 0) { throw "Download failed for $($model.id)" }
+              $bytes = (Get-Item -LiteralPath $path).Length
+              if ($bytes -ne $model.sizeBytes) { throw "Wrong size for $($model.id): $bytes" }
+              $result.bytes += $bytes
+              $result.models += @{ id = $model.id; bytes = $bytes; seconds = $timer.Elapsed.TotalSeconds }
+            }
+            $result.status = 'passed'
+          } finally {
+            $result.seconds = $clock.Elapsed.TotalSeconds
+            $result | ConvertTo-Json -Depth 5 | Set-Content "$root/evidence/download.json"
+          }
+
+      - name: Measure one shortest LM generation and one-step synthesis
+        timeout-minutes: 6
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $env:CPU_TRIAL_ROOT
+          $evidence = "$root/evidence"
+          $engine = "$root/app/engine"
+          # The CPU archive supplies its DLLs; exclude build/toolkit search paths.
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          $env:GGML_BACKEND_PATH = $engine
+          $request = @{
+            caption = 'A simple instrumental piano melody'; lyrics = '[Instrumental]'
+            duration = 10; bpm = 120; keyscale = 'C major'; timesignature = '4'
+            seed = 42; lm_seed = 42; lm_mode = 'generate'; use_cot_caption = $false
+            lm_model = 'acestep-5Hz-lm-0.6B-Q8_0.gguf'
+            synth_model = 'acestep-v15-base-Q4_K_M.gguf'
+            inference_steps = 1; guidance_scale = 1; output_format = 'wav16'
+            lm_batch_size = 1; synth_batch_size = 1
+          }
+          $request | ConvertTo-Json | Set-Content "$evidence/request.json"
+          $result = [ordered]@{
+            status = 'failed'; inference_seconds = 0; peak_working_set_bytes = 0
+            requested_audio_seconds = 10; steps = 1; phases = @(); audio_seconds = $null
+            note = 'Reduced-step execution test only; no audio quality claim. Peak RAM is process peak working set.'
+          }
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          function Invoke-TrialPhase([string]$name, [string]$exe, [string]$requestPath) {
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $process = $null
+            $peak = 0L
+            $phase = [ordered]@{ name = $name; seconds = 0; peak_working_set_bytes = 0; exit_code = $null }
+            try {
+              if ($clock.Elapsed.TotalSeconds -ge 300) { throw 'Five-minute inference budget exhausted' }
+              $process = Start-Process -FilePath $exe -WorkingDirectory $engine -WindowStyle Hidden -PassThru `
+                -ArgumentList @('--models', "`"$root/models`"", '--request', "`"$requestPath`"", '--no-fa') `
+                -RedirectStandardOutput "$evidence/$name.stdout.log" -RedirectStandardError "$evidence/$name.stderr.log"
+              while (-not $process.HasExited) {
+                $process.Refresh()
+                $peak = [math]::Max($peak, $process.PeakWorkingSet64)
+                if ($clock.Elapsed.TotalSeconds -ge 300) { throw 'Five-minute inference budget exhausted' }
+                Start-Sleep -Milliseconds 100
+              }
+              $process.WaitForExit()
+              $phase.exit_code = $process.ExitCode
+              if ($process.ExitCode -ne 0) { throw "$name exited $($process.ExitCode)" }
+            } finally {
+              if ($process) {
+                if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+                $process.Dispose()
+              }
+              $phase.seconds = $timer.Elapsed.TotalSeconds
+              $phase.peak_working_set_bytes = $peak
+              $result.peak_working_set_bytes = [math]::Max($result.peak_working_set_bytes, $peak)
+              $result.phases += $phase
+            }
+          }
+          try {
+            Invoke-TrialPhase 'lm' "$engine/ace-lm.exe" "$evidence/request.json"
+            $planned = Get-Content "$evidence/request0.json" -Raw | ConvertFrom-Json
+            if (-not $planned.audio_codes) { throw 'LM produced no audio codes' }
+            if ($planned.duration -ne 10) { throw 'LM changed the requested minimum duration' }
+            # Preserve the LM output fields and make trial-only synthesis settings explicit.
+            $planned | Add-Member -Force -NotePropertyName inference_steps -NotePropertyValue 1
+            $planned | Add-Member -Force -NotePropertyName output_format -NotePropertyValue 'wav16'
+            $planned | ConvertTo-Json -Depth 10 | Set-Content "$evidence/request0.json"
+            Invoke-TrialPhase 'synth' "$engine/ace-synth.exe" "$evidence/request0.json"
+            $result.inference_seconds = $clock.Elapsed.TotalSeconds
+            if ($result.inference_seconds -gt 300) { throw 'Inference exceeded five minutes' }
+            $wav = [IO.File]::ReadAllBytes("$evidence/request00.wav")
+            $ascii = [Text.Encoding]::ASCII
+            if ($wav.Length -lt 44 -or $ascii.GetString($wav, 0, 4) -ne 'RIFF' -or $ascii.GetString($wav, 8, 4) -ne 'WAVE') { throw 'Invalid WAV header' }
+            if ([BitConverter]::ToUInt32($wav, 4) + 8 -ne $wav.Length) { throw 'Truncated WAV' }
+            $format = $null; $dataOffset = 0; $dataSize = 0
+            for ($offset = 12; $offset + 8 -le $wav.Length;) {
+              $tag = $ascii.GetString($wav, $offset, 4)
+              $size = [BitConverter]::ToUInt32($wav, $offset + 4)
+              $start = $offset + 8
+              if ($start + $size -gt $wav.Length) { throw 'Truncated WAV chunk' }
+              if ($tag -eq 'fmt ' -and $size -ge 16) {
+                $format = @{ code = [BitConverter]::ToUInt16($wav, $start); channels = [BitConverter]::ToUInt16($wav, $start + 2)
+                  rate = [BitConverter]::ToUInt32($wav, $start + 4); bits = [BitConverter]::ToUInt16($wav, $start + 14) }
+              }
+              if ($tag -eq 'data') { $dataOffset = $start; $dataSize = $size }
+              $offset = $start + $size + ($size % 2)
+            }
+            if (-not $format -or $format.code -ne 1 -or $format.channels -ne 2 -or $format.rate -ne 48000 -or $format.bits -ne 16) { throw 'Expected stereo 48 kHz PCM16' }
+            if ($dataSize -le 0 -or $dataSize % 4 -ne 0) { throw 'Empty or incomplete audio frames' }
+            $nonzero = $false
+            for ($i = $dataOffset; $i -lt $dataOffset + $dataSize; $i += 2) {
+              if ([BitConverter]::ToInt16($wav, $i) -ne 0) { $nonzero = $true; break }
+            }
+            if (-not $nonzero) { throw 'Audio contains only silence' }
+            $result.audio_seconds = $dataSize / (48000 * 4)
+            if ([math]::Abs($result.audio_seconds - 10) -gt 0.25) { throw 'Unexpected audio duration' }
+            $result.status = 'passed'
+          } catch {
+            $result.error = $_.Exception.Message
+            throw
+          } finally {
+            if ($result.inference_seconds -eq 0) { $result.inference_seconds = $clock.Elapsed.TotalSeconds }
+            $result | ConvertTo-Json -Depth 6 | Set-Content "$evidence/inference.json"
+          }
+
+      - name: Upload trial measurements, logs and audio
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-generation-trial
+          path: ${{ runner.temp }}/HOT Step CPU trial/evidence/*
+          if-no-files-found: warn
 
   # A separate hosted VM per archive: no build outputs or toolkit setup.
   test-windows-artifacts:
