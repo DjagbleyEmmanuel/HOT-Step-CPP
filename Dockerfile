@@ -36,6 +36,8 @@ RUN curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_V
 
 WORKDIR /build/engine
 COPY engine/ .
+# The CPU numeric test includes this oracle relative to engine/tools/.
+COPY tools/yue2-aitk-reference/convrot_cpu.h /build/tools/yue2-aitk-reference/convrot_cpu.h
 RUN test -f ggml/CMakeLists.txt && test -f vendor/vst3sdk/CMakeLists.txt || \
     (echo "Initialize submodules first: git submodule update --init --recursive" >&2; exit 1)
 
@@ -62,17 +64,7 @@ RUN mkdir -p /staging/engine \
     && cp /opt/onnxruntime/lib/libonnxruntime*.so* /staging/engine/
 
 
-# ── Stage 2: UI Builder ─────────────────────────────────────────────
-FROM node:22-slim AS ui-builder
-
-WORKDIR /build/ui
-COPY ui/package*.json ./
-RUN npm ci
-COPY ui/ .
-RUN npx vite build
-
-
-# ── Stage 3: Server Dependencies ────────────────────────────────────
+# ── Stage 2: Server Dependencies ────────────────────────────────────
 # Official Node binaries; native modules build on the runtime's Ubuntu/glibc.
 FROM node:22 AS node-runtime
 FROM ubuntu:22.04 AS server-deps
@@ -89,6 +81,21 @@ COPY server/package*.json ./
 # Include dev dependencies so the locked tsx runtime is retained despite npm
 # deduplicating its optional/dev entries. No unlocked follow-up install.
 RUN npm ci --include=dev
+
+
+# ── Stage 3: UI Builder ─────────────────────────────────────────────
+FROM node:22-slim AS ui-builder
+
+WORKDIR /build/ui
+COPY ui/package*.json ./
+RUN npm ci
+COPY ui/ .
+# Browser runtime imports need these sibling sources. trainingRecipes imports
+# zod/v4; retain the server's locked package and its normal resolution path.
+COPY server/src/contracts/trainingRecipes.ts /build/server/src/contracts/trainingRecipes.ts
+COPY server/src/services/streamSessions/analysis.ts /build/server/src/services/streamSessions/analysis.ts
+COPY --from=server-deps /build/server/node_modules/zod/ /build/server/node_modules/zod/
+RUN npx vite build
 
 
 # ── Stage 4: Runtime ────────────────────────────────────────────────
