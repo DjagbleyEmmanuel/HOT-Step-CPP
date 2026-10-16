@@ -84,7 +84,7 @@ Windows PowerShell 5; this repo's convention is `;`).
 Get-Item "D:\Ace-Step-Latest\hot-step-cpp\engine\build\Release\ace-server.exe" | Select-Object LastWriteTime
 
 # 3. Relaunch the app (dev-rebuild does NOT do this) — detached, then check http://localhost:3000:
-& "D:\Ace-Step-Latest\hot-step-cpp\dev.bat"       # dev mode (Vite :3000 HMR + tsx watch :3001)
+cd D:\Ace-Step-Latest\hot-step-cpp; pwsh -NoProfile -File tools\detach.ps1 dev.bat   # dev mode (Vite :3000 HMR + tsx watch :3001); outlives your run
 # LAUNCH.bat is the end-user prod launcher — agents don't run it
 ```
 

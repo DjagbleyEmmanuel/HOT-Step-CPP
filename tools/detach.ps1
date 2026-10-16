@@ -25,6 +25,14 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $target = (Resolve-Path $Script).Path
 
+# Everything is pasted into one cmd /c line: refuse what cmd would treat as
+# an operator, expansion or quote, rather than trying to escape it.
+foreach ($a in @($target) + @($ScriptArgs)) {
+  if ($null -ne $a -and ($a -eq '' -or $a -match '[&|<>^"%]')) {
+    throw "Unsupported argument '$a': empty values and & | < > ^ `" % cannot be passed through cmd safely."
+  }
+}
+
 # A second dev.bat on top of a live stack is the doubled-VRAM orphan problem.
 if ((Split-Path $target -Leaf) -eq 'dev.bat' -and
     (Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue)) {
