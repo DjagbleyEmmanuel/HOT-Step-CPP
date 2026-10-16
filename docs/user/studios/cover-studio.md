@@ -221,7 +221,15 @@ Prepare. Finish preparing those before generating the first takes.
    back far enough to build that section again.
 5. Click **Save song** to submit everything kept so far as an ordinary generation
    job, even if some sections remain unbuilt. It uses the kept audio codes and
-   receives the usual post-processing, drift check and Library save.
+   receives the usual post-processing, drift check and Library save. Once the
+   song is saved, the build clears so the next Build starts fresh. If the save
+   fails, is cancelled or times out, the build stays so you can save again.
+
+**AR strength** (0 to 10, default 0.6) is Cover Studio's own setting, shown on
+both Prepare and Build. It replaces the adapter picker's AR scale for every
+Cover render, including 0. Values above 0.6 hurt adherence to the score: on
+one seed, 1.0 matched 11% of chords against 89% at 0.6. A build keeps the
+value it started with; the control locks until you start over.
 
 Once the first takes start, the build's settings, score and lyrics are fixed.
 Edits on Prepare do not change that build. Choose **Start over** in Build actions

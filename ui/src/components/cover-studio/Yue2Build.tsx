@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, MoreHorizontal, Play, RotateCcw, Square, Trash2 } f
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
+import { CoverArStrength } from './Yue2CoverPanel';
 
 const FPS = 25;
 // A take plays from this long before its first section, so the join is heard.
@@ -74,6 +75,9 @@ interface PageProps {
   /** The lyrics the build follows (the session's once it exists). */
   lyrics: string;
   summary: string;
+  /** AR strength: the session's captured value once it exists, else the Cover setting. */
+  arStrength: number;
+  onArStrength: (value: number) => void;
   title: string;
   /** Why a build cannot start yet, or ''. */
   blocked: string;
@@ -164,6 +168,10 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <button type="button" onClick={p.onSave} disabled={!s?.kept.length}
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
           title="Render everything kept so far as a library song">Save song</button>
+      </div>
+
+      <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-2">
+        <CoverArStrength value={p.arStrength} onChange={p.onArStrength} locked={!!s} />
       </div>
 
       {/* Song timeline. */}

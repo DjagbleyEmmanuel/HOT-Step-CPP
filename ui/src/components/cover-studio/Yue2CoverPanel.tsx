@@ -52,12 +52,24 @@ interface Props {
   onKeyShift: (value: number) => void;
   cfgScale: number;
   onCfgScale: (value: number) => void;
+  arStrength: number;
+  onArStrength: (value: number) => void;
   lyricSchedule: 'off' | 'bias' | 'mask';
   onLyricSchedule: (value: 'off' | 'bias' | 'mask') => void;
   canGenerate: boolean;
   isGenerating: boolean;
   onGenerate: () => void;
 }
+
+/** Cover Studio's own AR strength, 0 to 10. It replaces the adapter picker's
+ *  AR scale in every Cover request; the same control sits on Prepare and Build. */
+export const COVER_AR_DEFAULT = 0.6;
+export const clampCoverAr = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(10, v)) : COVER_AR_DEFAULT;
+export const CoverArStrength: React.FC<{ value: number; onChange: (v: number) => void; locked?: boolean }> = ({ value, onChange, locked }) =>
+  <EditableSlider label="AR strength" value={value} min={0} max={10} step={0.05}
+    onChange={v => onChange(clampCoverAr(v))} defaultValue={COVER_AR_DEFAULT}
+    tooltip="How hard the AR adapter steers the musical plan, for covers only (the adapter picker's AR scale is ignored here). Values above 0.6 hurt adherence to the score: on one seed, 1.0 matched 11% of chords against 89% at 0.6."
+    disabled={locked} disabledReason={locked ? 'This build keeps the strength it started with. Start over to change it.' : undefined} />;
 
 /** Column width in px, padding included, above which the settings switch from
  *  one column to paired rows. */
@@ -143,6 +155,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
     onChange={p.onKeyShift} defaultValue={0} disabled={!keyLabel}
     formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
     helpText={keyLabel ? `Source: ${keyLabel}. Shift within twelve semitones.` : 'No supported score key found.'} />;
+  const arStrengthEl = <CoverArStrength value={p.arStrength} onChange={p.onArStrength} />;
   const advancedEl = <details className="text-xs text-zinc-600 dark:text-zinc-400">
     <summary className="cursor-pointer">Advanced</summary>
     <EditableSlider label="Condition strength" value={p.cfgScale} min={0.1} max={2} step={0.05}
@@ -189,12 +202,13 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         {instrumentalEl}{keepChordsEl}
         {voicesEl}{tempoEl}
         {pitchEl}{bpmEl}
+        <div className="col-span-2">{arStrengthEl}</div>
         <div className="col-span-2">{advancedEl}</div>
         <div className="col-span-2">{generateEl}</div>
       </div>
       : <div className="space-y-3">
         {renderModeEl}{artistGridEl}{sourceEl}{captionSourceEl}{captionEl}{instrumentalEl}
-        {voicesEl}{keepChordsEl}{tempoEl}{bpmEl}{pitchEl}{advancedEl}{generateEl}
+        {voicesEl}{keepChordsEl}{tempoEl}{bpmEl}{pitchEl}{arStrengthEl}{advancedEl}{generateEl}
       </div>}
   </div>
   );

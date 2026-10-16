@@ -48,7 +48,7 @@ import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
   type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
-import { Yue2CoverPanel } from './Yue2CoverPanel';
+import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { CoverResizeHandle } from './CoverResizeHandle';
@@ -194,12 +194,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The Build page (true) or the Prepare page (false).
   const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
   const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
+  const buildSessionIdRef = useRef(buildSessionId);
+  buildSessionIdRef.current = buildSessionId;
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
   const [coverBpm, setCoverBpm] = useState(() => restore('coverBpm', 120));
   const [coverKeyShift, setCoverKeyShift] = useState(() => restore('coverKeyShift', 0));
   const [coverCfgScale, setCoverCfgScale] = useState(() => restore('coverCfgScale', 1));
+  // Cover's own AR strength; it replaces the adapter picker's AR scale in every Cover request.
+  const [coverArStrength, setCoverArStrength] = useState(COVER_AR_DEFAULT);
   const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>(() => restore('coverLyricSchedule', 'off'));
   const [captionMode, setCaptionMode] = useState(() => restore('captionMode', 'custom'));
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
@@ -1144,7 +1148,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         keyShift: coverKeyShift, cfgScale: coverCfgScale, lyricSchedule: coverLyricSchedule,
         lmAdapterAr: activeYue2Ar, lmAdapterNar: activeYue2Nar,
         pairMode: renderMode === 'base' ? 'base' : 'pair',
-        yue2Pick: yue2PickAtEnqueue(null),
+        yue2Pick: { ...yue2PickAtEnqueue(null), lmAdapterArScale: clampCoverAr(coverArStrength) },
         captionMode: yue2Mode ? 'custom' : captionMode, captionTracks: renderMode === 'base' ? [] : captionTracks,
       },
     };
@@ -1204,6 +1208,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // usual post-processing and library save.
   const saveBuild = () => {
     if (!token || !buildSession?.kept.length) return;
+    const sessionId = buildSession.id;
     const params = { ...buildSession.params, yue2Build: { session: buildSession.id },
       yue2BatchSize: 1, yue2Variations: 1, batchSize: 1, randomSeed: true };
     const title = String(buildSession.params.title || 'Cover');
@@ -1214,7 +1219,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       try {
         const res = await generateApi.submit(params as any, token);
         updateManualQueueItem(qId, { jobId: res.jobId });
-        await pollJobAsync(res.jobId, qId);
+        const outcome = await pollJobAsync(res.jobId, qId);
+        // Only a saved song starts the next build, and only if this build is
+        // still the open one; any other outcome keeps it for a retry.
+        if (outcome === 'succeeded' && buildSessionIdRef.current === sessionId) setBuildSessionId('');
       } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
       finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
     });
@@ -1238,6 +1246,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
       lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : lyrics}
+      arStrength={buildSession ? Number((params?.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale ?? coverArStrength) : coverArStrength}
+      onArStrength={v => setCoverArStrength(clampCoverAr(v))}
       title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error}
@@ -1283,6 +1293,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     parallelCoverArt: settings.parallelCoverArt,
   };
   const pair = { ...yue2PickAtEnqueue(null),
+    lmAdapterArScale: clampCoverAr(coverArStrength),
     lmAdapterAr: activeYue2Ar,
     lmAdapterNar: activeYue2Nar };
   const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
@@ -1476,11 +1487,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // Poll a single cover job to completion. Resolves on any terminal state so
   // the serial queue can advance to the next cover. Updates the inline progress
   // (safe — jobs run one at a time) and the per-job queue item.
-  const pollJobAsync = async (jobId: string, qId: string): Promise<void> => {
+  const pollJobAsync = async (jobId: string, qId: string): Promise<'succeeded' | 'failed' | 'cancelled' | 'timeout'> => {
     setActiveJobId(jobId); setQueueItemId(qId);
     setGenProgress(0); setGenStage('Queued...');
     const timer = createGenerationTimer();
     let timedOut = false;
+    let outcome: 'succeeded' | 'failed' | 'cancelled' | 'timeout' = 'failed';
     try {
       await waitForSnapshot(serverKey('shell-queue/generation-status', { id: jobId }),
         signal => generateApi.status(jobId, { signal }),
@@ -1502,13 +1514,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           });
 
           if (tk.timedOut) {
-            timedOut = true;
+            timedOut = true; outcome = 'timeout';
             showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
             failManualQueueItem(qId, 'Generation timed out');
             return;
           }
 
           if (s.status === 'succeeded') {
+            outcome = 'succeeded';
             setGenProgress(100); setGenStage('Complete!');
             showToast(t('cover.coverGenerated'));
 
@@ -1521,6 +1534,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               audioDuration: s.result?.duration,
             });
           } else if (s.status === 'failed' || s.status === 'cancelled') {
+            outcome = s.status;
             showToast(`Failed: ${s.error || 'Unknown error'}`);
             failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
           }
@@ -1528,7 +1542,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       await songsChanged();
     } catch (err) {
       failManualQueueItem(qId, err instanceof Error ? err.message : 'Generation status failed');
+      return 'failed';
     }
+    return outcome;
   };
 
   // Cancel the currently-running cover. The poll sees the cancelled status,
@@ -1720,11 +1736,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                   : "Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
                 {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match lyrics to score'}</button>
-              {!sectionMatching && <button type="button" onClick={() => void handlePlanScore()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || scoreCuts.length > 0}
+              <button type="button" onClick={() => void handlePlanScore()}
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || scoreCuts.length > 0}
                 title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
                   : "Set the score's sections from where the source vocal sings each lyric block, and retag the lyrics to match. Shows the changes before applying."}
-                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button>}</span>
+                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button></span>
             </div>
             {scorePlan && scorePlan.key === sourceKey && <ScorePlanReview beforeSections={scorePlan.sections}
               beforeLyrics={scorePlan.lyrics} plan={scorePlan.plan} stale={scorePlanStale}
@@ -1807,6 +1823,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           bpm={coverBpm} onBpm={setCoverBpm}
           keyShift={coverKeyShift} onKeyShift={setCoverKeyShift}
           cfgScale={coverCfgScale} onCfgScale={setCoverCfgScale}
+          arStrength={coverArStrength} onArStrength={v => setCoverArStrength(clampCoverAr(v))}
           lyricSchedule={coverLyricSchedule} onLyricSchedule={setCoverLyricSchedule}
           canGenerate={canGenerate} isGenerating={isGenerating} onGenerate={handleGenerate}
         />
