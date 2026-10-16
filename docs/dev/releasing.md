@@ -10,6 +10,10 @@ every platform and creates a **draft** GitHub Release; you review and publish it
 A separate `Cache Warm` workflow keeps the engine build cache on `master` so
 release builds take ~10–15 min instead of ~1.5h for the CUDA jobs.
 
+RunPod containers are built separately from portable releases. There is no published
+project image or automatic image publishing workflow yet. Follow the [RunPod guide](runpod.md)
+to build an image and push it to your own registry.
+
 ## Prerequisites
 
 - `gh` authenticated (as `scragnog`).

@@ -324,10 +324,19 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 
 ## Other env files
 
-- `.env.docker` is copied to `/app/.env` by the `Dockerfile` and used by
+- `.env.docker` is copied to `/app/.env` by the Dockerfile's default `runtime` target and used by
   `docker-compose.yml`. It points the engine, models and adapters at container paths.
 - `tools/discord-claude/.env.example` configures the Discord bridge tool. The app does not
   read it.
+
+The `runpod` Docker target uses container environment defaults and the persistent
+`/workspace` volume instead of the local Compose path mappings. Its entrypoint
+uses `HOT_STEP_DATA_ROOT=/workspace` to link models, adapters, data and logs into
+that volume. This container guard also works without `HOT_STEP_ROOT`; the
+release-only data-root selection described above is a separate server mechanism.
+Keep `ACESTEPCPP_MODELS`, `ACESTEPCPP_ADAPTERS` and `DATA_DIR` aligned if you
+override the volume path. See the [RunPod guide](runpod.md) for the layout and
+the unauthenticated HTTP proxy warning.
 
 ## Adding a variable
 
