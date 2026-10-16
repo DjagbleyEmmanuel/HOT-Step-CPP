@@ -134,7 +134,9 @@ Existing model files can be placed in `/workspace/models` before startup. For
 startup failures, inspect the Pod's container logs and `/workspace/logs`. Back up
 the persistent volume before deleting or replacing storage.
 
-Once models are installed, check `/api/health` again: `aceServer.status` should no
+After the engine's 3 crashes it stays down, and nothing retries it when a model
+download finishes, so once models are installed restart the Pod (or container).
+The volume keeps the models. Then check `/api/health` again: `aceServer.status` should no
 longer be `disconnected` and `engine.ready` should be true. Inspect
 `engine.bootStatus` and the container logs if not; an HTTP response alone does not
 prove the engine started.
