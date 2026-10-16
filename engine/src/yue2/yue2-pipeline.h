@@ -35,6 +35,7 @@
 #include "yue2-sample.h"
 #include "yue2-tokenizer.h"
 #include "yue2-vae-graph.h"
+#include "train/yue2-loudness.h"  // yue2_peak_scale
 
 #include <algorithm>
 #include <atomic>
@@ -1629,14 +1630,13 @@ static bool yue2_pipeline_run_nar(Yue2Model & m, const Yue2Request & req, Yue2Ar
                                     &tr.audio_planar, &tr.samples, err)) {
                 return false;
             }
-            // Final [-1,1] clamp is pipeline-level, not decoder-level (03-reference-
-            // numerics.md §4.5 — the decoder's own last module is Identity).
-            for (float & v : tr.audio_planar) {
-                if (v < -1.0f) {
-                    v = -1.0f;
-                } else if (v > 1.0f) {
-                    v = 1.0f;
-                }
+            // The reference clamps to [-1,1] here (03-reference-numerics.md §4.5 —
+            // the decoder's own last module is Identity). We peak-scale instead:
+            // the decoder overshoots loud material by ~4 dB and a clamp flat-tops it.
+            const double over_db = yue2_peak_scale(tr.audio_planar.data(), tr.audio_planar.size());
+            if (over_db != 0.0) {
+                fprintf(stderr, "[YuE2] track %d.%d over full scale: scaled %.1f dB to -0.3 dBFS peak\n", b, j,
+                        over_db);
             }
             const bool limit = tr.stage_end_reason[YUE2_STAGE_PLAN] == "limit_hit" ||
                                tr.stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit";

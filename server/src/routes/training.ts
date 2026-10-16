@@ -116,7 +116,7 @@ import {
   applyYue2Preset, availableYue2Bases, estimateYue2PreprocessMb, estimateYue2RunMs,
   isYue2CaptionMode, isYue2Target, isYue2VaeVariant, missingYue2TrainModels,
   readYue2PreprocessSummary, resolveYue2TrainModels,
-  YUE2_DEFAULT_PRESET, YUE2_NAR_DEFAULTS, YUE2_PRESETS,
+  YUE2_CACHE_LUFS, YUE2_DEFAULT_PRESET, YUE2_NAR_DEFAULTS, YUE2_PRESETS,
   YUE2_TARGET_TENSORS, YUE2_VRAM_MODEL, yue2AdapterRunDir, yue2LatentsDir,
   yue2ModelDir, yue2PreprocessManifest, yue2RunName,
 } from '../services/training/yue2Train.js';
@@ -3288,11 +3288,10 @@ router.post('/datasets/:id/yue2-preprocess', async (req: Request, res: Response)
       return;
     }
 
-    // Loudness target: 0 = off, the default here since 2026-10-15 (every
-    // method but Legacy trains on an off cache); Legacy's chain asks for -14.
-    // It is part of the cache key, so a change re-encodes and drops
-    // codes/sheet/alignment.
-    let loudnessLufs = 0;
+    // Loudness target: -14 LUFS for every method unless the body names
+    // another; 0 = off. It is part of the cache key, so a change re-encodes
+    // and drops codes/sheet/alignment.
+    let loudnessLufs = YUE2_CACHE_LUFS;
     if (b.loudnessLufs !== undefined && b.loudnessLufs !== null && b.loudnessLufs !== '') {
       const v = Number(b.loudnessLufs);
       if (!Number.isFinite(v) || v > 0 || v < -40) { res.status(400).json({ error: 'loudnessLufs must be 0 (off) or a target from -40 to 0 LUFS.' }); return; }
@@ -4482,7 +4481,7 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           done: !!cache && cache.clips > 0 && cache.loudnessLufs !== null,
           cache: cache ?? null,
           // The level the cache was cut at (0 = off); the batch chain re-cuts
-          // when a method wants another (yue2LoudnessForMethod).
+          // anything but YUE2_CACHE_LUFS.
           loudnessLufs: cache?.loudnessLufs ?? null,
           missing: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
           // A cache built for the NAR (or before `ace` existed) carries no

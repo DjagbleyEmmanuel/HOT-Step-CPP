@@ -22,7 +22,7 @@ import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
 import { listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
-import { yue2LoudnessForMethod } from './yue2Train.js';
+import { YUE2_CACHE_LUFS } from './yue2Train.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import { bestScoredRung } from './yue2BestRung.js';
@@ -519,10 +519,10 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   const st = await readStatus(item.datasetId);
   switch (stage) {
     case 'cache': {
-      // The method decides the loudness the cache is cut at (-14 tuned, 0
-      // base-matched). A cache at the other level is re-cut: the key changes,
-      // so codes, sheet and alignment are dropped and their stages run again.
-      const lufs = yue2LoudnessForMethod(state.recipe.method);
+      // Every method trains on a -14 LUFS cache. A cache at another level is
+      // re-cut: the key changes, so codes, sheet and alignment are dropped and
+      // their stages run again.
+      const lufs = YUE2_CACHE_LUFS;
       const p = st.stages.preprocess;
       const cut = p.done && p.captionModeOk !== false && !p.captionsStale && p.loudnessLufs === lufs;
       return cut ? null : { captionMode: 'yue2', loudnessLufs: lufs };

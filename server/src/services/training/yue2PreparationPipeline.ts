@@ -12,7 +12,7 @@ import { getDataset } from './datasetsRepo.js';
 import { activeJobForDataset, cancelJob } from './labelingQueue.js';
 import { hasActivePipeline, registerYue2PreparationActivity } from './pipelineRunner.js';
 import { hasActiveBatch } from './yue2BatchRunner.js';
-import { yue2LoudnessForMethod } from './yue2Train.js';
+import { YUE2_CACHE_LUFS } from './yue2Train.js';
 import { pushDataset, workerFetch } from './trainingWorkers.js';
 
 type Snapshot = TrainingSnapshot<Yue2PreparationPayload>;
@@ -54,13 +54,11 @@ const POLL_MS = 1500;
 const PREPARED_NAME: Partial<Record<Yue2PreparationStage, string>> = {
   latents: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric cursor spans',
 };
-/** The loudness a joint chain cuts its cache at (0 base-matched and
- *  fixed-recipe, -14 tuned); undefined without a joint stage, which keeps
- *  whatever cache is there. Nothing refuses a cache at another level. */
-const cacheLufs = (snapshot: Snapshot): number | undefined => {
-  const joint = snapshot.payload.recipes.joint;
-  return joint ? yue2LoudnessForMethod(joint.overrides.method) : undefined;
-};
+/** The loudness a joint chain cuts its cache at (-14, every method);
+ *  undefined without a joint stage, which keeps whatever cache is there.
+ *  Nothing refuses a cache at another level. */
+const cacheLufs = (snapshot: Snapshot): number | undefined =>
+  snapshot.payload.recipes.joint ? YUE2_CACHE_LUFS : undefined;
 const terminal = (s: Status) => s === 'done' || s === 'failed' || s === 'cancelled' || s === 'interrupted';
 const active = (s: Status) => !terminal(s);
 

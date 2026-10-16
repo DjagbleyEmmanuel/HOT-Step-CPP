@@ -150,8 +150,8 @@ const LOKR_STOP = YUE2_JOINT_LOKR_STOP;
 // 5090 (x2 for 8 songs) x updates, for the relative-time label.
 // Legacy (2026-09-29, Rob): the tuned recipe the card shipped before
 // base-matched (v1.3.4's defaults), for anyone who wants its speed back.
-// Two deliberate gaps: lyric timing stays off (it needs stems + alignment
-// first), and a cache cut for base-matched keeps its loudness on Start.
+// One deliberate gap: lyric timing stays off (it needs stems + alignment
+// first).
 // It stops at the planner's KL target, so steps is a cap; minutes assumes
 // the ~250 updates of 1 song a Prodigy run took to KL 1.2. Target 1.0
 // since 2026-10-06: past ~1 the planner lost the lead sheet's tempo late in a take.
