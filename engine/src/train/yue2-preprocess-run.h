@@ -1179,9 +1179,11 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         (void) sidecar_hit;
 
         // The loudness target is part of the key: normalized latents are a
-        // different encoding of the file. Off keeps the old key byte for byte.
+        // different encoding of the file. Off is tagged "|peak" since overs
+        // were peak-scaled rather than clamped (2026-10-16): a new stem, so the
+        // codes and sheets keyed on it are rebuilt from the new level too.
         const bool   loud_on   = a.loudness_lufs != 0.0;
-        char         loud_tag[32] = "";
+        char         loud_tag[32] = "|peak";
         if (loud_on) snprintf(loud_tag, sizeof(loud_tag), "|lufs%.2f", a.loudness_lufs);
         const std::string key = yp_key_hex(name + "|" + std::to_string(fbytes) + "|" + std::to_string(fmtime) + "|" +
                                            variant_name + "|" + vae_base + "|v1" + loud_tag);
@@ -1191,8 +1193,7 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         s.latent_rel = latent_rel;
 
         // The gain rides beside the latent, so a cache hit still knows it.
-        // Loudness off records one too (the peak-scale gain, usually 0), so an
-        // off cache cut before peak-scaling, with no .gain, is re-encoded.
+        // Loudness off records one too: the peak-scale gain, usually 0.
         const std::string gain_path = a.out_dir + "/latents/" + s.stem + ".gain";
         bool gain_known = false;
         if (FILE * gf = hs_fopen(gain_path.c_str(), "rb")) { gain_known = fscanf(gf, "%lf", &s.gain_db) == 1; fclose(gf); }
@@ -1201,6 +1202,7 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
             s.cache_hit = true;
             n_cached++;
         } else {
+            s.gain_db = 0.0;  // a .gain beside a missing or short latent is stale
             // ── decode ──
             const bool use_ffmpeg = (a.decode == "ffmpeg") || !(ext == ".wav" || ext == ".mp3");
             if (use_ffmpeg && a.ffmpeg.empty()) {
