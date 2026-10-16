@@ -112,6 +112,8 @@ export interface Yue2CoverDriftResult {
  *  are codec frames, 25 per second; sections are 0-based. */
 export interface Yue2BuildTake {
   id: string;
+  /** The build revision it was made at; a take of an older one cannot be kept. */
+  revision: number;
   from: number;
   to: number;
   seed: number;
@@ -123,6 +125,8 @@ export interface Yue2BuildTake {
 }
 export interface Yue2BuildSession {
   id: string;
+  /** Counts changes to what the next take is sent (lyrics); mutations name the one they saw. */
+  revision: number;
   sections: Array<{ label: string; startBar: number }>;
   takes: Yue2BuildTake[];
   kept: string[];
@@ -155,20 +159,25 @@ export const yue2CoverApi = {
   }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
-  buildStart: (params: Record<string, unknown>, token: string) =>
-    request<Yue2BuildSession>('/build', token, { method: 'POST', body: JSON.stringify({ params }) }),
+  /** `lyrics` is the build's own text; without it the session follows params.lyrics. */
+  buildStart: (params: Record<string, unknown>, token: string, lyrics?: string) =>
+    request<Yue2BuildSession>('/build', token, { method: 'POST', body: JSON.stringify({ params, ...(lyrics === undefined ? {} : { lyrics }) }) }),
+  buildLyricsCheck: (lyrics: string, token: string) =>
+    request<{ ok: true }>('/build/lyrics-check', token, { method: 'POST', body: JSON.stringify({ lyrics }) }),
+  buildLyrics: (id: string, revision: number, lyrics: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/lyrics`, token, { method: 'POST', body: JSON.stringify({ revision, lyrics }) }),
   buildGet: (id: string, token: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, token, options),
-  buildGenerate: (id: string, to: number, count: number, token: string) =>
-    request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ to, count }) }),
+  buildGenerate: (id: string, revision: number, to: number, count: number, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ revision, to, count }) }),
   buildCancel: (id: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/cancel`, token, { method: 'POST' }),
-  buildKeep: (id: string, take: string, token: string) =>
-    request<Yue2BuildSession>(`/build/${id}/keep`, token, { method: 'POST', body: JSON.stringify({ take }) }),
+  buildKeep: (id: string, revision: number, take: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/keep`, token, { method: 'POST', body: JSON.stringify({ revision, take }) }),
   /** Drops the last kept take, or every kept take from `section` on. */
-  buildUndo: (id: string, token: string, section?: number) =>
-    request<Yue2BuildSession>(`/build/${id}/undo`, token, { method: 'POST', body: JSON.stringify(section === undefined ? {} : { section }) }),
-  buildDelete: (id: string, take: string, token: string) =>
-    request<Yue2BuildSession>(`/build/${id}/takes/${take}`, token, { method: 'DELETE' }),
+  buildUndo: (id: string, revision: number, token: string, section?: number) =>
+    request<Yue2BuildSession>(`/build/${id}/undo`, token, { method: 'POST', body: JSON.stringify(section === undefined ? { revision } : { revision, section }) }),
+  buildDelete: (id: string, revision: number, take: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
   /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */

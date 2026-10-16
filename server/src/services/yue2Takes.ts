@@ -25,6 +25,10 @@ import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
+import {
+  BUILD_SESSION_VERSION, composeArrangement, generateRefusal, keepRefusal, migrateLegacySession, nextOccurrence,
+  planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
+} from './backends/yue2/coverArrangement.js';
 
 /** Codec frames per second (the composer's frame clock). */
 export const YUE2_FPS = 25;
@@ -32,12 +36,19 @@ export const YUE2_FPS = 25;
 const TAKE_SLACK = 1.3;
 const TAKE_SLACK_FRAMES = 4 * YUE2_FPS;
 const MAX_TAKES = 10;
+const MAX_LYRICS = 20_000;
 /** Bars in a take's waveform, over its new part (from its lead-in). */
 const PEAKS = 120;
 const LEAD_IN_S = 4;
 
 export class TakesError extends Error {
   constructor(message: string, public status = 400) { super(message); }
+}
+
+/** A mutation names the revision it was made against; refuse it once the build moved on. */
+function checkRevision(stored: Stored, expected: unknown): void {
+  const refusal = revisionRefusal(stored, expected);
+  if (refusal) throw new TakesError(refusal, 409);
 }
 
 export interface Yue2Take {
@@ -56,16 +67,16 @@ export interface Yue2Take {
   peaks?: number[];
 }
 
-export interface Yue2BuildSession {
+/** Session file version 2 (coverArrangement.ts): revisions, take parents, the
+ *  plan. `kept` is the kept takes, oldest first; the last is the spine. */
+export interface Yue2BuildSession extends ArrangedSession {
   id: string;
   sections: Array<{ label: string; startBar: number }>;
-  takes: Yue2Take[];
-  /** Kept takes, oldest first; the last is the spine. */
-  kept: string[];
   /** Takes still rendering. */
   pending: Array<{ from: number; to: number; count: number; activeCount?: number; phase?: string; progress?: number }>;
   error: string | null;
-  /** The params a Save song render submits, as the session was started. */
+  /** The params a Save song render submits. Applying lyrics replaces
+   *  params.lyrics and the stored request together. */
   params: Record<string, unknown>;
 }
 
@@ -81,11 +92,19 @@ const codesFile = (id: string, take: string) => path.join(sessionDir(id), `${tak
 
 function load(id: string, userId: string): Stored {
   if (!/^[0-9a-f-]{36}$/.test(id)) throw new TakesError('Build session not found', 404);
-  let stored: Stored;
-  try { stored = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')) as Stored; }
+  let stored: Stored | (LegacySession & Pick<Stored, 'id' | 'userId' | 'params' | 'pending' | 'error' | 'request' | 'scoreStarts'>);
+  try { stored = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')); }
   catch { throw new TakesError('Build session not found', 404); }
   if (stored.userId !== userId) throw new TakesError('Build session not found', 404);
-  return stored;
+  if (stored.version === BUILD_SESSION_VERSION) return stored;
+  // A session from before revisions: upgrade it once, on first open.
+  let upgraded: Stored;
+  try {
+    upgraded = migrateLegacySession(stored as Exclude<typeof stored, Stored>, take =>
+      JSON.parse(fs.readFileSync(codesFile(id, take), 'utf8')) as number[]) as unknown as Stored;
+  } catch (err) { throw new TakesError(`This build session cannot be opened: ${(err as Error).message}`, 409); }
+  save(upgraded);
+  return upgraded;
 }
 
 function save(stored: Stored): void {
@@ -220,22 +239,30 @@ export function wavPeaks(wav: Buffer, fromSec: number, toSec: number): number[] 
   return peaks;
 }
 
-/** Starts a build session for a cover's request. */
-export function createBuildSession(params: Record<string, unknown>, request: Yue2SynthRequest, userId: string): Yue2BuildSession {
-  if (!request.abc) throw new TakesError('Build by section needs an approved score.');
-  const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
-  if (!sections.length) throw new TakesError('The score has no section labels.');
-  // The take count controls songs; every song has exactly one noise variation.
+/** The take count controls songs; every song has exactly one noise variation. */
+function plainRequest(request: Yue2SynthRequest): Yue2SynthRequest {
   request = { ...request };
   delete request.lm_batch_size;
   delete request.synth_batch_size;
   delete request.songs;
   delete request.seed;
+  return request;
+}
+
+/** Starts a build session for a cover's request. */
+export function createBuildSession(params: Record<string, unknown>, request: Yue2SynthRequest, userId: string): Yue2BuildSession {
+  if (!request.abc) throw new TakesError('Build by section needs an approved score.');
+  const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
+  if (!sections.length) throw new TakesError('The score has no section labels.');
+  request = plainRequest(request);
   const bars = scoreBarClock(request.abc!);
+  const arranged = sourceSections(request.abc!, request.lyrics ?? '');
   const id = randomUUID();
   fs.mkdirSync(sessionDir(id), { recursive: true });
   const stored: Stored = {
     id, userId, sections, takes: [], kept: [], pending: [], error: null, params, request,
+    version: BUILD_SESSION_VERSION, revision: 0,
+    arrangement: { sections: arranged, plan: arranged.map((s, i) => ({ id: `o${i}`, section: s.id })), nextOccurrence: arranged.length, finished: true },
     scoreStarts: sections.map(s => Math.round((bars[s.startBar - 1]?.start ?? 0) * YUE2_FPS))
       .concat(Math.round((bars.at(-1)?.end ?? 0) * YUE2_FPS)),
   };
@@ -247,18 +274,14 @@ export function getBuildSession(id: string, userId: string): Yue2BuildSession {
   return view(load(id, userId));
 }
 
-/** The first section not yet built: the one after the spine's last. */
-function nextSection(stored: Stored): number {
-  const spine = stored.takes.find(t => t.id === stored.kept.at(-1));
-  return spine ? spine.to + 1 : 0;
-}
-
 /** Queues `count` takes of sections [next, to], resumed from the spine.
  *  Returns at once; the session lists the takes as they finish. */
-export function generateBuildTakes(id: string, userId: string, to: number, count: number): Yue2BuildSession {
+export function generateBuildTakes(id: string, userId: string, to: number, count: number, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
-  const from = nextSection(stored);
-  if (!Number.isInteger(to) || to < from || to >= stored.sections.length) throw new TakesError('Pick a section from the next one to build onward.');
+  checkRevision(stored, revision);
+  const from = nextOccurrence(stored);
+  const refusal = generateRefusal(stored, to);
+  if (refusal) throw new TakesError(refusal);
   if (!Number.isInteger(count) || count < 1 || count > MAX_TAKES) throw new TakesError(`Generate 1 to ${MAX_TAKES} takes at a time.`);
   const spine = stored.takes.find(t => t.id === stored.kept.at(-1));
   const start = spine ? spine.starts[from] : 0;
@@ -268,6 +291,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const length = stored.scoreStarts[to + 1] - stored.scoreStarts[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
+  const identity = takeIdentity(stored, to);
   const pending = { from, to, count, activeCount: 0, phase: 'queued', progress: 0 };
   stored.pending.push(pending);
   stored.error = null;
@@ -319,7 +343,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             // gaps. Validate the entire chunk before attaching any of its audio.
             const mapped = mapTakeTracks(seeds, tracks, parts);
             update('aligning', 100);
-            const takes: Yue2Take[] = [];
+            const takes: ArrangedTake[] = [];
             for (const { seed, ids, wav } of mapped) {
               checkCancelled();
               const starts = await alignStarts(stored, wav, ids.length, last ? undefined : to + 1);
@@ -333,7 +357,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
               const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (from ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);
@@ -394,33 +418,37 @@ export async function cancelBuildTakes(id: string, userId: string): Promise<Yue2
 }
 
 /** Keeps a take of the next sections: it becomes the spine. */
-export function keepBuildTake(id: string, userId: string, takeId: string): Yue2BuildSession {
+export function keepBuildTake(id: string, userId: string, takeId: string, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
+  checkRevision(stored, revision);
   const take = stored.takes.find(t => t.id === takeId);
   if (!take) throw new TakesError('No such take.');
-  if (take.from !== nextSection(stored)) throw new TakesError('That take is for sections already built; undo back to it first.');
+  const refusal = keepRefusal(stored, take);
+  if (refusal) throw new TakesError(refusal, 409);
   stored.kept.push(take.id);
   save(stored);
   return view(stored);
 }
 
-/** Drops the last kept take, so its sections can be built again. */
 /** Drops kept takes from the end: one, or until `section` is the next to
- *  build again. */
-export function undoBuildKeep(id: string, userId: string, section?: number): Yue2BuildSession {
+ *  build again. The revision stays, so a take made from an earlier spine is
+ *  keepable again. */
+export function undoBuildKeep(id: string, userId: string, section: number | undefined, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
+  checkRevision(stored, revision);
   if (section === undefined) stored.kept.pop();
   else {
     if (!Number.isInteger(section) || section < 0) throw new TakesError('No such section.');
-    while (stored.kept.length && nextSection(stored) > section) stored.kept.pop();
+    while (stored.kept.length && nextOccurrence(stored) > section) stored.kept.pop();
   }
   save(stored);
   return view(stored);
 }
 
 /** Deletes a take that is not part of the build, with its audio and codes. */
-export function deleteBuildTake(id: string, userId: string, takeId: string): Yue2BuildSession {
+export function deleteBuildTake(id: string, userId: string, takeId: string, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
+  checkRevision(stored, revision);
   if (!stored.takes.some(t => t.id === takeId)) throw new TakesError('No such take.');
   if (stored.kept.includes(takeId)) throw new TakesError('That take is part of the build; undo back past it first.');
   stored.takes = stored.takes.filter(t => t.id !== takeId);
@@ -437,4 +465,64 @@ export function buildSessionCodes(id: string, userId: string): number[] {
   const spine = stored.kept.at(-1);
   if (!spine) throw new TakesError('Keep a take before saving the song.');
   return JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[];
+}
+
+/** Why `lyrics` cannot be sung by a build, or null. Text above the first tag
+ *  and malformed tag lines would be sung as words or dropped silently. */
+export function lyricsProblem(lyrics: unknown): string | null {
+  if (typeof lyrics !== 'string') return 'Lyrics must be text.';
+  if (lyrics.length > MAX_LYRICS) return `Lyrics are limited to ${MAX_LYRICS.toLocaleString('en-US')} characters.`;
+  if (!lyrics.trim()) return 'Lyrics cannot be empty.';
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(lyrics)) return 'Lyrics contain control characters.';
+  const lines = lyrics.replace(/\r\n?/g, '\n').split('\n');
+  const bad = lines.findIndex(line => { const t = line.trim(); return t.startsWith('[') && !/^\[[^\]\n]*\S[^\]\n]*\]$/.test(t); });
+  if (bad >= 0) return `Line ${bad + 1} looks like a section tag but is not one; use [verse], [chorus] and so on.`;
+  const blocks = splitLyricBlocks(lyrics);
+  if (!blocks.some(b => b.tag)) return 'Lyrics need section tags such as [verse].';
+  if (blocks[0].tag === null) return 'Put a section tag above the first line of lyrics.';
+  if (blocks.some(b => (b.tag?.length ?? 0) > 40)) return 'A section tag is longer than 40 characters.';
+  return null;
+}
+
+/** Why the lyrics of the sections already built cannot change, or null: the
+ *  kept audio was composed under them. Later text is free. */
+function builtLyricsRefusal(stored: Stored, lyrics: string): string | null {
+  const built = nextOccurrence(stored);
+  if (!built) return null;
+  const abc = stored.request.abc ?? '', old = stored.request.lyrics ?? '';
+  try {
+    const plan = planSections(stored.arrangement).slice(0, built);
+    const before = sourceSections(abc, old), after = sourceSections(abc, lyrics);
+    const same = composeArrangement(abc, old, plan).lyrics === composeArrangement(abc, lyrics, plan).lyrics &&
+      before.slice(0, built).every((s, i) => s.lyricBlock === after[i].lyricBlock);
+    return same ? null : 'The lyrics of built sections are locked; undo back to a section to change its lyrics.';
+  } catch { return 'These lyrics do not fit the score; keep the section tags the score expects.'; }
+}
+
+/** Replaces the lyrics of the next takes. `toRequest` rebuilds the engine
+ *  request from the new params the way a render would, so the stored params
+ *  (what Save song submits) and the request agree. Kept audio stays; every
+ *  take not yet kept becomes ineligible through the revision. Nothing here
+ *  touches a dataset. */
+export function applyBuildLyrics(id: string, userId: string, revision: unknown, lyrics: unknown,
+  toRequest: (params: Record<string, unknown>) => Yue2SynthRequest): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (stored.params.instrumental === true) throw new TakesError('An instrumental build has no lyrics.');
+  const problem = lyricsProblem(lyrics);
+  if (problem) throw new TakesError(problem);
+  const text = (lyrics as string).replace(/\r\n?/g, '\n');
+  const params = { ...stored.params, lyrics: text };
+  const request = plainRequest(toRequest(params));
+  if (request.abc !== stored.request.abc) throw new TakesError('The score changed; start a new build.', 409);
+  if (request.lyrics === stored.request.lyrics && text === stored.params.lyrics) return view(stored);
+  const locked = builtLyricsRefusal(stored, request.lyrics ?? '');
+  if (locked) throw new TakesError(locked, 409);
+  stored.params = params;
+  stored.request = request;
+  stored.revision++;
+  stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? '') };
+  save(stored);
+  return view(stored);
 }

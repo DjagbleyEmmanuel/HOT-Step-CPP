@@ -3,7 +3,7 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, MoreHorizontal, Pause, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -40,8 +40,12 @@ export function buildNext(session: Yue2BuildSession | null): number {
   return spine ? spine.to + 1 : 0;
 }
 
-/** A Build-by-section session kept on the server, polled while takes render. */
-export function useYue2Build(token: string | null, sessionId: string, setSessionId: (id: string) => void) {
+/** The build's own lyrics before a session exists: null follows Prepare. */
+export interface BuildLyricsDraft { text: string | null; set: (text: string | null) => void }
+
+/** A Build-by-section session kept on the server, polled while takes render.
+ *  Every change names the revision the page saw, so a stale page is refused. */
+export function useYue2Build(token: string | null, sessionId: string, setSessionId: (id: string) => void, draft: BuildLyricsDraft) {
   const options = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${sessionId}`, token ?? undefined);
   const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0) });
   const session = sessionId ? snapshot.data ?? null : null;
@@ -51,7 +55,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   const call = async (fn: () => Promise<Yue2BuildSession>) => {
     setBusy(true);
     try { const next = await fn(); const key = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${next.id}`, token!).queryKey; queryClient.setQueryData([key[0], key[1], options.queryKey[2], key[3], key[4]], next); setError(''); return next; }
-    catch (err: any) { setError(err.message); return null; }
+    catch (err: any) { setError(err.message); void snapshot.refetch(); return null; }
     finally { setBusy(false); }
   };
   const live = session && session.id === sessionId ? session : null;
@@ -59,14 +63,23 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     session: live, error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. */
     generate: (params: Record<string, unknown>, to: number, count: number) => call(async () => {
-      let id = live?.id;
-      if (!id) { id = (await yue2CoverApi.buildStart(params, token!)).id; setSessionId(id); }
-      return yue2CoverApi.buildGenerate(id, to, count, token!);
+      let started = live;
+      if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
+      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!);
     }),
-    keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, take, token!)),
-    undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, token!, section)),
-    remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, take, token!)),
+    keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, live!.revision, take, token!)),
+    undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
+    remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take, token!)),
     cancel: () => call(() => yue2CoverApi.buildCancel(live!.id, token!)),
+    /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
+     *  True once the server (or, before a session, its validation) accepted them. */
+    applyLyrics: async (text: string) => {
+      if (live) return !!(await call(() => yue2CoverApi.buildLyrics(live.id, live.revision, text, token!)));
+      setBusy(true);
+      try { await yue2CoverApi.buildLyricsCheck(text, token!); draft.set(text); setError(''); return true; }
+      catch (err: any) { setError(err.message); return false; }
+      finally { setBusy(false); }
+    },
     startOver: () => { setSessionId(''); setError(''); },
   };
 }
@@ -92,6 +105,10 @@ interface PageProps {
   totalBars: number;
   /** The lyrics the build follows (the session's once it exists). */
   lyrics: string;
+  /** The Prepare page's lyrics, which the build starts from until it is given its own. */
+  prepareLyrics: string;
+  /** Applies new lyrics to this build only; true when accepted. */
+  onApplyLyrics: (text: string) => Promise<boolean>;
   summary: string;
   /** AR strength: the session's captured value once it exists, else the Cover setting. */
   arStrength: number;
@@ -122,6 +139,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [to, setTo] = useState<number | null>(null);
   const [count, setCount] = useState(3);
   const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const dragging = useRef(false);
   const s = p.session;
   const next = buildNext(s);
@@ -135,6 +153,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const done = next >= p.sections.length;
 
   useEffect(() => { setTo(null); }, [next]);
+  // An open editor belongs to the build it was opened on.
+  useEffect(() => { setEditing(null); }, [s?.id]);
+  const apply = async (text: string) => { if (await p.onApplyLyrics(text)) setEditing(null); };
   useEffect(() => {
     const up = () => { dragging.current = false; };
     window.addEventListener('pointerup', up);
@@ -262,9 +283,34 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       {/* The next sections: their lyrics, and their takes. */}
       <div className="flex-1 min-h-0 grid grid-cols-[minmax(240px,1fr)_minmax(320px,1.4fr)] overflow-hidden">
         <div className="min-h-0 overflow-y-auto border-r border-zinc-200 dark:border-white/10 p-4 space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            {done ? 'Done' : `Building: ${rangeLabel || p.sections[next].label}`}</p>
-          {shown.length ? shown.map((text, i) => <pre key={i} className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{text}</pre>)
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              {done ? 'Done' : `Building: ${rangeLabel || p.sections[next].label}`}</p>
+            {editing === null && <>
+              {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void apply(p.prepareLyrics)} disabled={p.busy || waiting > 0}
+                title="Replace this build's lyrics with the Prepare page's"
+                className="text-xs text-zinc-500 hover:text-cyan-600 disabled:opacity-40">Use Prepare lyrics</button>}
+              <button type="button" onClick={() => setEditing(p.lyrics)} disabled={p.busy || waiting > 0}
+                title={waiting > 0 ? 'Wait for the pending takes, or cancel them, to edit the lyrics' : 'Edit the lyrics for this build only'}
+                className="flex items-center gap-1 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Pencil className="w-3 h-3" />Edit lyrics</button>
+            </>}
+          </div>
+          {editing !== null ? <div className="space-y-2">
+            <textarea value={editing} onChange={e => setEditing(e.target.value)} maxLength={20000} rows={16} spellCheck={false}
+              aria-label="Build lyrics"
+              className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 p-2 font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200" />
+            <p className="text-xs text-zinc-500">
+              For this build only: the Prepare page and the dataset keep theirs.
+              {s?.kept.length ? ' Lyrics of built sections are locked.' : ''}
+              {candidates.length ? ' Takes made with the old lyrics can no longer be kept.' : ''}
+            </p>
+            {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => void apply(editing)} disabled={p.busy || waiting > 0 || !editing.trim() || editing === p.lyrics}
+                className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Apply</button>
+              <button type="button" onClick={() => setEditing(null)} className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
+            </div>
+          </div> : shown.length ? shown.map((text, i) => <pre key={i} className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{text}</pre>)
             : !done && <p className="text-xs text-zinc-500">No lyrics for this section.</p>}
         </div>
         <div className="min-h-0 flex flex-col p-4 gap-3">
@@ -282,7 +328,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                   className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500"><Square className="w-3.5 h-3.5" /></button>}
                 <Waveform peaks={take.peaks ?? []} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />
                 <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
-                <button type="button" onClick={() => keep(take.id)} disabled={p.busy}
+                <button type="button" onClick={() => keep(take.id)} disabled={p.busy || take.revision !== s?.revision}
+                  title={take.revision !== s?.revision ? 'Made with earlier lyrics; generate it again' : undefined}
                   className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Keep</button>
                 <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
                   className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>

@@ -195,6 +195,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [buildMode, setBuildMode] = useState(() => restore<boolean>('buildMode', false));
   const [buildSessionId, setBuildSessionId] = useState(() => restore<string>('buildSessionId', ''));
   useEffect(() => onBuildSaved(id => setBuildSessionId(cur => cur === id ? '' : cur)), []);
+  // The build's own lyrics before its first session, tied to the source they
+  // were written for. Prepare's lyrics and the dataset are never changed by it.
+  const [buildLyricsDraft, setBuildLyricsDraft] = useState<{ source: string; text: string } | null>(() => restore('buildLyricsDraft', null));
+  const buildLyricsSource = JSON.stringify([sourceMode, sourceAudioUrl, sourceSongId, sourceAssetId]);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
@@ -369,6 +373,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('coveringBand', coveringBand); }, [coveringBand]);
   useEffect(() => { persist('buildMode', buildMode); }, [buildMode]);
   useEffect(() => { persist('buildSessionId', buildSessionId); }, [buildSessionId]);
+  useEffect(() => { persist('buildLyricsDraft', buildLyricsDraft); }, [buildLyricsDraft]);
   useEffect(() => { persist('advancedMode', advancedMode); }, [advancedMode]);
   useEffect(() => { persist('pairMode', renderMode); }, [renderMode]);
   useEffect(() => { persist('yue2Ar', yue2Ar); }, [yue2Ar]);
@@ -390,7 +395,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -467,6 +472,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-coveringBand')) setCoveringBand(f['cover-studio-coveringBand'] as never);
     setBuildMode((f['cover-studio-buildMode'] ?? false) as never);
     setBuildSessionId((f['cover-studio-buildSessionId'] ?? '') as never);
+    setBuildLyricsDraft((f['cover-studio-buildLyricsDraft'] ?? null) as never);
     const assetId = f['cover-studio-sourceAssetId'];
     if (typeof assetId === 'string' && assetId) {
       const meta = f['cover-studio-metadata'] as AudioMetadata | null, found = f['cover-studio-analysis'] as AudioAnalysis | null;
@@ -1191,7 +1197,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     })();
   };
 
-  const build = useYue2Build(token, buildSessionId, setBuildSessionId);
+  const buildLyrics = !instrumental && buildLyricsDraft?.source === buildLyricsSource ? buildLyricsDraft.text : null;
+  const build = useYue2Build(token, buildSessionId, setBuildSessionId, { text: buildLyrics,
+    set: text => setBuildLyricsDraft(text === null || text === lyrics ? null : { source: buildLyricsSource, text }) });
   const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
   const nextBuild = buildNext(buildSession);
   const generateBuildTakes = (to: number, count: number) => {
@@ -1244,7 +1252,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const sections = buildSession?.sections ?? scoreSections.map(x => ({ label: x.label, startBar: x.startBar }));
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
-      lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : lyrics}
+      lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : buildLyrics ?? lyrics}
+      prepareLyrics={lyrics} onApplyLyrics={build.applyLyrics}
       arStrength={buildSession ? Number((params?.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale ?? coverArStrength) : coverArStrength}
       onArStrength={v => setCoverArStrength(clampCoverAr(v))}
       title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}

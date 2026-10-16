@@ -210,6 +210,18 @@ Prepare. Finish preparing those before generating the first takes.
    If a group fails or returns a missing or mismatched track, none of that
    group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.
+
+   **Edit lyrics** (beside the takes) changes the lyrics for this build only.
+   The Prepare page and the dataset's lyrics file are not touched, and you can
+   edit before the first take exists. Each tag must be a line like `[verse]`, with
+   no text above the first tag, and the text can be up to 20,000 characters.
+   **Apply** saves them with the build, so they survive a reload and are what
+   the next takes and **Save song** use. It is refused while takes are rendering
+   (cancel or wait). Takes you made with the old lyrics stay listed, but their
+   **Keep** is disabled; generate them again. Lyrics of sections you have
+   already kept are locked, so kept audio stays as it was: undo back to a
+   section to change its lyrics. **Use Prepare lyrics** puts the Prepare page's
+   text back.
 3. Play each take to compare it. Preview starts four seconds before its first new
    section, where available, so you can hear the join. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.

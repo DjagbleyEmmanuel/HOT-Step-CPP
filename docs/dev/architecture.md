@@ -274,6 +274,32 @@ backend does not support (`ui/src/stores/backendStore.ts`,
 the SQLite `settings` table under `active_backend_id` and switched with
 `POST /api/backends/active`. User-facing detail is in [../user/backends.md](../user/backends.md).
 
+### YuE2 build sessions
+
+Build by section keeps a session file per build under `<audioDir>/takes/<id>/`
+(`server/src/services/yue2Takes.ts`). Its shape and rules are defined once, in the
+header of `server/src/services/backends/yue2/coverArrangement.ts`; read that before
+changing sessions.
+
+- **Version 2 sessions.** A session carries `version`, a `revision` and an
+  `arrangement` (source sections `s0..`, the planned output occurrences `o0..`). A file
+  without a version is upgraded once on first open by `migrateLegacySession`.
+- **Revision.** It counts changes to what the next take would be sent: the plan, the
+  lyrics, later the settings. Every take records the revision and the parent (the
+  spine it resumed). Every mutation (generate, keep, undo, delete, lyrics) names the
+  revision the page saw, and a mismatch is refused with 409. Keep also needs the
+  take's revision and parent to match. Keep and undo never change the revision, so a
+  take made from an earlier spine is keepable again after undoing back to it.
+- **Build lyrics.** The Build page owns its lyrics. `POST /api/yue2-cover/build` takes
+  an optional `lyrics` that replaces `params.lyrics`, and
+  `POST /api/yue2-cover/build/:id/lyrics` replaces them later: it rewrites
+  `params.lyrics` and the stored engine request together (the route rebuilds the
+  request from the new params, as a render would), bumps the revision, and is refused
+  while takes are pending. Lyrics of sections already kept are locked, so kept audio
+  stays valid; text after them is free. Prepare lyrics and dataset sidecars are never
+  written. Until a session exists the text is a draft in the Cover Studio state,
+  checked by `POST /api/yue2-cover/build/lyrics-check`.
+
 ## Feature map
 
 Every API mount is registered in `server/src/index.ts`. Route files are in

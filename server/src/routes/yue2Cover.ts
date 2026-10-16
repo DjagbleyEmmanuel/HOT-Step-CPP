@@ -14,7 +14,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, cancelBuildTakes, createBuildSession, deleteBuildTake, generateBuildTakes, getBuildSession, keepBuildTake, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, cancelBuildTakes, createBuildSession, deleteBuildTake, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -175,30 +175,50 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   const takes = (res: Response, fn: () => unknown) => Promise.resolve().then(fn).then(
     out => { res.json(out); },
     err => { if (err instanceof TakesError) res.status(err.status).json({ error: err.message }); else fail(res, err); });
-  router.post('/build', (req: Request, res: Response) => takes(res, () => {
-    const userId = authenticate(req)!;
-    const params = req.body?.params;
-    if (!params || typeof params !== 'object' || Array.isArray(params)) throw new TakesError('params are required');
+  const buildRequest = (params: Record<string, unknown>, userId: string) => {
     const id = `build-${randomUUID()}`;
     let envelope;
     try { envelope = buildEnvelope(params, userId, id, Date.now()); }
     catch (err) { throw new TakesError((err as Error).message); }
     if (envelope.backendId !== 'yue2') throw new TakesError('Build by section needs the YuE2 backend.');
     const job = { id, userId, envelope, params, attempts: [], status: 'pending' } as unknown as GenerationJob;
-    return createBuildSession(params, yue2RequestForJob(job), userId);
+    return yue2RequestForJob(job);
+  };
+  // `lyrics` is the build's own text, set on the Build page. It replaces the
+  // Prepare lyrics in the session's params and never reaches a dataset.
+  router.post('/build', (req: Request, res: Response) => takes(res, () => {
+    const userId = authenticate(req)!;
+    let params = req.body?.params;
+    if (!params || typeof params !== 'object' || Array.isArray(params)) throw new TakesError('params are required');
+    if (req.body.lyrics !== undefined) {
+      const problem = lyricsProblem(req.body.lyrics);
+      if (problem) throw new TakesError(problem);
+      params = { ...params, lyrics: req.body.lyrics };
+    }
+    return createBuildSession(params, buildRequest(params, userId), userId);
+  }));
+  router.post('/build/lyrics-check', (req: Request, res: Response) => takes(res, () => {
+    const problem = lyricsProblem(req.body?.lyrics);
+    if (problem) throw new TakesError(problem);
+    return { ok: true };
   }));
   router.get('/build/:id', (req: Request, res: Response) =>
     takes(res, () => getBuildSession(String(req.params.id), authenticate(req)!)));
   router.post('/build/:id/generate', (req: Request, res: Response) =>
-    takes(res, () => generateBuildTakes(String(req.params.id), authenticate(req)!, req.body?.to, req.body?.count)));
+    takes(res, () => generateBuildTakes(String(req.params.id), authenticate(req)!, req.body?.to, req.body?.count, req.body?.revision)));
   router.post('/build/:id/cancel', (req: Request, res: Response) =>
     takes(res, () => cancelBuildTakes(String(req.params.id), authenticate(req)!)));
   router.post('/build/:id/keep', (req: Request, res: Response) =>
-    takes(res, () => keepBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''))));
+    takes(res, () => keepBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''), req.body?.revision)));
   router.post('/build/:id/undo', (req: Request, res: Response) =>
-    takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!, req.body?.section)));
+    takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!, req.body?.section, req.body?.revision)));
+  router.post('/build/:id/lyrics', (req: Request, res: Response) => {
+    const userId = authenticate(req)!;
+    return takes(res, () => applyBuildLyrics(String(req.params.id), userId, req.body?.revision, req.body?.lyrics,
+      params => buildRequest(params, userId)));
+  });
   router.delete('/build/:id/takes/:take', (req: Request, res: Response) =>
-    takes(res, () => deleteBuildTake(String(req.params.id), authenticate(req)!, String(req.params.take))));
+    takes(res, () => deleteBuildTake(String(req.params.id), authenticate(req)!, String(req.params.take), Number(req.query.revision))));
 
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {

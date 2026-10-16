@@ -131,7 +131,7 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
     await t.test(`${count} takes use ${widths.join('+')}`, async () => {
       const s = session();
       const first = requests.length;
-      generateBuildTakes(s.id, 'user', 0, count);
+      generateBuildTakes(s.id, 'user', 0, count, 0);
       await until(() => getBuildSession(s.id, 'user').pending.length === 0);
       const done = getBuildSession(s.id, 'user');
       assert.equal(done.error, null);
@@ -153,8 +153,8 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
         }
       }
       if (count === 4) {
-        keepBuildTake(s.id, 'user', done.takes[0].id);
-        generateBuildTakes(s.id, 'user', 1, 4);
+        keepBuildTake(s.id, 'user', done.takes[0].id, 0);
+        generateBuildTakes(s.id, 'user', 1, 4, 0);
         await until(() => getBuildSession(s.id, 'user').pending.length === 0);
         const req = requests.at(-1)!;
         assert.equal(req.continue_codec_ids, true);
@@ -169,7 +169,7 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
       mode = failure;
       const first = requests.length;
       const s = session();
-      generateBuildTakes(s.id, 'user', 0, 10);
+      generateBuildTakes(s.id, 'user', 0, 10, 0);
       await until(() => !getBuildSession(s.id, 'user').pending.length);
       const done = getBuildSession(s.id, 'user');
       assert.equal(done.takes.length, 0);
@@ -181,10 +181,10 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
     mode = 'running'; cancels = 0; polls = 0;
     const first = requests.length;
     const s = session();
-    generateBuildTakes(s.id, 'user', 0, 10);
+    generateBuildTakes(s.id, 'user', 0, 10, 0);
     await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 50);
     assert.equal(getBuildSession(s.id, 'user').pending[0].activeCount, 4);
-    assert.throws(() => generateBuildTakes(s.id, 'user', 0, 1), /pending takes/);
+    assert.throws(() => generateBuildTakes(s.id, 'user', 0, 1, 0), /pending takes/);
     await assert.rejects(cancelBuildTakes(s.id, 'other-user'), /not found/);
     await cancelBuildTakes(s.id, 'user');
     await until(() => !getBuildSession(s.id, 'user').pending.length);
@@ -198,7 +198,7 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
     let now = 0;
     st.mock.method(Date, 'now', () => now += 16 * 60_000);
     const s = session();
-    generateBuildTakes(s.id, 'user', 0, 5);
+    generateBuildTakes(s.id, 'user', 0, 5, 0);
     // Use the event loop rather than a clock that this test has replaced.
     while (getBuildSession(s.id, 'user').pending.length) await new Promise(resolve => setImmediate(resolve));
     assert.match(getBuildSession(s.id, 'user').error!, /timed out/);
@@ -211,7 +211,7 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
     await new Promise(resolve => setImmediate(resolve));
     const s = session();
     const first = requests.length;
-    generateBuildTakes(s.id, 'user', 0, 5);
+    generateBuildTakes(s.id, 'user', 0, 5, 0);
     resetGpuLane(); release(); await occupied;
     await until(() => !getBuildSession(s.id, 'user').pending.length);
     assert.equal(requests.length, first);
@@ -225,4 +225,139 @@ test('track mapping rejects duplicate indices, unknown indices, extra variations
   }
   assert.throws(() => mapTakeTracks([10, 11], tracks, [pcm(1)]), /audio parts/);
   assert.throws(() => mapTakeTracks([10, 11], tracks, [pcm(1), Buffer.from('invalid audio')]), /valid WAV/);
+});
+
+test('cover-local lyrics: validated, revisioned, isolated, and the next take follows them', async t => {
+  const { applyBuildLyrics, deleteBuildTake, undoBuildKeep, lyricsProblem } = await import('./yue2Takes.js');
+  const previousDir = config.data.dir;
+  const dir = fs.mkdtempSync(path.resolve('.test-yue2-lyrics-'));
+  config.data.dir = dir;
+  t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
+  const requests: Yue2SynthRequest[] = [];
+  const results = new Map<string, Yue2TrackDetail[]>();
+  let hold = false, cancelled = false;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/synth') {
+      const req = JSON.parse(String(init?.body)) as Yue2SynthRequest;
+      requests.push(req);
+      const id = String(requests.length);
+      results.set(id, [{ song: 0, seed: req.seed!, noise_seed: req.seed!, variation: 0,
+        semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(400).fill(1)], frames: 400 }]);
+      return Response.json({ id });
+    }
+    if (url.pathname === '/yue2/align') return Response.json({ words: [] });
+    if (url.searchParams.has('cancel')) { cancelled = true; return Response.json({}); }
+    if (url.searchParams.has('result')) return new Response(new Uint8Array(pcm(1)), { headers: { 'content-type': 'audio/wav' } });
+    if (hold) return Response.json({ status: cancelled ? 'cancelled' : 'running', phase: 'semantic', phase_step: 1, phase_total: 4 });
+    return Response.json({ status: 'done', tracks: results.get(url.searchParams.get('id')!) });
+  });
+  const until = async (condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!condition()) { assert.ok(Date.now() < deadline, 'finished within deadline'); await new Promise(r => setTimeout(r, 5)); }
+  };
+  const toRequest = (p: Record<string, unknown>) => ({ style: 'ambient', cot: 'off', abc: score, lyrics: String(p.lyrics) }) as Yue2SynthRequest;
+  const start = (user = 'user') => createBuildSession({ lyrics }, toRequest({ lyrics }), user);
+  const settle = (id: string) => until(() => !getBuildSession(id, 'user').pending.length);
+  const edited = lyrics.replace('hook line now', 'a brand new hook');
+
+  await t.test('length and section tags are validated', () => {
+    assert.equal(lyricsProblem(lyrics), null);
+    assert.match(lyricsProblem('')!, /empty/);
+    assert.match(lyricsProblem('x'.repeat(20_001))!, /limited/);
+    assert.match(lyricsProblem('just words')!, /section tags/);
+    assert.match(lyricsProblem('words first\n[verse]\nmore')!, /above the first line/);
+    assert.match(lyricsProblem('[verse\nmore')!, /Line 1/);
+    assert.match(lyricsProblem('[ ]\nmore')!, /Line 1/);
+    const s = start();
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 0, 'no tags here', toRequest), /section tags/);
+    assert.equal(getBuildSession(s.id, 'user').revision, 0);
+  });
+
+  await t.test('apply changes params and request together, survives reload, and bumps the revision once', async () => {
+    const s = start();
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 3, edited, toRequest), /changed since/);
+    const next = applyBuildLyrics(s.id, 'user', 0, edited, toRequest);
+    assert.equal(next.revision, 1);
+    assert.equal(next.params.lyrics, edited);
+    assert.equal(getBuildSession(s.id, 'user').params.lyrics, edited);
+    assert.equal(applyBuildLyrics(s.id, 'user', 1, edited, toRequest).revision, 1);
+    generateBuildTakes(s.id, 'user', 0, 1, 1);
+    await settle(s.id);
+    assert.equal(requests.at(-1)!.lyrics, edited);
+    assert.equal(getBuildSession(s.id, 'user').takes[0].revision, 1);
+  });
+
+  await t.test('two sessions and two users stay apart', () => {
+    const a = start(), b = start(), other = start('other');
+    applyBuildLyrics(a.id, 'user', 0, edited, toRequest);
+    assert.equal(getBuildSession(b.id, 'user').params.lyrics, lyrics);
+    assert.equal(getBuildSession(other.id, 'other').params.lyrics, lyrics);
+    assert.throws(() => applyBuildLyrics(a.id, 'other', 1, lyrics, toRequest), /not found/);
+    assert.equal(getBuildSession(a.id, 'user').params.lyrics, edited);
+  });
+
+  await t.test('updates are refused while takes are pending', async () => {
+    hold = true;
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 25);
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 0, edited, toRequest), /pending/);
+    await cancelBuildTakes(s.id, 'user');
+    await settle(s.id);
+    hold = false;
+  });
+
+  await t.test('candidates made before an edit cannot be kept; mutations on the old revision fail', async () => {
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await settle(s.id);
+    const old = getBuildSession(s.id, 'user').takes[0];
+    applyBuildLyrics(s.id, 'user', 0, edited, toRequest);
+    assert.throws(() => keepBuildTake(s.id, 'user', old.id, 0), /changed since/);
+    assert.throws(() => keepBuildTake(s.id, 'user', old.id, 1), /before the last change/);
+    assert.throws(() => generateBuildTakes(s.id, 'user', 0, 1, 0), /changed since/);
+    assert.throws(() => deleteBuildTake(s.id, 'user', old.id, 0), /changed since/);
+    assert.throws(() => undoBuildKeep(s.id, 'user', undefined, 0), /changed since/);
+  });
+
+  await t.test('lyrics of built sections are locked, later ones are free, kept audio stays', async () => {
+    const s = start();
+    generateBuildTakes(s.id, 'user', 1, 1, 0);
+    await settle(s.id);
+    const take = getBuildSession(s.id, 'user').takes[0];
+    keepBuildTake(s.id, 'user', take.id, 0);
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 0, lyrics.replace('first line here', 'another line'), toRequest), /locked/);
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 0, lyrics.replace('[intro]\n', '[intro]\nla la\n'), toRequest), /locked/);
+    assert.equal(getBuildSession(s.id, 'user').revision, 0);
+    const next = applyBuildLyrics(s.id, 'user', 0, edited, toRequest);
+    assert.deepEqual(next.kept, [take.id]);
+    assert.ok(fs.existsSync(path.join(config.data.audioDir, 'takes', s.id, `${take.id}.wav`)));
+    // The kept take stays the spine; the next section resumes it under the new text.
+    generateBuildTakes(s.id, 'user', 2, 1, 1);
+    await settle(s.id);
+    assert.equal(requests.at(-1)!.lyrics, edited);
+    assert.equal(requests.at(-1)!.continue_codec_ids, true);
+  });
+
+  await t.test('a session written before revisions opens as version 2', async () => {
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await settle(s.id);
+    const file = path.join(config.data.audioDir, 'takes', s.id, 'session.json');
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    keepBuildTake(s.id, 'user', stored.takes[0].id, 0);
+    const legacy = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const key of ['version', 'revision', 'arrangement']) delete legacy[key];
+    legacy.takes = legacy.takes.map(({ revision: _r, parent: _p, occurrences: _o, ...take }: Record<string, unknown>) => take);
+    fs.writeFileSync(file, JSON.stringify(legacy));
+    const opened = getBuildSession(s.id, 'user');
+    assert.equal(opened.version, 2);
+    assert.equal(opened.revision, 0);
+    assert.equal(opened.takes[0].parent, null);
+    assert.deepEqual(opened.kept, [stored.takes[0].id]);
+    generateBuildTakes(s.id, 'user', 1, 1, 0);
+    await settle(s.id);
+    assert.equal(getBuildSession(s.id, 'user').takes.at(-1)!.parent, stored.takes[0].id);
+  });
 });
