@@ -201,7 +201,7 @@ import { setEngineReady } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
-import { onEngineRestarted, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
+import { onEngineRestarted, retryIfGaveUp, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
 import { killActiveChildren } from './services/training/labelingQueue.js';
 
 // ── Required runtime DLL bootstrap ──────────────────────────────────
@@ -232,7 +232,10 @@ function getRequiredRuntimeIds(): string[] {
 }
 
 async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[] }> {
-  const engineDir = path.dirname(config.aceServer.exe);
+  // Downloads land in the data folder's tools/runtime in a release
+  // (modelDownloadService.engineDir); older installs keep them beside the exe.
+  const runtimeDirs = [modelDownloadService.engineDir, path.dirname(config.aceServer.exe)];
+  const present = (filename: string) => runtimeDirs.some(d => fs.existsSync(path.join(d, filename)));
   const registry = JSON.parse(
     fs.readFileSync(path.join(__dirname, 'data', 'model-registry.json'), 'utf-8')
   );
@@ -242,7 +245,7 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   for (const id of REQUIRED_RUNTIME_IDS) {
     const file = registry.files.find((f: any) => f.id === id);
     if (!file) continue;
-    if (!fs.existsSync(path.join(engineDir, file.filename))) {
+    if (!present(file.filename)) {
       missing.push({ id, filename: file.filename });
     }
   }
@@ -325,7 +328,7 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // Re-check which files are actually present
   const stillMissing: string[] = [];
   for (const m of missing) {
-    if (!fs.existsSync(path.join(engineDir, m.filename))) {
+    if (!present(m.filename)) {
       stillMissing.push(m.filename);
     }
   }
@@ -367,6 +370,17 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   setEngineReady(false, cudaReady ? 'Starting engine...' : 'Starting engine (CPU only — CUDA runtime missing)...');
   startAceServer();
   setEngineReady(true, cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
+
+  // The engine scans models once at boot, so wait for the whole queue to
+  // drain before retrying — retrying after the first file can boot it on a
+  // VAE alone, blind to the DiT still downloading.
+  modelDownloadService.on('progress', () => {
+    const jobs = modelDownloadService.getJobs();
+    if (jobs.some(j => j.status === 'completed')
+        && !jobs.some(j => j.status === 'queued' || j.status === 'downloading')) {
+      retryIfGaveUp();
+    }
+  });
 
   // MiniMax-Music3 holds its chosen quant in engine memory, so a restart
   // reverts to the best-first default (f16) and silently discards the user's

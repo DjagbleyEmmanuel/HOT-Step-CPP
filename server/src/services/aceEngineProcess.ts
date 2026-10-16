@@ -55,6 +55,8 @@ let crashCount = 0;
 let firstCrashTime = 0;
 const MAX_CRASHES = 3;
 const CRASH_WINDOW_MS = 30_000; // 30 seconds
+/** Set when the crash limiter gives up; cleared by the next restart. */
+let gaveUp = false;
 
 /**
  * Bumped on every unexpected engine exit. A job in flight when it changes is
@@ -244,9 +246,10 @@ export function startAceServer(): ChildProcess | null {
 
       if (crashCount >= MAX_CRASHES) {
         console.error(`[ace-server] Crashed ${MAX_CRASHES} times within ${CRASH_WINDOW_MS / 1000}s — giving up.`);
-        console.error('[ace-server] This usually means a required DLL is missing from the engine/ directory.');
-        console.error('[ace-server] Check the error above, or try re-extracting the release zip.');
-        setEngineReady(false, `Engine crashed ${MAX_CRASHES} times — check logs for missing DLLs`);
+        console.error('[ace-server] Check the error above: usually no models downloaded yet, or a DLL missing from the engine/ directory.');
+        console.error('[ace-server] The engine starts again by itself once a model download finishes.');
+        setEngineReady(false, `Engine crashed ${MAX_CRASHES} times — download a model in the Model Manager, or check the logs`);
+        gaveUp = true;
         return;
       }
 
@@ -355,6 +358,17 @@ export function stopAceServer(reason = 'Engine stopped', timeoutMs = 15_000,
 }
 
 /**
+ * Respawn the engine if the crash limiter gave up. A first launch with an empty
+ * models folder exits at the model scan three times before the user has had a
+ * chance to download anything; this brings it back once they have.
+ */
+export function retryIfGaveUp(): void {
+  if (!gaveUp || suspended) return;
+  console.log('[Server] Models changed since the engine gave up — starting it again');
+  void restartAceServer();
+}
+
+/**
  * Clear `suspended`, respawn ace-server and poll /health until it answers.
  * Resolves true when the engine came back, false on timeout.
  */
@@ -363,6 +377,8 @@ export async function restartAceServer(): Promise<boolean> {
   // `suspended`, or the orphaned timer spawns a duplicate engine 3 s from now.
   cancelPendingRespawn();
   suspended = false;
+  gaveUp = false;
+  crashCount = 0;
   setEngineReady(false, 'Restarting engine...');
 
   if (aceProcess && aceProcess.exitCode === null && aceProcess.signalCode === null) {
