@@ -342,6 +342,34 @@ node tools/docs/check-docs.mjs
 For the archive command and backend acceptance rules, see
 [the helper reference](../../release/smoke-artifact.md).
 
+### Optional hosted CPU generation trial
+
+The manual preflight input `cpu_generation_trial` defaults to `false`. Enabling it
+adds a separate `windows-2022` job that downloads and verifies the CPU archive's
+checksum, then extracts it under `HOT Step CPU trial`. The usual five Windows builds
+and archive gates still run. The trial uses `continue-on-error`, and release creation
+does not depend on it. Inspect its evidence even when the overall workflow is green.
+
+The trial downloads `lm-0.6b-q80`, `dit-std-base-q4km`, `embedding-q8` and `vae-bf16`
+from the registry, checks their file sizes, and requires the total to remain
+3,277,122,752 bytes. Downloads have a separate ten-minute budget and no model cache.
+It runs the packaged `ace-lm` and `ace-synth` sequentially with a shared five-minute
+inference budget, including model loading. The request is ten seconds, the LM's
+minimum supported duration, with one DiT step and flash attention disabled.
+The child processes use the packaged CPU backends and Windows system paths.
+
+The `cpu-generation-trial` artifact contains `download.json`, `inference.json`, CPU
+details, request JSON, process logs and any output WAV. Download timing is separate
+from inference timing. RAM is the maximum process peak working set observed across
+the sequential LM and synthesis phases, not total VM memory. Phase timings and peaks
+are also recorded. A timeout or failed process preserves the available evidence.
+
+Success requires a complete, nonempty stereo 48 kHz PCM16 WAV with a nonzero sample
+and duration within 0.25 seconds of the requested ten seconds. One-step synthesis
+proves execution only: the base DiT normally needs 60-100 steps, and audio quality
+still needs a listening check. Hosted speed and memory use must be measured before
+considering a generation gate. See the [trial dispatch instructions](releasing.md#optional-cpu-generation-measurement).
+
 ## Portable releases
 
 A portable release bundles the engine, a Node runtime, the server and the built UI, so users

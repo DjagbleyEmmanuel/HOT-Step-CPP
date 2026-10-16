@@ -91,6 +91,33 @@ It collects the original checksummed `release-*` artifacts, excluding smoke evid
 The Windows preflight proves startup and backend loading on hosted runners; the local
 release gate and listening check above still cover model execution and audio quality.
 
+### Optional CPU generation measurement
+
+For a measured CPU trial, obtain approval for both pushing the reviewed commits and
+dispatching the workflow. Push first: `--ref master` uses the remote branch, so local
+commits are not included until pushed. After approval and a successful push, run:
+
+```bash
+gh workflow run release.yml --ref master -f cpu_generation_trial=true
+```
+
+The input defaults to `false`. This still builds and tests all five Windows variants;
+only the added generation job uses the CPU archive. It downloads approximately
+3.3 GB of models without caching, with a ten-minute download budget, then attempts
+one ten-second LM generation and one-step synthesis within five minutes total.
+It creates no tag or release and does not gate release creation.
+
+Inspect the `cpu-generation-trial` job and its evidence artifact directly. The job
+uses `continue-on-error`, so a green workflow alone does not prove generation passed.
+Report the run link, `download.json` download seconds, `inference.json` inference
+seconds and peak working set bytes, and whether WAV validation passed. If it times
+out or fails, report that outcome rather than a successful generation time.
+The artifact includes logs and any generated audio for inspection.
+
+The reduced-step trial establishes execution only, not audio quality or normal
+generation speed. Keep it non-gating until hosted measurements support a decision.
+See [trial details and validation limits](building.md#optional-hosted-cpu-generation-trial).
+
 ### Optional full-platform compile test
 
 To verify CI compiles without cutting a real release, push a throwaway
