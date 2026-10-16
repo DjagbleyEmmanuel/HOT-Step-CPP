@@ -14,17 +14,19 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS engine-builder
 # Default to Blackwell (sm_120a) for fast dev builds.
 # Override with --build-arg for multi-arch distribution.
 ARG CUDA_ARCHS="120a"
+ARG ENABLE_TRT=1
+ARG BUILD_JOBS
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build build-essential git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # TensorRT SDK for DiT/LM acceleration (native TRT API)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnvinfer-dev \
-    libnvinfer-plugin-dev \
-    libnvonnxparsers-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN if [ "$ENABLE_TRT" = 1 ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        libnvinfer-dev libnvinfer-plugin-dev libnvonnxparsers-dev \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Download ONNX Runtime GPU SDK (Linux x64) for SuperSep stem separation
 ARG ORT_VERSION=1.25.1
@@ -32,8 +34,10 @@ RUN curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_V
     | tar xz -C /opt \
     && mv "/opt/onnxruntime-linux-x64-gpu-${ORT_VERSION}" /opt/onnxruntime
 
-WORKDIR /build
+WORKDIR /build/engine
 COPY engine/ .
+RUN test -f ggml/CMakeLists.txt && test -f vendor/vst3sdk/CMakeLists.txt || \
+    (echo "Initialize submodules first: git submodule update --init --recursive" >&2; exit 1)
 
 # Build the C++ engine with CUDA + ONNX Runtime
 RUN cmake -B build -G Ninja \
@@ -45,16 +49,17 @@ RUN cmake -B build -G Ninja \
     -DGGML_CPU_ALL_VARIANTS=ON \
     -DGGML_BACKEND_DL=ON \
     -DORT_ROOT=/opt/onnxruntime \
-    && cmake --build build --config Release -j"$(nproc)"
+    && cmake --build build --config Release -j"${BUILD_JOBS:-$(nproc)}"
 
 # Stage all binaries + shared libs into /staging for clean COPY
 RUN mkdir -p /staging/engine \
-    && for bin in ace-server mastering mp3-codec vst-host; do \
-         [ -f "build/${bin}" ] && cp "build/${bin}" /staging/engine/; \
+    && for bin in ace-server ace-synth ace-lm ace-understand ace-train ace-caption ace-midi neural-codec quantize mastering mp3-codec vst-host; do \
+         test -f "build/${bin}" || { echo "Missing engine binary: ${bin}" >&2; exit 1; }; \
+         cp "build/${bin}" /staging/engine/; \
        done \
     && find build/ -maxdepth 1 -name '*.so' -exec cp {} /staging/engine/ \; \
     && find build/ -maxdepth 1 -name '*.so.*' -exec cp {} /staging/engine/ \; \
-    && cp /opt/onnxruntime/lib/libonnxruntime*.so* /staging/engine/ 2>/dev/null || true
+    && cp /opt/onnxruntime/lib/libonnxruntime*.so* /staging/engine/
 
 
 # ── Stage 2: UI Builder ─────────────────────────────────────────────
@@ -62,41 +67,50 @@ FROM node:22-slim AS ui-builder
 
 WORKDIR /build/ui
 COPY ui/package*.json ./
-RUN npm install
+RUN npm ci
 COPY ui/ .
 RUN npx vite build
 
 
 # ── Stage 3: Server Dependencies ────────────────────────────────────
-# Full node image (not slim) — better-sqlite3 needs Python + g++ for native build
-FROM node:22 AS server-deps
+# Official Node binaries; native modules build on the runtime's Ubuntu/glibc.
+FROM node:22 AS node-runtime
+FROM ubuntu:22.04 AS server-deps
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/server
 COPY server/package*.json ./
-# Install production deps. tsx is in both devDependencies and optionalDependencies,
-# but npm --omit=dev deduplicates and skips it. Install explicitly.
-RUN npm install --omit=dev && npm install tsx
+# Include dev dependencies so the locked tsx runtime is retained despite npm
+# deduplicating its optional/dev entries. No unlocked follow-up install.
+RUN npm ci --include=dev
 
 
 # ── Stage 4: Runtime ────────────────────────────────────────────────
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04 AS runtime-base
+ARG ENABLE_TRT=1
 
 # Install Node.js 22 (LTS) + runtime libraries the engine needs
 # TensorRT 11 runtime libraries for native DiT/LM acceleration (dit-trt.h)
 # Note: ORT TRT EP needs TRT 10 (libnvinfer.so.10) but segfaults due to
 # version mismatch with CUDA 12.8. ORT falls back to CUDA EP gracefully
 # which is fine for the small text/cond encoders. Native TRT 11 handles DiT.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnvinfer11 \
-    libnvinfer-plugin11 \
-    libnvonnxparsers11 \
-    && rm -rf /var/lib/apt/lists/*
+RUN if [ "$ENABLE_TRT" = 1 ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        libnvinfer11 libnvinfer-plugin11 libnvonnxparsers11 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates libgomp1 \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 
 WORKDIR /app
 
@@ -114,12 +128,9 @@ COPY --from=ui-builder /build/ui/dist/ /app/ui/dist/
 # Noise samples (small WAV files for noise profiling, baked into image)
 COPY noise_samples/ /app/noise_samples/
 
-# Docker-specific environment config
-COPY .env.docker /app/.env
-
 # Entrypoint script
 COPY docker/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # GGML backends + ORT need to find their .so files
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/app/engine:${LD_LIBRARY_PATH}
@@ -128,3 +139,24 @@ ENV NODE_ENV=production
 EXPOSE 3001 8085
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+# RunPod persists its models, adapters, library and logs on the mounted volume.
+FROM runtime-base AS runpod
+COPY engine/plugins/ /app/engine/plugins/
+COPY plugins/ /app/plugins/
+ENV HOT_STEP_DATA_ROOT=/workspace \
+    ACESTEPCPP_EXE=/app/engine/ace-server \
+    ACESTEPCPP_MODELS=/workspace/models \
+    ACESTEPCPP_ADAPTERS=/workspace/adapters \
+    ACESTEPCPP_HOST=127.0.0.1 \
+    ACESTEPCPP_PORT=8085 \
+    SERVER_HOST=0.0.0.0 \
+    SERVER_PORT=3001 \
+    DATA_DIR=/workspace/data \
+    GGML_CUDA_GRAPH_OPT=1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:${SERVER_PORT}/api/health >/dev/null || exit 1
+
+# Keep the default build and Compose environment unchanged.
+FROM runtime-base AS runtime
+COPY .env.docker /app/.env
