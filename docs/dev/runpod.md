@@ -67,10 +67,11 @@ In another terminal, check startup and open `http://localhost:3001`:
 curl -f http://localhost:3001/api/health
 ```
 
-Check that `aceServer.status` is not `disconnected` and inspect `engine.ready`,
-`engine.bootStatus` and the container logs. An HTTP response alone does not prove
-the engine started. After testing, authenticate to your registry and publish the
-same tag:
+On a fresh, empty `/workspace` there are no models yet, so expect health to return
+200 and the UI to load with `aceServer.status=disconnected` and
+`engine.ready=false`. The logs show `no models found in /workspace/models` and
+`Crashed 3 times within 30s`; that is normal until models are installed. After
+testing, authenticate to your registry and publish the same tag:
 
 ```sh
 docker login YOUR_REGISTRY
@@ -132,3 +133,8 @@ Open the Model Manager and download a compatible pack before generating music.
 Existing model files can be placed in `/workspace/models` before startup. For
 startup failures, inspect the Pod's container logs and `/workspace/logs`. Back up
 the persistent volume before deleting or replacing storage.
+
+Once models are installed, check `/api/health` again: `aceServer.status` should no
+longer be `disconnected` and `engine.ready` should be true. Inspect
+`engine.bootStatus` and the container logs if not; an HTTP response alone does not
+prove the engine started.
