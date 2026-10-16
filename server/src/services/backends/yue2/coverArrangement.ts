@@ -140,7 +140,8 @@ export interface Composed {
 }
 
 /** Writes the score and lyrics out in the order of `plan` (source section
- *  indexes; repeats allowed). The source order gives the source text back. */
+ *  indexes; repeats allowed). The source order gives the source text back
+ *  (lyrics gain a final newline if they lack one). */
 export function composeArrangement(abc: string, lyrics: string, plan: number[]): Composed {
   abc = abc.replace(/\r\n?/g, '\n');
   lyrics = lyrics.replace(/\r\n?/g, '\n');
@@ -178,8 +179,28 @@ export function composeArrangement(abc: string, lyrics: string, plan: number[]):
   const out = lines.slice(0, headerEnd);
   const blocks = sungBlocks(lyrics);
   const chars = Array.from(lyrics);
-  const pairs = pairSections(starts.map(at => label(lines[at].trim())), lyrics);
-  const sourceOrder = plan.length === starts.length && plan.every((s, i) => s === i);
+  const labels = starts.map(at => label(lines[at].trim()));
+  const pairs = pairSections(labels, lyrics);
+  // Each section owns a verbatim slice of the lyrics, from its own block (its
+  // sung one, else an empty tag of its kind between its neighbours' blocks)
+  // to the next owned block. Text before that belongs to the first section.
+  // Every plan, the source order included, is a concatenation of the same
+  // slices, so kept text and offsets never depend on what follows.
+  const anchor = pairs.map(at => (at === null ? null : blocks[at].start));
+  const all = splitLyricBlocks(lyrics);
+  for (let i = 0; i < anchor.length; i++) {
+    if (anchor[i] !== null) continue;
+    const lo = anchor.slice(0, i).reduce<number>((last, a) => a ?? last, -1);
+    const hi = anchor.slice(i + 1).find(a => a !== null) ?? Infinity;
+    anchor[i] = all.find(b => b.tag && !b.body.trim() && b.start > lo && b.start < hi
+      && sectionKind(b.tag) === sectionKind(labels[i]))?.start ?? null;
+  }
+  const cuts = anchor.map((a, i) => (i === 0 ? 0 : a ?? anchor.slice(i + 1).find(n => n !== null) ?? chars.length));
+  cuts.push(chars.length);
+  const slices = cuts.slice(0, -1).map((c, i) => chars.slice(c, cuts[i + 1]).join(''));
+  // The last slice may follow another in a new order, so it ends its line.
+  const tail = slices.findLastIndex(slice => slice);
+  if (tail >= 0 && !slices[tail].endsWith('\n')) slices[tail] += '\n';
   const lyricParts: string[] = [];
   const occurrences: ComposedOccurrence[] = [];
   let state = header, bar = 1, lyricAt = 0;
@@ -210,26 +231,18 @@ export function composeArrangement(abc: string, lyrics: string, plan: number[]):
     if (!voices.size && changed.length) out.push(...changed);
     state = walk(want, chunks[s]);
     const at = pairs[s];
-    let lyric: [number, number] | null = null;
-    if (at !== null && sourceOrder) lyric = [blocks[at].start, blocks[at].end];
-    else if (at !== null) {
-      const text = chars.slice(blocks[at].start, blocks[at].end).join('').replace(/\s+$/, '') + '\n\n';
-      lyricParts.push(text);
-      lyric = [lyricAt, lyricAt + Array.from(text).length];
-      lyricAt = lyric[1];
-    }
+    const lyric: [number, number] | null = at === null ? null
+      : [lyricAt + blocks[at].start - cuts[s], lyricAt + Math.min(blocks[at].end, cuts[s + 1]) - cuts[s]];
+    lyricParts.push(slices[s]);
+    lyricAt += Array.from(slices[s]).length;
     occurrences.push({ section: s, startBar: bar, bars: sections[s].bars, abcStart, lyric });
     bar += sections[s].bars;
   }
   out.push(...trailer);
-  // The source order keeps the source lyrics, unsung blocks included.
-  const composedLyrics = sourceOrder ? lyrics : lyricParts.join('').replace(/\n+$/, '\n');
-  if (!sourceOrder) {
-    // The final block lost its blank line; clip its span to the text.
-    const end = Array.from(composedLyrics).length;
-    for (const o of occurrences) if (o.lyric && o.lyric[1] > end) o.lyric[1] = end;
-  }
-  const used = new Set(plan.map(s => pairs[s]).filter((b): b is number => b !== null));
+  const composedLyrics = lyricParts.join('');
+  // A sung block is placed when the section owning its slice is.
+  const owner = (start: number) => cuts.findLastIndex((c, i) => i < slices.length && c <= start);
+  const used = new Set(blocks.flatMap((b, i) => (plan.includes(owner(b.start)) ? [i] : [])));
   const composedAbc = out.join('\n');
   const repaired = pairSections(scoreSections(composedAbc).map(s => s.label), composedLyrics);
   const own = occurrences.map(o => (o.lyric ? sungBlocks(composedLyrics).findIndex(b => b.start === o.lyric![0]) : null));

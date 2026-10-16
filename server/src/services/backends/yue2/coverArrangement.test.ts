@@ -77,13 +77,13 @@ test('a chorus repeated after itself restates 4/4 in each voice, once', () => {
 test('repeated lyric blocks: each sung occurrence gets its own copy, in order', () => {
   const plan = [INTRO, VERSE, CHORUS, CHORUS, BRIDGE, CHORUS, OUTRO];
   const out = composeArrangement(score, lyrics, plan);
-  assert.deepEqual(splitLyricBlocks(out.lyrics).map(b => b.tag), ['Verse', 'Chorus', 'Chorus', 'Bridge', 'Chorus']);
+  assert.deepEqual(splitLyricBlocks(out.lyrics).map(b => b.tag),
+    ['Intro', 'Verse', 'Chorus', 'Chorus', 'Bridge', 'Chorus', 'Outro']);
   const chars = Array.from(out.lyrics);
   assert.deepEqual(out.occurrences.map(o => (o.lyric ? chars.slice(...o.lyric).join('').trim() : null)), [
     null, '[Verse]\nwalking down the line', '[Chorus]\nsing it out', '[Chorus]\nsing it out',
     '[Bridge]\nturn around', '[Chorus]\nsing it out', null,
   ]);
-  // Unsung intro and outro tags are dropped once the order changes.
   assert.deepEqual(out.unplacedBlocks, []);
   // The lyric schedule pairs every sung occurrence with its own block.
   const wire = buildYue2LyricSchedule(out.abc, out.lyrics, schedule).wire;
@@ -110,6 +110,29 @@ test('the retained prefix: text before the next occurrence depends only on the k
   // And yue2Takes' cut for aligning a take that stops early still lands on
   // the end of the occurrence after it.
   assert.equal(lyricsThrough(b.abc, b.lyrics, 3), Array.from(b.lyrics).slice(0, b.occurrences[3].lyric![1]).join(''));
+});
+
+test('kept text and offsets survive leaving the source order, with odd whitespace and empty tags', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/16', 'Q:1/4=120', 'K:C', '% intro', 'V: Vocal', 'Z|', '% verse', 'V: Vocal', 'C16|',
+    '% chorus', 'V: Vocal', 'c16|', '% outro', 'V: Vocal', 'Z|', ''].join('\n');
+  for (const text of [
+    '[Intro]\n\n[Verse]\nla la\n\n[Chorus]\noh oh\n\n[Outro]\n',
+    'spoken first\n[Intro]\n[Verse]\n  la la  \n\n\n[Chorus]\noh oh\n[Outro]',
+    '[Verse]\nla la\n[Chorus]\noh oh',
+  ]) {
+    const source = composeArrangement(abc, text, [0, 1, 2, 3]);
+    const repeat = composeArrangement(abc, text, [0, 1, 2, 2, 3]);
+    assert.equal(source.lyrics, text.endsWith('\n') ? text : `${text}\n`);
+    // Intro and verse kept: everything up to the chorus is the same text.
+    const keptLyrics = source.occurrences[2].lyric![0];
+    assert.deepEqual(repeat.occurrences.slice(0, 3).map(o => [o.lyric, o.abcStart]), source.occurrences.slice(0, 3).map(o => [o.lyric, o.abcStart]));
+    assert.equal(Array.from(repeat.lyrics).slice(0, keptLyrics).join(''), Array.from(source.lyrics).slice(0, keptLyrics).join(''));
+    const cut = source.occurrences[2].abcStart;
+    assert.equal(Array.from(repeat.abc).slice(0, cut).join(''), Array.from(source.abc).slice(0, cut).join(''));
+    const timed = (o: typeof source) => buildYue2LyricSchedule(o.abc, o.lyrics, schedule).wire.sections[0];
+    assert.deepEqual(timed(repeat), timed(source));
+    assert.equal(repeat.textPairingMatches, true);
+  }
 });
 
 test('an unsung section moved before a sung one of its kind breaks re-pairing the text', () => {
