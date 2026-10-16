@@ -962,3 +962,15 @@ add_dependencies(vst-host version)
 if(APPLE)
     target_link_libraries(vst-host PRIVATE ${COCOA_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
 endif()
+
+# Embed the long-path manifest in every engine executable, so training and
+# adapter paths past 260 characters open when Windows long paths are enabled.
+if(MSVC)
+    get_property(_hs_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_hs_target IN LISTS _hs_targets)
+        get_target_property(_hs_type ${_hs_target} TYPE)
+        if(_hs_type STREQUAL "EXECUTABLE")
+            target_sources(${_hs_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/long-paths.manifest)
+        endif()
+    endforeach()
+endif()
