@@ -56,7 +56,7 @@ import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ScorePlanReview } from './ScorePlanReview';
-import { Yue2BuildPage, buildNext, finishSavedBuild, onBuildSaved, useYue2Build } from './Yue2Build';
+import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
@@ -198,7 +198,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The build's own lyrics before its first session, tied to the source they
   // were written for. Prepare's lyrics and the dataset are never changed by it.
   const [buildLyricsDraft, setBuildLyricsDraft] = useState<{ source: string; text: string } | null>(() => restore('buildLyricsDraft', null));
-  const buildLyricsSource = JSON.stringify([sourceMode, sourceAudioUrl, sourceSongId, sourceAssetId]);
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
@@ -1197,7 +1196,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     })();
   };
 
-  const buildLyrics = !instrumental && buildLyricsDraft?.source === buildLyricsSource ? buildLyricsDraft.text : null;
+  // The approved score is part of the source: a MusicXML import has no other identity.
+  const buildLyricsSource = JSON.stringify([sourceMode, sourceAudioUrl, sourceSongId, sourceAssetId, approvedSheet?.abc ?? '']);
+  const buildLyrics = instrumental ? null : draftText(buildLyricsDraft, buildLyricsSource);
   const build = useYue2Build(token, buildSessionId, setBuildSessionId, { text: buildLyrics,
     set: text => setBuildLyricsDraft(text === null || text === lyrics ? null : { source: buildLyricsSource, text }) });
   const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
@@ -1253,7 +1254,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
       lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : buildLyrics ?? lyrics}
-      prepareLyrics={lyrics} onApplyLyrics={build.applyLyrics}
+      prepareLyrics={lyrics} onApplyLyrics={build.applyLyrics} loading={build.loading}
       arStrength={buildSession ? Number((params?.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale ?? coverArStrength) : coverArStrength}
       onArStrength={v => setCoverArStrength(clampCoverAr(v))}
       title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}

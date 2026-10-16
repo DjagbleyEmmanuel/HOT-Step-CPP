@@ -27,3 +27,20 @@ test('a Save finishing after a newer build began leaves the newer build', () => 
   assert.deepEqual(seen, []);
   off();
 });
+
+test('lyrics edits wait for a saved build to load instead of becoming a draft', async () => {
+  const { lyricsTarget } = await import('./Yue2Build');
+  assert.equal(lyricsTarget('saved-id', null), 'loading');
+  assert.equal(lyricsTarget('saved-id', { id: 'saved-id' }), 'session');
+  assert.equal(lyricsTarget('', null), 'draft');
+});
+
+test('a draft belongs to the source and score it was written for', async () => {
+  const { draftText } = await import('./Yue2Build');
+  const first = JSON.stringify(['musicxml', '', '', '', 'X:1 first score']);
+  const second = JSON.stringify(['musicxml', '', '', '', 'X:1 other score']);
+  const draft = { source: first, text: '[verse]\nmine' };
+  assert.equal(draftText(draft, first), '[verse]\nmine');
+  assert.equal(draftText(draft, second), null);
+  assert.equal(draftText(null, first), null);
+});

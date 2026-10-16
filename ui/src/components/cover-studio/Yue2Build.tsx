@@ -40,6 +40,15 @@ export function buildNext(session: Yue2BuildSession | null): number {
   return spine ? spine.to + 1 : 0;
 }
 
+/** Where an Apply goes: the loaded session, a draft when there is no session at all, or
+ *  nowhere while a saved session is still loading (or failed to), so it cannot be lost to a draft. */
+export const lyricsTarget = (sessionId: string, live: unknown): 'session' | 'draft' | 'loading' =>
+  live ? 'session' : sessionId ? 'loading' : 'draft';
+
+/** A saved draft's text if it was written for `source`, else null (follow Prepare). */
+export const draftText = (draft: { source: string; text: string } | null, source: string): string | null =>
+  draft?.source === source ? draft.text : null;
+
 /** The build's own lyrics before a session exists: null follows Prepare. */
 export interface BuildLyricsDraft { text: string | null; set: (text: string | null) => void }
 
@@ -60,7 +69,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   };
   const live = session && session.id === sessionId ? session : null;
   return {
-    session: live, error: error || snapshot.error?.message || '', busy,
+    session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. */
     generate: (params: Record<string, unknown>, to: number, count: number) => call(async () => {
       let started = live;
@@ -74,6 +83,8 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
      *  True once the server (or, before a session, its validation) accepted them. */
     applyLyrics: async (text: string) => {
+      const target = lyricsTarget(sessionId, live);
+      if (target === 'loading') { setError('This build is still loading; try again once it has.'); return false; }
       if (live) return !!(await call(() => yue2CoverApi.buildLyrics(live.id, live.revision, text, token!)));
       setBusy(true);
       try { await yue2CoverApi.buildLyricsCheck(text, token!); draft.set(text); setError(''); return true; }
@@ -109,6 +120,8 @@ interface PageProps {
   prepareLyrics: string;
   /** Applies new lyrics to this build only; true when accepted. */
   onApplyLyrics: (text: string) => Promise<boolean>;
+  /** A saved build is still loading, so its lyrics cannot be edited yet. */
+  loading: boolean;
   summary: string;
   /** AR strength: the session's captured value once it exists, else the Cover setting. */
   arStrength: number;
@@ -287,10 +300,10 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {done ? 'Done' : `Building: ${rangeLabel || p.sections[next].label}`}</p>
             {editing === null && <>
-              {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void apply(p.prepareLyrics)} disabled={p.busy || waiting > 0}
+              {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void apply(p.prepareLyrics)} disabled={p.busy || p.loading || waiting > 0}
                 title="Replace this build's lyrics with the Prepare page's"
                 className="text-xs text-zinc-500 hover:text-cyan-600 disabled:opacity-40">Use Prepare lyrics</button>}
-              <button type="button" onClick={() => setEditing(p.lyrics)} disabled={p.busy || waiting > 0}
+              <button type="button" onClick={() => setEditing(p.lyrics)} disabled={p.busy || p.loading || waiting > 0}
                 title={waiting > 0 ? 'Wait for the pending takes, or cancel them, to edit the lyrics' : 'Edit the lyrics for this build only'}
                 className="flex items-center gap-1 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Pencil className="w-3 h-3" />Edit lyrics</button>
             </>}
