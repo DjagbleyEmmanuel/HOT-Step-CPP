@@ -844,59 +844,117 @@ jobs:
             seed = 42; lm_seed = 42; lm_mode = 'generate'; use_cot_caption = $false
             lm_model = 'acestep-5Hz-lm-0.6B-Q8_0.gguf'
             synth_model = 'acestep-v15-base-Q4_K_M.gguf'
+            emb_model = 'Qwen3-Embedding-0.6B-Q8_0.gguf'; vae_model = 'vae-BF16.gguf'
             inference_steps = 1; guidance_scale = 1; output_format = 'wav16'
             lm_batch_size = 1; synth_batch_size = 1
           }
           $request | ConvertTo-Json | Set-Content "$evidence/request.json"
           $result = [ordered]@{
-            status = 'failed'; inference_seconds = 0; peak_working_set_bytes = 0
+            status = 'failed'; inference_seconds = $null; peak_working_set_bytes = $null
             requested_audio_seconds = 10; steps = 1; phases = @(); audio_seconds = $null
             note = 'Reduced-step execution test only; no audio quality claim. Peak RAM is process peak working set.'
           }
           $clock = [Diagnostics.Stopwatch]::StartNew()
-          function Invoke-TrialPhase([string]$name, [string]$exe, [string]$requestPath) {
-            $timer = [Diagnostics.Stopwatch]::StartNew()
-            $process = $null
-            $peak = 0L
-            $phase = [ordered]@{ name = $name; seconds = 0; peak_working_set_bytes = 0; exit_code = $null }
+          $process = $null
+          $ready = $false
+          $peak = 0L
+          $client = [Net.Http.HttpClient]::new()
+          $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
+          $client.BaseAddress = [uri]'http://127.0.0.1:18085'
+          function Assert-TrialRunning {
+            if ($clock.Elapsed.TotalSeconds -ge 300) { throw 'Five-minute inference budget exhausted' }
+            $process.Refresh()
+            if ($process.HasExited) { throw "ace-server exited $($process.ExitCode); see server.stderr.log" }
+            $script:peak = [math]::Max($script:peak, $process.PeakWorkingSet64)
+          }
+          function Invoke-TrialHttp([string]$method, [string]$path, [string]$body = '', [string]$outFile = '') {
+            Assert-TrialRunning
+            $message = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::new($method), $path)
+            $response = $null
             try {
-              if ($clock.Elapsed.TotalSeconds -ge 300) { throw 'Five-minute inference budget exhausted' }
-              $process = Start-Process -FilePath $exe -WorkingDirectory $engine -WindowStyle Hidden -PassThru `
-                -ArgumentList @('--models', "`"$root/models`"", '--request', "`"$requestPath`"", '--no-fa') `
-                -RedirectStandardOutput "$evidence/$name.stdout.log" -RedirectStandardError "$evidence/$name.stderr.log"
-              while (-not $process.HasExited) {
-                $process.Refresh()
-                $peak = [math]::Max($peak, $process.PeakWorkingSet64)
-                if ($clock.Elapsed.TotalSeconds -ge 300) { throw 'Five-minute inference budget exhausted' }
+              if ($body) { $message.Content = [Net.Http.StringContent]::new($body, [Text.Encoding]::UTF8, 'application/json') }
+              # Buffer the full response while sampling RAM and enforcing the same deadline.
+              $pending = $client.SendAsync($message)
+              while (-not $pending.IsCompleted) {
+                Assert-TrialRunning
                 Start-Sleep -Milliseconds 100
               }
-              $process.WaitForExit()
-              $phase.exit_code = $process.ExitCode
-              if ($process.ExitCode -ne 0) { throw "$name exited $($process.ExitCode)" }
-            } finally {
-              if ($process) {
-                if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
-                $process.Dispose()
+              Assert-TrialRunning
+              $response = $pending.GetAwaiter().GetResult()
+              if (-not $response.IsSuccessStatusCode) {
+                throw "${method} ${path}: HTTP $([int]$response.StatusCode): $($response.Content.ReadAsStringAsync().GetAwaiter().GetResult())"
               }
-              $phase.seconds = $timer.Elapsed.TotalSeconds
-              $phase.peak_working_set_bytes = $peak
-              $result.peak_working_set_bytes = [math]::Max($result.peak_working_set_bytes, $peak)
+              if ($outFile) {
+                [IO.File]::WriteAllBytes($outFile, $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult())
+              } else {
+                return $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              }
+            } finally {
+              if ($response) { $response.Dispose() }
+              $message.Dispose()
+            }
+          }
+          function Invoke-TrialPhase([string]$name, [string]$path, [hashtable]$body, [string]$outFile) {
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $phase = [ordered]@{ name = $name; status = 'failed'; seconds = $null; job_id = $null }
+            try {
+              $submitted = Invoke-TrialHttp 'POST' $path ($body | ConvertTo-Json -Depth 10) | ConvertFrom-Json
+              if (-not $submitted.id) { throw "$name returned no job ID" }
+              $phase.job_id = $submitted.id
+              $jobPath = '/job?id=' + [uri]::EscapeDataString([string]$submitted.id)
+              while ($true) {
+                $job = Invoke-TrialHttp 'GET' $jobPath | ConvertFrom-Json
+                $job | ConvertTo-Json -Depth 10 | Set-Content "$evidence/$name.status.json"
+                if ($job.status -eq 'done') { break }
+                if ($job.status -ne 'running') { throw "$name job $($submitted.id): $($job.status)" }
+                Start-Sleep -Milliseconds 100
+              }
+              Invoke-TrialHttp 'GET' "$jobPath&result=1" '' $outFile
+              $phase.status = 'passed'
+            } finally {
+              if ($phase.job_id) { $phase.seconds = $timer.Elapsed.TotalSeconds }
               $result.phases += $phase
             }
           }
           try {
-            Invoke-TrialPhase 'lm' "$engine/ace-lm.exe" "$evidence/request.json"
-            $planned = Get-Content "$evidence/request0.json" -Raw | ConvertFrom-Json
+            # Only the shipped server and its DLLs are needed, never the CLI LM/synth tools.
+            foreach ($file in @('ace-server.exe', 'ggml.dll', 'ggml-base.dll', 'ggml-cpu.dll')) {
+              if (-not (Test-Path -LiteralPath "$engine/$file" -PathType Leaf)) { throw "Missing packaged engine file: $file" }
+            }
+            foreach ($file in @($request.lm_model, $request.synth_model, $request.emb_model, $request.vae_model)) {
+              if (-not (Test-Path -LiteralPath "$root/models/$file" -PathType Leaf)) { throw "Missing downloaded model: $file" }
+            }
+            $process = Start-Process -FilePath "$engine/ace-server.exe" -WorkingDirectory $engine -WindowStyle Hidden -PassThru `
+              -ArgumentList @('--models', "`"$root/models`"", '--host', '127.0.0.1', '--port', '18085', '--no-fa') `
+              -RedirectStandardOutput "$evidence/server.stdout.log" -RedirectStandardError "$evidence/server.stderr.log"
+            while (-not $ready) {
+              Assert-TrialRunning
+              try {
+                $health = Invoke-TrialHttp 'GET' '/health' | ConvertFrom-Json
+                if ($health.status -ne 'ok') { throw 'Unexpected health response' }
+                $ready = $true
+              } catch {
+                Assert-TrialRunning
+                if ($clock.Elapsed.TotalSeconds -ge 30) { throw "ace-server did not become healthy: $_" }
+                Start-Sleep -Milliseconds 100
+              }
+            }
+            Invoke-TrialPhase 'lm' '/lm' $request "$evidence/lm.result.json"
+            $outputs = Get-Content "$evidence/lm.result.json" -Raw | ConvertFrom-Json -AsHashtable -NoEnumerate
+            if ($outputs -isnot [array] -or $outputs.Count -ne 1) { throw 'Expected one LM result' }
+            $planned = $outputs[0]
             if (-not $planned.audio_codes) { throw 'LM produced no audio codes' }
             if ($planned.duration -ne 10) { throw 'LM changed the requested minimum duration' }
-            # Preserve the LM output fields and make trial-only synthesis settings explicit.
-            $planned | Add-Member -Force -NotePropertyName inference_steps -NotePropertyValue 1
-            $planned | Add-Member -Force -NotePropertyName output_format -NotePropertyValue 'wav16'
-            $planned | ConvertTo-Json -Depth 10 | Set-Content "$evidence/request0.json"
-            Invoke-TrialPhase 'synth' "$engine/ace-synth.exe" "$evidence/request0.json"
+            # Match the app: keep every original field, overlay only the seven LM outputs.
+            $synth = $request.Clone()
+            foreach ($field in @('audio_codes', 'caption', 'lyrics', 'bpm', 'duration', 'keyscale', 'timesignature')) {
+              $synth[$field] = $planned[$field]
+            }
+            $synth | ConvertTo-Json -Depth 10 | Set-Content "$evidence/synth.request.json"
+            Invoke-TrialPhase 'synth' '/synth?format=wav16' $synth "$evidence/output.wav"
             $result.inference_seconds = $clock.Elapsed.TotalSeconds
             if ($result.inference_seconds -gt 300) { throw 'Inference exceeded five minutes' }
-            $wav = [IO.File]::ReadAllBytes("$evidence/request00.wav")
+            $wav = [IO.File]::ReadAllBytes("$evidence/output.wav")
             $ascii = [Text.Encoding]::ASCII
             if ($wav.Length -lt 44 -or $ascii.GetString($wav, 0, 4) -ne 'RIFF' -or $ascii.GetString($wav, 8, 4) -ne 'WAVE') { throw 'Invalid WAV header' }
             if ([BitConverter]::ToUInt32($wav, 4) + 8 -ne $wav.Length) { throw 'Truncated WAV' }
@@ -927,8 +985,21 @@ jobs:
             $result.error = $_.Exception.Message
             throw
           } finally {
-            if ($result.inference_seconds -eq 0) { $result.inference_seconds = $clock.Elapsed.TotalSeconds }
-            $result | ConvertTo-Json -Depth 6 | Set-Content "$evidence/inference.json"
+            # A failed launch has no inference measurement. Failed jobs keep elapsed
+            # time only after readiness, with status/error distinguishing them from a pass.
+            if ($ready) {
+              if ($null -eq $result.inference_seconds) { $result.inference_seconds = $clock.Elapsed.TotalSeconds }
+              if ($peak -gt 0) { $result.peak_working_set_bytes = $peak }
+            }
+            try {
+              $client.Dispose()
+              if ($process) {
+                if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+                $process.Dispose()
+              }
+            } finally {
+              $result | ConvertTo-Json -Depth 6 | Set-Content "$evidence/inference.json"
+            }
           }
 
       - name: Upload trial measurements, logs and audio

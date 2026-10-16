@@ -104,7 +104,11 @@ gh workflow run release.yml --ref master -f cpu_generation_trial=true
 The input defaults to `false`. This still builds and tests all five Windows variants;
 only the added generation job uses the CPU archive. It downloads approximately
 3.3 GB of models without caching, with a ten-minute download budget, then attempts
-one ten-second LM generation and one-step synthesis within five minutes total.
+one ten-second LM generation and one-step synthesis within five minutes total,
+including engine startup. It starts the archive's `ace-server.exe`, submits `/lm`,
+polls `/job`, then submits `/synth?format=wav16` and fetches the completed WAV,
+using the same HTTP sequence as the app. The trial does not need standalone
+LM or synthesis executables.
 It creates no tag or release and does not gate release creation.
 
 Inspect the `cpu-generation-trial` job and its evidence artifact directly. The job
@@ -113,6 +117,8 @@ Report the run link, `download.json` download seconds, `inference.json` inferenc
 seconds and peak working set bytes, and whether WAV validation passed. If it times
 out or fails, report that outcome rather than a successful generation time.
 The artifact includes logs and any generated audio for inspection.
+If the packaged server cannot start or become healthy, the step fails and records
+null inference time and peak RAM, rather than reporting a measurement.
 
 The reduced-step trial establishes execution only, not audio quality or normal
 generation speed. Keep it non-gating until hosted measurements support a decision.
