@@ -198,7 +198,7 @@ public:
                         Yue2AitkBlockWorkspace * workspace = nullptr,
                         ggml_tensor * device_input = nullptr, ggml_tensor * device_output = nullptr,
                         ggml_tensor * capture_k = nullptr, ggml_tensor * capture_v = nullptr,
-                        bool async = false) {
+                        bool async = false, ggml_tensor * capture_attention = nullptr) {
         using namespace yue2_aitk_executor_detail;
         if (!result) return fail(error, "forward result is null");
         if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
@@ -238,6 +238,14 @@ public:
             };
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.key, rows(capture_k)));
             ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.value, rows(capture_v)));
+        }
+        if (capture_attention) {
+            // The packed O+LSE, kept for this block's backward recompute
+            // (backward's saved_attention). Fused attention only.
+            if (!out.attention || capture_attention->type != GGML_TYPE_F32 || !ggml_is_contiguous(capture_attention) ||
+                ggml_nelements(capture_attention) != ggml_nelements(out.attention))
+                return fail(error, "attention capture tensor does not match the fused attention result");
+            ggml_build_forward_expand(graph, ggml_cpy(r.ctx, out.attention, capture_attention));
         }
         if (yue2_aitk_bf16_storage::enabled() && yue2_aitk_is_cuda(backend) && !yue2_aitk_graph::strict_f32())
             yue2_aitk_bf16_storage::apply(graph, {hidden_copy ? nullptr : out.hidden, key_cont, value_cont});
@@ -283,7 +291,8 @@ public:
                          ggml_tensor * device_input = nullptr, ggml_tensor * device_upstream = nullptr,
                          ggml_tensor * device_dx = nullptr,
                          const std::vector<ggml_tensor *> * gradient_sinks = nullptr,
-                         bool accumulate_sinks = false, bool async = false) {
+                         bool accumulate_sinks = false, bool async = false,
+                         ggml_tensor * saved_attention = nullptr) {
         using namespace yue2_aitk_executor_detail;
         yue2_aitk_prof::Lap lap;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
@@ -312,6 +321,15 @@ public:
         TensorFlagsGuard input_flags(device_input);
         ggml_set_param(h);
         Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length,causal_hint(mask_mode,prefix_length,sequence),constants ? constants->positions : nullptr);
+        if (saved_attention) {
+            // The forward capture of this very node (same input, weights, mask
+            // and shape): the backend copies it in place of the attention
+            // forward. A backend without the hint recomputes; same result.
+            if (!out.attention || saved_attention->type != GGML_TYPE_F32 || !ggml_is_contiguous(saved_attention) ||
+                ggml_nelements(saved_attention) != ggml_nelements(out.attention))
+                return fail(error, "saved attention does not match the fused attention result");
+            ggml_flash_attn_train_set_saved(out.attention, saved_attention);
+        }
         ggml_tensor * loss=ggml_sum(r.ctx,ggml_mul(r.ctx,out.hidden,upstream)); ggml_cgraph * graph=ggml_new_graph_custom(r.ctx,65536,true); if(!loss||!graph) return fail(error,"backward graph allocation failed");
         ggml_build_forward_expand(graph,loss); ggml_set_loss(loss);
         lap.mark("bwd: graph build");

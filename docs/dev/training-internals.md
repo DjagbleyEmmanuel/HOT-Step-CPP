@@ -78,7 +78,12 @@ fused `FLASH_ATTN_TRAIN` ops where the backend has them (CUDA, CPU, Vulkan via
 (`YUE2_AITK_MATH_ATTENTION=1` forces it, for diagnosis). Exact attention keeps
 `[keys, S, heads]` probabilities per layer, which rules out whole songs, and on
 Vulkan it produced non-finite values in the AR forward (not root-caused; the
-fused path does not). ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
+fused path does not). On Metal the backward recompute copies each layer's
+attention O+LSE kept from the adapted forward instead of running the attention
+forward again (`keep_attention` in `yue2-aitk-stack.h`; about 63 MB a layer at
+S = 7,668, recompute with a warning when that memory is not there).
+`YUE2_AITK_ATTENTION_RECOMPUTE=1` restores the recompute; CUDA, CPU and Vulkan
+always recompute. ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
 directory. Each `checkpoint-stepN` contains the combined

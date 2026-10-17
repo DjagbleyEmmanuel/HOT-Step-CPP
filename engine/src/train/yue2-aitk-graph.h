@@ -33,6 +33,9 @@ struct Yue2AitkBlockResult {
     // independent non-param buffers before NAR; never connect AR to NAR backward.
     ggml_tensor * key = nullptr;
     ggml_tensor * value = nullptr;
+    // The fused attention's packed O+LSE (FLASH_ATTN_TRAIN); null on the exact
+    // math path. Exposing it adds no node.
+    ggml_tensor * attention = nullptr;
 };
 
 namespace yue2_aitk_graph {
@@ -358,6 +361,7 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     if (causal_hint >= 0) ggml_flash_attn_train_set_causal(packed, int32_t(causal_hint));
     if (prefix_k_canvas && prefix_length > 0) ggml_flash_attn_train_set_kv_grad_start(packed, int32_t(prefix_length));
     attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
+    out.attention = packed;
     }
 #endif
     h = round(ctx, ggml_add(ctx, h, linear(ctx, w.output, attention, adapters ? &adapters->output : nullptr)));
