@@ -7,11 +7,11 @@ import { createCoverStemCache, isCompleteWav } from './coverStemCache.js';
 import { NoVocalsError } from './training/yue2Stems.js';
 
 /** A real 16-bit mono PCM WAV with `frames` frames; `chunks` can override the layout. */
-function wav(frames = 8, opts: { fmt?: boolean; dataSize?: number; riffSize?: number; tag?: number } = {}): Buffer {
+function wav(frames = 8, opts: { fmt?: boolean; dataSize?: number; riffSize?: number; tag?: number; bits?: number; align?: number; rate?: number } = {}): Buffer {
   const fmt = Buffer.alloc(24);
   fmt.write('fmt ', 0, 'ascii'); fmt.writeUInt32LE(16, 4); fmt.writeUInt16LE(opts.tag ?? 1, 8); fmt.writeUInt16LE(1, 10);
-  fmt.writeUInt32LE(44100, 12); fmt.writeUInt32LE(88200, 16); fmt.writeUInt16LE(2, 20); fmt.writeUInt16LE(16, 22);
-  const pcm = Buffer.alloc(frames * 2, 1);
+  fmt.writeUInt32LE(opts.rate ?? 44100, 12); fmt.writeUInt32LE(88200, 16); fmt.writeUInt16LE(opts.align ?? 2, 20); fmt.writeUInt16LE(opts.bits ?? 16, 22);
+  const pcm = Buffer.alloc(frames * (opts.align ?? 2), 1);
   const data = Buffer.concat([Buffer.from('data'), Buffer.alloc(4), pcm]);
   data.writeUInt32LE(opts.dataSize ?? pcm.length, 4);
   const body = Buffer.concat([Buffer.from('WAVE'), opts.fmt === false ? Buffer.alloc(0) : fmt, data]);
@@ -28,6 +28,11 @@ const MALFORMED: Array<[string, Buffer]> = [
   ['data past end of file', wav(8, { dataSize: 4000 })],
   ['partial frame', wav(8, { dataSize: 15 })],
   ['truncated RIFF size', wav(8, { riffSize: 9999 })],
+  ['PCM with 7 bits', wav(8, { bits: 7 })],
+  ['zero sample rate', wav(8, { rate: 0 })],
+  ['block align disagrees with bits', wav(8, { align: 4 })],
+  ['chunks outside a tiny RIFF', wav(8, { riffSize: 4 })],
+  ['extensible with a short fmt', wav(8, { tag: 0xfffe })],
 ];
 
 function setup(mode: 'ok' | 'none' | 'bad' = 'ok', bad: Buffer = Buffer.from('junk')) {
@@ -103,6 +108,8 @@ test('malformed WAVs are rejected by the validator and the real one passes', () 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stemwav-'));
   const f = path.join(dir, 'x.wav');
   fs.writeFileSync(f, wav());
+  assert.equal(isCompleteWav(f), true);
+  fs.writeFileSync(f, wav(8, { bits: 24, align: 3 }));
   assert.equal(isCompleteWav(f), true);
   for (const [name, body] of MALFORMED) {
     fs.writeFileSync(f, body);

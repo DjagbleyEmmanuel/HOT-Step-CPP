@@ -17,20 +17,28 @@ export function isCompleteWav(file: string): boolean {
   try {
     const buf = fs.readFileSync(file);
     if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return false;
-    if (buf.readUInt32LE(4) + 8 > buf.length) return false;  // truncated
+    const end = buf.readUInt32LE(4) + 8;  // chunks must lie inside the declared RIFF
+    if (end < 12 || end > buf.length) return false;
     let blockAlign = 0;
-    for (let pos = 12; pos + 8 <= buf.length;) {
+    for (let pos = 12; pos + 8 <= end;) {
       const id = buf.toString('ascii', pos, pos + 4);
       const size = buf.readUInt32LE(pos + 4);
       const body = pos + 8;
-      if (body + size > buf.length) return false;
+      if (body + size > end) return false;
       if (id === 'fmt ') {
         if (size < 16) return false;
-        const tag = buf.readUInt16LE(body);
+        let tag = buf.readUInt16LE(body);
         const channels = buf.readUInt16LE(body + 2);
+        const rate = buf.readUInt32LE(body + 4);
         blockAlign = buf.readUInt16LE(body + 12);
         const bits = buf.readUInt16LE(body + 14);
-        if (![1, 3, 0xfffe].includes(tag) || !channels || !bits || !blockAlign) return false;
+        if (tag === 0xfffe) {  // extensible: the subformat decides, as in engine/src/wav.h
+          if (size < 40) return false;
+          tag = buf.readUInt16LE(body + 24);
+        }
+        // Same formats the engine decodes: PCM 16/24-bit and float 32-bit.
+        const ok = (tag === 1 && (bits === 16 || bits === 24)) || (tag === 3 && bits === 32);
+        if (!ok || !channels || !rate || blockAlign !== channels * (bits / 8)) return false;
       } else if (id === 'data') {
         return blockAlign > 0 && size >= blockAlign && size % blockAlign === 0;
       }
