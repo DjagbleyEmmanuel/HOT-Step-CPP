@@ -120,6 +120,20 @@ are saved with the draft.
 3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
    the score or changing the source audio, stem mix or source mode withdraws approval. The
    Generate button stays disabled until the current source has an approved score.
+   A score in 2/4 shows **Convert 2/4 to 4/4** under the score sections. It pairs
+   every two 2/4 bars into one 4/4 bar, in every voice, and shows the result as a
+   chart before anything changes. Each note keeps its pitch and timing: where a
+   removed bar line would carry an accidental into the second half of the new
+   bar, that note gets its own accidental. Section labels stay on their bars, and
+   a 2/4 bar with no partner before a new section, a meter change or the end
+   stays in 2/4. Turn on **First bar is a pickup** when the preview puts the
+   downbeats mid-bar: bar 1 then stays in 2/4 and pairing starts at bar 2.
+   **Apply 4/4** replaces this cover's score (the dataset's `.abc` is not
+   changed), so the score needs approving again; **Undo conversion** brings the
+   2/4 score back. A score with repeats, endings, double bars, voice overlays,
+   comments or lyric lines inside the music, or voices that disagree on their
+   bars, is refused with the reason and left as it was. Transcription still
+   writes the meter it detects.
    For uploaded sources, transcription and approval use the draft's revision;
    a result from an older source or a cancelled transcription cannot replace the
    current score.

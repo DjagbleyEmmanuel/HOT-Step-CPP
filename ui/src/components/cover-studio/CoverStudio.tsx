@@ -59,6 +59,8 @@ import { ScorePlanReview } from './ScorePlanReview';
 import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { Toggle } from '../shared/Toggle';
+import { AbcChart } from './AbcChart';
 import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
 import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
@@ -1008,6 +1010,32 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     changeSheetAbc(lastCut.abc);
   };
 
+  // 2/4 to 4/4: the server rewrites the score for a preview. Applying it is a
+  // score edit like any other, so the score has to be approved again.
+  const [remeter, setRemeter] = useState<{ from: string; pickup: boolean; abc?: string; twoFourBars?: number; error?: string } | null>(null);
+  const [remeterUndo, setRemeterUndo] = useState<{ before: string; after: string } | null>(null);
+  const remeterOpen = remeter?.from === sheetAbc ? remeter : null;
+  const previewRemeter = async (pickup: boolean) => {
+    if (!token) return;
+    const from = sheetAbc;
+    const settle = (result: object) => setRemeter(current =>
+      current?.from === from && current.pickup === pickup ? { ...current, ...result } : current);
+    setRemeter({ from, pickup });
+    try { settle(await yue2CoverApi.remeterScore(from, pickup, token)); }
+    catch (err) { settle({ error: (err as Error).message }); }
+  };
+  const applyRemeter = () => {
+    if (!remeterOpen?.abc) return;
+    setRemeterUndo({ before: sheetAbc, after: remeterOpen.abc });
+    setRemeter(null);
+    changeSheetAbc(remeterOpen.abc);
+  };
+  const undoRemeter = () => {
+    if (!remeterUndo) return;
+    setRemeterUndo(null);
+    changeSheetAbc(remeterUndo.before);
+  };
+
   // The original source, never a recombined mix: its vocal stem is what the
   // aligner reads, and its path is what finds the dataset song.
   const sectionSource = () => sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl };
@@ -1828,6 +1856,32 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
                 <button type="button" onClick={undoCut} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo cut</button>}
             </p>}
+            {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
+              <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
+                title="Rewrite the score in 4/4 by pairing its 2/4 bars. Every note keeps its pitch and timing. Shows a preview before applying."
+                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Convert 2/4 to 4/4</button>}
+            {remeterOpen && <div className="space-y-2 rounded-lg border border-cyan-500/30 p-2">
+              <Toggle size="sm" accent="cyan" checked={remeterOpen.pickup} label="First bar is a pickup"
+                info="Keep bar 1 as a 2/4 bar and pair the bars from bar 2. Turn it on when the preview puts the downbeats in the middle of the 4/4 bars."
+                onChange={pickup => void previewRemeter(pickup)} />
+              {remeterOpen.error ? <p role="alert" className="text-xs text-red-500">This score cannot be converted: {remeterOpen.error}</p>
+                : !remeterOpen.abc ? <p className="text-xs text-zinc-500">Converting…</p>
+                : <>
+                  <p className="text-xs text-zinc-500">
+                    {remeterOpen.twoFourBars
+                      ? `${remeterOpen.twoFourBars} bar${remeterOpen.twoFourBars > 1 ? 's stay' : ' stays'} in 2/4: a pickup, a bar before a new section or meter, or the last bar. `
+                      : ''}
+                    Applying replaces this cover's score (the dataset files are not changed), and the score then needs approving again.</p>
+                  <AbcChart abc={remeterOpen.abc} disabled height={240} playingBar={null} onAbcChange={() => {}} />
+                </>}
+              <div className="flex gap-3">
+                <button type="button" onClick={applyRemeter} disabled={!remeterOpen.abc}
+                  className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Apply 4/4</button>
+                <button type="button" onClick={() => setRemeter(null)} className="text-xs text-zinc-500">Cancel</button>
+              </div>
+            </div>}
+            {remeterUndo?.after === sheetAbc && <p className="text-xs text-zinc-500">Score converted to 4/4; approve it again before rendering.
+              <button type="button" onClick={undoRemeter} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo conversion</button></p>}
             {!instrumental && sectionLint && !sectionLint.ok &&
               <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
           </div>}

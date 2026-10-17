@@ -10,6 +10,7 @@ import { getDb } from '../db/database.js';
 import { yue2Align } from '../services/backends/yue2/client.js';
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
 import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
+import { remeterTwoFourToFourFour } from '../services/backends/yue2/coverScoreTransform.js';
 import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows/coverWorkflow.js';
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
@@ -106,6 +107,21 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
       if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }
       fail(res, err);
     }
+  });
+
+  // A preview only: nothing is stored. The studio applies the result as a score
+  // edit, so it has to be approved again before a cover uses it.
+  router.post('/score/remeter', (req: Request, res: Response) => {
+    try {
+      const { abc, pickup } = req.body || {};
+      if (typeof abc !== 'string' || !abc.trim() || typeof pickup !== 'boolean') {
+        throw new CoverRequestError('abc and a boolean pickup are required.');
+      }
+      let result;
+      try { result = remeterTwoFourToFourFour(abc, pickup); }
+      catch (err) { throw new CoverRequestError((err as Error).message, 422); }
+      res.json(result);
+    } catch (err) { fail(res, err); }
   });
 
   router.post('/sections/review', (req: Request, res: Response) => {

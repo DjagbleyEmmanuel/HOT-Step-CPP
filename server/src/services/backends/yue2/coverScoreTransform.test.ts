@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import abcjs from 'abcjs';
 import {
-  coverScoreChoices, coverTempo, coverTranspose, coverVocalOnly, transformCoverScore,
+  coverScoreChoices, coverTempo, coverTranspose, coverVocalOnly, remeterTwoFourToFourFour, transformCoverScore,
 } from './coverScoreTransform.js';
+import { scoreBarClock } from './scoreClock.js';
+import { scoreSections } from './scoreSections.js';
 
 // The two-voice layout, fields, rests and section markers follow a transcribed
 // excerpt from _experiments/yue2-cover-qual-2026-10-02/approved.abc.
@@ -163,4 +165,77 @@ test('explicit vocal-only choice remains available and removes the instrumental 
   assert.equal(result.fullScore, score);
   assert.equal(result.renderedAbc.includes('V: Ins'), false);
   assert.equal(result.renderedAbc.includes('V: Vocal'), true);
+});
+
+// Two voices in the transcribed layout: a two-bar intro, then a five-bar verse
+// whose last bar has no partner.
+const twoFour = [
+  'X:1', 'M:2/4', 'L:1/16', 'Q:1/4=100',
+  'V: Vocal clef=treble name="Vocal Melody"',
+  'V: Ins clef=treble name="Ins Melody"',
+  'K:G', '% intro', 'V: Vocal', '"G"z8|"D"z8|', 'V: Ins', 'G8|Z|',
+  '% verse', 'V: Vocal', '"G"=F4G4|"C"F4[CEG]4-|[CEG]4d4|"D"d8-|d8|', 'V: Ins', 'Z5|', '',
+].join('\n');
+
+test('re-meter pairs 2/4 bars in every voice, keeps sections and leaves an odd last bar in 2/4', () => {
+  const result = remeterTwoFourToFourFour(twoFour, false);
+  assert.equal(result.abc, [
+    'X:1', 'M:4/4', 'L:1/16', 'Q:1/4=100',
+    'V: Vocal clef=treble name="Vocal Melody"',
+    'V: Ins clef=treble name="Ins Melody"',
+    // A bar with chord symbols keeps its rests; a full rest pair becomes one Z.
+    'K:G', '% intro', 'V: Vocal', '"G"z8"D"z8|', 'V: Ins', 'G8z8|',
+    // The removed bar line would carry =F into the second half: it gets ^F back.
+    // The tied chord crosses what is now the middle of a bar.
+    '% verse', 'V: Vocal', '"G"=F4G4"C"^F4[CEG]4-|[CEG]4d4"D"d8-|', 'V: Ins', 'Z2|',
+    // Off the header meter, a rest bar is written out: abcjs times Z by the header.
+    'V: Vocal', 'M:2/4', 'd8|', 'V: Ins', 'M:2/4', 'z8|', '',
+  ].join('\n'));
+  assert.equal(result.twoFourBars, 1);
+  assert.deepEqual(scoreSections(twoFour), [{ label: 'intro', startBar: 1 }, { label: 'verse', startBar: 3 }]);
+  assert.deepEqual(scoreSections(result.abc), [{ label: 'intro', startBar: 1 }, { label: 'verse', startBar: 2 }]);
+  const before = scoreBarClock(twoFour), after = scoreBarClock(result.abc);
+  assert.equal(after.length, 4);
+  assert.ok(Math.abs(after.at(-1)!.end - before.at(-1)!.end) < 1e-9);
+  assert.ok(Math.abs(after[1].start - before[2].start) < 1e-9);
+});
+
+test('re-meter with a pickup leaves the first bar in 2/4 and pairs from bar 2', () => {
+  const abc = 'X:1\nM:2/4\nL:1/8\nK:C\nc4|d4|e4|f4|g4|';
+  assert.equal(remeterTwoFourToFourFour(abc, false).abc, 'X:1\nM:4/4\nL:1/8\nK:C\nc4d4|e4f4|\nM:2/4\ng4|');
+  const pickup = remeterTwoFourToFourFour(abc, true);
+  assert.equal(pickup.abc, 'X:1\nM:4/4\nL:1/8\nK:C\nM:2/4\nc4|\nM:4/4\nd4e4|f4g4|');
+  assert.equal(pickup.twoFourBars, 1);
+});
+
+test('re-meter writes the default length out, keeps CRLF and marks only notes the carry would change', () => {
+  // Under 2/4 the default L: is 1/16; under 4/4 it would be 1/8 and double every note.
+  assert.equal(remeterTwoFourToFourFour('X:1\r\nM:2/4\r\nK:C\r\nc8|d8|\r\n', false).abc,
+    'X:1\r\nM:4/4\r\nL:1/16\r\nK:C\r\nc8d8|\r\n');
+  // A tie continuation keeps its pitch and carries nothing; the next c is natural again.
+  assert.match(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\nz4^c4-|c4c4|', false).abc, /^z4\^c4-c4=c4\|$/m);
+  // YuE2 carries an accidental across octaves, so f gets its natural written in.
+  assert.match(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\n^F4z4|f8|', false).abc, /^\^F4z4=f8\|$/m);
+});
+
+test('re-meter moves a key change before a second half inside the bar', () => {
+  assert.equal(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\nc8|\nK:G\nf8|', false).abc,
+    'X:1\nM:4/4\nL:1/16\nK:C\nc8[K:G]f8|');
+  assert.equal(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\nc8|d8|\nK:G\nf8|g8|', false).abc,
+    'X:1\nM:4/4\nL:1/16\nK:C\nc8d8|\nK:G\nf8g8|');
+});
+
+test('re-meter rejects what it cannot convert exactly, and returns nothing to apply', () => {
+  for (const [abc, pickup, message] of [
+    ['X:1\nM:4/4\nL:1/16\nK:C\nc16|d16|', false, /no 2\/4 bars/],
+    ['X:1\nM:2/4\nL:1/16\nK:C\n|:c8|d8:|', false, /Repeats/],
+    [twoFour.replace('Z5|', 'Z4|'), false, /voices disagree/],
+    ['X:1\nM:2/4\nL:1/16\nK:C\nc8|\n\nd8|', false, /blank line/],
+    ['X:1\nM:2/4\nL:1/16\nK:C\nc8|d8|\nw: la la', false, /w: line/],
+    ['X:1\nM:2/4\nL:1/16\nK:C\nc8|d8', false, /end with a bar line/],
+    ['X:1\nM:3/4\nL:1/16\nK:C\nc12|\nM:2/4\nc8|d8|', true, /pickup/],
+    ['X:1\nM:2/4\nL:1/16\nK:C\nc8|\nM:3/4\nc12|', false, /paired/],
+  ] as const) {
+    assert.throws(() => remeterTwoFourToFourFour(abc, pickup), message);
+  }
 });

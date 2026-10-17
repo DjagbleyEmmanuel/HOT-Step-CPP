@@ -9,7 +9,8 @@ interface Props {
   /** The bar playing now, highlighted and kept in view. */
   playingBar: number | null;
   onAbcChange: (value: string) => void;
-  onPlayBar: (bar: number) => void;
+  /** Without it (a preview) the bars are not clickable. */
+  onPlayBar?: (bar: number) => void;
 }
 
 /** A text field that commits on Enter or blur and drops the edit on Escape. */
@@ -83,9 +84,9 @@ export const AbcChart: React.FC<Props> = ({ abc, disabled, height, playingBar, o
 
   const card = (bar: ChartBar, colour: string) => {
     const rest = !bar.vocal.some(note => note.midi !== null);
-    return <div key={bar.number} data-bar={bar.number} onClick={() => onPlayBar(bar.number)}
-      title={`Play from bar ${bar.number}`}
-      className={`w-32 cursor-pointer rounded-md border bg-white dark:bg-black/20 p-1.5 space-y-0.5 ${playingBar === bar.number
+    return <div key={bar.number} data-bar={bar.number} onClick={onPlayBar && (() => onPlayBar(bar.number))}
+      title={onPlayBar && `Play from bar ${bar.number}`}
+      className={`w-32 ${onPlayBar ? 'cursor-pointer' : ''} rounded-md border bg-white dark:bg-black/20 p-1.5 space-y-0.5 ${playingBar === bar.number
         ? 'border-amber-500 ring-2 ring-amber-500/40' : 'border-zinc-200 dark:border-white/10 hover:border-zinc-400'}`}>
       <div className="flex items-center gap-1 min-h-[20px]">
         <span className="text-[10px] text-zinc-400 tabular-nums">{bar.number}</span>
@@ -124,7 +125,7 @@ export const AbcChart: React.FC<Props> = ({ abc, disabled, height, playingBar, o
             : <button type="button" disabled={disabled} onClick={() => setEditing('tempo')} title="Edit the tempo (20–300 BPM)"
               className="rounded px-1 font-semibold text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10">{chart.tempo ?? 'not set'}</button>} BPM
         </label>
-        <span title="Changing the meter means re-barring the score, which comes with the bar tools">Meter <b className="text-zinc-900 dark:text-white">{chart.meter || '4/4'}</b></span>
+        <span title={chart.meter === '2/4' ? 'Convert 2/4 to 4/4 (under Score sections) re-bars the score' : 'Changing the meter means re-barring the score; only 2/4 to 4/4 is supported'}>Meter <b className="text-zinc-900 dark:text-white">{chart.meter || '4/4'}</b></span>
         <span title="Changing the key means transposing every note, which comes with the bar tools">Key <b className="text-zinc-900 dark:text-white">{chart.key || 'C'}</b></span>
       </div>
       {chart.sections.map(section => {

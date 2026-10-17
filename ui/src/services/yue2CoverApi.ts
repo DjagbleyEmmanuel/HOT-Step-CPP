@@ -175,6 +175,11 @@ export const yue2CoverApi = {
   reviewSections: (abc: string, lyrics: string, token: string, options: ReadOptions = {}) => request<Yue2SectionReview>('/sections/review', token, {
     ...options, method: 'POST', body: JSON.stringify({ abc, lyrics }),
   }),
+  /** A 2/4 score rewritten in 4/4, for preview; nothing is stored. With `pickup` the
+   *  first bar stays 2/4. `twoFourBars` counts the 2/4 bars left (pickup, odd bars
+   *  before a section, the last bar). Fails (422) on anything it cannot convert exactly. */
+  remeterScore: (abc: string, pickup: boolean, token: string) =>
+    apiClient.post<{ abc: string; twoFourBars: number }>(`${BASE}/score/remeter`.replace(/^\/api/, ''), { abc, pickup }, { token }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
   /** `lyrics` is the build's own text; without it the session follows params.lyrics. */
