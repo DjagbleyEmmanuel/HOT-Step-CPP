@@ -35,6 +35,7 @@ CMake 3.21 or later is required (`engine/CMakeLists.txt`).
 |---|---|
 | Xcode Command Line Tools 16+ | `xcode-select --install`. Provides the Metal SDK and compiler |
 | CMake 3.21+ | `brew install cmake` |
+| PowerShell 7 (`pwsh`) | `brew install powershell`. `engine/build-mac.sh` runs the hook check `engine/verify-hooks.ps1` with it and stops if `pwsh` is missing |
 | Node.js 20 to 24 LTS | `brew install node@24` |
 | Essentia (optional) | BPM and key detection. `bash tools/essentia/build-macos.sh Essentia`, or set `ESSENTIA_BIN` |
 
@@ -266,10 +267,12 @@ others). [ggml-fork.md](ggml-fork.md) lists each one and explains why it exists.
   `adapter-merge.h` and `adapter-runtime.h`), the MiniMax-Music3 and YuE2 route hooks in
   `hot-step-server.cpp`, the `hotstep_sampler_linked_` linker sentinel, one check per
   HOT-ggml change (hooks 7-16), and that `engine/ggml` is clean at the pinned commit
-  (Hook 17). Exit 0 means all present. `build.cmd` runs it before every compile.
+  (Hook 17). Exit 0 means all present. `build.cmd` and `build-mac.sh` run it before every
+  compile.
 
   ```
-  powershell -File engine\verify-hooks.ps1
+  powershell -File engine\verify-hooks.ps1        # Windows
+  pwsh -NoProfile -File engine/verify-hooks.ps1   # macOS
   ```
 
 - **A stock or stale `engine/ggml` has one fix.** The submodule URL is cached in
