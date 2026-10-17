@@ -247,6 +247,19 @@ Prepare. Finish preparing those before generating the first takes.
    group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.
 
+   **Caption** (above the Generate button) gives the next takes their own
+   caption, for example to ask for a busier chorus. Leave it empty to use the
+   build's caption, exactly as before. It is a trial: it changes what the
+   composer writes (the AR) for those takes, and an adapter's trigger is still
+   added. The sound is still rendered (the NAR) from the whole song under one
+   caption, so a take's preview plays everything, kept sections included,
+   under its own caption, and **Save song** renders the whole song under the
+   build's caption. A section can be written differently, but its timbre follows
+   that one caption, and joins between sections composed under different
+   captions may be audible. Hover a take's name to see the prompt it was sent;
+   ✎ marks a take with its own caption. Turn **Take caption** off to hide the
+   field and send none.
+
    **Edit lyrics** (beside the takes) changes the lyrics for this build only.
    The Prepare page and the dataset's lyrics file are not touched, and you can
    edit before the first take exists. Each tag must be a line like `[verse]`, with

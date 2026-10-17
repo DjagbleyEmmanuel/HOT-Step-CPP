@@ -36,6 +36,11 @@ export function finishSavedBuild(id: string): boolean {
   return true;
 }
 
+/** The next takes' own caption, kept in storage so a generate reads what the page shows.
+ *  Off hides the field and sends none, as before the field existed. */
+const TAKE_CAPTION = 'buildTakeCaption', TAKE_CAPTION_ON = 'buildTakeCaptionOn';
+export const takeCaption = () => (restore<boolean>(TAKE_CAPTION_ON, true) ? restore<string>(TAKE_CAPTION, '').trim() : '');
+
 /** The first section not yet built. */
 export function buildNext(session: Yue2BuildSession | null): number {
   const spine = session?.takes.find(t => t.id === session.kept.at(-1));
@@ -130,7 +135,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     generate: (params: Record<string, unknown>, to: number, count: number) => call(async () => {
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
-      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!);
+      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, takeCaption() || undefined);
     }),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
     plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
@@ -226,6 +231,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [cropping, setCropping] = useState(false);
   const [cutAt, setCutAt] = useState<number | null>(null);
   const [cropMode, setCropMode] = useState<'regenerate' | 'advance' | null>(null);
+  const [captionOn, setCaptionOn] = useState(() => restore<boolean>(TAKE_CAPTION_ON, true));
+  const [caption, setCaption] = useState(() => restore<string>(TAKE_CAPTION, ''));
   const dragging = useRef(false);
   const s = p.session;
   const next = buildNext(s);
@@ -504,7 +511,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               const win = takeWindow(take);
               const colour = colours[items[take.from]?.section ?? -1] ?? '#ec4899';
               return <div key={take.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
-                <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.cropOf ? 'A cropped copy of a take' : undefined}>Take {i + 1}{take.cropOf ? ' ✂' : ''}</span>
+                <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.style ? `Sent: ${take.style}` : take.cropOf ? 'A cropped copy of a take' : undefined}>
+                  Take {i + 1}{take.cropOf ? ' ✂' : ''}{take.caption ? ' ✎' : ''}</span>
                 <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
                   className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
                   {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
@@ -532,6 +540,18 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
           {!done && <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Toggle size="sm" accent="pink" checked={captionOn} label="Take caption"
+                info="Off hides the field and sends no take caption, so takes use the build's caption as before."
+                onChange={on => { setCaptionOn(on); persist(TAKE_CAPTION_ON, on); }} />
+              {captionOn && <>
+                <ParamLabel label="Caption" className="text-xs text-zinc-500"
+                  info="A caption for the next takes only; empty uses the build's. It changes what is composed (the AR), and the adapter trigger is still added. The sound of the whole song is still rendered (the NAR) with one caption: a take's preview uses its own caption for everything it plays, kept sections included, and Save song uses the build's caption for the whole song. So a section can be written differently, but its timbre follows the one caption. Hover a take's name to see the prompt it was sent; ✎ marks a take with its own caption." />
+                <input type="text" value={caption} maxLength={4000} placeholder="Empty: the build's caption" aria-label="Caption for the next takes"
+                  onChange={e => { setCaption(e.target.value); persist(TAKE_CAPTION, e.target.value); }}
+                  className="min-w-0 flex-1 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 text-xs text-zinc-800 dark:text-zinc-200" />
+              </>}
+            </div>
             <div className="flex items-center gap-2">
               <div className="w-20 flex-shrink-0" title="Takes per run">
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}

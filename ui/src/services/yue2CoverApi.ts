@@ -136,6 +136,10 @@ export interface Yue2BuildTake {
   resume?: number;
   /** Ids of the occurrences it composed, from..to. */
   occurrences: string[];
+  /** The style prompt it was sent, adapter trigger included (older takes: missing). */
+  style?: string;
+  /** Its own caption; missing when it used the session's. */
+  caption?: string;
 }
 /** A section of the score, as the arrangement names it (s0, s1, ... in score order). */
 export interface Yue2SourceSection { id: string; label: string; startBar: number; bars: number; lyricBlock: number | null }
@@ -200,8 +204,9 @@ export const yue2CoverApi = {
   buildPlan: (id: string, revision: number, upcoming: string[], finished: boolean, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/plan`, token, { method: 'POST', body: JSON.stringify({ revision, upcoming, finished }) }),
   buildGet: (id: string, token: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, token, options),
-  buildGenerate: (id: string, revision: number, to: number, count: number, token: string) =>
-    request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ revision, to, count }) }),
+  /** `caption`, when non-empty, replaces the session's caption for these takes only. */
+  buildGenerate: (id: string, revision: number, to: number, count: number, token: string, caption?: string) =>
+    request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ revision, to, count, ...(caption ? { caption } : {}) }) }),
   buildCancel: (id: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/cancel`, token, { method: 'POST' }),
   buildKeep: (id: string, revision: number, take: string, token: string) =>

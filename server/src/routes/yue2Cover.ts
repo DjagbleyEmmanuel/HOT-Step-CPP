@@ -220,8 +220,12 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   }));
   router.get('/build/:id', (req: Request, res: Response) =>
     takes(res, () => getBuildSession(String(req.params.id), authenticate(req)!)));
-  router.post('/build/:id/generate', (req: Request, res: Response) =>
-    takes(res, () => generateBuildTakes(String(req.params.id), authenticate(req)!, req.body?.to, req.body?.count, req.body?.revision)));
+  // `caption` (optional) is these takes' own caption; empty uses the session's.
+  router.post('/build/:id/generate', (req: Request, res: Response) => {
+    const userId = authenticate(req)!;
+    return takes(res, () => generateBuildTakes(String(req.params.id), userId, req.body?.to, req.body?.count, req.body?.revision,
+      req.body?.caption, params => buildRequest(params, userId).style));
+  });
   router.post('/build/:id/cancel', (req: Request, res: Response) =>
     takes(res, () => cancelBuildTakes(String(req.params.id), authenticate(req)!)));
   router.post('/build/:id/keep', (req: Request, res: Response) =>

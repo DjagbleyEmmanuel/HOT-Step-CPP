@@ -17,7 +17,10 @@
 // starts index the arrangement's occurrences, never the score's sections.
 // The spine can be cropped (cropBuildTake): the cut is a new take in its
 // place, so the next take and Save song resume the cut stream and the
-// original stays to be put back.
+// original stays to be put back. A take may carry its own caption
+// (generateBuildTakes): it changes what the AR composes for that take only.
+// Every preview and Save song still decode the whole stream through NAR under
+// one caption: the take's own for its preview, the session's for Save song.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,6 +46,7 @@ const TAKE_SLACK = 1.3;
 const TAKE_SLACK_FRAMES = 4 * YUE2_FPS;
 const MAX_TAKES = 10;
 const MAX_LYRICS = 20_000;
+const MAX_CAPTION = 4000;
 /** Bars in a take's waveform, over its new part (from its lead-in). */
 const PEAKS = 120;
 const LEAD_IN_S = 4;
@@ -79,6 +83,10 @@ export interface Yue2Take {
   /** Where the next take resumes, when not at starts[to + 1]: a crop inside
    *  an occurrence that the next take composes again. */
   resume?: number;
+  /** The style prompt it was sent, adapter trigger included. Missing on older takes. */
+  style?: string;
+  /** Its own caption, as typed; missing when it used the session's. */
+  caption?: string;
 }
 
 /** Session file version 2 (coverArrangement.ts): revisions, take parents, the
@@ -308,10 +316,18 @@ export function getBuildSession(id: string, userId: string): Yue2BuildSession {
 
 /** Queues `count` takes of occurrences [next, to], resumed from the spine
  *  under the arranged prompt. Returns at once; the session lists the takes
- *  as they finish. */
-export function generateBuildTakes(id: string, userId: string, to: number, count: number, revision: unknown): Yue2BuildSession {
+ *  as they finish. A non-empty `caption` replaces the session's for these
+ *  takes only; `toStyle` composes the style prompt a render of params would
+ *  send (adapter trigger and template included). Empty or missing inherits.
+ *  It is not session state, so the revision stays. */
+export function generateBuildTakes(id: string, userId: string, to: number, count: number, revision: unknown,
+  caption?: unknown, toStyle?: (params: Record<string, unknown>) => string): Yue2BuildSession {
   const stored = load(id, userId);
   checkRevision(stored, revision);
+  if (caption !== undefined && caption !== null && typeof caption !== 'string') throw new TakesError('caption must be text.');
+  if (typeof caption === 'string' && caption.length > MAX_CAPTION) throw new TakesError(`A caption is limited to ${MAX_CAPTION.toLocaleString('en-US')} characters.`);
+  const own = typeof caption === 'string' && caption.trim() ? caption.trim() : undefined;
+  if (own && !toStyle) throw new TakesError('A take caption needs the style composer.', 500);
   const from = nextOccurrence(stored);
   const refusal = generateRefusal(stored, to);
   if (refusal) throw new TakesError(refusal);
@@ -326,6 +342,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   }
   const prefix = spine ? (JSON.parse(fs.readFileSync(codesFile(id, spine.id), 'utf8')) as number[]).slice(0, start) : [];
   const { request, lyrics, spans, clock } = arranged(stored);
+  // prompt is the first caption field a render reads (generate.ts), so it wins.
+  if (own) request.style = toStyle!({ ...stored.params, prompt: own });
   const occurrences = spans.length;
   const last = to + 1 >= occurrences;
   const length = clock[to + 1] - clock[from];
@@ -397,7 +415,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
               const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, ...identity });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, style: request.style, ...(own ? { caption: own } : {}), ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);

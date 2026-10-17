@@ -219,6 +219,48 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
     await until(() => !getBuildSession(s.id, 'user').pending.length);
     assert.equal(requests.length, first);
   });
+  await t.test('a take caption styles single and batched takes, is recorded, and empty inherits', async () => {
+    mode = 'done';
+    const composed: Array<Record<string, unknown>> = [];
+    const toStyle = (params: Record<string, unknown>) => { composed.push(params); return `trig, in the style of trig. ${params.prompt}`; };
+    for (const [count, caption, style] of [[1, '  brighter, more drums ', 'trig, in the style of trig. brighter, more drums'],
+      [3, 'brighter', 'trig, in the style of trig. brighter'], [2, '   ', 'ambient'], [1, undefined, 'ambient']] as const) {
+      const s = session();
+      const first = requests.length;
+      generateBuildTakes(s.id, 'user', 0, count, 0, caption, toStyle);
+      await until(() => !getBuildSession(s.id, 'user').pending.length);
+      const sent = requests.slice(first);
+      assert.deepEqual(sent.flatMap(r => r.songs?.map(x => x.style) ?? [r.style]), Array(count).fill(style));
+      const done = getBuildSession(s.id, 'user');
+      assert.equal(done.revision, 0);
+      for (const take of done.takes) {
+        assert.equal(take.style, style);
+        assert.equal(take.caption, style === 'ambient' ? undefined : caption!.trim());
+      }
+    }
+    // Composed from the session's params with only the caption replaced.
+    assert.deepEqual(composed.map(p => p.prompt), ['brighter, more drums', 'brighter']);
+    const s = session();
+    assert.throws(() => generateBuildTakes(s.id, 'user', 0, 1, 0, 7, toStyle), /caption must be text/);
+    assert.throws(() => generateBuildTakes(s.id, 'user', 0, 1, 0, 'x'.repeat(4001), toStyle), /limited/);
+  });
+  await t.test('a queued take keeps the caption it was submitted with', async () => {
+    mode = 'done';
+    let release!: () => void;
+    const occupied = runOnGpuLane(() => new Promise<void>(resolve => { release = resolve; }));
+    await new Promise(resolve => setImmediate(resolve));
+    const s = session();
+    const first = requests.length;
+    // The composer answers differently by the time the lane frees: the take must not ask again.
+    let style = 'first';
+    generateBuildTakes(s.id, 'user', 0, 1, 0, 'first', () => style);
+    style = 'second';
+    assert.equal(getBuildSession(s.id, 'user').pending[0].phase, 'queued');
+    release(); await occupied;
+    await until(() => !getBuildSession(s.id, 'user').pending.length);
+    assert.equal(requests[first].style, 'first');
+    assert.equal(getBuildSession(s.id, 'user').takes[0].caption, 'first');
+  });
 });
 
 test('track mapping rejects duplicate indices, unknown indices, extra variations and missing audio', () => {
