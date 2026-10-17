@@ -455,8 +455,13 @@ export async function getJob(id: string) {
   // and elapsed time can pass the estimate. Report eta_s null (unknown) and an
   // additive phase field instead of a misleading 0. State stays unchanged.
   const loading = !j.finalState && out.state !== 'done' && /^loading\b/i.test(String(out.stage ?? ''));
-  (out as Record<string, unknown>).phase = j.finalState ?? (loading ? 'loading_model' : out.state);
-  (out as Record<string, unknown>).eta_s = loading ? null : jobEtaS(j);
+  let etaS = loading ? null : jobEtaS(j);
+  // SA3 renders in one synchronous call with no progress, so once its estimate
+  // runs out the remaining time is unknown: report null, not a clamped 0.
+  const sa3Overdue = !loading && !j.finalState && j.eta?.key === 'sa3' && etaS === 0;
+  if (sa3Overdue) etaS = null;
+  (out as Record<string, unknown>).phase = j.finalState ?? (loading ? 'loading_model' : sa3Overdue ? 'running' : out.state);
+  (out as Record<string, unknown>).eta_s = etaS;
   (out as Record<string, unknown>).dit_model = j.ditModel ?? null;
   if (j.eta) (out as Record<string, unknown>).eta_backend = j.eta.key;
   return out;

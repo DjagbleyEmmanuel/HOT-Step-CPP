@@ -564,6 +564,33 @@ test('a job still loading its model reports eta_s null and phase loading_model, 
   } finally { __setCaller(prevC); }
 });
 
+test('an SA3 render past its estimate reports eta_s null and phase running, ACE keeps a number', async () => {
+  resetEta();
+  const stageFor: Record<string, any> = {
+    'up-sa3': { status: 'running', stage: 'SA3: rendering 30s (8 steps)...', progress: 5 },
+    'up-ace': { status: 'running', stage: 'Synthesizing', progress: 90, ace_phase_progress: 'Step 7/8' },
+  };
+  const prevC = __setCaller(async (_m: string, route: string) => {
+    const id = route.split('/').pop()!;
+    return stageFor[id] ? { status: 200, data: stageFor[id] } : { status: 404, data: {} };
+  });
+  try {
+    // 30 s since submit against a 6 s estimate: the old code clamps both to 0.
+    __test.addJob({ id: 'eta-sa3', upstreamId: 'up-sa3', seeds: [], createdAt: Date.now() - 30_000,
+      eta: { key: 'sa3', takes: 1, durationS: 30, estS: 6, cold: false } } as any);
+    __test.addJob({ id: 'eta-ace', upstreamId: 'up-ace', seeds: [], createdAt: Date.now() - 30_000,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 6, cold: false } } as any);
+    const s = await getJob('eta-sa3') as any;
+    const a = await getJob('eta-ace') as any;
+    console.log('sa3 job: state', s.state, 'eta_s', s.eta_s, 'phase', s.phase, '| ace job: eta_s', a.eta_s, 'phase', a.phase);
+    assert.equal(s.state, 'running');
+    assert.equal(s.eta_s, null);
+    assert.equal(s.phase, 'running');
+    assert.equal(a.eta_s, 0, 'ACE keeps its numeric clamp');
+    assert.equal(a.phase, 'running');
+  } finally { __setCaller(prevC); }
+});
+
 test('a YuE2 job at its loading stage reports phase loading_model and eta_s null', async () => {
   resetEta();
   const stage = (yue2Gen as any).YUE2_LOADING_STAGE ?? 'YuE2: submitting...';
