@@ -1,7 +1,7 @@
 // Sidebar.tsx — Left navigation sidebar
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -260,6 +260,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onMobileClose?.();
   };
 
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const onMobileCloseRef = useRef(onMobileClose);
+  onMobileCloseRef.current = onMobileClose;
+
+  // Drawer a11y: focus in on open, Escape closes, focus returns to the opener on close.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    drawerRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onMobileCloseRef.current?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [mobileOpen]);
+
+  // Reset the drawer when the viewport crosses into the desktop layout (where it is hidden).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px) and (orientation: landscape)');
+    const onChange = (e: MediaQueryListEvent) => { if (e.matches) onMobileCloseRef.current?.(); };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
   return (
     <>
       {/* ── Mobile overlay backdrop — shown behind drawer at narrow widths ── */}
@@ -272,7 +297,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           aria-hidden="true"
         />
       {/* ── Mobile overlay drawer — slides in from the left ── */}
-        <div className="fixed inset-y-0 left-0 z-50 min-[1024px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
+        <div ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Navigation" className="outline-none fixed inset-y-0 left-0 z-50 min-[1024px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
           {/* Close button */}
           <div className="mb-6 flex items-center justify-between px-3">
             <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Menu</span>

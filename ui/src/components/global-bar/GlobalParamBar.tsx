@@ -223,6 +223,20 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
   const [showProfiles, setShowProfiles] = useState(false);
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [sheetOpenSection, setSheetOpenSection] = useState<SectionId>(null);
+  const mobileSheetRef = useRef<HTMLDivElement>(null);
+
+  // Settings sheet a11y: focus into the sheet on open, Escape closes, focus returns to the opener on close.
+  useEffect(() => {
+    if (!showMobileSettings) return;
+    const opener = document.activeElement as HTMLElement | null;
+    mobileSheetRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMobileSettings(false); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [showMobileSettings]);
 
   const modelsQuery = useQuery(aceModelsOptions());
   const availableModels = modelsQuery.data;
@@ -512,7 +526,6 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
           role="dialog"
           aria-modal="true"
           aria-label={t('globalBar.mobileSettingsTitle')}
-          onKeyDown={e => { if (e.key === 'Escape') setShowMobileSettings(false); }}
         >
           {/* Backdrop */}
           <div
@@ -522,7 +535,9 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
           {/* Sheet panel */}
           <div
             data-portal-layer
-            className="relative ml-auto w-full max-w-[420px] h-full bg-white dark:bg-zinc-900 flex flex-col shadow-2xl shadow-black/40"
+            ref={mobileSheetRef}
+            tabIndex={-1}
+            className="outline-none relative ml-auto w-full max-w-[420px] h-full bg-white dark:bg-zinc-900 flex flex-col shadow-2xl shadow-black/40"
           >
             {/* Header */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 dark:border-white/10 flex-shrink-0">
