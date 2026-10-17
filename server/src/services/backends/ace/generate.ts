@@ -273,6 +273,17 @@ export async function runAceGeneration(
           }
         }
 
+        // /lm always generates codes here, so a result without any means the
+        // planner failed (its output could not be parsed, e.g. non-finite
+        // logits on one backend). Rendering from the caption alone would look
+        // fine and quietly drop the plan, so fail with the reason instead.
+        const noCodes = lmResults.findIndex(r => !r.audio_codes);
+        if (noCodes >= 0) {
+          throw new Error(
+            `LM planner returned no audio codes (result ${noCodes + 1} of ${lmResults.length}): `
+            + 'its output could not be parsed, so there is no plan to render. See ace_engine.log.');
+        }
+
         // Store only LM-generated fields in cache (never DiT/adapter/DCW/etc.)
         if (useLmCache) {
           const lmOutputs: LmCacheEntry[] = lmResults.map(r => ({

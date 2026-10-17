@@ -144,6 +144,11 @@ static inline void lm_forward(Qwen3LM * m, const int * tokens, int n, int kv_set
     if (s_use_trt) { lm_trt_forward(s_trt_ctx, tokens, n, kv_set, logits, 0); return; }
 #endif
     qw3lm_forward(m, tokens, n, kv_set, logits);
+    // A non-finite prefill poisons the KV cache, so every later token is noise.
+    if (n > 1 && !std::all_of(logits, logits + lm_vocab_size(m), [](float x) { return std::isfinite(x); })) {
+        fprintf(stderr, "[LM] ERROR: prefill logits are not finite (backend %s); the LM output will be garbage\n",
+                ggml_backend_name(m->backend));
+    }
 }
 
 static inline void lm_forward_batch(Qwen3LM * m, const int * tokens, const int * sets,
