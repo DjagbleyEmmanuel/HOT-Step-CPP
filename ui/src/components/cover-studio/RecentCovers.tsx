@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Music, Play, Pause, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
-import { playFromList, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
+import { playFromList, togglePlay, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 
 interface RecentCoversProps {
   refreshTrigger: number;
@@ -43,6 +43,8 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
   };
 
   const handlePlay = (cover: Song) => {
+    // The current track pauses/resumes in place; reloading it would restart it.
+    if (cover.id === currentTrackId) { togglePlay(); return; }
     playFromList(songToTrack(cover), covers.map(songToTrack), 'cover-studio');
   };
 

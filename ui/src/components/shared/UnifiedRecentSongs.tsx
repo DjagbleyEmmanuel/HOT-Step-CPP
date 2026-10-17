@@ -16,7 +16,7 @@ import type { UnifiedRecentSong } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { downloadTrack } from '../../utils/downloadTrack';
 import { usePlaylist } from '../lyric-studio/playlistStore';
-import { playFromList, unifiedRecentSongToTrack } from '../../stores/playbackStore';
+import { playFromList, togglePlay, unifiedRecentSongToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { SongActionsMenu, songFromRecent } from './SongActionsMenu';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { CoverImage } from './CoverImage';
@@ -46,14 +46,17 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
   const loading = query.isPending && !!token;
   const { disguiseArtist, disguiseTitle } = useDisguiseMode();
 
+  const currentTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
   const handlePlay = useCallback(async (rs: UnifiedRecentSong) => {
     const track = unifiedRecentSongToTrack(rs);
+    // The current track pauses/resumes in place; reloading it would restart it.
+    if (track.id === currentTrackId) { togglePlay(); return; }
     const allTracks = songs.map(unifiedRecentSongToTrack);
     const playbackSource = source === 'cover-studio' ? 'cover-studio' as const
       : source === 'lyric-studio' ? 'lireek-recent' as const
       : 'library' as const;
     playFromList(track, allTracks, playbackSource);
-  }, [songs, source]);
+  }, [songs, source, currentTrackId]);
 
   const handleDelete = useCallback(async (rs: UnifiedRecentSong) => {
     if (!token || !rs.audio_url) return;

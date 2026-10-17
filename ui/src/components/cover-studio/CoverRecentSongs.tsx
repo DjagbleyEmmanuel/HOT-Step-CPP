@@ -14,7 +14,7 @@ import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { downloadTrack } from '../../utils/downloadTrack';
 import { usePlaylist } from '../lyric-studio/playlistStore';
-import { playFromList, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
+import { playFromList, togglePlay, songToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
 
@@ -51,8 +51,10 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
   }, [token]);
 
   const handlePlay = useCallback((song: Song) => {
+    // The current track pauses/resumes in place; reloading it would restart it.
+    if (song.id === currentTrackId) { togglePlay(); return; }
     playFromList(songToTrack(song), songs.map(songToTrack), 'cover-studio');
-  }, [songs]);
+  }, [songs, currentTrackId]);
 
   const handleDelete = useCallback(async (song: Song) => {
     if (!token) return;

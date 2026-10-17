@@ -12,7 +12,7 @@ import {
   Music, ListPlus, ListMusic, Square, DownloadCloud, Loader2,
 } from 'lucide-react';
 import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
-import { playFromList, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
+import { playFromList, togglePlay, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
 import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
@@ -67,8 +67,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
   const handlePlay = useCallback((item: PlaylistItem) => {
     const allTracks = playlist.items.map(playlistItemToTrack);
     const clickedTrack = playlistItemToTrack(item);
+    // The current track pauses/resumes in place; reloading it would restart it.
+    if (clickedTrack.id === currentSongId) { togglePlay(); return; }
     playFromList(clickedTrack, allTracks, 'playlist');
-  }, [playlist.items]);
+  }, [playlist.items, currentSongId]);
 
   const totalDuration = useMemo(() => {
     const total = playlist.items.reduce((sum, i) => sum + (i.duration || 0), 0);
