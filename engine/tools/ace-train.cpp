@@ -552,6 +552,14 @@ static void print_usage(void) {
             "                [--companion] merge the tokenizer's companion decoder adapter\n"
             "                (nar_lora_joint_v9) under the NAR first, as the server does at\n"
             "                render time, so the adapter trains on the decoder it ships on.\n"
+            "                [--audio-loss <w>] add w * an audio-domain loss: the clean-latent\n"
+            "                estimate x_t - t*v is decoded through the frozen VAE and scored\n"
+            "                against the source recording (log-mel + multi-res STFT + stereo\n"
+            "                width), on steps with t <= [--audio-tmax 0.4]. The decode covers\n"
+            "                [--audio-frames 150] frames plus [--audio-margin 25] each side.\n"
+            "                References are decoded like yue2-preprocess did ([--ffmpeg\n"
+            "                ffmpeg] for non-WAV/MP3). With --fd-check it checks the decoder\n"
+            "                against the inference VAE, then gates the audio term alone.\n"
             "                [--style \"text\"] [--lyrics \"text\"] conditioning for the gate's\n"
             "                cot=off prefix (the loop takes captions from the manifest, and\n"
             "                --lyrics only as the fallback for a clip that states none).\n"
@@ -4619,6 +4627,11 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--nar-layers"))  a.nar_layers = atoi(next("--nar-layers"));
         else if (!strcmp(argv[i], "--abc-dropout")) a.abc_dropout = (float) atof(next("--abc-dropout"));
         else if (!strcmp(argv[i], "--no-abc"))      a.no_abc     = true;
+        else if (!strcmp(argv[i], "--audio-loss"))  a.audio_loss = (float) atof(next("--audio-loss"));
+        else if (!strcmp(argv[i], "--audio-tmax"))  a.audio_tmax = (float) atof(next("--audio-tmax"));
+        else if (!strcmp(argv[i], "--audio-frames")) a.audio_frames = atoll(next("--audio-frames"));
+        else if (!strcmp(argv[i], "--audio-margin")) a.audio_margin = atoll(next("--audio-margin"));
+        else if (!strcmp(argv[i], "--ffmpeg"))      a.ffmpeg     = next("--ffmpeg");
         else if (!strcmp(argv[i], "--dump-cond")) {
             a.dump_cond_name = next("--dump-cond");
             a.dump_cond_mode = next("--dump-cond");
