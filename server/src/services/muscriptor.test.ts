@@ -24,3 +24,16 @@ test('partialMidiFromEvents keeps completed notes and drops the open one', () =>
 test('partialMidiFromEvents is null when no note completed', () => {
   assert.equal(partialMidiFromEvents([{ type: 'note_start', index: 0, pitch: 60, time: 0, instrument: 'voice' }]), null);
 });
+
+test('partialMidiFromEvents pads a zero-length note instead of merging it into the next', () => {
+  const mid = partialMidiFromEvents([
+    { type: 'note_start', index: 0, pitch: 60, time: 0, instrument: 'acoustic_piano' },
+    { type: 'note_end', index: 0, time: 0 },
+    { type: 'note_start', index: 1, pitch: 60, time: 1, instrument: 'acoustic_piano' },
+    { type: 'note_end', index: 1, time: 2 },
+  ])!;
+  const notes = parseMidiFile(mid).notes.map(n => [n.start, n.duration]);
+  assert.equal(notes.length, 2);
+  assert.ok(Math.abs(notes[0][0]) < 0.002 && Math.abs(notes[0][1] - 0.01) < 0.002);
+  assert.ok(Math.abs(notes[1][0] - 1) < 0.002 && Math.abs(notes[1][1] - 1) < 0.002);
+});

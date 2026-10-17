@@ -58,6 +58,8 @@ interface MidiJob {
   noteCount: number;
   error?: string;
   gated?: boolean;
+  /** A failed run whose streamed notes were saved as out.mid. */
+  partial?: boolean;
   createdAt: number;
   child?: ChildProcess;
   listeners: Set<Response>;
@@ -220,6 +222,7 @@ function savePartial(job: MidiJob): void {
       fs.writeFileSync(midPath(job.id), mid);
     }
     const { noteCount } = saveResult(job, true);
+    job.partial = true;
     console.log(`[MidiStudio] Job ${job.id}: kept partial MIDI (${noteCount} notes, ${job.chunksDone}/${job.chunksTotal} chunks)`);
   } catch (err: any) {
     console.warn(`[MidiStudio] Job ${job.id}: could not keep partial MIDI (${err.message})`);
@@ -354,12 +357,11 @@ router.get('/jobs', (_req: Request, res: Response) => {
         if (!fs.existsSync(metaPath)) continue;
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-          const live = jobs.get(meta.id || entry.name);
-          if (live && live.status !== 'done') continue; // a kept partial lists as failed until restart
           onDisk.add(meta.id || entry.name);
           summaries.push({
             id: meta.id || entry.name,
-            status: 'done',
+            // A kept partial stays a failure, before and after a restart.
+            status: meta.partial ? 'failed' : 'done',
             sourceFileName: meta.sourceFileName || 'unknown',
             sourceAudioUrl: meta.sourceAudioUrl,
             songId: meta.songId,
@@ -367,7 +369,9 @@ router.get('/jobs', (_req: Request, res: Response) => {
             noteCount: meta.noteCount || 0,
             durationSec: meta.durationSec || 0,
             createdAt: meta.createdAt || '',
-            ...(meta.partial ? { partial: true, error: meta.error } : {}),
+            ...(meta.partial ? {
+              partial: true, error: meta.error, chunksDone: meta.chunksDone, chunksTotal: meta.chunksTotal,
+            } : {}),
           });
         } catch { /* skip corrupted meta */ }
       }
@@ -388,6 +392,7 @@ router.get('/jobs', (_req: Request, res: Response) => {
         createdAt: new Date(job.createdAt).toISOString(),
         error: job.error,
         gated: job.gated,
+        partial: job.partial,
       });
     }
     summaries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -402,8 +407,11 @@ router.get('/:jobId/progress', (req: Request, res: Response) => {
   const jobId = req.params.jobId as string;
   const job = jobs.get(jobId);
   if (!job) {
-    if (fs.existsSync(path.join(jobDir(jobId), '_meta.json'))) {
-      res.json({ status: 'done' });
+    const metaPath = path.join(jobDir(jobId), '_meta.json');
+    if (fs.existsSync(metaPath)) {
+      let meta: any = {};
+      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch { /* treat as done */ }
+      res.json(meta.partial ? { status: 'failed', partial: true, error: meta.error } : { status: 'done' });
       return;
     }
     res.status(404).json({ error: 'Job not found' });
@@ -416,6 +424,7 @@ router.get('/:jobId/progress', (req: Request, res: Response) => {
     noteCount: job.noteCount,
     error: job.error,
     gated: job.gated,
+    partial: job.partial,
   });
 });
 

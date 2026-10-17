@@ -204,7 +204,8 @@ function varLen(n: number): number[] {
  * Build a type-0 SMF (480 tpb, 120 bpm, velocity 100) from ace-midi's JSONL
  * note events, so a run that dies before writing out.mid still leaves the
  * notes it decoded. Notes still open at the cut are dropped. Null when no
- * note completed.
+ * note completed. Notes are fixed up as the engine's writer does
+ * (validate_notes_fix, trim_overlapping in engine/tools/ace-midi.cpp).
  */
 export function partialMidiFromEvents(events: any[]): Buffer | null {
   const open = new Map<number, { pitch: number; time: number; instrument: string }>();
@@ -214,10 +215,22 @@ export function partialMidiFromEvents(events: any[]): Buffer | null {
     else if (ev?.type === 'note_end' && open.has(ev.index)) {
       const s = open.get(ev.index)!;
       open.delete(ev.index);
-      notes.push({ pitch: s.pitch, on: s.time, off: Math.max(ev.time, s.time), instrument: s.instrument });
+      // A too-short note gets the engine's 0.01 s minimum, so its off never sorts before its on.
+      const off = ev.time - s.time < 0.01 ? s.time + 0.01 : ev.time;
+      notes.push({ pitch: s.pitch, on: s.time, off, instrument: s.instrument });
     }
   }
-  if (!notes.length) return null;
+  // A note of the same pitch and instrument ends where the next one starts.
+  notes.sort((a, b) => a.on - b.on);
+  const lastOf = new Map<string, (typeof notes)[number]>();
+  for (const n of notes) {
+    const key = `${n.instrument}:${n.pitch}`;
+    const prev = lastOf.get(key);
+    if (prev && prev.off > n.on) prev.off = n.on;
+    lastOf.set(key, n);
+  }
+  const kept = notes.filter(n => n.on < n.off);
+  if (!kept.length) return null;
 
   // Channels by first appearance: 0-8, 10-15 (overflow shares 15), drums on 9.
   const channels = new Map<string, number>();
@@ -238,7 +251,7 @@ export function partialMidiFromEvents(events: any[]): Buffer | null {
 
   const tick = (sec: number) => Math.round(sec * 960); // 480 tpb at 120 bpm
   const evs: { tick: number; status: number; pitch: number; vel: number }[] = [];
-  for (const n of notes) {
+  for (const n of kept) {
     const ch = chanFor(n.instrument);
     evs.push({ tick: tick(n.on), status: 0x90 | ch, pitch: n.pitch, vel: 100 });
     evs.push({ tick: tick(n.off), status: 0x80 | ch, pitch: n.pitch, vel: 0 });
