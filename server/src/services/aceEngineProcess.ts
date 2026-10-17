@@ -70,6 +70,15 @@ export function engineCrashSeq(): number {
 
 /** How long restartAceServer() waits for /health after a respawn. */
 const RESTART_HEALTH_TIMEOUT_MS = 90_000;
+/** Poll interval of the watcher that outlives that timeout. */
+const LATE_READY_POLL_MS = 2_000;
+
+/** Test seam: swap the spawn and shrink the timings. Production never touches it. */
+export const testHooks = {
+  spawn: spawn as typeof spawn,
+  restartHealthTimeoutMs: RESTART_HEALTH_TIMEOUT_MS,
+  lateReadyPollMs: LATE_READY_POLL_MS,
+};
 
 // ── Post-restart restore hooks ──────────────────────────────────────────────
 //
@@ -202,7 +211,7 @@ export function startAceServer(): ChildProcess | null {
     console.log(`[Server] TensorRT libs: ${config.aceServer.trtLibs}`);
   }
 
-  const child = spawn(exe, args, spawnOpts);
+  const child = testHooks.spawn(exe, args, spawnOpts);
 
   // Filter repetitive GGML noise from console output (still written to ace_engine.log via logEngine)
   const isNoise = (line: string) =>
@@ -397,7 +406,7 @@ export async function restartAceServer(): Promise<boolean> {
     return false;
   }
 
-  const deadline = Date.now() + RESTART_HEALTH_TIMEOUT_MS;
+  const deadline = Date.now() + testHooks.restartHealthTimeoutMs;
   while (Date.now() < deadline) {
     if (await aceClient.isReachable()) {
       setEngineReady(true, 'Ready');
@@ -410,5 +419,24 @@ export async function restartAceServer(): Promise<boolean> {
 
   console.error('[Server] ace-server did not answer /health within 90 s after a restart');
   setEngineReady(false, 'Engine did not come back — restart the app');
+  // The verdict above is not final while the child lives: a cold first boot on
+  // fresh models can out-run 90 s, and engineReady stays false (every backend
+  // reads 'down', so the model lists stay empty) until something flips it.
+  void lateReadyWatch(child, lifecycleEpoch);
   return false;
+}
+
+/** Keep polling a live child after the restart timeout; flip ready when it answers. */
+async function lateReadyWatch(child: ChildProcess, epoch: number): Promise<void> {
+  while (aceProcess === child && epoch === lifecycleEpoch && !suspended
+         && child.exitCode === null && child.signalCode === null) {
+    await new Promise(r => setTimeout(r, testHooks.lateReadyPollMs));
+    if (aceProcess !== child || epoch !== lifecycleEpoch || suspended) return;
+    if (await aceClient.isReachable()) {
+      setEngineReady(true, 'Ready');
+      console.log('[Server] ace-server answered /health after the restart timeout — marking ready');
+      await runRestoreHooks();
+      return;
+    }
+  }
 }
