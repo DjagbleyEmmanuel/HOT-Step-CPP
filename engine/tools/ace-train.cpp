@@ -429,6 +429,8 @@ static void print_usage(void) {
             "                yue2-preprocess uses, at 48 kHz, so codes and latents come from\n"
             "                identical decoded samples.\n"
             "                [--force]  re-encode sources whose codes are already cached\n"
+            "                [--dump-mert]  also write codes/<stem>.mert.f16, the head's instance-normed\n"
+            "                [T25, 1024] input (fp16), for tokenizer-head training\n"
             "                Codes are RAW, in [0, 32768). The + codec_offset (151853) is\n"
             "                added once, at conditioning time, by the trainer.\n"
             "                TF32 is forced off, same rule as yue2-preprocess.\n"
@@ -4756,6 +4758,7 @@ static int cmd_yue2_tokenize(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--decode"))   a.decode     = next("--decode");
         else if (!strcmp(argv[i], "--limit"))    a.limit      = atoi(next("--limit"));
         else if (!strcmp(argv[i], "--force"))    a.force      = true;
+        else if (!strcmp(argv[i], "--dump-mert")) a.dump_mert = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }

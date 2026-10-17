@@ -467,7 +467,7 @@ usage. `ace-train --help` prints the full option list.
 | `mm3-train-dit` | Train an MM3 flow-DiT LoRA |
 | `rec7-selftest` | Parity gate for the rec7 state encoder |
 | `yue2-preprocess` | Audio folder to cached YuE2 VAE latents and a manifest. Skips `*.engine.wav` (old server conversion-cache leftovers, duplicates of real tracks), as the dataset scanner does |
-| `yue2-tokenize` | Fill a YuE2 manifest's codec ids |
+| `yue2-tokenize` | Fill a YuE2 manifest's codec ids. `--dump-mert` also writes `codes/<stem>.mert.f16`, the tokenizer head's exact instance-normed `[T25, 1024]` MERT input, for head-training experiments |
 | `yue2-align` | Fill word timings for the AR lyric-cursor loss |
 | `yue2-sheet` | Fill the ABC lead sheet with SheetSage2; `--melody-only` serves cover inference, while training keeps full score by default |
 | `yue2-nar-train` | Train a YuE2 NAR LoRA |
