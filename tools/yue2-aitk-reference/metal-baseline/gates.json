@@ -1,0 +1,30 @@
+{
+  "issue": "HOTSTEP-342",
+  "status": "pending_fixture_recovery_and_reviewer_acceptance",
+  "baseline_parent": "1ca695cc73cb5570d99052cd5f00830d01dab15e",
+  "comparison_parent_at_task_start": "7652d959ca1f17ddd33a26784548e404085d0a30",
+  "ggml": "6d57c78a2c749cd7d9d58c2f7bd3178729171584",
+  "metric": "First update of a fresh seed-42 run after one identical warmup update in the same process; pipeline and frozen-teacher caches retained",
+  "warm_step1_seconds": [36.133546667000005, 35.4531325, 35.36655625],
+  "warm_median_seconds": 35.4531325,
+  "warm_spread_max_minus_min_seconds": 0.7669904170000024,
+  "three_times_spread_seconds": 2.300971251000007,
+  "repeat_rule": "One paired run per slice; increase to three pairs if absolute delta is below three_times_spread_seconds. Batch acceptance always uses three pairs.",
+  "observed_logged_scalar_repeatability_max_abs": {
+    "ar_ce": 0,
+    "ar_kl": 0,
+    "nar_mse": 0,
+    "gradient_norm": 0
+  },
+  "native_loss_tolerance": null,
+  "native_tensor_gradient_tolerance": null,
+  "a4_existing_thresholds": {
+    "step1_loss_flow_ar_ce_relative_error_max_inclusive": 0.005,
+    "each_sampled_B_gradient_relative_L2_max_exclusive": 0.03,
+    "each_sampled_post_update_B_relative_L2_max_exclusive": 0.05
+  },
+  "a4_replay": "not_run_missing_fixture",
+  "exact_copy_and_rounding": "bitwise_equality_required",
+  "always_reject": ["nonfinite_results", "wrong_shapes", "wrong_backend_placement", "unexplained_accumulating_drift"],
+  "blocker": "Original A4 inputs, reference tensor outputs and a4_gates.py are absent from their documented location. Scalar gradient-norm equality does not establish tensor-gradient repeatability. B must wait for recovery, replay, numeric tolerances and reviewer acceptance."
+}
