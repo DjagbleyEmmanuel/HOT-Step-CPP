@@ -595,6 +595,37 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.ok(!fs.existsSync(path.join(config.data.audioDir, 'takes', s.id, `${x.id}.codes.json`)));
   });
 
+  await t.test('a section reopened by a crop and then changed cannot come back through undo or a later crop', async () => {
+    const { cropBuildTake, applyBuildLyrics } = await import('./yue2Takes.js');
+    const s = start();
+    // Intro and verse in one take; the chorus would start at 300.
+    const [both] = await take(s.id, 1, 0);
+    keepBuildTake(s.id, 'user', both.id, 0);
+    const reopened = cropBuildTake(s.id, 'user', both.id, 0, 200, 'regenerate');
+    const crop = reopened.kept.at(-1)!;
+    // Swap the reopened verse and the chorus.
+    const plan = editBuildPlan(s.id, 'user', 0, ['o2', 'o1', 'o3'], true);
+    assert.deepEqual(plan.arrangement.plan.map(o => o.id), ['o0', 'o2', 'o1', 'o3']);
+    assert.throws(() => cropBuildTake(s.id, 'user', crop, 1, null, undefined), /no longer matches/);
+    assert.throws(() => cropBuildTake(s.id, 'user', crop, 1, 250, 'advance'), /no longer matches/);
+    assert.throws(() => cropBuildTake(s.id, 'user', crop, 1, 300, undefined), /no longer matches/);
+    const after = getBuildSession(s.id, 'user');
+    assert.equal(after.kept.at(-1), crop);
+    assert.equal(after.takes.length, 2);
+    // Cutting within what is built still works.
+    const shorter = cropBuildTake(s.id, 'user', crop, 1, 180, 'regenerate');
+    assert.deepEqual(shorter.takes.find(x => x.id === shorter.kept.at(-1))!.occurrences, ['o0']);
+
+    // A lyric edit to the reopened verse also blocks it.
+    const t2 = start();
+    const [pair] = await take(t2.id, 1, 0);
+    keepBuildTake(t2.id, 'user', pair.id, 0);
+    const c2 = cropBuildTake(t2.id, 'user', pair.id, 0, 200, 'regenerate').kept.at(-1)!;
+    const toRequest = (p: Record<string, unknown>) => ({ style: 'ambient', cot: 'full', abc: score, lyrics: String(p.lyrics) }) as Yue2SynthRequest;
+    applyBuildLyrics(t2.id, 'user', 0, lyrics.replace('first line here', 'other words now'), toRequest);
+    assert.throws(() => cropBuildTake(t2.id, 'user', c2, 1, null, undefined), /no longer matches/);
+  });
+
   await t.test('crop waits for pending takes', async () => {
     const { cropBuildTake } = await import('./yue2Takes.js');
     const s = start();

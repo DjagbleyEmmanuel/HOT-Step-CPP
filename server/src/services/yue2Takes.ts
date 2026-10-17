@@ -564,14 +564,23 @@ export function cropBuildTake(id: string, userId: string, takeId: string, revisi
   const spine = stored.takes.find(t => t.id === stored.kept.at(-1));
   if (!spine || spine.id !== takeId) throw new TakesError('Only the last kept take can be cropped.', 409);
   const base = stored.takes.find(t => t.id === spine.cropOf) ?? spine;
+  // Reaching past the spine re-adds occurrences a regenerate crop reopened,
+  // which the plan or lyrics may have changed since: keep's own rules apply.
+  const refuseReach = (take: ArrangedTake) => {
+    const refusal = take.to > spine.to ? keepRefusal({ ...stored, kept: stored.kept.slice(0, -1) }, take) : null;
+    if (refusal) throw new TakesError(`${refusal} Its cut part no longer matches the build: crop within what is built, or generate that section again.`, 409);
+  };
   let next: ArrangedTake;
   if (frame === null) {
     if (base === spine) throw new TakesError(spine.cropOf ? 'The uncropped take was deleted.' : 'That take is not cropped.', 409);
+    refuseReach(base);
     next = base;
   } else {
     const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i]?.section)?.label ?? `section ${i + 1}`;
     const plan = cropPlan(base, frame, mode, name);
     const cut = frame as number;
+    const occurrences = base.occurrences.slice(0, Math.max(0, plan.to - base.from + 1));
+    refuseReach({ ...base, to: plan.to, occurrences });
     const same = stored.takes.find(t => t.cropOf === base.id && t.frames === cut && t.to === plan.to && t.resume === plan.resume);
     if (same) next = same;
     else {
@@ -581,8 +590,7 @@ export function cropBuildTake(id: string, userId: string, takeId: string, revisi
       fs.writeFileSync(path.join(sessionDir(id), `${cropId}.wav`), wav);
       fs.writeFileSync(codesFile(id, cropId), JSON.stringify(codes));
       next = { ...base, id: cropId, audioUrl: `/audio/takes/${id}/${cropId}.wav`, frames: cut, to: plan.to, starts: plan.starts,
-        prefix: plan.prefix, resume: plan.resume, cropOf: base.cropOf ?? base.id,
-        occurrences: base.occurrences.slice(0, Math.max(0, plan.to - base.from + 1)),
+        prefix: plan.prefix, resume: plan.resume, cropOf: base.cropOf ?? base.id, occurrences,
         peaks: wavPeaks(wav, Math.max(0, plan.prefix / YUE2_FPS - (plan.prefix ? LEAD_IN_S : 0)), cut / YUE2_FPS) };
       stored.takes.push(next);
     }

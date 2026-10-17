@@ -285,6 +285,9 @@ Prepare. Finish preparing those before generating the first takes.
    original, so you can move the cut later as well as earlier. Takes made
    before a crop (or after it, once you undo it) can no longer be kept until
    the build they continued is back. Cropping is refused while takes render.
+   If a crop reopened a section and you then change the plan or that section's
+   lyrics, **Undo crop** (or a crop that reaches past the cut) is refused, since
+   the original no longer matches; generate the section again instead.
 5. Click **Save song** to submit everything kept so far as an ordinary generation
    job, even if some sections remain unbuilt. It uses the kept audio codes and
    receives the usual post-processing, drift check and Library save. Once the
