@@ -837,10 +837,14 @@ async function capabilities(): Promise<BackendCapabilities> {
         key: 'yue2VaeVariant',
         type: 'select',
         label: 'VAE Variant',
-        hint: 'Which decoder checkpoint renders the final audio. Standard and Legacy ship with the app; '
+        hint: 'Which decoder checkpoint renders the final audio. Model picker uses the VAE chosen in the top bar; '
+            + 'any other choice overrides it for this generation. Standard and Legacy ship with the app; '
             + '2x decoder appears only when a locally fine-tuned yue2-vae-dec2x GGUF is in the models folder.',
-        default: 'standard',
+        // '' defers to the picker (yue2ResolvePick). A 'standard' default here
+        // used to win over every picker choice, because the UI always sends it.
+        default: '',
         options: [
+          { value: '', label: 'Model picker' },
           { value: 'standard', label: 'Standard' },
           { value: 'legacy', label: 'Legacy' },
           // Not distributed: listed only when the engine found the file, so it is never a dead option.

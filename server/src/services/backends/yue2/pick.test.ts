@@ -120,6 +120,11 @@ test('the captured VAE reaches the request', async () => {
   // The per-request VAE select is folded into the pick at submit.
   assert.equal(yue2ResolvePick({ yue2VaeVariant: 'legacy' }, defaults).vae_variant, 'legacy');
   assert.equal(yue2ResolvePick({ yue2VaeVariant: 'legacy', yue2Pick: { vae: 'standard' } }, defaults).vae_variant, 'standard');
+  // The select's default ('' = Model picker) leaves the saved picker choice in charge.
+  const saved = { ...defaults, vae_variant: 'dec2x' };
+  assert.equal(yue2ResolvePick({ yue2VaeVariant: '' }, saved).vae_variant, 'dec2x');
+  assert.equal(mapYue2Params({ caption: 'folk' }, yue2ResolvePick({ yue2VaeVariant: '' }, saved)).req.vae_variant, 'dec2x');
+  assert.equal(yue2ResolvePick({ yue2VaeVariant: 'dec2x' }, defaults).vae_variant, 'dec2x');
 });
 
 test('the captured lm_type reaches the request', async () => {
