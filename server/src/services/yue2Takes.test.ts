@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { lyricsThrough, sectionStarts, YUE2_FPS } from './yue2Takes.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
+import { composeArrangement } from './backends/yue2/coverArrangement.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -17,6 +18,8 @@ const score = [
   '% outro', 'V: Vocal', 'z6|z6|', '',
 ].join('\n');
 const lyrics = '[intro]\n\n[verse]\nfirst line here\n\n[chorus]\nhook line now\n\n[outro]';
+/** Each section's lyric span, in source order. */
+const spans = composeArrangement(score, lyrics, [0, 1, 2, 3]).occurrences.map(o => o.lyric);
 
 function words(times: Array<[string, number]>): Yue2AlignWord[] {
   return times.map(([text, start]) => {
@@ -28,25 +31,25 @@ function words(times: Array<[string, number]>): Yue2AlignWord[] {
 test('a section starts halfway through the gap before its first sung word, by the take\'s own timing', () => {
   // Sung later than the score clock says (verse at 6 s, chorus at 12 s). With
   // two words the median start is the second.
-  const starts = sectionStarts(score, lyrics, words([['first', 8], ['line here', 8.5], ['hook', 15], ['line now', 15.5]]), 30 * YUE2_FPS);
+  const starts = sectionStarts(spans, words([['first', 8], ['line here', 8.5], ['hook', 15], ['line now', 15.5]]), 30 * YUE2_FPS);
   assert.deepEqual(starts.map(f => (f === null ? null : f / YUE2_FPS)), [0, 8, 12.2, 16.4]);
 });
 
 test('squashed words, or a section past the take\'s end, give no start', () => {
   const squashed = words([['first', 8], ['line here', 8.5]]).concat(
     words([['hook', 9.9], ['line now', 9.92]]).map(w => ({ ...w, end: w.start + 0.01 })));
-  const starts = sectionStarts(score, lyrics, squashed, 11 * YUE2_FPS);
+  const starts = sectionStarts(spans, squashed, 11 * YUE2_FPS);
   assert.equal(starts[2], null);
   assert.equal(starts[3], null);
 });
 
 test('a take that stops early is aligned only against lyrics up to the next section', () => {
-  assert.equal(lyricsThrough(score, lyrics, 1), '[intro]\n\n[verse]\nfirst line here\n\n');
-  assert.equal(lyricsThrough(score, lyrics, 3), lyrics);
+  assert.equal(lyricsThrough(lyrics, spans, 1), '[intro]\n\n[verse]\nfirst line here\n\n');
+  assert.equal(lyricsThrough(lyrics, spans, 3), lyrics);
 });
 
 test('a start at or before the previous section\'s is dropped', () => {
-  const starts = sectionStarts(score, lyrics, words([['first', 8], ['line here', 8.5], ['hook', 4], ['line now', 4.5]]), 30 * YUE2_FPS);
+  const starts = sectionStarts(spans, words([['first', 8], ['line here', 8.5], ['hook', 4], ['line now', 4.5]]), 30 * YUE2_FPS);
   assert.equal(starts[2], null);
 });
 
@@ -360,4 +363,187 @@ test('cover-local lyrics: validated, revisioned, isolated, and the next take fol
     await settle(s.id);
     assert.equal(getBuildSession(s.id, 'user').takes.at(-1)!.parent, stored.takes[0].id);
   });
+});
+
+test('arrangements: takes and Save song follow the plan, by occurrence', async t => {
+  const { editBuildPlan, buildSessionRender, undoBuildKeep } = await import('./yue2Takes.js');
+  const { buildYue2LyricSchedule } = await import('./backends/yue2/lyricSchedule.js');
+  const previousDir = config.data.dir;
+  const dir = fs.mkdtempSync(path.resolve('.test-yue2-arrangement-'));
+  config.data.dir = dir;
+  t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
+  const requests: Yue2SynthRequest[] = [];
+  const results = new Map<string, Yue2TrackDetail[]>();
+  let hold = false, cancelled = false;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/synth') {
+      const req = JSON.parse(String(init?.body)) as Yue2SynthRequest;
+      requests.push(req);
+      const id = String(requests.length);
+      // Each take's new codes carry its request number, so prefixes are traceable.
+      results.set(id, (req.songs?.map(s => s.seed!) ?? [req.seed!]).map((seed, song) => ({ song, seed, noise_seed: seed, variation: 0,
+        semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(400).fill(requests.length)], frames: 400 })));
+      return Response.json({ id });
+    }
+    if (url.pathname === '/yue2/align') return Response.json({ words: [] });
+    if (url.searchParams.has('cancel')) { cancelled = true; return Response.json({}); }
+    const tracks = results.get(url.searchParams.get('id')!)!;
+    if (url.searchParams.has('result')) {
+      if (tracks.length === 1) return new Response(new Uint8Array(pcm(1)), { headers: { 'content-type': 'audio/wav' } });
+      const body = Buffer.concat(tracks.flatMap(() => [Buffer.from('--t\r\nContent-Type: audio/wav\r\n\r\n'), pcm(1), Buffer.from('\r\n')])
+        .concat(Buffer.from('--t--\r\n')));
+      return new Response(new Uint8Array(body), { headers: { 'content-type': 'multipart/mixed; boundary=t' } });
+    }
+    if (hold) return Response.json({ status: cancelled ? 'cancelled' : 'running', phase: 'semantic', phase_step: 1, phase_total: 4 });
+    return Response.json({ status: 'done', tracks });
+  });
+  const until = async (condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!condition()) { assert.ok(Date.now() < deadline, 'finished within deadline'); await new Promise(r => setTimeout(r, 5)); }
+  };
+  const options = { mode: 'bias', bias: -4, abc: false, leadSec: 0, behind: -1 } as const;
+  const start = (text = lyrics, abc = score) => createBuildSession({ lyrics: text }, { style: 'ambient', cot: 'full', abc, lyrics: text,
+    lyric_schedule: buildYue2LyricSchedule(abc, text, options).wire }, 'user');
+  const settle = (id: string) => until(() => !getBuildSession(id, 'user').pending.length);
+  const take = async (id: string, to: number, revision: number, count = 1) => {
+    const before = getBuildSession(id, 'user').takes.length;
+    generateBuildTakes(id, 'user', to, count, revision);
+    await settle(id);
+    const after = getBuildSession(id, 'user');
+    assert.equal(after.error, null);
+    return after.takes.slice(before);
+  };
+  // Skip the intro, repeat the chorus: verse, chorus, chorus, outro.
+  const composed = composeArrangement(score, lyrics, [1, 2, 2, 3]);
+
+  await t.test('the source order sends the stored score and lyrics unchanged', async () => {
+    const s = start();
+    await take(s.id, 0, 0);
+    assert.equal(requests.at(-1)!.abc, score);
+    assert.equal(requests.at(-1)!.lyrics, lyrics);
+    assert.deepEqual(requests.at(-1)!.lyric_schedule, buildYue2LyricSchedule(score, lyrics, options).wire);
+  });
+
+  await t.test('skip, repeat and continue: each take resumes the kept output under the composed prompt', async () => {
+    const s = start();
+    const planned = editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2', 's3'], true);
+    assert.equal(planned.revision, 1);
+    assert.deepEqual(planned.arrangement.plan.map(o => o.section), ['s1', 's2', 's2', 's3']);
+    // Identical labels, distinct occurrences that never reuse an earlier id.
+    assert.deepEqual(planned.arrangement.plan.map(o => o.id), ['o4', 'o5', 'o6', 'o7']);
+    const [verse] = await take(s.id, 0, 1);
+    const first = requests.at(-1)!;
+    assert.equal(first.abc, composed.abc);
+    assert.equal(first.lyrics, composed.lyrics);
+    assert.equal(first.codec_ids, undefined);
+    // Two 3 s bars of verse on the composed clock: 150 frames, then slack.
+    assert.equal(first.preview_max_frames, Math.round(150 * 1.3) + 100);
+    assert.deepEqual(first.lyric_schedule, buildYue2LyricSchedule(composed.abc, composed.lyrics, options).wire);
+    assert.deepEqual(verse.occurrences, ['o4']);
+    keepBuildTake(s.id, 'user', verse.id, 1);
+    const [chorus] = await take(s.id, 1, 1);
+    assert.deepEqual(requests.at(-1)!.codec_ids, Array(150).fill(requests.length - 1));
+    assert.equal(requests.at(-1)!.abc, composed.abc);
+    assert.deepEqual([chorus.parent, chorus.from, chorus.occurrences], [verse.id, 1, ['o5']]);
+    keepBuildTake(s.id, 'user', chorus.id, 1);
+    const [again] = await take(s.id, 2, 1);
+    // The repeat resumes the first chorus's own stream where the repeat starts.
+    assert.equal(requests.at(-1)!.codec_ids!.length, 300);
+    assert.deepEqual(requests.at(-1)!.codec_ids!.slice(150), Array(150).fill(requests.length - 1));
+    assert.deepEqual(again.occurrences, ['o6']);
+    keepBuildTake(s.id, 'user', again.id, 1);
+    // Save song: the spine's whole stream under the same arranged prompt.
+    const render = buildSessionRender(s.id, 'user');
+    assert.equal(render.abc, composed.abc);
+    assert.equal(render.lyrics, composed.lyrics);
+    assert.equal(render.codec_ids!.length, 300 + 400);
+    assert.deepEqual(render.lyric_schedule, first.lyric_schedule);
+    // The last occurrence ends the song: no cap.
+    await take(s.id, 3, 1);
+    assert.equal(requests.at(-1)!.preview_max_frames, undefined);
+  });
+
+  await t.test('kept occurrences stay put; an unfinished plan cannot build its last one', async () => {
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s1', 's2'], false);
+    assert.throws(() => generateBuildTakes(s.id, 'user', 1, 1, 1), /finish the arrangement/);
+    const [verse] = await take(s.id, 0, 1);
+    keepBuildTake(s.id, 'user', verse.id, 1);
+    // Upcoming chorus o5 keeps its identity; a new outro follows it.
+    const next = editBuildPlan(s.id, 'user', 1, ['o5', 's3'], true);
+    assert.deepEqual(next.arrangement.plan.map(o => o.id), ['o4', 'o5', 'o6']);
+    assert.equal(next.revision, 2);
+    assert.equal(editBuildPlan(s.id, 'user', 2, ['o5', 'o6'], true).revision, 2);
+    assert.throws(() => editBuildPlan(s.id, 'user', 2, ['o4'], true), /No such section/);
+    assert.throws(() => editBuildPlan(s.id, 'user', 2, 'o5', true), /must list/);
+    assert.deepEqual(getBuildSession(s.id, 'user').kept, [verse.id]);
+    assert.deepEqual(getBuildSession(s.id, 'user').arrangement.plan[0].id, 'o4');
+  });
+
+  await t.test('stale revisions, stale candidates and stale parents are refused', async () => {
+    const s = start();
+    const [a, b] = await take(s.id, 0, 0, 2);
+    keepBuildTake(s.id, 'user', a.id, 0);
+    const [fromA] = await take(s.id, 1, 0);
+    undoBuildKeep(s.id, 'user', undefined, 0);
+    keepBuildTake(s.id, 'user', b.id, 0);
+    // fromA resumed a, which is no longer the spine.
+    assert.throws(() => keepBuildTake(s.id, 'user', fromA.id, 0), /does not follow/);
+    const [fromB] = await take(s.id, 1, 0);
+    editBuildPlan(s.id, 'user', 0, ['s2', 's2', 's3'], true);
+    assert.throws(() => editBuildPlan(s.id, 'user', 0, ['s2'], true), /changed since/);
+    assert.throws(() => keepBuildTake(s.id, 'user', fromB.id, 1), /before the last change/);
+  });
+
+  await t.test('plan edits wait for pending takes', async () => {
+    hold = true;
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 25);
+    assert.throws(() => editBuildPlan(s.id, 'user', 0, ['s2'], true), /pending/);
+    await cancelBuildTakes(s.id, 'user');
+    await settle(s.id);
+    hold = false;
+    assert.equal(getBuildSession(s.id, 'user').revision, 0);
+  });
+
+  await t.test('a plan whose text would pair a block with the wrong occurrence sends no schedule', async () => {
+    // The unsung second chorus moved ahead of the sung one would take its
+    // block if the composed text were paired again.
+    const abc = ['X:1', 'M:4/4', 'L:1/16', 'Q:1/4=120', 'K:C', '% verse', 'V: Vocal', 'C16|',
+      '% chorus', 'V: Vocal', 'c16|', '% chorus', 'V: Vocal', 'Z|', ''].join('\n');
+    const text = '[Verse]\nla la\n\n[Chorus]\noh oh\n';
+    const plan = [0, 2, 1];
+    assert.equal(composeArrangement(abc, text, plan).textPairingMatches, false);
+    const s = start(text, abc);
+    editBuildPlan(s.id, 'user', 0, plan.map(i => `s${i}`), true);
+    await take(s.id, 0, 1);
+    assert.equal(requests.at(-1)!.lyric_schedule, undefined);
+    assert.equal(requests.at(-1)!.abc, composeArrangement(abc, text, plan).abc);
+  });
+});
+
+test('a repeated section is timed by its own copy of the lyrics', () => {
+  const composed = composeArrangement(score, lyrics, [1, 2, 2]);
+  const own = composed.occurrences.map(o => o.lyric);
+  assert.ok(own[1] && own[2] && own[2][0] > own[1][1] - 1);
+  const chars = Array.from(composed.lyrics);
+  const find = (text: string, from: number) => {
+    for (let i = from; i < chars.length; i++) if (chars.slice(i, i + text.length).join('') === text) return i;
+    throw new Error(text);
+  };
+  // The verse, then words sung only in the second copy of the chorus.
+  const sung: Yue2AlignWord[] = [
+    { char0: find('first', 0), char1: 0, start: 2, end: 2.4, score: 0 },
+    { char0: find('hook', own[2]![0]), char1: 0, start: 14, end: 14.4, score: 0 },
+  ];
+  const starts = sectionStarts(own, sung, 30 * YUE2_FPS);
+  // The first copy was not heard, so the second starts just before its words.
+  assert.equal(starts[1], null);
+  assert.equal(starts[2], Math.round((14 - 0.5) * YUE2_FPS));
+  // Heard in the first copy only: the repeat is not given its time.
+  const early = sectionStarts(own, [sung[0], { ...sung[1], char0: find('hook', own[1]![0]), start: 8, end: 8.4 }], 30 * YUE2_FPS);
+  assert.equal(early[1], Math.round(((2.4 + 8) / 2) * YUE2_FPS));
+  assert.equal(early[2], null);
 });

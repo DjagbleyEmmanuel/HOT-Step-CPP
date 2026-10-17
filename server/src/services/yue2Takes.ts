@@ -11,7 +11,10 @@
 // post-processing and library save. Section starts come from aligning the
 // lyrics on each take's audio, because the score clock drifts from what the
 // composer sings. Sessions are files under <audioDir>/takes/<id>/, so the
-// /audio static route plays the takes.
+// /audio static route plays the takes. Sections are built in the
+// arrangement's order (coverArrangement.ts): every take and Save song sends
+// the score and lyrics written out in that order, and a take's from, to and
+// starts index the arrangement's occurrences, never the score's sections.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,15 +23,15 @@ import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
 import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
 import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './backends/yue2/client.js';
-import { sectionKind } from './backends/yue2/coverDrift.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import {
-  BUILD_SESSION_VERSION, composeArrangement, generateRefusal, keepRefusal, migrateLegacySession, nextOccurrence,
+  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, migrateLegacySession, nextOccurrence,
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
+import { buildYue2LyricSchedule } from './backends/yue2/lyricSchedule.js';
 
 /** Codec frames per second (the composer's frame clock). */
 export const YUE2_FPS = 25;
@@ -53,14 +56,14 @@ function checkRevision(stored: Stored, expected: unknown): void {
 
 export interface Yue2Take {
   id: string;
-  /** The sections it composed, 0-based and inclusive. */
+  /** The occurrences it composed, plan indexes, 0-based and inclusive. */
   from: number;
   to: number;
   seed: number;
   /** Played through /audio. */
   audioUrl: string;
   frames: number;
-  /** The frame each section starts at in this take's audio, or null where
+  /** The frame each occurrence starts at in this take's audio, or null where
    *  the take does not reach it or no start was found. */
   starts: Array<number | null>;
   /** Loudness of its new part, 0..1, from LEAD_IN_S before `from` to its end. */
@@ -80,7 +83,8 @@ export interface Yue2BuildSession extends ArrangedSession {
   params: Record<string, unknown>;
 }
 
-interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRequest; scoreStarts: number[] }
+/** `request` holds the score and lyrics in source order; arranged() writes them out in plan order. */
+interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRequest }
 
 interface BuildRun { cancelled: boolean; jobId?: string }
 const runs = new Map<string, BuildRun>();
@@ -92,7 +96,7 @@ const codesFile = (id: string, take: string) => path.join(sessionDir(id), `${tak
 
 function load(id: string, userId: string): Stored {
   if (!/^[0-9a-f-]{36}$/.test(id)) throw new TakesError('Build session not found', 404);
-  let stored: Stored | (LegacySession & Pick<Stored, 'id' | 'userId' | 'params' | 'pending' | 'error' | 'request' | 'scoreStarts'>);
+  let stored: Stored | (LegacySession & Pick<Stored, 'id' | 'userId' | 'params' | 'pending' | 'error' | 'request'>);
   try { stored = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')); }
   catch { throw new TakesError('Build session not found', 404); }
   if (stored.userId !== userId) throw new TakesError('Build session not found', 404);
@@ -113,30 +117,54 @@ function save(stored: Stored): void {
   fs.renameSync(tmp, sessionFile(stored.id));
 }
 
-const view = ({ request: _r, scoreStarts: _s, userId: _u, ...rest }: Stored): Yue2BuildSession => rest;
+// Older session files also carry scoreStarts, which arranged() replaced.
+const view = ({ request: _r, scoreStarts: _s, userId: _u, ...rest }: Stored & { scoreStarts?: unknown }): Yue2BuildSession => rest;
 
-/** For each score section, the index of its lyric block (non-empty blocks,
- *  in order, the next one of the section's kind), or null. */
-function pairBlocks(abc: string, lyrics: string): Array<number | null> {
-  const blocks = splitLyricBlocks(lyrics).filter(block => block.body.trim());
-  let next = 0;
-  return scoreSections(abc).map(section => {
-    const at = blocks.findIndex((block, i) => i >= next && !!block.tag && sectionKind(block.tag) === sectionKind(section.label));
-    if (at < 0) return null;
-    next = at + 1;
-    return at;
-  });
+/** A lyric span per occurrence (code points in the composed lyrics), or null when unsung. */
+type Spans = Array<[number, number] | null>;
+
+/** What a take or Save song sends now: the session's request with its score
+ *  and lyrics written out in plan order, plus each occurrence's lyric span
+ *  and its frame on the score clock (and the end's). The source order sends
+ *  the stored text unchanged, so sessions from before arrangements render as
+ *  they did. A lyric schedule is rebuilt from the composed text, or dropped
+ *  when that text would pair a block with the wrong occurrence. */
+function arranged(stored: Pick<Stored, 'request' | 'arrangement'>): { request: Yue2SynthRequest; lyrics: string; spans: Spans; clock: number[] } {
+  const abc = stored.request.abc ?? '', lyrics = stored.request.lyrics ?? '';
+  const plan = planSections(stored.arrangement);
+  const composed = composeArrangement(abc, lyrics, plan);
+  const request = { ...stored.request };
+  if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i)) {
+    request.abc = composed.abc;
+    if (request.lyrics) request.lyrics = composed.lyrics;
+    const schedule = request.lyric_schedule;
+    delete request.lyric_schedule;
+    // ponytail: no schedule rather than a mispaired one; pairing the schedule
+    // by occurrence would need lyricSchedule.ts to take the spans.
+    if (schedule && request.lyrics && composed.textPairingMatches) {
+      try {
+        request.lyric_schedule = buildYue2LyricSchedule(composed.abc, composed.lyrics, { mode: schedule.mode,
+          bias: schedule.bias ?? -4, abc: schedule.abc === true, leadSec: schedule.lead_sec ?? 0, behind: schedule.behind ?? -1 }).wire;
+      } catch { /* renders unscheduled, as generate.ts does for a schedule it cannot build */ }
+    }
+  }
+  const marks = scoreSections(request.abc!);
+  if (marks.length !== plan.length) throw new TakesError('The arranged score lost a section label; edit the arrangement again.', 409);
+  const bars = scoreBarClock(request.abc!);
+  const clock = marks.map(m => Math.round((bars[m.startBar - 1]?.start ?? 0) * YUE2_FPS))
+    .concat(Math.round((bars.at(-1)?.end ?? 0) * YUE2_FPS));
+  return { request, lyrics: composed.lyrics, spans: composed.occurrences.map(o => o.lyric), clock };
 }
 
-/** Where each section starts in a take, from the lyrics aligned on its audio:
- *  halfway through the gap before the section's first sung word. A section
- *  pairs with the next lyric block of its kind, in order. Sections with no
- *  sung block (intro, solo) start just after the previous block's last word.
- *  Section 0 starts at 0. Word times are read as the section matcher reads
- *  them (median of the first three starts; squashed words mean not sung
- *  there), not by the aligner's scores, which read near zero on a full mix. */
-export function sectionStarts(abc: string, lyrics: string, words: Yue2AlignWord[], frames: number): Array<number | null> {
-  const blocks = splitLyricBlocks(lyrics).filter(block => block.body.trim());
+/** Where each occurrence starts in a take, from the lyrics aligned on its
+ *  audio: halfway through the gap before its first sung word. `spans` gives
+ *  each occurrence its own lyric block (composeArrangement), so a repeated
+ *  chorus is timed by its own copy. Occurrences with no sung block (intro,
+ *  solo) start just after the previous block's last word. Occurrence 0
+ *  starts at 0. Word times are read as the section matcher reads them
+ *  (median of the first three starts; squashed words mean not sung there),
+ *  not by the aligner's scores, which read near zero on a full mix. */
+export function sectionStarts(spans: Spans, words: Yue2AlignWord[], frames: number): Array<number | null> {
   const timed = (block: { start: number; end: number }) => {
     const own = words.filter(word => word.char0 >= block.start && word.char0 < block.end &&
       Number.isFinite(word.start) && Number.isFinite(word.end) && word.end > word.start);
@@ -146,13 +174,12 @@ export function sectionStarts(abc: string, lyrics: string, words: Yue2AlignWord[
     const firsts = own.slice(0, 3).map(word => word.start).sort((a, b) => a - b);
     return { start: firsts[Math.floor(firsts.length / 2)], end: Math.max(...own.map(word => word.end)) };
   };
-  const pairs = pairBlocks(abc, lyrics);
   // The end of the last sung word before each section, unless a sung section
   // in between could not be placed (then what follows it is unknown too).
   let lastEnd: number | null = null;
   let lastStart = 0;
-  return pairs.map((at, i) => {
-    const span = at === null ? null : timed(blocks[at]);
+  return spans.map((at, i) => {
+    const span = at === null ? null : timed({ start: at[0], end: at[1] });
     const seconds = i === 0 ? 0 : span ? (lastEnd !== null && lastEnd < span.start ? (lastEnd + span.start) / 2
       : Math.max(0, span.start - 0.5)) : at === null && lastEnd !== null ? lastEnd + 0.5 : null;
     if (span) lastEnd = span.end;
@@ -166,26 +193,23 @@ export function sectionStarts(abc: string, lyrics: string, words: Yue2AlignWord[
   });
 }
 
-/** The lyrics up to the end of the block paired with section `through`. */
-export function lyricsThrough(abc: string, lyrics: string, through: number): string {
-  const blocks = splitLyricBlocks(lyrics).filter(block => block.body.trim());
-  const pairs = pairBlocks(abc, lyrics);
-  if (through >= pairs.length - 1) return lyrics;
-  const at = pairs.slice(0, through + 1).filter(i => i !== null).at(-1);
-  return at === undefined || at === null ? lyrics : Array.from(lyrics).slice(0, blocks[at].end).join('');
+/** The lyrics up to the end of the block of occurrence `through`. */
+export function lyricsThrough(lyrics: string, spans: Spans, through: number): string {
+  if (through >= spans.length - 1) return lyrics;
+  const end = spans.slice(0, through + 1).filter(span => span !== null).at(-1)?.[1];
+  return end === undefined ? lyrics : Array.from(lyrics).slice(0, end).join('');
 }
 
 // A take that stops early is aligned against the lyrics only up to the
-// block of the section after its own: words it never sang would be squashed
-// into its tail and drag the earlier ones with them.
-async function alignStarts(stored: Stored, wav: Buffer, frames: number, through?: number): Promise<Array<number | null>> {
-  const lyrics = (stored.request.lyrics ?? '').replace(/\r\n?/g, '\n');
-  if (!lyrics.trim()) return stored.sections.map((_, i) => (i === 0 ? 0 : null));
-  const text = through === undefined ? lyrics : lyricsThrough(stored.request.abc ?? '', lyrics, through);
+// block of the occurrence after its own: words it never sang would be
+// squashed into its tail and drag the earlier ones with them.
+async function alignStarts(lyrics: string, spans: Spans, wav: Buffer, frames: number, through?: number): Promise<Array<number | null>> {
+  if (!lyrics.trim()) return spans.map((_, i) => (i === 0 ? 0 : null));
+  const text = through === undefined ? lyrics : lyricsThrough(lyrics, spans, through);
   const aligned = await yue2Align(wav, text);
-  const starts = sectionStarts(stored.request.abc ?? '', text, aligned.words, frames);
-  // Past `through` the lyrics were cut, so those sections read as unsung.
-  return stored.sections.map((_, i) => (through !== undefined && i > through ? null : starts[i] ?? null));
+  const starts = sectionStarts(spans, aligned.words, frames);
+  // Past `through` the lyrics were cut, so those occurrences read as unsung.
+  return spans.map((_, i) => (through !== undefined && i > through ? null : starts[i] ?? null));
 }
 
 async function waitJob(jobId: string, run: BuildRun, lease: LaneLease,
@@ -255,16 +279,13 @@ export function createBuildSession(params: Record<string, unknown>, request: Yue
   const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
   if (!sections.length) throw new TakesError('The score has no section labels.');
   request = plainRequest(request);
-  const bars = scoreBarClock(request.abc!);
-  const arranged = sourceSections(request.abc!, request.lyrics ?? '');
+  const source = sourceSections(request.abc!, request.lyrics ?? '');
   const id = randomUUID();
   fs.mkdirSync(sessionDir(id), { recursive: true });
   const stored: Stored = {
     id, userId, sections, takes: [], kept: [], pending: [], error: null, params, request,
     version: BUILD_SESSION_VERSION, revision: 0,
-    arrangement: { sections: arranged, plan: arranged.map((s, i) => ({ id: `o${i}`, section: s.id })), nextOccurrence: arranged.length, finished: true },
-    scoreStarts: sections.map(s => Math.round((bars[s.startBar - 1]?.start ?? 0) * YUE2_FPS))
-      .concat(Math.round((bars.at(-1)?.end ?? 0) * YUE2_FPS)),
+    arrangement: { sections: source, plan: source.map((s, i) => ({ id: `o${i}`, section: s.id })), nextOccurrence: source.length, finished: true },
   };
   save(stored);
   return view(stored);
@@ -274,8 +295,9 @@ export function getBuildSession(id: string, userId: string): Yue2BuildSession {
   return view(load(id, userId));
 }
 
-/** Queues `count` takes of sections [next, to], resumed from the spine.
- *  Returns at once; the session lists the takes as they finish. */
+/** Queues `count` takes of occurrences [next, to], resumed from the spine
+ *  under the arranged prompt. Returns at once; the session lists the takes
+ *  as they finish. */
 export function generateBuildTakes(id: string, userId: string, to: number, count: number, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
   checkRevision(stored, revision);
@@ -287,9 +309,12 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const start = spine ? spine.starts[from] : 0;
   if (start === null || start === undefined) throw new TakesError('The kept take does not reach the next section. Undo the keep and try another take.');
   const prefix = spine ? (JSON.parse(fs.readFileSync(codesFile(id, spine.id), 'utf8')) as number[]).slice(0, start) : [];
-  const last = to + 1 >= stored.sections.length;
-  const length = stored.scoreStarts[to + 1] - stored.scoreStarts[from];
+  const { request, lyrics, spans, clock } = arranged(stored);
+  const occurrences = spans.length;
+  const last = to + 1 >= occurrences;
+  const length = clock[to + 1] - clock[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
+  const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i].section)?.label ?? `#${i + 1}`;
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
   const identity = takeIdentity(stored, to);
   const pending = { from, to, count, activeCount: 0, phase: 'queued', progress: 0 };
@@ -315,7 +340,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             save(fresh);
           };
           update('starting', 0);
-          const req: Yue2SynthRequest = { ...stored.request, synth_batch_size: 1,
+          const req: Yue2SynthRequest = { ...request, synth_batch_size: 1,
             ...(prefix.length ? { codec_ids: prefix, continue_codec_ids: true } : {}),
             ...(cap ? { preview_max_frames: cap } : {}) };
           // Sessions saved by older servers may still carry batch fields.
@@ -324,8 +349,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
           if (seeds.length === 1) req.seed = seeds[0];
           else {
             delete req.seed;
-            req.songs = seeds.map(seed => ({ style: stored.request.style, lyrics: stored.request.lyrics,
-              abc: stored.request.abc, seed }));
+            req.songs = seeds.map(seed => ({ style: request.style, lyrics: request.lyrics, abc: request.abc, seed }));
           }
           // Retry winners use a different seed, which breaks the take identity.
           delete req.semantic_retries;
@@ -346,11 +370,11 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             const takes: ArrangedTake[] = [];
             for (const { seed, ids, wav } of mapped) {
               checkCancelled();
-              const starts = await alignStarts(stored, wav, ids.length, last ? undefined : to + 1);
+              const starts = await alignStarts(lyrics, spans, wav, ids.length, last ? undefined : to + 1);
               checkCancelled();
               for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
-              for (let i = from + 1; i <= Math.min(to + 1, stored.sections.length - 1); i++) {
-                const estimate = start + stored.scoreStarts[i] - stored.scoreStarts[from];
+              for (let i = from + 1; i <= Math.min(to + 1, occurrences - 1); i++) {
+                const estimate = start + clock[i] - clock[from];
                 if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
               }
               const takeId = randomUUID().slice(0, 8);
@@ -369,7 +393,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
           } finally {
             run.jobId = undefined;
           }
-        }, { label: `yue2 build: ${stored.sections[from].label}–${stored.sections[to].label}`, family: 'yue2' });
+        }, { label: `yue2 build: ${name(from)}–${name(to)}`, family: 'yue2' });
       }
     } catch (err) {
       const fresh = load(id, userId);
@@ -430,9 +454,9 @@ export function keepBuildTake(id: string, userId: string, takeId: string, revisi
   return view(stored);
 }
 
-/** Drops kept takes from the end: one, or until `section` is the next to
- *  build again. The revision stays, so a take made from an earlier spine is
- *  keepable again. */
+/** Drops kept takes from the end: one, or until occurrence `section` is the
+ *  next to build again. The revision stays, so a take made from an earlier
+ *  spine is keepable again. */
 export function undoBuildKeep(id: string, userId: string, section: number | undefined, revision: unknown): Yue2BuildSession {
   const stored = load(id, userId);
   checkRevision(stored, revision);
@@ -459,12 +483,44 @@ export function deleteBuildTake(id: string, userId: string, takeId: string, revi
   return view(stored);
 }
 
-/** The spine's whole codec stream, for the Save song render. */
-export function buildSessionCodes(id: string, userId: string): number[] {
+/** What the Save song render sends in place of the job's own score and
+ *  lyrics: the spine's whole codec stream under the arranged prompt it was
+ *  composed with. */
+export function buildSessionRender(id: string, userId: string):
+  Pick<Yue2SynthRequest, 'codec_ids' | 'abc' | 'lyrics' | 'lyric_schedule'> {
   const stored = load(id, userId);
   const spine = stored.kept.at(-1);
   if (!spine) throw new TakesError('Keep a take before saving the song.');
-  return JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[];
+  const { request } = arranged(stored);
+  return { codec_ids: JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[],
+    abc: request.abc, lyrics: request.lyrics, lyric_schedule: request.lyric_schedule };
+}
+
+const MAX_OCCURRENCES = 100;
+
+/** Replaces the occurrences not yet built (coverArrangement's editPlan):
+ *  `upcoming` lists source section ids (s0...) for new occurrences, or
+ *  existing upcoming occurrence ids (o3...) to keep their identity, and
+ *  `finished` says the plan ends the song. Kept occurrences stay. Every take
+ *  not yet kept becomes ineligible through the revision. */
+export function editBuildPlan(id: string, userId: string, revision: unknown, upcoming: unknown, finished: unknown): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (!Array.isArray(upcoming) || upcoming.some(x => typeof x !== 'string') || typeof finished !== 'boolean') {
+    throw new TakesError('upcoming must list section or occurrence ids, and finished must be true or false.');
+  }
+  let arrangement;
+  try { arrangement = editPlan(stored, upcoming as string[], finished); }
+  catch (err) { throw new TakesError((err as Error).message, 409); }
+  if (arrangement.plan.length > MAX_OCCURRENCES) throw new TakesError(`An arrangement holds at most ${MAX_OCCURRENCES} sections.`);
+  const same = (a: typeof arrangement) => JSON.stringify([a.plan, a.finished]);
+  if (same(arrangement) === same(stored.arrangement)) return view(stored);
+  arranged({ request: stored.request, arrangement });
+  stored.arrangement = arrangement;
+  stored.revision++;
+  save(stored);
+  return view(stored);
 }
 
 /** Why `lyrics` cannot be sung by a build, or null. Text above the first tag

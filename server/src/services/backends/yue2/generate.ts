@@ -79,7 +79,7 @@ import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { PollWatchdogOptions } from '../../generation/pollUntilDone.js';
 import type { GenerationAttempt } from '../types.js';
-import { buildSessionCodes } from '../../yue2Takes.js';
+import { buildSessionRender } from '../../yue2Takes.js';
 
 /** Injected so this module never imports back into routes/generate.ts at
  *  runtime, matching MinimaxGenerationDeps' own shape exactly. */
@@ -635,13 +635,19 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
   for (const n of notes) log('WARNING', `[YuE2] ${n}`);
   // A song built section by section: the kept codec stream is rendered as it
-  // is (prefilled, not sampled), so the job only runs the audio stages. Set
-  // after the request is logged, which would otherwise list every code.
+  // is (prefilled, not sampled), so the job only runs the audio stages, under
+  // the score and lyrics in the build's arranged order (the job params hold
+  // them in source order). Set after the request is logged, which would
+  // otherwise list every code.
   const build = job.params?.yue2Build as { session?: unknown } | undefined;
   if (build?.session !== undefined) {
-    req.codec_ids = buildSessionCodes(String(build.session), job.userId);
+    const render = buildSessionRender(String(build.session), job.userId);
+    for (const key of ['codec_ids', 'abc', 'lyrics', 'lyric_schedule'] as const) {
+      if (render[key] === undefined) delete req[key];
+      else (req as unknown as Record<string, unknown>)[key] = render[key];
+    }
     delete req.semantic_retries;
-    log('INFO', `[YuE2] Rendering ${req.codec_ids.length} kept codec frames from build session ${String(build.session)}`);
+    log('INFO', `[YuE2] Rendering ${render.codec_ids!.length} kept codec frames from build session ${String(build.session)}`);
   }
 
   console.log(`[Generate] Job ${job.id} — backend=yue2, cot=${req.cot}, seed=${req.seed ?? -1}, `

@@ -109,7 +109,7 @@ test('the retained prefix: text before the next occurrence depends only on the k
   assert.deepEqual(timed(a.abc, a.lyrics), timed(b.abc, b.lyrics));
   // And yue2Takes' cut for aligning a take that stops early still lands on
   // the end of the occurrence after it.
-  assert.equal(lyricsThrough(b.abc, b.lyrics, 3), Array.from(b.lyrics).slice(0, b.occurrences[3].lyric![1]).join(''));
+  assert.equal(lyricsThrough(b.lyrics, b.occurrences.map(o => o.lyric), 3), Array.from(b.lyrics).slice(0, b.occurrences[3].lyric![1]).join(''));
 });
 
 test('kept text and offsets survive leaving the source order, with odd whitespace and empty tags', () => {

@@ -299,6 +299,17 @@ changing sessions.
   stays valid; text after them is free. Prepare lyrics and dataset sidecars are never
   written. Until a session exists the text is a draft in the Cover Studio state,
   checked by `POST /api/yue2-cover/build/lyrics-check`.
+- **Arrangement.** `POST /api/yue2-cover/build/:id/plan` replaces the occurrences not
+  yet built: `upcoming` lists source section ids (a new occurrence) or upcoming
+  occurrence ids (kept identity), and `finished` says the plan ends the song. Kept
+  occurrences never move, and the last planned one can only be built once the plan is
+  finished. The session keeps its score and lyrics in source order; every take and
+  Save song sends them written out in plan order (`composeArrangement`), with any lyric
+  schedule rebuilt from that text, or dropped when re-pairing the text would give a
+  block to the wrong occurrence. A take's `from`, `to` and `starts` index occurrences;
+  alignment, the take length cap and undo use the same indexes. The source order
+  sends the stored text unchanged. Repeats make the prompt longer; a request past the
+  model context fails with the engine's error in the session's `error`.
 
 ## Feature map
 
