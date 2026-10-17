@@ -115,6 +115,7 @@ export interface Yue2Props {
     convrot?: Yue2PropsFile;
     vae_standard?: Yue2PropsFile;
     vae_legacy?: Yue2PropsFile;
+    vae_dec2x?: Yue2PropsFile;
   };
   variants?: {
     lm?: Yue2LmVariants;
@@ -170,7 +171,7 @@ export interface Yue2AdapterRef {
  *  mm3SelectModel's shape at YuE2's much smaller (two-part) scale. */
 export interface Yue2Selection {
   lm?: string;
-  vae_variant?: 'standard' | 'legacy';
+  vae_variant?: 'standard' | 'legacy' | 'dec2x';
   /** A NAR LoRA to merge into the LM at load, as an ABSOLUTE path.
    *
    *  The engine opens the path AS GIVEN — yue2-adapter.h resolves it against
@@ -214,7 +215,7 @@ export interface Yue2SelectModelResult {
 
 export interface Yue2WarmRequest {
   lm?: string;
-  vae_variant?: 'standard' | 'legacy';
+  vae_variant?: 'standard' | 'legacy' | 'dec2x';
 }
 
 export interface Yue2UnloadResult {
@@ -270,7 +271,7 @@ export interface Yue2SynthRequest {
   infer_method?: 'md_wasserstein_yue2';
   scheduler?: 'md_ht_scheduler V3';
   plugin_params?: Record<string, string | number | boolean>;
-  vae_variant?: 'standard' | 'legacy';
+  vae_variant?: 'standard' | 'legacy' | 'dec2x';
   /** Validator-only per the plan; never sent by this backend's own mapping. */
   noise_source?: 'native' | 'fixture';
   /** Preview-only semantic frame ceiling; 0 leaves normal generation limits. */

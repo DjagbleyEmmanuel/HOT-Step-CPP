@@ -837,11 +837,14 @@ async function capabilities(): Promise<BackendCapabilities> {
         key: 'yue2VaeVariant',
         type: 'select',
         label: 'VAE Variant',
-        hint: 'Which of the two shipped decoder checkpoints renders the final audio.',
+        hint: 'Which decoder checkpoint renders the final audio. Standard and Legacy ship with the app; '
+            + '2x decoder appears only when a locally fine-tuned yue2-vae-dec2x GGUF is in the models folder.',
         default: 'standard',
         options: [
           { value: 'standard', label: 'Standard' },
           { value: 'legacy', label: 'Legacy' },
+          // Not distributed: listed only when the engine found the file, so it is never a dead option.
+          ...(props?.files?.vae_dec2x?.found ? [{ value: 'dec2x', label: '2x decoder (experimental)' }] : []),
         ],
       },
       {
@@ -1158,7 +1161,7 @@ async function models(): Promise<BackendModels> {
       // Fixed two-choice enum, not a disk scan — matches the extension's own
       // yue2VaeVariant select. modelsMissing/props.files is what tells the
       // user whether a given variant is actually installed.
-      vae: ['standard', 'legacy'],
+      vae: ['standard', 'legacy', ...(props?.files?.vae_dec2x?.found ? ['dec2x'] : [])],
     },
     adapters: [],
     lmAdapters: adapters.paths,
@@ -1331,7 +1334,7 @@ export function yue2ResolvePick(
     lm: own.lm ?? persisted.lm,
     // The per-request VAE select (the yue2VaeVariant extension) is part of the
     // job's pick, after the job's own yue2Pick and before the saved default.
-    vae_variant: own.vae ?? (submission.yue2VaeVariant === 'standard' || submission.yue2VaeVariant === 'legacy'
+    vae_variant: own.vae ?? (['standard', 'legacy', 'dec2x'].includes(String(submission.yue2VaeVariant))
       ? submission.yue2VaeVariant : persisted.vae_variant),
     adapters: resolveSlots(own, persisted.adapters).next,
   };
@@ -1475,7 +1478,7 @@ async function reconcileSelection(props: Yue2Props | null, stale: boolean): Prom
   if (!lmDrifted && !adapterDrifted) return;
 
   const sel: Yue2Selection = { lm: targetLm };
-  if (want.vae_variant === 'standard' || want.vae_variant === 'legacy') {
+  if (want.vae_variant === 'standard' || want.vae_variant === 'legacy' || want.vae_variant === 'dec2x') {
     sel.vae_variant = want.vae_variant;
   }
   // Only speak about the adapter when there is something to say: replaying the

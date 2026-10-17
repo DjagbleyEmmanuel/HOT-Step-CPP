@@ -387,7 +387,8 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
 
   // From the job's pick (#204), which already folded in the per-request
   // yue2VaeVariant select at submit. '' (never chosen) renders standard.
-  const vae_variant: Yue2SynthRequest['vae_variant'] = pick.vae_variant === 'legacy' ? 'legacy' : 'standard';
+  const vae_variant: Yue2SynthRequest['vae_variant'] =
+    pick.vae_variant === 'legacy' || pick.vae_variant === 'dec2x' ? pick.vae_variant : 'standard';
 
   // ── Duration: model-ended, same story as MM3 ──────────────────────────────
   // core.duration.auto = true / editable = false: the AR plan/semantic stages
