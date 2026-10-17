@@ -68,7 +68,10 @@ class Chunks(torch.utils.data.IterableDataset):
                 continue
             if length < dur + 1:
                 continue
-            x = read_clip(f, rng.uniform(0, length - dur - 0.5), dur)
+            try:  # one bad file must not end an overnight run
+                x = read_clip(f, rng.uniform(0, length - dur - 0.5), dur)
+            except Exception:
+                continue
             if x is None or x.pow(2).mean().sqrt() < 1e-3:
                 continue
             peak = x.abs().max()
