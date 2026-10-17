@@ -416,7 +416,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Without continuation, single song and single variation only |
 | `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
-| `vae_variant` | `"standard"` | `standard` or `legacy` |
+| `vae_variant` | `"standard"` | `standard`, `legacy`, or `dec2x` (a local fine-tuned decoder; only when `yue2-vae-dec2x-*.gguf` is present) |
 | `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
 | `id` | `"yue2"` | Request label |
 

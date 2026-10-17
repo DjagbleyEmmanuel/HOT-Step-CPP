@@ -148,7 +148,7 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> semantic stage: the AR "composer" (yue2-lm-graph.h) samples codec ids
   -> NAR stage: mixture-of-transformers flow matching with a midpoint ODE solver
      (yue2-nar-graph.h), optionally chunked (nar_chunk_frames)
-  -> Oobleck VAE decode, "standard" or "legacy" variant (yue2-vae-graph.h)
+  -> Oobleck VAE decode, "standard", "legacy" or local "dec2x" variant (yue2-vae-graph.h)
   -> stitch and clamp -> 16-bit WAV (yue2-pipeline.h, yue2-job.h)
 ```
 
@@ -192,7 +192,15 @@ variants, repeated unload/reload and cache reuse with real decoder allocations;
 set `GGML_BACKEND=CPU` or `GGML_BACKEND=CUDA0` to select the device.
 
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
-the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
+the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). A third,
+local-only variant, `dec2x` (`yue2-vae-dec2x-f32.gguf`), is a fine-tuned standard VAE whose
+decoder has 9 residual units per block instead of 3. It is not distributed; the UI lists
+it only when the engine finds the file. Its GGUF carries `yue2vae.dec_res_dilations` (the
+decoder's own unit list; the encoder keeps `res_dilations`) and a 40-frame decode halo,
+because the extra units widen the receptive field to 29 frames. Build one with
+`tools/yue2-vae-train` (train, then `export.py`, then `convert-yue2.py --src-vae-dec2x`);
+`yue2-probe --vae-roundtrip <in.f32> <out.f32> --vae <variant>` measures what any VAE
+loses on real audio. The
 NAR stage can use Lua solvers and schedulers through `infer_method` and
 `scheduler`. A song's composer (semantic stage) stops at `plan_cutoff` (default 1.5)
 times its plan's length plus 20 s (`yue2_plan_cap_frames`, the bars x beats / tempo

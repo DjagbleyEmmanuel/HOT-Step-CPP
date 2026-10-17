@@ -5563,8 +5563,10 @@ int main(int argc, char ** argv) {
                 variant = YUE2_VAE_STANDARD;
             } else if (v == "legacy") {
                 variant = YUE2_VAE_LEGACY;
+            } else if (v == "dec2x") {
+                variant = YUE2_VAE_DEC2X;
             } else {
-                fprintf(stderr, "--vae must be 'standard' or 'legacy', got '%s'\n", v.c_str());
+                fprintf(stderr, "--vae must be 'standard', 'legacy' or 'dec2x', got '%s'\n", v.c_str());
                 return 2;
             }
         } else if (!strcmp(argv[i], "--adapter") && i + 1 < argc) {

@@ -293,7 +293,7 @@ static bool yue2_vae_prepare(const Yue2Model & m, Yue2VaeGraph * g, std::string 
     const Yue2VaeConfig &  vc  = m.vae_cfg;
     const Yue2VaeWeights & vw  = m.vae;
     const int              NB  = (int) vc.strides.size();
-    const int              NR  = (int) vc.res_dilations.size();
+    const int              NR  = (int) vc.dec_res_dilations.size();
     const float            eps = vc.snake_eps > 0.0f ? vc.snake_eps : 1e-9f;
 
     // The model's own backend (its NAR-lane instance when there is one), so a
@@ -478,8 +478,8 @@ static ggml_tensor * yue2_vae_build(ggml_context * ctx, const Yue2Model & m, con
 
         x = yue2_vae_snake_beta(ctx, x, pb.snake_pre);  // activation BEFORE upsample
         x = yue2_vae_convt(ctx, pb.upsample_w, wb.upsample_b, x, stride, oc);
-        for (size_t r = 0; r < vc.res_dilations.size(); r++) {
-            x = yue2_vae_res_unit(ctx, wb.res[r], pb.res[r], x, (int) vc.res_dilations[r]);
+        for (size_t r = 0; r < vc.dec_res_dilations.size(); r++) {
+            x = yue2_vae_res_unit(ctx, wb.res[r], pb.res[r], x, (int) vc.dec_res_dilations[r]);
         }
     }
 

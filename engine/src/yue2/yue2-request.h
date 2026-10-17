@@ -778,9 +778,11 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             out->vae_variant = YUE2_VAE_STANDARD;
         } else if (s == "legacy") {
             out->vae_variant = YUE2_VAE_LEGACY;
+        } else if (s == "dec2x") {
+            out->vae_variant = YUE2_VAE_DEC2X;
         } else {
             if (err) {
-                *err = "\"vae_variant\" must be \"standard\"|\"legacy\"";
+                *err = "\"vae_variant\" must be \"standard\"|\"legacy\"|\"dec2x\"";
             }
             yyjson_doc_free(doc);
             return false;

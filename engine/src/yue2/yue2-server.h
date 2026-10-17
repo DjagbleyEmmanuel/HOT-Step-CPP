@@ -161,6 +161,7 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
     }
     yue2_json_add_file(doc, files, "vae_standard", g_yue2.vae_file[YUE2_VAE_STANDARD]);
     yue2_json_add_file(doc, files, "vae_legacy", g_yue2.vae_file[YUE2_VAE_LEGACY]);
+    yue2_json_add_file(doc, files, "vae_dec2x", g_yue2.vae_file[YUE2_VAE_DEC2X]);
 
     // Quant catalogue — what the UI's LM quant picker is built from. Mirrors
     // minimax/mm3-server.h's own "variants" block (add_role), scoped to just
@@ -471,8 +472,10 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     Yue2VaeVariant variant_req = YUE2_VAE_STANDARD;
     if (variant_str == "legacy") {
         variant_req = YUE2_VAE_LEGACY;
+    } else if (variant_str == "dec2x") {
+        variant_req = YUE2_VAE_DEC2X;
     } else if (!variant_str.empty() && variant_str != "standard") {
-        yue2_json_error(res, 400, "vae_variant must be \"standard\"|\"legacy\"");
+        yue2_json_error(res, 400, "vae_variant must be \"standard\"|\"legacy\"|\"dec2x\"");
         return;
     }
 
