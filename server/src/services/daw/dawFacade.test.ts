@@ -6,7 +6,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
-import { DawError } from './dawSchema.js';
+import { DawError, parseDawRequest } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
 
 test('sweep removes an old upload-less job', () => {
@@ -511,4 +511,26 @@ test('audio path containment rejects a sibling dir and accepts a real child', ()
   assert.equal(sibling, false);
   assert.equal(child, true);
   assert.equal(up, false);
+});
+
+test('a seed at the uint32 max with takes 2 is rejected, not run past the engine range', async () => {
+  const raw = { mode: 'text2music', caption: 'x', takes: 2, seed: 4294967295 };
+  let err: unknown = null;
+  let seeds: number[] = [];
+  try {
+    const req = parseDawRequest(raw);
+    const up = fakeUpstream('sa3');
+    const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+    try {
+      await submitGenerate('seed-max', req, { seed: req.seed });
+      await __test.getJob('seed-max')!.seq?.done;
+      seeds = up.posts.map((p) => p.seed);
+    } finally { __setCaller(prevC); __setPollMs(prevP); __test.removeJob('seed-max'); }
+  } catch (e) { err = e; }
+  console.log('seed max: rejected', err instanceof DawError ? (err as DawError).status : null, 'seeds sent:', JSON.stringify(seeds));
+  assert.ok(err instanceof DawError);
+  assert.equal((err as DawError).status, 400);
+  assert.deepEqual(seeds, []);
+  // The last valid start for 2 takes still parses.
+  assert.equal(parseDawRequest({ ...raw, seed: 4294967294 }).seed, 4294967294);
 });

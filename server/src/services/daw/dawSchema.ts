@@ -74,6 +74,9 @@ const num = (v: unknown): number | undefined =>
   v === undefined || v === null || v === '' ? undefined : (Number.isFinite(Number(v)) ? Number(v) : NaN);
 
 /** Validate and normalise the DAW request. Throws DawError(400/422) on bad input. */
+/** Largest seed the engine honours (it consumes the low 32 bits). */
+export const SEED_MAX = 4294967295;
+
 export function parseDawRequest(raw: unknown): DawGenerateRequest {
   if (!raw || typeof raw !== 'object') throw new DawError(400, 'bad_request', 'request JSON object is required');
   const r = raw as Record<string, unknown>;
@@ -99,6 +102,11 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
   if (out.duration_s !== undefined && !(out.duration_s > 0)) throw new DawError(400, 'bad_request', 'duration_s must be positive');
   if (out.takes !== undefined && (!Number.isInteger(out.takes) || out.takes < 1 || out.takes > 8)) {
     throw new DawError(400, 'bad_request', 'takes must be an integer 1..8');
+  }
+  // The engine reads the low 32 bits of a seed and takes i renders with seed + i,
+  // so every take's seed must stay in 0..2^32-1 or the reported seed lies.
+  if (out.seed !== undefined && out.seed + (out.takes ?? 1) - 1 > SEED_MAX) {
+    throw new DawError(400, 'bad_request', `seed + takes - 1 must be at most ${SEED_MAX}`);
   }
   if (out.region !== undefined) {
     const s = Number(out.region?.start_s), e = Number(out.region?.end_s);
