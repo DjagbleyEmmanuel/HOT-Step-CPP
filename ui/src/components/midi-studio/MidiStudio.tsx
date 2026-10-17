@@ -448,6 +448,8 @@ export const MidiStudio: React.FC = () => {
           <div className="flex flex-col gap-2">
             {jobs.map(job => {
               const running = job.status === 'queued' || job.status === 'transcribing';
+              // A failed job can still hold a partial .mid (the failed badge stays).
+              const hasMidi = job.status === 'done' || (job.status === 'failed' && !!job.partial);
               const pct = job.chunksTotal ? Math.round(100 * (job.chunksDone || 0) / job.chunksTotal) : 0;
               return (
                 <div key={job.id} className="rounded-lg border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-black/20 px-3 py-2.5">
@@ -498,7 +500,7 @@ export const MidiStudio: React.FC = () => {
                       )}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      {job.status === 'done' && (
+                      {hasMidi && (
                         <>
                           <button
                             onClick={() => setExpandedJob(e => e === job.id ? null : job.id)}
@@ -529,7 +531,7 @@ export const MidiStudio: React.FC = () => {
                   {job.status === 'transcribing' && (
                     <MidiPlayer key={`${job.id}-live`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live />
                   )}
-                  {expandedJob === job.id && job.status === 'done' && (
+                  {expandedJob === job.id && hasMidi && (
                     <MidiPlayer key={`${job.id}-done`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={false} />
                   )}
                 </div>

@@ -34,6 +34,7 @@ export interface MidiJobProgress {
   noteCount?: number;
   error?: string;
   gated?: boolean;
+  partial?: boolean;
 }
 
 export interface MidiJobSummary {
@@ -50,6 +51,8 @@ export interface MidiJobSummary {
   error?: string;
   /** Failure looks like gated-model / HF auth trouble */
   gated?: boolean;
+  /** Failed, but the notes decoded before the failure were saved as a .mid */
+  partial?: boolean;
   /** chunk progress — present on in-flight jobs */
   chunksDone?: number;
   chunksTotal?: number;
