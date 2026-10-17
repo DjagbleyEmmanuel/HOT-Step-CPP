@@ -75,6 +75,15 @@ it onto a FIFO queue and return `{"id":"..."}` straight away. Clients poll
 YuE2 jobs share that queue, so they never run on the GPU at the same time. The job
 table keeps 32 entries and evicts the oldest finished ones first.
 
+`POST /sa3-refine`, `/pp-vae-reencode` and `/yue2/align` answer in the same request,
+but `on_worker()` in `hot-step-server.cpp` runs their body on the worker thread while
+the HTTP thread waits. Every module shares one GGML backend, and two threads
+computing on it at once abort the Metal driver or corrupt the model store (GH #226).
+These routes therefore queue behind whatever job is running: a call made during a
+long YuE2 batch waits for the whole batch, so a direct engine client needs a timeout
+long enough to cover that wait. The MM3 bring-up endpoints and `POST /yue2/imatrix`
+are not wrapped yet and still compute on their HTTP thread.
+
 Models are discovered by scanning `--models` at startup. ACE-Step files are
 classified by their GGUF `general.architecture` into LM, text encoder, DiT and VAE
 buckets (`model-registry.h`). MM3 looks in `<models>/mm3/` and then `<models>/`;
