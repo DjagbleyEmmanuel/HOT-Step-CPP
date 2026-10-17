@@ -1046,17 +1046,30 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // score to its .abc (each keeps a backup), then the same change is applied here.
   // Nothing is applied when the server refuses; a score write that fails after the
   // lyrics went in is reported, and the change is still applied here.
+  const sectionMatchRef = useRef(sectionMatch); sectionMatchRef.current = sectionMatch;
+  const scorePlanRef = useRef(scorePlan); scorePlanRef.current = scorePlan;
+  // Snapshot of what a save started from. The returned check is true only while
+  // the source, lyrics, score and proposal are all still those: an edit, a new
+  // match or Discard while the save is in flight means the late apply must not run.
+  const captureEdits = (key: string, sameProposal: () => boolean) => {
+    const lyricEdits = lyricEditRef.current, sheetRequest = sheetRequestRef.current;
+    return () => sourceKeyRef.current === key && lyricEditRef.current === lyricEdits &&
+      sheetRequestRef.current === sheetRequest && sameProposal();
+  };
   const saveScorePlan = async () => {
     if (!token || !scorePlan || scorePlanStale || !scorePlan.plan.revision) return;
     const next = resectionScore(sheetAbc, scorePlan.plan.sections);
     if ('error' in next) { setSheetError(next.error); return; }
+    const stillCurrent = captureEdits(scorePlan.key, () => scorePlanRef.current === scorePlan);
     setSectionSaving(true);
     try {
       const saved = await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: scorePlan.plan.lyrics,
         abc: next.abc, revision: scorePlan.plan.revision }, token);
-      if (sourceKeyRef.current === scorePlan.key) applyScorePlan();
-      if (saved.abcSaved === false) setSheetError(`Lyrics saved to the dataset, but the score was not: ${saved.abcError}`);
-      else showToast('Lyrics and score saved to the dataset');
+      const apply = stillCurrent();
+      if (apply) applyScorePlan();
+      const kept = apply || sourceKeyRef.current !== scorePlan.key ? '' : ' Your later changes were kept, so they were not applied here.';
+      if (saved.abcSaved === false) setSheetError(`Lyrics saved to the dataset, but the score was not: ${saved.abcError}${kept}`);
+      else showToast(`Lyrics and score saved to the dataset.${kept}`);
     } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
     finally { setSectionSaving(false); }
   };
@@ -1071,11 +1084,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
   const saveSectionMatch = async () => {
     if (!token || !sectionMatch || sectionMatchStale || !sectionMatch.match.revision) return;
+    const stillCurrent = captureEdits(sectionMatch.key, () => sectionMatchRef.current === sectionMatch);
     setSectionSaving(true);
     try {
       await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: sectionMatch.match.lyrics, revision: sectionMatch.match.revision }, token);
-      if (sourceKeyRef.current === sectionMatch.key) applySectionMatch();
-      showToast('Lyrics saved to the dataset');
+      const apply = stillCurrent();
+      if (apply) applySectionMatch();
+      showToast(apply || sourceKeyRef.current !== sectionMatch.key ? 'Lyrics saved to the dataset'
+        : 'Lyrics saved to the dataset; your later edits were kept, so they were not applied here');
     } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
     finally { setSectionSaving(false); }
   };

@@ -34,7 +34,8 @@ export const ScorePlanReview: React.FC<Props> = ({ beforeSections, beforeLyrics,
     <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2 space-y-2">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
         {plan.unchanged ? 'The score’s sections already match the lyrics.'
-          : 'Proposed score sections from where the source vocal sings each lyric block. Notes and words are unchanged; only this cover’s score and lyrics change.'}
+          : 'Proposed score sections from where the source vocal sings each lyric block. Notes and words are unchanged; ' + (plan.datasetSong
+            ? 'accepting saves the lyrics and score to the dataset song.' : 'only this cover’s score and lyrics change.')}
       </p>
       {plan.unsure.length > 0 && <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
         No clear start, so joined to the section before: {plan.unsure.map(b => b.tag ? `[${b.tag}]` : `block ${b.block}`).join(', ')}. Check these by hand.
@@ -48,7 +49,7 @@ export const ScorePlanReview: React.FC<Props> = ({ beforeSections, beforeLyrics,
         The score or the lyrics changed after matching. Match again before applying.
       </p>}
       <div className="flex flex-wrap gap-2">
-        {!plan.unchanged && <button type="button" onClick={onApply} disabled={stale}
+        {!plan.unchanged && !plan.datasetSong && <button type="button" onClick={onApply} disabled={stale}
           className="disabled:opacity-40 rounded bg-cyan-600 px-2 py-1 text-xs font-semibold text-white">Apply</button>}
         {!plan.unchanged && plan.datasetSong && <button type="button" onClick={onSave} disabled={saving || stale}
           className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">
