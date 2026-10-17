@@ -207,10 +207,19 @@ For a one-shot cover, **Generate cover** renders the song in one go. Choose
 It opens the **Build** tab, using the approved score, lyrics and settings from
 Prepare. Finish preparing those before generating the first takes.
 
-1. Use the coloured section chips on the **Song** timeline as your build track.
-   Built sections have ticks and start times; the next section has an arrow.
-   Click the last section you want the next take to reach, or drag across sections
-   from the next one. The selected sections' lyrics appear beside the takes.
+1. Two bars show the song. The **Source** bar is the score as it is, and never
+   changes. The **Song** bar is the output you are building: built sections have
+   ticks and start times, the next one has an arrow, and the rest are planned.
+   Click a source section to add it to the end of the song; click it again to repeat
+   it (a repeated chorus is its own entry on the Song bar). Hover a planned section
+   to move it earlier or later, or remove it. Built sections are locked until you
+   undo back to them. Click a planned section to build up to it; its lyrics, and the
+   lyrics of the planned sections before it, appear beside the takes, one block per
+   entry. **Ends the song** (on by default) marks the last section as the ending; turn
+   it off to keep adding sections, since the last section cannot be built until
+   something follows it or it is marked as the end. Editing the plan is refused while
+   takes render, and takes made for an earlier plan can no longer be kept. The plan
+   is saved with the build, so it survives a reload and is what **Save song** renders.
 2. Choose 1 to 10 takes, then press **Generate N takes of A → B**, with the
    count and section names shown for your selection. Each take uses a fresh seed,
    continues everything kept so far, and stops a little beyond the chosen range.

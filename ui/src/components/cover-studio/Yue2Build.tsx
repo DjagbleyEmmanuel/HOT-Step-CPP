@@ -3,10 +3,11 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Square, Trash2, X } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import { CoverArStrength } from './Yue2CoverPanel';
 import { persist, restore } from './coverStudioUtils';
 
@@ -38,6 +39,46 @@ export function finishSavedBuild(id: string): boolean {
 export function buildNext(session: Yue2BuildSession | null): number {
   const spine = session?.takes.find(t => t.id === session.kept.at(-1));
   return spine ? spine.to + 1 : 0;
+}
+
+/** One occurrence of the output: a score section placed in the song. Kept ones are built and locked. */
+export interface PlanItem { id: string; section: number; kept: boolean }
+
+/** The output in order. Before a session exists it is the score in its own order. */
+export function planItems(session: Yue2BuildSession | null, sectionCount: number): PlanItem[] {
+  const built = buildNext(session);
+  if (!session) return Array.from({ length: sectionCount }, (_, i) => ({ id: `o${i}`, section: i, kept: false }));
+  const { sections, plan } = session.arrangement;
+  return plan.map((o, i) => ({ id: o.id, section: sections.findIndex(s => s.id === o.section), kept: i < built }));
+}
+
+/** The ids `POST /build/:id/plan` takes for the unbuilt part of the output after `edit`. */
+export function editedPlan(items: PlanItem[], next: number,
+  edit: { add: number } | { remove: string } | { move: string; by: -1 | 1 }): string[] {
+  const upcoming = items.slice(next).map(i => i.id);
+  if ('add' in edit) return [...upcoming, `s${edit.add}`];
+  if ('remove' in edit) return upcoming.filter(id => id !== edit.remove);
+  const at = upcoming.indexOf(edit.move), to = at + edit.by;
+  if (at < 0 || to < 0 || to >= upcoming.length) return upcoming;
+  [upcoming[at], upcoming[to]] = [upcoming[to], upcoming[at]];
+  return upcoming;
+}
+
+/** The lyric block an occurrence sings, as text. A session pairs sections with the sung (non-empty) blocks. */
+export function occurrenceLyrics(lyrics: string, session: Yue2BuildSession | null, item: PlanItem): string {
+  const ranges = lyricBlockRanges(lyrics);
+  if (!session) { const r = ranges[item.section]; return r ? lyrics.slice(r.start, r.end).trim() : ''; }
+  const sung = ranges.filter(r => lyrics.slice(r.start, r.end).replace(/^[^\n]*/, '').trim());
+  const r = sung[session.arrangement.sections[item.section]?.lyricBlock ?? -1];
+  return r ? lyrics.slice(r.start, r.end).trim() : '';
+}
+
+/** Whether a take can be kept now: it resumed the kept build, at the current revision, and composed the planned occurrences. */
+export function keepable(session: Yue2BuildSession, take: Yue2BuildTake): boolean {
+  const next = buildNext(session);
+  const want = session.arrangement.plan.slice(next, take.to + 1).map(o => o.id);
+  return take.revision === session.revision && take.parent === (session.kept.at(-1) ?? null) && take.from === next
+    && want.length === take.occurrences.length && want.every((id, i) => id === take.occurrences[i]);
 }
 
 /** Where an Apply goes: the loaded session, a draft when there is no session at all, or
@@ -75,6 +116,12 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
       return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!);
+    }),
+    /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
+    plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
+      let started = live;
+      if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
+      return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished, token!);
     }),
     keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, live!.revision, take, token!)),
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
@@ -132,6 +179,8 @@ interface PageProps {
   busy: boolean;
   error: string;
   onGenerate: (to: number, count: number) => void;
+  /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
+  onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
   onKeep: (take: string) => void;
   onDelete: (take: string) => void;
@@ -149,7 +198,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [progress, setProgress] = useState<number | null>(null);
   const [paused, setPaused] = useState(true);
   const generation = useRef(0);
-  const [to, setTo] = useState<number | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
   const [count, setCount] = useState(3);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -158,14 +207,20 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const next = buildNext(s);
   const spine = s?.takes.find(t => t.id === s.kept.at(-1)) ?? null;
   const colours = sectionColours(p.sections.map(x => x.label));
-  const range = to !== null && to >= next && to < p.sections.length ? to : null;
-  const candidates = s?.takes.filter(t => t.from === next) ?? [];
+  const items = planItems(s, p.sections.length);
+  const finished = s?.arrangement.finished ?? true;
+  const targetAt = items.findIndex(i => i.id === target);
+  const range = targetAt >= next ? targetAt : null;
+  const candidates = s?.takes.filter(t => t.from === next && t.parent === (spine?.id ?? null)) ?? [];
   const waiting = s?.pending.reduce((n, x) => n + x.count, 0) ?? 0;
   const chunk = s?.pending[0];
   const chunkStage = ({ starting: 'Starting', semantic: 'Composing', plan: 'Planning', nar: 'Rendering', vae: 'Decoding audio', aligning: 'Aligning lyrics' } as Record<string, string>)[chunk?.phase ?? ''] ?? 'Rendering';
-  const done = next >= p.sections.length;
+  const done = next >= items.length;
+  const lastOpen = range !== null && range === items.length - 1 && !finished;
+  const editable = !p.busy && waiting === 0 && !p.loading;
+  const nameOf = (i: PlanItem) => p.sections[i.section]?.label ?? '?';
 
-  useEffect(() => { setTo(null); }, [next]);
+  useEffect(() => { setTarget(null); }, [next]);
   // An open editor belongs to the build it was opened on.
   useEffect(() => { setEditing(null); }, [s?.id]);
   const apply = async (text: string) => { if (await p.onApplyLyrics(text)) setEditing(null); };
@@ -224,10 +279,10 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   };
 
   // Lyrics of the chosen sections (block i pairs with section i).
-  const blocks = lyricBlockRanges(p.lyrics);
-  const shown = done ? [] : blocks.slice(next, (range ?? next) + 1).map(b => p.lyrics.slice(b.start, b.end).trim());
-  const bars = (i: number) => (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
-  const rangeLabel = range === null ? '' : `${p.sections[next].label}${range > next ? ` → ${p.sections[range].label}` : ''}`;
+  const shown = done ? [] : items.slice(next, (range ?? next) + 1).map(i => ({ id: i.id, text: occurrenceLyrics(p.lyrics, s, i) }));
+  const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
+  const rangeLabel = range === null ? '' : `${nameOf(items[next])}${range > next ? ` → ${nameOf(items[range])}` : ''}`;
+  const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => p.onPlan(editedPlan(items, next, change), ends);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -262,32 +317,58 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <CoverArStrength value={p.arStrength} onChange={p.onArStrength} locked={!!s} />
       </div>
 
-      {/* Song timeline. */}
+      {/* Source bar: the score as it is. Song bar: what the output will be, kept occurrences first. */}
       <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-3 space-y-2">
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <span className="font-semibold uppercase tracking-wide">Source</span>
+          <span className="ml-auto">Click a section to add it to the end of the song; repeat it as often as you like.</span>
+        </div>
+        <div className="flex gap-1 select-none" aria-label="Source sections">
+          {p.sections.map((section, i) => {
+            const uses = items.filter(x => x.section === i).length;
+            return <button type="button" key={i} disabled={!editable}
+              style={{ flexGrow: Math.max(1, bars(i)), flexBasis: 0, borderColor: colours[i], backgroundColor: `${colours[i]}22` }}
+              onClick={() => p.onPlan(editedPlan(items, next, { add: i }), finished)}
+              title={`Add ${section.label} to the end of the song`}
+              className="min-w-0 rounded-md border-t-4 px-1.5 py-1 text-left disabled:opacity-40">
+              <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">{section.label}</p>
+              <p className="truncate text-[10px] text-zinc-500">{bars(i)} bars{uses > 1 ? ` · used ${uses}×` : ''}</p>
+            </button>;
+          })}
+        </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-semibold uppercase tracking-wide">Song</span>
           <button type="button" disabled={!spine} onClick={() => spine && toggle('build', spine.audioUrl, 0, spine.frames / FPS)}
             className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
             {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
-          <span className="ml-auto">{done ? 'Every section is built.' : `Click or drag across sections from ${p.sections[next]?.label} to choose what to build next.`}</span>
+          <Toggle size="sm" accent="cyan" checked={finished} disabled={!editable} label="Ends the song"
+            info="The song stops after its last section. Turn it off to keep adding sections: the last one cannot be built until something follows it."
+            onChange={ends => p.onPlan(items.slice(next).map(i => i.id), ends)} />
+          <span className="ml-auto">{done ? 'Every section is built.' : `Click a section to build up to it, starting from ${nameOf(items[next])}.`}</span>
         </div>
-        <div className="flex gap-1 select-none">
-          {p.sections.map((section, i) => {
-            const built = i < next, picked = range !== null && i >= next && i <= range;
+        <div className="flex gap-1 select-none" aria-label="Song sections">
+          {items.map((item, i) => {
+            const picked = range !== null && i >= next && i <= range;
             const start = spine?.starts[i];
-            return <div key={i} style={{ flexGrow: Math.max(1, bars(i)), flexBasis: 0, borderColor: colours[i],
-              backgroundColor: built ? `${colours[i]}55` : picked ? `${colours[i]}33` : `${colours[i]}12` }}
-              onPointerDown={() => { if (!built) { dragging.current = true; setTo(Math.max(next, i)); } }}
-              onPointerEnter={() => { if (dragging.current && !built) setTo(Math.max(next, i)); }}
-              onClick={() => { if (built && spine && start != null) toggle(`s${i}`, spine.audioUrl, start / FPS, spine.frames / FPS); }}
-              title={built ? `Play the build from ${section.label}` : `Build up to ${section.label}`}
-              className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${i > next && !picked ? 'opacity-60' : ''}`}>
+            return <div key={item.id} style={{ flexGrow: Math.max(1, bars(item.section)), flexBasis: 0, borderColor: colours[item.section],
+              backgroundColor: item.kept ? `${colours[item.section]}55` : picked ? `${colours[item.section]}33` : `${colours[item.section]}12` }}
+              onClick={() => { if (item.kept) { if (spine && start != null) toggle(`s${item.id}`, spine.audioUrl, start / FPS, spine.frames / FPS); } else setTarget(item.id); }}
+              title={item.kept ? `Play the build from ${nameOf(item)}` : `Build up to ${nameOf(item)}`}
+              className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${!item.kept && i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
-                {built ? '✓ ' : i === next ? '→ ' : ''}{section.label}</p>
-              <p className="truncate text-[10px] text-zinc-500">{built ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${bars(i)} bars`}</p>
-              {built && <button type="button" onClick={e => { e.stopPropagation(); undo(i); }}
-                title={`Undo back to ${section.label}, to build it again`}
+                {item.kept ? '✓ ' : i === next ? '→ ' : ''}{nameOf(item)}</p>
+              <p className="truncate text-[10px] text-zinc-500">{item.kept ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${bars(item.section)} bars`}</p>
+              {item.kept && <button type="button" onClick={e => { e.stopPropagation(); undo(i); }}
+                title={`Undo back to ${nameOf(item)}, to build it again`}
                 className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-500 hover:text-pink-500 group-hover:block"><RotateCcw className="w-3 h-3" /></button>}
+              {!item.kept && <div className="absolute right-0.5 top-0.5 hidden items-center group-hover:flex">
+                <button type="button" disabled={!editable || i === next} onClick={e => { e.stopPropagation(); edit({ move: item.id, by: -1 }); }}
+                  aria-label={`Move ${nameOf(item)} earlier`} className="rounded p-0.5 text-zinc-500 hover:text-pink-500 disabled:opacity-30"><ChevronLeft className="w-3 h-3" /></button>
+                <button type="button" disabled={!editable || i === items.length - 1} onClick={e => { e.stopPropagation(); edit({ move: item.id, by: 1 }); }}
+                  aria-label={`Move ${nameOf(item)} later`} className="rounded p-0.5 text-zinc-500 hover:text-pink-500 disabled:opacity-30"><ChevronRight className="w-3 h-3" /></button>
+                <button type="button" disabled={!editable || items.length - next < 2} onClick={e => { e.stopPropagation(); edit({ remove: item.id }); }}
+                  aria-label={`Remove ${nameOf(item)} from the song`} className="rounded p-0.5 text-zinc-500 hover:text-red-500 disabled:opacity-30"><X className="w-3 h-3" /></button>
+              </div>}
             </div>;
           })}
         </div>
@@ -298,7 +379,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <div className="min-h-0 overflow-y-auto border-r border-zinc-200 dark:border-white/10 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              {done ? 'Done' : `Building: ${rangeLabel || p.sections[next].label}`}</p>
+              {done ? 'Done' : `Building: ${rangeLabel || nameOf(items[next])}`}</p>
             {editing === null && <>
               {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void apply(p.prepareLyrics)} disabled={p.busy || p.loading || waiting > 0}
                 title="Replace this build's lyrics with the Prepare page's"
@@ -323,7 +404,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Apply</button>
               <button type="button" onClick={() => setEditing(null)} className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
             </div>
-          </div> : shown.length ? shown.map((text, i) => <pre key={i} className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{text}</pre>)
+          </div> : shown.length ? shown.map(x => <pre key={x.id} className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{x.text || 'No lyrics for this section.'}</pre>)
             : !done && <p className="text-xs text-zinc-500">No lyrics for this section.</p>}
         </div>
         <div className="min-h-0 flex flex-col p-4 gap-3">
@@ -331,7 +412,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
           <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
             {candidates.map((take, i) => {
               const win = takeWindow(take);
-              const colour = colours[take.from] ?? '#ec4899';
+              const colour = colours[items[take.from]?.section ?? -1] ?? '#ec4899';
               return <div key={take.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
                 <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200">Take {i + 1}</span>
                 <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
@@ -341,8 +422,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                   className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500"><Square className="w-3.5 h-3.5" /></button>}
                 <Waveform peaks={take.peaks ?? []} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />
                 <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
-                <button type="button" onClick={() => keep(take.id)} disabled={p.busy || take.revision !== s?.revision}
-                  title={take.revision !== s?.revision ? 'Made with earlier lyrics; generate it again' : undefined}
+                <button type="button" onClick={() => keep(take.id)} disabled={p.busy || !s || !keepable(s, take)}
+                  title={s && !keepable(s, take) ? 'Made before the lyrics or the arrangement changed; generate it again' : undefined}
                   className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Keep</button>
                 <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
                   className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
@@ -357,7 +438,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               <button type="button" onClick={p.onCancel} disabled={p.busy}
                 className="rounded px-2 py-1 font-semibold hover:bg-amber-500/10 disabled:opacity-40">Cancel</button>
             </div>}
-            {!candidates.length && !waiting && !done && <p className="text-xs text-zinc-500">No takes yet. Choose sections on the timeline, then generate.</p>}
+            {!candidates.length && !waiting && !done && <p className="text-xs text-zinc-500">No takes yet. Choose sections on the song bar, then generate.</p>}
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
           {!done && <div className="space-y-1">
@@ -366,11 +447,12 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}
                   options={Array.from({ length: 10 }, (_, k) => ({ value: k + 1, label: String(k + 1) }))} />
               </div>
-              <button type="button" onClick={() => range !== null && p.onGenerate(range, count)} disabled={range === null || p.busy || waiting > 0 || !!p.blocked}
+              <button type="button" onClick={() => range !== null && p.onGenerate(range, count)} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
                 className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
-                {range === null ? 'Choose sections on the timeline' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
+                {range === null ? 'Choose sections on the song bar' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
             </div>
             {p.blocked && <p className="text-xs text-amber-600">{p.blocked}</p>}
+            {lastOpen && <p className="text-xs text-amber-600">Add what comes next, or tick Ends the song, before building the last section.</p>}
             {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
           </div>}
         </div>

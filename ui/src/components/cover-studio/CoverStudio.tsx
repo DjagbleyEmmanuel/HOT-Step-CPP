@@ -1238,14 +1238,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     set: text => setBuildLyricsDraft(text === null || text === lyrics ? null : { source: buildLyricsSource, text }) });
   const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
   const nextBuild = buildNext(buildSession);
+  /** The params a build starts from: the session's own, or the Prepare page's before there is one. */
+  const buildParams = (): Record<string, unknown> | null => {
+    if (buildSession) return buildSession.params;
+    const built = yue2CoverParams();
+    if (typeof built === 'string') { showToast(built); return null; }
+    return built.params;
+  };
   const generateBuildTakes = (to: number, count: number) => {
-    let params: Record<string, unknown> = buildSession?.params ?? {};
-    if (!buildSession) {
-      const built = yue2CoverParams();
-      if (typeof built === 'string') { showToast(built); return; }
-      params = built.params;
-    }
-    void build.generate(params, to, count);
+    const params = buildParams();
+    if (params) void build.generate(params, to, count);
+  };
+  const planBuild = (upcoming: string[], finished: boolean) => {
+    const params = buildParams();
+    if (params) void build.plan(params, upcoming, finished);
   };
   // Save song: an ordinary render of the kept codec stream, so it gets the
   // usual post-processing and library save.
@@ -1295,7 +1301,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error}
-      onGenerate={generateBuildTakes} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
+      onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
       onBack={() => setBuildMode(false)} />;
   };

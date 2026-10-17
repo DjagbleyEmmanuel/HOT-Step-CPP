@@ -126,6 +126,19 @@ export interface Yue2BuildTake {
   starts: Array<number | null>;
   /** Loudness 0..1 of its new part, from 4 s before its first section. */
   peaks?: number[];
+  /** The kept take it resumed (null: it starts the song). */
+  parent: string | null;
+  /** Ids of the occurrences it composed, from..to. */
+  occurrences: string[];
+}
+/** A section of the score, as the arrangement names it (s0, s1, ... in score order). */
+export interface Yue2SourceSection { id: string; label: string; startBar: number; bars: number; lyricBlock: number | null }
+/** The output: which source section each occurrence (o0, o1, ...) sings. Kept ones come first. */
+export interface Yue2Arrangement {
+  sections: Yue2SourceSection[];
+  plan: Array<{ id: string; section: string }>;
+  /** The plan ends the song; until then its last occurrence cannot be built. */
+  finished: boolean;
 }
 export interface Yue2BuildSession {
   id: string;
@@ -137,6 +150,7 @@ export interface Yue2BuildSession {
   pending: Array<{ from: number; to: number; count: number; activeCount?: number; phase?: string; progress?: number }>;
   error: string | null;
   params: Record<string, unknown>;
+  arrangement: Yue2Arrangement;
 }
 
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
@@ -170,6 +184,10 @@ export const yue2CoverApi = {
     request<{ ok: true }>('/build/lyrics-check', token, { method: 'POST', body: JSON.stringify({ lyrics }) }),
   buildLyrics: (id: string, revision: number, lyrics: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/lyrics`, token, { method: 'POST', body: JSON.stringify({ revision, lyrics }) }),
+  /** Replaces the unbuilt part of the plan: `upcoming` lists source section ids (s0...) for new
+   *  occurrences, or ids of upcoming occurrences (o3...) to keep them, in the order to build. */
+  buildPlan: (id: string, revision: number, upcoming: string[], finished: boolean, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/plan`, token, { method: 'POST', body: JSON.stringify({ revision, upcoming, finished }) }),
   buildGet: (id: string, token: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, token, options),
   buildGenerate: (id: string, revision: number, to: number, count: number, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/generate`, token, { method: 'POST', body: JSON.stringify({ revision, to, count }) }),
