@@ -1280,7 +1280,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
+    <div className="flex flex-col h-[100dvh] bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
       {/* Global Parameter Bar — full width, above everything */}
       <GlobalParamBar />
 

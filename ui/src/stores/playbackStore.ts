@@ -35,7 +35,24 @@ import * as engine from '../audio/engine';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
+// Players outside this store (the Compare studio's Web Audio engine) register a
+// pause callback so starting global playback silences them: only one player
+// is ever audible.
+const _externalPausers = new Set<() => void>();
+
+/** Register a pause callback for a player outside this store. Returns unregister. */
+export function registerExternalPlayer(pause: () => void): () => void {
+  _externalPausers.add(pause);
+  return () => { _externalPausers.delete(pause); };
+}
+
+/** Pause global playback if it is playing (used by external players before they start). */
+export function pauseGlobalPlayback(): void {
+  if (_state.isPlaying) togglePlay();
+}
+
 function stopVstMonitorIfActive(): void {
+  _externalPausers.forEach(fn => { try { fn(); } catch { /* ignore */ } });
   try {
     const vst = useVstChainStore.getState();
     if (vst.monitoring) vst.stopMonitor();
