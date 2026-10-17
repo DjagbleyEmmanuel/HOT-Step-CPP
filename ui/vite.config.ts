@@ -24,6 +24,8 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
+        // X-Forwarded-For lets the worker token gate tell a LAN browser from a local one.
+        xfwd: true,
         configure: closeWithUpstream,
       },
       '/audio': {
