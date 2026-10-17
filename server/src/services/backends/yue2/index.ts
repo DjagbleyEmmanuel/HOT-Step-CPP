@@ -834,24 +834,6 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 10,
       },
       {
-        key: 'yue2VaeVariant',
-        type: 'select',
-        label: 'VAE Variant',
-        hint: 'Which decoder checkpoint renders the final audio. Model picker uses the VAE chosen in the top bar; '
-            + 'any other choice overrides it for this generation. Standard and Legacy ship with the app; '
-            + '2x decoder appears only when a locally fine-tuned yue2-vae-dec2x GGUF is in the models folder.',
-        // '' defers to the picker (yue2ResolvePick). A 'standard' default here
-        // used to win over every picker choice, because the UI always sends it.
-        default: '',
-        options: [
-          { value: '', label: 'Model picker' },
-          { value: 'standard', label: 'Standard' },
-          { value: 'legacy', label: 'Legacy' },
-          // Not distributed: listed only when the engine found the file, so it is never a dead option.
-          ...(props?.files?.vae_dec2x?.found ? [{ value: 'dec2x', label: '2x decoder (experimental)' }] : []),
-        ],
-      },
-      {
         key: 'yue2AutoReplan', section: 'Re-planning',
         type: 'toggle',
         label: 'Re-plan runaway scores',
@@ -1162,9 +1144,9 @@ async function models(): Promise<BackendModels> {
   return {
     buckets: {
       lm: (v?.lm?.available ?? []).map(f => f.type),
-      // Fixed two-choice enum, not a disk scan — matches the extension's own
-      // yue2VaeVariant select. modelsMissing/props.files is what tells the
-      // user whether a given variant is actually installed.
+      // The shipped pair, plus the local dec2x only when its file was found.
+      // modelsMissing/props.files is what tells the user whether a shipped
+      // variant is actually installed.
       vae: ['standard', 'legacy', ...(props?.files?.vae_dec2x?.found ? ['dec2x'] : [])],
     },
     adapters: [],
@@ -1336,10 +1318,11 @@ export function yue2ResolvePick(
   }
   return {
     lm: own.lm ?? persisted.lm,
-    // The per-request VAE select (the yue2VaeVariant extension) is part of the
-    // job's pick, after the job's own yue2Pick and before the saved default.
-    vae_variant: own.vae ?? (['standard', 'legacy', 'dec2x'].includes(String(submission.yue2VaeVariant))
-      ? submission.yue2VaeVariant : persisted.vae_variant),
+    // The model picker is the only VAE control. A per-generation select used
+    // to sit beside it and, being saved with the other generation settings
+    // (and restored by reusing a song's), silently overrode the picker; a
+    // stale yue2VaeVariant in old saved settings is ignored for that reason.
+    vae_variant: own.vae ?? persisted.vae_variant,
     adapters: resolveSlots(own, persisted.adapters).next,
   };
 }
