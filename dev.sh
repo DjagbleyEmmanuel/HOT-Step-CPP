@@ -69,6 +69,12 @@ if [ ! -d "ui/node_modules" ]; then
     echo "📦 Installing UI dependencies..."
     cd ui && npm install --loglevel=warn && cd ..
 fi
+# better-sqlite3 is native: node_modules installed under another Node major
+# (say Homebrew's newer plain `node`) will not load. Rebuild it for this one.
+if ! (cd server && node -e "new (require('better-sqlite3'))(':memory:').close()") 2>/dev/null; then
+    echo "📦 Rebuilding better-sqlite3 for Node $(node --version)..."
+    (cd server && npm rebuild better-sqlite3 --loglevel=warn)
+fi
 
 # ── Process helpers ──────────────────────────────────────────────────
 # Every descendant of a PID, children before parents.
