@@ -28,6 +28,8 @@ test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   assert.deepEqual([recipe.textDropout, recipe.lyricDropout, recipe.bothDropout], [0, 0, 0]);
   assert.deepEqual([recipe.steps, recipe.seed, recipe.saveEvery], [1500, 42, 200]);
   assert.equal(recipe.arTargets, 'tuned');
+  assert.equal(recipe.base, 'bf16');
+  assert.equal(applyFixedRecipe({ method: 'fixed-recipe', base: 'Q4_K_M' }).base, 'Q4_K_M');
   const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
     steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
   const parity = buildYue2JointTrainArgs({ ...base, ...recipe, method: 'fixed-recipe' });

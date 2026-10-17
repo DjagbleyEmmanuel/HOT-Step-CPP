@@ -3562,13 +3562,6 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       if ('error' in base) { res.status(400).json({ error: base.error }); return; }
       checkpoint = base.checkpoint;
     }
-    if (method === 'fixed-recipe') {
-      const bf16 = resolveYue2JointBase('bf16');
-      if ('error' in bf16 || path.resolve(checkpoint) !== path.resolve(bf16.checkpoint)) {
-        res.status(400).json({ error: 'Fixed recipe requires the installed bf16 YuE2 base.' });
-        return;
-      }
-    }
     const dataset = str('dataset');
     const outDir = str('output') || yue2JointOutputDirectory(config.aceServer.adapters, ds.customTag || ds.slug);
     const resume = str('resume');
@@ -4032,7 +4025,7 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       res.status(400).json({ error: 'models must provide exactly vae=FILE, semantic=FILE, and sheetsage=FILE (repeat model fields are accepted)' });
       return;
     }
-    const fixedBase = b.captionGrammar === 'fixed-recipe' ? resolveYue2JointBase('bf16') : undefined;
+    const fixedBase = b.captionGrammar === 'fixed-recipe' ? resolveYue2JointBase(str('base') || 'bf16') : undefined;
     if (fixedBase && 'error' in fixedBase) { res.status(400).json({ error: fixedBase.error }); return; }
     const options: ResolvedYue2AitkPrepareOptions = {
       legacyManifest: str('legacyManifest') || str('manifest') || defaults.options.legacyManifest,

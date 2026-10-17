@@ -909,7 +909,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     try {
       const result = await runCommand(client, trainingWorker, () => startYue2AitkPrepare(datasetId, { ...prepare,
         lyricTiming: form.method === 'fixed-recipe' ? false : lyricTiming,
-        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const } : {}) }, { worker: trainingWorker }));
+        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const, base: form.base } : {}) }, { worker: trainingWorker }));
       setPrepareManifest(result.manifest);
       setAppliedPrepareJobId('');
       setPrepareJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
@@ -1156,7 +1156,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
-        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">The server fixes the base, adapter, optimizer, loss, crop and timing settings for this method.</p>}
+        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.fixedRecipeNote', 'The server fixes the adapter, optimizer, loss, crop and timing settings for this method. The base defaults to bf16 and can be changed below.')}</p>}
+        {form.method === 'fixed-recipe' && (form.base || 'bf16') !== 'bf16' && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.fixedRecipeBaseNote', 'Not ear-tested on this base: HOT-Approved was tuned and scored on bf16. A quantized base uses less VRAM.')}</p>}
         {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}

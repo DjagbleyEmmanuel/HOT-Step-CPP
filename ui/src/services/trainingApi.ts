@@ -897,6 +897,8 @@ export interface Yue2AitkPrepareRequest {
   models: { vae: string; semantic: string; sheetsage: string };
   lyricTiming?: boolean;
   captionGrammar?: 'fixed-recipe';
+  /** Fixed recipe only: the base id to prepare against (default bf16). */
+  base?: string;
 }
 
 /** A safetensors `__metadata__` block, as the exporter wrote it. */

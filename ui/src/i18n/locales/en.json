@@ -547,6 +547,8 @@
     "trainingStudio.yue2.method.presetBaseline": "1× time (baseline)",
     "trainingStudio.yue2.method.presetLegacySteps": "up to {{steps}} × 1 song",
     "trainingStudio.yue2.method.presetFixedSong": "song",
+    "trainingStudio.yue2.method.fixedRecipeNote": "The server fixes the adapter, optimizer, loss, crop and timing settings for this method. The base defaults to bf16 and can be changed below.",
+    "trainingStudio.yue2.method.fixedRecipeBaseNote": "Not ear-tested on this base: HOT-Approved was tuned and scored on bf16. A quantized base uses less VRAM.",
     "trainingStudio.yue2.method.preset_fixed-recipe": "HOT-Approved",
     "trainingStudio.yue2.method.presetCustom": "custom",
     "trainingStudio.yue2.method.presetInfo": "Fast, Balanced and Thorough are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Legacy is the previous recipe: one song per update, stopping once the planner has moved a set distance from the base model, so it can finish sooner, but its adapters scored lower by ear than the three new presets. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.",
