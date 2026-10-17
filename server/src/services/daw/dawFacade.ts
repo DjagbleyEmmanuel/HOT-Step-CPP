@@ -279,7 +279,8 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   }
   const { status, data } = await call('POST', '/api/generate', params);
   if (status !== 200 || !data?.jobId) throw upstreamError(status, data);
-  const seeds = req.seed !== undefined ? Array.from({ length: takes }, () => req.seed!) : [];
+  // YuE2 seeds take i with seed + i (yue2SongEntries); report what it rendered.
+  const seeds = req.seed !== undefined ? Array.from({ length: takes }, (_, i) => req.seed! + (backend === 'yue2' ? i : 0)) : [];
   jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, ditModel: req.dit_model ?? null, trimTo, fitTo, eta, createdAt: Date.now() });
   return id;
 }

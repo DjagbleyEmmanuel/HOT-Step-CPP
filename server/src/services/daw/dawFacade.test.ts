@@ -100,7 +100,7 @@ test('magic-byte sniff rejects a .wav that is really text', () => {
  * holds, so tests sync on events instead of sleeping. `statusFail(id)` returns
  * a status code to fail that poll with, `gatePost(n)` holds the n-th POST open.
  */
-function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: string, n: number) => number | null; gatePost?: (n: number) => Promise<void> | null } = {}) {
+function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: string, n: number) => number | null; gatePost?: (n: number) => Promise<void> | null; nUrls?: number } = {}) {
   const posts: any[] = [];
   const cancels: string[] = [];
   const statusCalls: string[] = [];
@@ -130,7 +130,7 @@ function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: stri
       if (n < 0) return { status: 200, data: { status: 'cancelled' } };
       polls.set(k, n + 1);
       if (n < ticks) return { status: 200, data: { status: 'running', progress: 50 } };
-      return { status: 200, data: { status: 'succeeded', result: { audioUrls: [`/audio/${k}.flac`], durations: [backend === 'yue2' ? 63.2 : 10] } } };
+      return { status: 200, data: { status: 'succeeded', result: { audioUrls: Array.from({ length: opts.nUrls ?? 1 }, (_, i) => `/audio/${k}${i ? `_${i}` : ''}.flac`), durations: Array.from({ length: opts.nUrls ?? 1 }, () => backend === 'yue2' ? 63.2 : 10) } } };
     }
     return { status: 404, data: { error: route } };
   };
@@ -467,4 +467,18 @@ test('ACE fit pads 9.44 s to exactly 480000 frames and cuts 11 s to 480000, with
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('YuE2 takes=2 reports seed + i per take', async () => {
+  const up = fakeUpstream('yue2', 0, { nUrls: 2 });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('yue2-seeds', { mode: 'text2music', caption: 'x', takes: 2, seed: 4242 } as any, { batchSize: 2, seed: 4242 });
+    const r = await getJob('yue2-seeds') as any;
+    const seeds = r.takes.map((t: any) => t.seed);
+    console.log('yue2 job seeds:', JSON.stringify(seeds), 'state:', r.state);
+    assert.equal(r.takes.length, 2);
+    assert.ok(seeds.every((s: unknown) => typeof s === 'number'));
+    assert.deepEqual(seeds, [4242, 4243]);
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
 });
