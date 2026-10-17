@@ -21,8 +21,10 @@ function fakeChild(): any {
 
 test('restart that outruns the health timeout still ends ready', async () => {
   let healthUp = false;
-  const srv = http.createServer((req, res) => {
-    if (req.url === '/health' && healthUp) { res.setHeader('content-type', 'application/json'); res.end('{"status":"ok"}'); }
+  let gate: Promise<void> | null = null;   // holds /health open until released
+  const srv = http.createServer(async (req, res) => {
+    if (req.url === '/health' && healthUp) {
+      if (gate) await gate; res.setHeader('content-type', 'application/json'); res.end('{"status":"ok"}'); }
     else { res.statusCode = 503; res.end('booting'); }
   });
   await new Promise<void>(r => srv.listen(0, '127.0.0.1', r));
@@ -33,6 +35,8 @@ test('restart that outruns the health timeout still ends ready', async () => {
   const proc = await import('./aceEngineProcess.js');
   const state = await import('../engineState.js');
   const kids: any[] = [];
+  let restores = 0;
+  proc.onEngineRestarted(() => { restores++; });
   proc.testHooks.spawn = (() => { const c = fakeChild(); kids.push(c); return c; }) as any;
   proc.testHooks.restartHealthTimeoutMs = 300;
   proc.testHooks.lateReadyPollMs = 50;
@@ -56,6 +60,22 @@ test('restart that outruns the health timeout still ends ready', async () => {
     const until = Date.now() + 3000;
     while (!state.engineReady && Date.now() < until) await new Promise(r => setTimeout(r, 25));
     assert.equal(state.engineReady, true, 'late /health 200 flips the engine to ready');
+
+    // Stop while a late-watch /health request is in flight: its success is stale.
+    healthUp = false;
+    for (const k of kids) k.exitCode = 0;            // retire the first engine so restart spawns a new one
+    assert.equal(await proc.restartAceServer(), false);
+    const restoresBefore = restores;
+    let release!: () => void;
+    gate = new Promise<void>(r => { release = r; });
+    healthUp = true;
+    await new Promise(r => setTimeout(r, 200));      // watcher's request is now parked on the gate
+    for (const k of kids) k.exitCode = 0;            // fake pid: never let stop reach taskkill
+    await proc.stopAceServer('stopped mid-health', 100);
+    release();
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(state.engineReady, false, 'stale health success must not mark a stopped engine ready');
+    assert.equal(restores, restoresBefore, 'no restore hook after a stop');
   } finally {
     for (const k of kids) k.exitCode = 0;   // fake pid: never let stop reach taskkill
     await proc.stopAceServer('test over', 100).catch(() => {});

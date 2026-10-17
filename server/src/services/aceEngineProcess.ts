@@ -432,7 +432,12 @@ async function lateReadyWatch(child: ChildProcess, epoch: number): Promise<void>
          && child.exitCode === null && child.signalCode === null) {
     await new Promise(r => setTimeout(r, testHooks.lateReadyPollMs));
     if (aceProcess !== child || epoch !== lifecycleEpoch || suspended) return;
-    if (await aceClient.isReachable()) {
+    const up = await aceClient.isReachable();
+    // A stop or restart can land while the request is in flight; its stale
+    // success must not mark a stopped engine ready.
+    if (aceProcess !== child || epoch !== lifecycleEpoch || suspended
+        || child.exitCode !== null || child.signalCode !== null) return;
+    if (up) {
       setEngineReady(true, 'Ready');
       console.log('[Server] ace-server answered /health after the restart timeout — marking ready');
       await runRestoreHooks();
