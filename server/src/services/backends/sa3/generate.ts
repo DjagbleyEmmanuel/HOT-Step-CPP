@@ -18,6 +18,16 @@
 // of an ACE instrumental bed and wrong for a primary render of whatever the
 // user asked for. The caption goes through as written.
 
+/** Stage shown from submit until the render returns. /sa3-synth is one
+ *  synchronous call with no progress stream and no load phase, so model load
+ *  and render are indistinguishable from here. Both stages start with
+ *  "Loading" so the DAW facade (/^loading/i) reports phase loading_model
+ *  and eta_s null instead of a made-up eta; "saving audio" replaces it. */
+export const SA3_LOADING_STAGE = 'Loading SA3 model...';
+export function sa3RenderStage(durationSec: number, steps: number): string {
+  return `Loading SA3 model, rendering ${Math.round(durationSec)}s (${steps} steps)...`;
+}
+
 import fs from 'fs';
 import path from 'path';
 import { performance } from 'perf_hooks';
@@ -171,7 +181,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
   try {
     // ── Tokenise ──────────────────────────────────────────────────────────
     job.status   = 'synth_running';
-    job.stage    = 'Stable Audio 3: tokenising caption...';
+    job.stage    = SA3_LOADING_STAGE;
     job.progress = 2;
     const tokStart = performance.now();
     const { ids, nTokens } = await tokenizeForSa3(caption);
@@ -192,7 +202,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
     }
 
     // ── Synth (one synchronous call) ──────────────────────────────────────
-    job.stage    = `Stable Audio 3: rendering ${Math.round(durationSec)}s (${steps} steps)...`;
+    job.stage    = sa3RenderStage(durationSec, steps);
     job.progress = 5;
     if ((job.status as string) === 'cancelled') throw new Error('Cancelled');
     const synthStart = performance.now();
