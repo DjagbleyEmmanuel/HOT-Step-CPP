@@ -104,9 +104,24 @@ async function command(file: string, args: string[], cwd: string, log: (line: st
   });
 }
 
+/** Per-platform commands. Windows keeps its cmd.exe/powershell.exe/build.cmd forms; macOS uses pwsh, plain npm and build-mac.sh. */
+export function platformCommands(platform: NodeJS.Platform, root: string) {
+  const mac = platform === 'darwin';
+  return {
+    hooks: mac
+      ? ['pwsh', ['-NoProfile', '-File', path.join(root, 'engine', 'verify-hooks.ps1')]] as const
+      : ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'engine', 'verify-hooks.ps1')]] as const,
+    npm: (...args: string[]) => (mac ? ['npm', args] : ['cmd.exe', ['/d', '/c', `npm ${args.join(' ')}`]]) as readonly [string, string[]],
+    engineBuild: mac
+      ? ['bash', [path.join(root, 'engine', 'build-mac.sh')]] as const
+      : ['cmd.exe', ['/d', '/c', path.join(root, 'engine', 'build.cmd')]] as const,
+  };
+}
+
 async function verifyGgmlHooks(root: string, log: (line: string) => void): Promise<void> {
   let hookFailed = false;
-  await command('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'engine', 'verify-hooks.ps1')], root, line => {
+  const [hookFile, hookArgs] = platformCommands(process.platform, root).hooks;
+  await command(hookFile, [...hookArgs], root, line => {
     if (line.includes('[FAIL]')) hookFailed = true;
     log(line);
   });
@@ -130,6 +145,8 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
   const bundle = path.join(os.tmpdir(), `hotstep-worker-${randomUUID()}.bundle`);
   let resetStarted = false;
   let bundlePresent = true;
+  const cmds = platformCommands(process.platform, PROJECT_ROOT);
+  const npm = (args: string[], cwd: string, log: (line: string) => void) => { const [f, a] = cmds.npm(...args); return command(f, a, cwd, log); };
   try {
     await pipeline(body, fs.createWriteStream(bundle));
     assertIdle();
@@ -152,15 +169,15 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
         log('Updating committed ggml submodule', 'engine-submodule');
         await updateGgml(PROJECT_ROOT, line => log(line));
       },
-      serverInstall: async () => { log('Installing server dependencies', 'server-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'server'), line => log(line)); },
-      uiInstall: async () => { log('Installing UI dependencies', 'ui-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
-      uiBuild: async () => { log('Building UI', 'ui-build'); await command('cmd.exe', ['/d', '/c', 'npm run build'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
+      serverInstall: async () => { log('Installing server dependencies', 'server-install'); await npm(['ci'], path.join(PROJECT_ROOT, 'server'), line => log(line)); },
+      uiInstall: async () => { log('Installing UI dependencies', 'ui-install'); await npm(['ci'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
+      uiBuild: async () => { log('Building UI', 'ui-build'); await npm(['run', 'build'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
       engineBuild: async () => {
         log('Stopping engine for rebuild', 'engine-build');
         // ace-server holds the ggml DLLs open; the linker cannot replace them while it runs.
         if (!await stopAceServer('Worker engine rebuild')) throw new Error('ace-server did not stop before the engine build');
         log('Building engine', 'engine-build');
-        await command('cmd.exe', ['/d', '/c', path.join(PROJECT_ROOT, 'engine', 'build.cmd')], path.join(PROJECT_ROOT, 'engine'), line => log(line)); },
+        await command(cmds.engineBuild[0], [...cmds.engineBuild[1]], path.join(PROJECT_ROOT, 'engine'), line => log(line)); },
       restart: () => { log('Build complete; requesting restart', 'restarting'); fs.unlinkSync(bundle); bundlePresent = false; requestWorkerRestart(); },
     });
   } finally {

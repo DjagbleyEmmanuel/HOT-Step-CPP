@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { PROJECT_ROOT } from '../../config.js';
-import { changedSteps, currentCommit, getUpdate, ggmlPointerChanged, runUpdatePlan, startUpdate, updateGgml } from './workerUpdate.js';
+import { changedSteps, currentCommit, getUpdate, ggmlPointerChanged, platformCommands, runUpdatePlan, startUpdate, updateGgml } from './workerUpdate.js';
 import { workerStatus } from './trainingWorkers.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
@@ -206,4 +206,17 @@ test('mocked worker with an active job refuses update before bundle creation', a
     assert.equal(update?.status, 'failed');
     assert.match(update?.error ?? '', /active or queued/);
   } finally { server.close(); }
+});
+
+test('platform commands: Windows forms are unchanged, macOS uses pwsh, npm and build-mac.sh', () => {
+  const win = platformCommands('win32', 'R');
+  assert.deepEqual(win.hooks, ['powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join('R', 'engine', 'verify-hooks.ps1')]]);
+  assert.deepEqual(win.npm('ci'), ['cmd.exe', ['/d', '/c', 'npm ci']]);
+  assert.deepEqual(win.npm('run', 'build'), ['cmd.exe', ['/d', '/c', 'npm run build']]);
+  assert.deepEqual(win.engineBuild, ['cmd.exe', ['/d', '/c', path.join('R', 'engine', 'build.cmd')]]);
+  const mac = platformCommands('darwin', 'R');
+  assert.deepEqual(mac.hooks, ['pwsh', ['-NoProfile', '-File', path.join('R', 'engine', 'verify-hooks.ps1')]]);
+  assert.deepEqual(mac.npm('ci'), ['npm', ['ci']]);
+  assert.deepEqual(mac.npm('run', 'build'), ['npm', ['run', 'build']]);
+  assert.deepEqual(mac.engineBuild, ['bash', [path.join('R', 'engine', 'build-mac.sh')]]);
 });
