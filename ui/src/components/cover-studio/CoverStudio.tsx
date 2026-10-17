@@ -1331,6 +1331,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       busy={build.busy} error={build.error}
       onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
+      onCrop={(take, frame, mode) => void build.crop(take, frame, mode)}
       onBack={() => setBuildMode(false)} />;
   };
 
