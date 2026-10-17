@@ -164,7 +164,7 @@ const keySignature = (field: string) => transposeKeyField(field, 0).key.source;
 const unquoted = (text: string) => text.replace(/"[^"]*"/g, '');
 
 /** A music line's bars; a multi-bar rest `Z4` becomes four one-bar rests. */
-function remeterBars(line: string, meter: string): RemeterBar[] {
+function remeterBars(line: string, meter: string, unit: { n: number; d: number }): RemeterBar[] {
   if (UNSUPPORTED_BAR.test(unquoted(line))) {
     throw new Error('Repeats, endings, double bars, voice overlays, comments and inline meter or length changes are not supported.');
   }
@@ -177,11 +177,20 @@ function remeterBars(line: string, meter: string): RemeterBar[] {
   if (line.slice(start).trim()) throw new Error('Every music line must end with a bar line.');
   return parts.filter(text => text.trim()).flatMap(text => {
     const multi = unquoted(text).trim().match(/^Z(\d*)$/);
-    if (!multi) return [{ text, meter, rest: /^\s*(?:[zx]\d*(?:\/\d*)?\s*)+$/.test(text), keys: [] }];
+    if (!multi) return [{ text, meter, rest: !!meter && restUnits(text) === barUnits(meter, unit), keys: [] }];
     const prefix = text.slice(0, text.lastIndexOf('Z'));
     return Array.from({ length: Math.max(1, Number(multi[1] || 1)) }, (_, i) =>
       ({ text: `${i ? '' : prefix}Z`, meter, rest: i > 0 || !prefix.trim(), keys: [] }));
   });
+}
+
+/** L: units in a bar of plain rests, or null for anything else. Only a full
+ *  bar of rests may become a `Z`: a short one would gain the missing time. */
+function restUnits(text: string): number | null {
+  if (!/^\s*(?:[zx]\d*(?:\/\d*)?\s*)+$/.test(text)) return null;
+  let units = 0;
+  for (const [, n, slash, d] of text.matchAll(/[zx](\d*)(\/?)(\d*)/g)) units += Number(n || 1) / (slash ? Number(d || 2) : 1);
+  return units;
 }
 
 /** L: units in one bar of `meter`. */
@@ -250,11 +259,12 @@ function walkBar(text: string, state: NoteState, before?: Carry): { text: string
   return { text: out, carry: merged };
 }
 
-/** Each note's pitch, start and length per track, as abcjs plays the text. */
-function soundingNotes(abc: string): number[][][] {
-  const tune = abcjs.parseOnly(abc)[0] as any;
-  return tune.setUpAudio().tracks.map((track: any[]) => track
-    .filter(e => e.cmd === 'note' && e.startChar !== undefined).map(e => [e.pitch, e.start, e.duration]));
+/** Each note's pitch, start and length per track, and the whole length with
+ *  trailing rests, as abcjs plays the text. */
+function soundingNotes(abc: string): { tracks: number[][][]; total: number } {
+  const audio = (abcjs.parseOnly(abc)[0] as any).setUpAudio();
+  return { total: audio.totalDuration, tracks: audio.tracks.map((track: any[]) => track
+    .filter(e => e.cmd === 'note' && e.startChar !== undefined).map(e => [e.pitch, e.start, e.duration])) };
 }
 
 export interface CoverRemeterResult {
@@ -298,7 +308,7 @@ export function remeterTwoFourToFourFour(abc: string, pickup: boolean): CoverRem
     if (/^[A-Za-z]:/.test(text)) throw new Error(`A ${text.slice(0, 2)} line inside the score is not supported.`);
     const current = segments.at(-1)!;
     if (!current.voices.has(voice)) { current.order.push(voice); current.voices.set(voice, []); current.heads.set(voice, head); }
-    const bars = remeterBars(line, meters.get(voice) ?? headerMeter?.text ?? '');
+    const bars = remeterBars(line, meters.get(voice) ?? headerMeter?.text ?? '', unit);
     if (bars[0]) { bars[0].keys = keys.get(voice) ?? []; keys.delete(voice); }
     current.voices.get(voice)!.push(...bars);
   }
@@ -381,10 +391,14 @@ export function remeterTwoFourToFourFour(abc: string, pickup: boolean): CoverRem
   // The source's own `Z` bars may be mis-timed; the result must play right as written.
   const before = soundingNotes(explicitRests(abc)), after = soundingNotes(result);
   const same = (x: number[], y?: number[]) => !!y && x[0] === y[0] && Math.abs(x[1] - y[1]) < 1e-9 && Math.abs(x[2] - y[2]) < 1e-9;
-  const track = before.length === after.length
-    ? before.findIndex((t, i) => t.length !== after[i].length || t.some((note, j) => !same(note, after[i][j]))) : 0;
+  if (Math.abs(before.total - after.total) > 1e-9) {
+    throw new Error('Re-metering would change the length of the score, so the score was left as it was.');
+  }
+  const [from, to] = [before.tracks, after.tracks];
+  const track = from.length === to.length
+    ? from.findIndex((t, i) => t.length !== to[i].length || t.some((note, j) => !same(note, to[i][j]))) : 0;
   if (track >= 0) {
-    const j = before[track]?.findIndex((note, k) => !same(note, after[track]?.[k])) ?? -1;
+    const j = from[track]?.findIndex((note, k) => !same(note, to[track]?.[k])) ?? -1;
     throw new Error(`Re-metering would change the music (track ${track + 1}, note ${j + 1}), so the score was left as it was.`);
   }
   return { abc: result, twoFourBars };

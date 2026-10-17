@@ -218,6 +218,15 @@ test('re-meter writes the default length out, keeps CRLF and marks only notes th
   assert.match(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\n^F4z4|f8|', false).abc, /^\^F4z4=f8\|$/m);
 });
 
+test('re-meter turns only full bars of rests into Z and keeps short ones as written', () => {
+  // Two one-beat rest bars are not a 4/4 bar's worth of silence.
+  assert.equal(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/8\nK:C\nc4|d4|z2|z2|', false).abc,
+    'X:1\nM:4/4\nL:1/8\nK:C\nc4d4|z2z2|');
+  // Rests that do add up to a bar each, fractions included, still become one Z.
+  assert.equal(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/8\nK:C\nc4|d4|z2z/z/z|z4|', false).abc,
+    'X:1\nM:4/4\nL:1/8\nK:C\nc4d4|Z|');
+});
+
 test('re-meter moves a key change before a second half inside the bar', () => {
   assert.equal(remeterTwoFourToFourFour('X:1\nM:2/4\nL:1/16\nK:C\nc8|\nK:G\nf8|', false).abc,
     'X:1\nM:4/4\nL:1/16\nK:C\nc8[K:G]f8|');
