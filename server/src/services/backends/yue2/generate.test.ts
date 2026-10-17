@@ -198,3 +198,12 @@ test('a supplied score is moved for an instrumental whatever re-planning is, and
     }
   }
 });
+
+test('re-plan seeds follow from the job seed, so a pinned seed replays the same plans', async () => {
+  const { yue2ReplanSeed } = await import('./generate.js');
+  assert.equal(yue2ReplanSeed(2110292260, 1), 2110292260);
+  const run = (base: number) => Array.from({ length: 10 }, (_, i) => yue2ReplanSeed(base, i + 1));
+  assert.deepEqual(run(4242), run(4242));
+  assert.equal(new Set(run(4242)).size, 10);
+  for (const s of run(4294967295)) assert.ok(Number.isInteger(s) && s >= 0 && s < 2 ** 32);
+});

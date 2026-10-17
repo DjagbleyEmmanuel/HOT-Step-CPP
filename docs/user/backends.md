@@ -210,7 +210,11 @@ What sets it apart:
   batch plans in the same pass. The first pass draws one plan
   per song; if any song needs another try, later passes draw up to 8 plans at once, shared
   between the songs still looking, in roughly the time of two single plans. The first clean
-  attempt wins, even when later ones in the same pass are clean as well. A song whose plan
+  attempt wins, even when later ones in the same pass are clean as well. Each redraw's seed
+  follows from the song's seed, so the same seed and settings replay the same attempts and
+  render the same song, whichever VAE decodes it. Generate songs one at a time for that: songs
+  sent together render as one batch, which can change them slightly. The song keeps the
+  winning attempt's seed, so to repeat a song exactly, reuse the seed you typed. A song whose plan
   is settled shows "Plan ready, waiting for N other songs"; one that has finished composing
   while the rest of its batch is still going shows "Composed, waiting for N other songs".
 - The re-plan and recompose knobs live in the collapsed **Re-planning** section of the

@@ -717,10 +717,16 @@ export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'a
   return params.instrumental === true || !req.lyrics ? 'once' : null;
 }
 
+/** Plan attempt k's seed (k from 1): the base itself, then fixed steps from it
+ *  (the engine's compose retries step the same way), within uint32. */
+export function yue2ReplanSeed(base: number, k: number): number {
+  return Number((BigInt(base) + 1000003n * BigInt(k - 1)) % 4294967296n);
+}
+
 async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
-    once: boolean; sheets: string[]; done: boolean;
+    once: boolean; sheets: string[]; done: boolean; seedBase?: number;
   };
   const pending: Pending[] = [];
   for (const m of members) {
@@ -755,10 +761,16 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     // 4096-token cap (12.3 ms/step at 8 wide, 5.8 at 1: ~50 s vs ~24 s), so
     // round one draws a single plan per song (yue2PlanDraws).
     const order = yue2PlanDraws(live.map(p => ({ used: p.m.autoReplan!.attempts.length, max: p.maxAttempts })), slots, round === 1);
-    // A pinned seed is the first attempt's (round one's); every re-plan draws its own.
+    // Attempt k plans with yue2ReplanSeed(base, k): attempt 1 is the job's own
+    // seed, later ones step from it, so a pinned seed replays the same re-plans
+    // (and the same winner) on every run. An unpinned job draws its base once.
+    const nextAttempt = new Map<Pending, number>();
     const draws = order.map(i => {
       const p = live[i];
-      return { p, seed: round === 1 && typeof p.m.req.seed === 'number' ? p.m.req.seed : randomSeed() };
+      const k = nextAttempt.get(p) ?? p.m.autoReplan!.attempts.length + 1;
+      nextAttempt.set(p, k + 1);
+      p.seedBase ??= typeof p.m.req.seed === 'number' && p.m.req.seed >= 0 ? p.m.req.seed : randomSeed();
+      return { p, seed: yue2ReplanSeed(p.seedBase, k) };
     });
     for (const p of live) {
       const n = draws.filter(d => d.p === p).length;
