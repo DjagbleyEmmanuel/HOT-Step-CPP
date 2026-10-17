@@ -36,10 +36,17 @@ export function finishSavedBuild(id: string): boolean {
   return true;
 }
 
-/** The next takes' own caption, kept in storage so a generate reads what the page shows.
- *  Off hides the field and sends none, as before the field existed. */
+/** Storage only remembers the field between visits; what is sent is what the page shows. */
 const TAKE_CAPTION = 'buildTakeCaption', TAKE_CAPTION_ON = 'buildTakeCaptionOn';
-export const takeCaption = () => (restore<boolean>(TAKE_CAPTION_ON, true) ? restore<string>(TAKE_CAPTION, '').trim() : '');
+/** The caption a Generate sends: none when Take caption is off (as before the field existed). */
+export const submittedCaption = (on: boolean, text: string) => (on ? text.trim() : '');
+// ponytail: the page hands its caption to the hook's generate in the same tick,
+// because CoverStudio's onGenerate(to, count) sits between them; a third
+// onGenerate argument forwarded there is the direct route.
+let handedCaption = '';
+export function handCaption(caption: string) { handedCaption = caption; }
+/** The caption handed over for this Generate, once. */
+export function takeHandedCaption(): string { const c = handedCaption; handedCaption = ''; return c; }
 
 /** The first section not yet built. */
 export function buildNext(session: Yue2BuildSession | null): number {
@@ -132,11 +139,14 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   return {
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. */
-    generate: (params: Record<string, unknown>, to: number, count: number) => call(async () => {
+    generate: (params: Record<string, unknown>, to: number, count: number) => {
+      const caption = takeHandedCaption();
+      return call(async () => {
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
-      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, takeCaption() || undefined);
-    }),
+      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, caption || undefined);
+      });
+    },
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
     plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
       let started = live;
@@ -557,7 +567,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}
                   options={Array.from({ length: 10 }, (_, k) => ({ value: k + 1, label: String(k + 1) }))} />
               </div>
-              <button type="button" onClick={() => range !== null && p.onGenerate(range, count)} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
+              <button type="button" onClick={() => { if (range === null) return; handCaption(submittedCaption(captionOn, caption)); p.onGenerate(range, count); }} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
                 className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
                 {range === null ? 'Choose sections on the song bar' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
             </div>
