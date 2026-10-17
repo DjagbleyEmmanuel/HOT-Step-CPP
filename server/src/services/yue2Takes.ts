@@ -15,6 +15,9 @@
 // arrangement's order (coverArrangement.ts): every take and Save song sends
 // the score and lyrics written out in that order, and a take's from, to and
 // starts index the arrangement's occurrences, never the score's sections.
+// The spine can be cropped (cropBuildTake): the cut is a new take in its
+// place, so the next take and Save song resume the cut stream and the
+// original stays to be put back.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,8 +69,16 @@ export interface Yue2Take {
   /** The frame each occurrence starts at in this take's audio, or null where
    *  the take does not reach it or no start was found. */
   starts: Array<number | null>;
-  /** Loudness of its new part, 0..1, from LEAD_IN_S before `from` to its end. */
+  /** Loudness of its new part, 0..1, from LEAD_IN_S before `prefix` to its end. */
   peaks?: number[];
+  /** Codec frames it resumed from its parent; its new part starts here.
+   *  Missing on takes from older servers: starts[from] then. */
+  prefix?: number;
+  /** A crop (cropBuildTake): the take whose audio and codes it cuts short. */
+  cropOf?: string;
+  /** Where the next take resumes, when not at starts[to + 1]: a crop inside
+   *  an occurrence that the next take composes again. */
+  resume?: number;
 }
 
 /** Session file version 2 (coverArrangement.ts): revisions, take parents, the
@@ -306,8 +317,13 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   if (refusal) throw new TakesError(refusal);
   if (!Number.isInteger(count) || count < 1 || count > MAX_TAKES) throw new TakesError(`Generate 1 to ${MAX_TAKES} takes at a time.`);
   const spine = stored.takes.find(t => t.id === stored.kept.at(-1));
-  const start = spine ? spine.starts[from] : 0;
-  if (start === null || start === undefined) throw new TakesError('The kept take does not reach the next section. Undo the keep and try another take.');
+  // Where occurrence `from` starts, and where this take resumes: the same
+  // place unless a crop cut into `from` (cropBuildTake).
+  const sectionStart = spine ? spine.starts[from] : 0;
+  const start = spine?.resume ?? sectionStart;
+  if (start === null || start === undefined || sectionStart === null || sectionStart === undefined) {
+    throw new TakesError('The kept take does not reach the next section. Undo the keep and try another take.');
+  }
   const prefix = spine ? (JSON.parse(fs.readFileSync(codesFile(id, spine.id), 'utf8')) as number[]).slice(0, start) : [];
   const { request, lyrics, spans, clock } = arranged(stored);
   const occurrences = spans.length;
@@ -374,14 +390,14 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
               checkCancelled();
               for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
               for (let i = from + 1; i <= Math.min(to + 1, occurrences - 1); i++) {
-                const estimate = start + clock[i] - clock[from];
+                const estimate = sectionStart + clock[i] - clock[from];
                 if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
               }
               const takeId = randomUUID().slice(0, 8);
-              const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (from ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
+              const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, ...identity });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);
@@ -475,9 +491,108 @@ export function deleteBuildTake(id: string, userId: string, takeId: string, revi
   checkRevision(stored, revision);
   if (!stored.takes.some(t => t.id === takeId)) throw new TakesError('No such take.');
   if (stored.kept.includes(takeId)) throw new TakesError('That take is part of the build; undo back past it first.');
+  if (stored.takes.some(t => t.cropOf === takeId && stored.kept.includes(t.id))) {
+    throw new TakesError('A crop of that take is part of the build; undo the crop first.');
+  }
   stored.takes = stored.takes.filter(t => t.id !== takeId);
   save(stored);
   for (const file of [`${takeId}.wav`, `${takeId}.codes.json`]) {
+    try { fs.unlinkSync(path.join(sessionDir(id), file)); } catch { /* already gone */ }
+  }
+  return view(stored);
+}
+
+/** A 16-bit PCM WAV cut to its first `seconds`; chunks after the data are dropped. */
+export function cropWav(wav: Buffer, seconds: number): Buffer {
+  let off = 12, frameBytes = 4, rate = 48000;
+  while (off + 8 <= wav.length) {
+    const id = wav.toString('ascii', off, off + 4), len = wav.readUInt32LE(off + 4);
+    if (id === 'fmt ') { frameBytes = 2 * wav.readUInt16LE(off + 10); rate = wav.readUInt32LE(off + 12); }
+    if (id === 'data') {
+      const keep = Math.min(Math.round(seconds * rate) * frameBytes, Math.floor(Math.min(len, wav.length - off - 8) / frameBytes) * frameBytes);
+      const out = Buffer.from(wav.subarray(0, off + 8 + keep));
+      out.writeUInt32LE(keep, off + 4);
+      out.writeUInt32LE(out.length - 8, 4);
+      return out;
+    }
+    off += 8 + len + (len % 2);
+  }
+  throw new TakesError('The take\'s audio has no data chunk.', 409);
+}
+
+type CropMode = 'regenerate' | 'advance';
+
+/** What a take cut at codec frame `frame` covers. The cut lies in the part the
+ *  take composed. Cut inside an occurrence, `mode` says whether the next take
+ *  composes that occurrence again from the cut ('regenerate') or starts the
+ *  one after it there ('advance'); refused without one. A cut at an
+ *  occurrence's start, or past the next one's start (the overrun the next
+ *  take would replace anyway), needs no choice. */
+export function cropPlan(take: Pick<Yue2Take, 'from' | 'to' | 'frames' | 'starts' | 'prefix'>, frame: unknown, mode: unknown,
+  label: (occurrence: number) => string = i => `section ${i + 1}`): { to: number; starts: Array<number | null>; resume?: number; prefix: number } {
+  const prefix = take.prefix ?? take.starts[take.from] ?? 0;
+  if (typeof frame !== 'number' || !Number.isInteger(frame) || frame <= prefix || frame >= take.frames) {
+    throw new TakesError(`Crop between ${(prefix / YUE2_FPS).toFixed(2)} s and ${(take.frames / YUE2_FPS).toFixed(2)} s: inside the part this take composed.`);
+  }
+  // The occurrence the cut falls in: the last one known to start at or before it.
+  let k = take.from;
+  for (let i = take.from + 1; i <= Math.min(take.to + 1, take.starts.length - 1); i++) {
+    const s = take.starts[i];
+    if (s !== null && s !== undefined && s <= frame) k = i;
+  }
+  let to = k - 1, resume: number | undefined;
+  if (k <= take.to && take.starts[k] !== frame) {
+    if (mode === 'advance') to = k;
+    else if (mode === 'regenerate') resume = frame;
+    else throw new TakesError(`The cut falls inside ${label(k)}: choose whether the next take composes it again or moves on.`);
+  }
+  if (k > take.to) to = take.to;
+  const starts = take.starts.map((s, i) => (i > to + 1 ? null : s));
+  if (to === k && k + 1 < starts.length) starts[k + 1] = frame;
+  return { to, starts, resume, prefix };
+}
+
+/** Crops the last kept take at codec frame `frame` (cropPlan). The crop is a
+ *  new take that replaces it as the spine, so the original keeps its audio
+ *  and codes; `frame` null puts the original back. A later crop always cuts
+ *  the original. Takes made from the replaced spine stop being keepable
+ *  through their parent and come back with it. Crops leave the revision. */
+export function cropBuildTake(id: string, userId: string, takeId: string, revision: unknown, frame: unknown, mode: unknown): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  const spine = stored.takes.find(t => t.id === stored.kept.at(-1));
+  if (!spine || spine.id !== takeId) throw new TakesError('Only the last kept take can be cropped.', 409);
+  const base = stored.takes.find(t => t.id === spine.cropOf) ?? spine;
+  let next: ArrangedTake;
+  if (frame === null) {
+    if (base === spine) throw new TakesError(spine.cropOf ? 'The uncropped take was deleted.' : 'That take is not cropped.', 409);
+    next = base;
+  } else {
+    const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i]?.section)?.label ?? `section ${i + 1}`;
+    const plan = cropPlan(base, frame, mode, name);
+    const cut = frame as number;
+    const same = stored.takes.find(t => t.cropOf === base.id && t.frames === cut && t.to === plan.to && t.resume === plan.resume);
+    if (same) next = same;
+    else {
+      const cropId = randomUUID().slice(0, 8);
+      const wav = cropWav(fs.readFileSync(path.join(sessionDir(id), `${base.id}.wav`)), cut / YUE2_FPS);
+      const codes = (JSON.parse(fs.readFileSync(codesFile(id, base.id), 'utf8')) as number[]).slice(0, cut);
+      fs.writeFileSync(path.join(sessionDir(id), `${cropId}.wav`), wav);
+      fs.writeFileSync(codesFile(id, cropId), JSON.stringify(codes));
+      next = { ...base, id: cropId, audioUrl: `/audio/takes/${id}/${cropId}.wav`, frames: cut, to: plan.to, starts: plan.starts,
+        prefix: plan.prefix, resume: plan.resume, cropOf: base.cropOf ?? base.id,
+        occurrences: base.occurrences.slice(0, Math.max(0, plan.to - base.from + 1)),
+        peaks: wavPeaks(wav, Math.max(0, plan.prefix / YUE2_FPS - (plan.prefix ? LEAD_IN_S : 0)), cut / YUE2_FPS) };
+      stored.takes.push(next);
+    }
+  }
+  stored.kept[stored.kept.length - 1] = next.id;
+  // A replaced crop goes, unless takes were made from it.
+  const drop = spine.cropOf && spine !== next && !stored.takes.some(t => t.parent === spine.id);
+  if (drop) stored.takes = stored.takes.filter(t => t !== spine);
+  save(stored);
+  if (drop) for (const file of [`${spine.id}.wav`, `${spine.id}.codes.json`]) {
     try { fs.unlinkSync(path.join(sessionDir(id), file)); } catch { /* already gone */ }
   }
   return view(stored);

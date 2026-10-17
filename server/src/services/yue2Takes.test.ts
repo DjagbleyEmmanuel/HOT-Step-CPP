@@ -535,6 +535,106 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(requests.at(-1)!.lyric_schedule, undefined);
     assert.equal(requests.at(-1)!.abc, composeArrangement(abc, text, plan).abc);
   });
+
+  await t.test('crop: the next take and Save song resume exactly the cut prefix, and the original comes back', async () => {
+    const { cropBuildTake, deleteBuildTake } = await import('./yue2Takes.js');
+    const codes = (sid: string, take: string) => JSON.parse(fs.readFileSync(path.join(config.data.audioDir, 'takes', sid, `${take}.codes.json`), 'utf8')) as number[];
+    const s = start();
+    const [a] = await take(s.id, 0, 0);
+    keepBuildTake(s.id, 'user', a.id, 0);
+    // b resumes a's 150 frames and composes the verse; the chorus would start at 300.
+    const [b] = await take(s.id, 1, 0);
+    assert.deepEqual([b.prefix, b.starts], [150, [0, 150, 300, null]]);
+    keepBuildTake(s.id, 'user', b.id, 0);
+    const [d] = await take(s.id, 2, 0);
+    assert.throws(() => cropBuildTake(s.id, 'user', b.id, 0, 200, undefined), /inside verse: choose/);
+    assert.throws(() => cropBuildTake(s.id, 'user', b.id, 1, 200, 'advance'), /changed since/);
+    assert.throws(() => cropBuildTake(s.id, 'user', a.id, 0, 100, 'advance'), /Only the last kept/);
+    assert.throws(() => cropBuildTake(s.id, 'user', b.id, 0, 150, 'advance'), /inside the part this take composed/);
+
+    // Move on: the chorus starts at the cut.
+    const cut = cropBuildTake(s.id, 'user', b.id, 0, 200, 'advance');
+    const c = cut.takes.find(x => x.id === cut.kept.at(-1))!;
+    assert.deepEqual([c.cropOf, c.frames, c.to, c.starts, c.occurrences, cut.revision], [b.id, 200, 1, [0, 150, 200, null], b.occurrences, 0]);
+    assert.deepEqual(codes(s.id, c.id), codes(s.id, b.id).slice(0, 200));
+    assert.deepEqual(codes(s.id, b.id).length, 550);
+    assert.deepEqual(buildSessionRender(s.id, 'user').codec_ids, codes(s.id, b.id).slice(0, 200));
+    // d continued the uncut take, so it waits for the original.
+    assert.throws(() => keepBuildTake(s.id, 'user', d.id, 0), /does not follow/);
+    assert.throws(() => deleteBuildTake(s.id, 'user', b.id, 0), /undo the crop/);
+    const [e] = await take(s.id, 2, 0);
+    assert.deepEqual(requests.at(-1)!.codec_ids, codes(s.id, b.id).slice(0, 200));
+    assert.deepEqual([e.parent, e.prefix, e.from], [c.id, 200, 2]);
+
+    // Restore: the original is the spine again, the crop stays for its take e.
+    const restored = cropBuildTake(s.id, 'user', c.id, 0, null, undefined);
+    assert.equal(restored.kept.at(-1), b.id);
+    assert.ok(restored.takes.some(x => x.id === c.id));
+    assert.throws(() => keepBuildTake(s.id, 'user', e.id, 0), /does not follow/);
+    assert.throws(() => cropBuildTake(s.id, 'user', b.id, 0, null, undefined), /not cropped/);
+
+    // Compose it again: the verse is open, and the next take resumes at the cut.
+    const again = cropBuildTake(s.id, 'user', b.id, 0, 200, 'regenerate');
+    const r = again.takes.find(x => x.id === again.kept.at(-1))!;
+    assert.deepEqual([r.to, r.resume, r.starts, r.occurrences], [0, 200, [0, 150, null, null], []]);
+    assert.equal(getBuildSession(s.id, 'user').arrangement.plan.length, 4);
+    const [v] = await take(s.id, 1, 0);
+    assert.deepEqual(requests.at(-1)!.codec_ids, codes(s.id, b.id).slice(0, 200));
+    assert.deepEqual([v.from, v.parent, v.prefix, v.starts[1]], [1, r.id, 200, 150]);
+    keepBuildTake(s.id, 'user', v.id, 0);
+    assert.equal(codes(s.id, v.id).length, 600);
+    // A crop with no takes made from it goes when it is replaced.
+    undoBuildKeep(s.id, 'user', undefined, 0);
+    undoBuildKeep(s.id, 'user', undefined, 0);
+    keepBuildTake(s.id, 'user', b.id, 0);
+    const exact = cropBuildTake(s.id, 'user', b.id, 0, 300, undefined);
+    const x = exact.takes.find(t => t.id === exact.kept.at(-1))!;
+    assert.deepEqual([x.to, x.resume, x.frames], [1, undefined, 300]);
+    const back = cropBuildTake(s.id, 'user', x.id, 0, null, undefined);
+    assert.ok(!back.takes.some(t => t.id === x.id));
+    assert.ok(!fs.existsSync(path.join(config.data.audioDir, 'takes', s.id, `${x.id}.codes.json`)));
+  });
+
+  await t.test('crop waits for pending takes', async () => {
+    const { cropBuildTake } = await import('./yue2Takes.js');
+    const s = start();
+    const [a] = await take(s.id, 0, 0);
+    keepBuildTake(s.id, 'user', a.id, 0);
+    hold = true; cancelled = false;
+    generateBuildTakes(s.id, 'user', 1, 1, 0);
+    await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 25);
+    assert.throws(() => cropBuildTake(s.id, 'user', a.id, 0, 100, 'advance'), /pending/);
+    await cancelBuildTakes(s.id, 'user');
+    await settle(s.id);
+    hold = false;
+  });
+});
+
+test('crop plans: a cut on a frame inside the composed part, by occurrence', async () => {
+  const { cropPlan, cropWav } = await import('./yue2Takes.js');
+  const take = { from: 1, to: 2, frames: 400, starts: [0, 150, 250, 330], prefix: 150 };
+  for (const bad of [150, 400, 200.5, '200']) assert.throws(() => cropPlan(take, bad, 'advance'), /Crop between/);
+  assert.deepEqual(cropPlan(take, 250, undefined), { to: 1, starts: [0, 150, 250, null], resume: undefined, prefix: 150 });
+  assert.throws(() => cropPlan(take, 200, undefined), /inside section 2/);
+  assert.deepEqual(cropPlan(take, 200, 'advance'), { to: 1, starts: [0, 150, 200, null], resume: undefined, prefix: 150 });
+  assert.deepEqual(cropPlan(take, 200, 'regenerate'), { to: 0, starts: [0, 150, null, null], resume: 200, prefix: 150 });
+  // Past the next section's start: only Save song's tail changes.
+  assert.deepEqual(cropPlan(take, 360, undefined), { to: 2, starts: [0, 150, 250, 330], resume: undefined, prefix: 150 });
+  // The last occurrence: moving on keeps it, cut short.
+  assert.deepEqual(cropPlan({ ...take, to: 3 }, 360, 'advance').to, 3);
+  assert.deepEqual(cropPlan({ ...take, to: 3 }, 360, 'advance').starts.length, 4);
+
+  const rate = 48000, frames = rate * 2;
+  const wav = Buffer.alloc(44 + frames * 4);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + frames * 4, 4); wav.write('WAVE', 8);
+  wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 4, 28); wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(frames * 4, 40);
+  const cut = cropWav(wav, 0.5);
+  assert.equal(cut.length, 44 + rate * 2);
+  assert.equal(cut.readUInt32LE(40), rate * 2);
+  assert.equal(cut.readUInt32LE(4), cut.length - 8);
+  assert.equal(cropWav(wav, 5).length, wav.length);
 });
 
 test('a repeated section is timed by its own copy of the lyrics', () => {

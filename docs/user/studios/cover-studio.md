@@ -270,6 +270,21 @@ Prepare. Finish preparing those before generating the first takes.
    clicking a built section plays from its start. To undo a keep, open **Build
    actions** and choose **Undo last keep**. A built section's undo button rolls
    back far enough to build that section again.
+
+   **Crop the last kept take** (under the Song bar) cuts the most recent keep
+   short, for when a take ran on too long or went wrong near its end. Set the
+   cut by time: click its waveform, type the seconds, or press **Cut at
+   playhead** while it plays. Only the part that take composed can be cut, on
+   the composer's 25-frames-per-second clock. A cut inside a section shows
+   which bar it is roughly at; that bar count is an estimate from the take's
+   timing, not an exact bar line. For a cut inside a section, choose whether the
+   next take composes that section again from the cut, or moves on to the next
+   section there; nothing is cropped until you choose. The next takes continue
+   from exactly the cropped audio, and **Save song** renders it. The original
+   take is kept: **Undo crop** puts it back, and a new crop always cuts the
+   original, so you can move the cut later as well as earlier. Takes made
+   before a crop (or after it, once you undo it) can no longer be kept until
+   the build they continued is back. Cropping is refused while takes render.
 5. Click **Save song** to submit everything kept so far as an ordinary generation
    job, even if some sections remain unbuilt. It uses the kept audio codes and
    receives the usual post-processing, drift check and Library save. Once the

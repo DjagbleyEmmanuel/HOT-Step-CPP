@@ -128,6 +128,12 @@ export interface Yue2BuildTake {
   peaks?: number[];
   /** The kept take it resumed (null: it starts the song). */
   parent: string | null;
+  /** Codec frames it resumed; its new part starts here (older takes: starts[from]). */
+  prefix?: number;
+  /** A crop of this take: same take, cut short. */
+  cropOf?: string;
+  /** Where the next take resumes when a crop cut into a section it composes again. */
+  resume?: number;
   /** Ids of the occurrences it composed, from..to. */
   occurrences: string[];
 }
@@ -203,6 +209,10 @@ export const yue2CoverApi = {
   /** Drops the last kept take, or every kept take from `section` on. */
   buildUndo: (id: string, revision: number, token: string, section?: number) =>
     request<Yue2BuildSession>(`/build/${id}/undo`, token, { method: 'POST', body: JSON.stringify(section === undefined ? { revision } : { revision, section }) }),
+  /** Cuts the last kept take at codec frame `frame`, or restores it with null. `mode` answers a cut inside
+   *  a section: compose it again from the cut, or move on to the next one there. */
+  buildCrop: (id: string, revision: number, take: string, frame: number | null, mode: 'regenerate' | 'advance' | undefined, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/crop`, token, { method: 'POST', body: JSON.stringify({ revision, take, frame, mode }) }),
   buildDelete: (id: string, revision: number, take: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>

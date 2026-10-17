@@ -15,7 +15,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, applyBuildLyrics, cancelBuildTakes, createBuildSession, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -228,6 +228,10 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     takes(res, () => keepBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''), req.body?.revision)));
   router.post('/build/:id/undo', (req: Request, res: Response) =>
     takes(res, () => undoBuildKeep(String(req.params.id), authenticate(req)!, req.body?.section, req.body?.revision)));
+  // Cuts the last kept take at codec frame `frame` (null restores it);
+  // `mode` is 'regenerate' or 'advance' when the cut falls inside a section.
+  router.post('/build/:id/crop', (req: Request, res: Response) =>
+    takes(res, () => cropBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''), req.body?.revision, req.body?.frame, req.body?.mode)));
   router.post('/build/:id/lyrics', (req: Request, res: Response) => {
     const userId = authenticate(req)!;
     return takes(res, () => applyBuildLyrics(String(req.params.id), userId, req.body?.revision, req.body?.lyrics,

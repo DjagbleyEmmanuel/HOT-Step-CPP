@@ -3,11 +3,12 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Scissors, Square, Trash2, X } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { CoverArStrength } from './Yue2CoverPanel';
 import { persist, restore } from './coverStudioUtils';
 
@@ -81,6 +82,20 @@ export function keepable(session: Yue2BuildSession, take: Yue2BuildTake): boolea
     && want.length === take.occurrences.length && want.every((id, i) => id === take.occurrences[i]);
 }
 
+/** Codec frames a take resumed: its new part starts here. */
+export const takePrefix = (take: Yue2BuildTake) => take.prefix ?? take.starts[take.from] ?? 0;
+
+/** Where a cut at `frame` falls in `take` (as the server's cropPlan reads it): the occurrence,
+ *  and whether it is inside it, so the user must say whether the next take composes it again. */
+export function cropPoint(take: Yue2BuildTake, frame: number): { occurrence: number; inside: boolean } {
+  let k = take.from;
+  for (let i = take.from + 1; i <= Math.min(take.to + 1, take.starts.length - 1); i++) {
+    const at = take.starts[i];
+    if (at != null && at <= frame) k = i;
+  }
+  return { occurrence: k, inside: k <= take.to && take.starts[k] !== frame };
+}
+
 /** Where an Apply goes: the loaded session, a draft when there is no session at all, or
  *  nowhere while a saved session is still loading (or failed to), so it cannot be lost to a draft. */
 export const lyricsTarget = (sessionId: string, live: unknown): 'session' | 'draft' | 'loading' =>
@@ -127,6 +142,9 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
     remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take, token!)),
     cancel: () => call(() => yue2CoverApi.buildCancel(live!.id, token!)),
+    /** Cuts the last kept take at codec frame `frame`, or restores it (null). */
+    crop: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') =>
+      call(() => yue2CoverApi.buildCrop(live!.id, live!.revision, take, frame, mode, token!)),
     /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
      *  True once the server (or, before a session, its validation) accepted them. */
     applyLyrics: async (text: string) => {
@@ -143,7 +161,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
 }
 
 /** Peak bars of a take's new part, with a playhead while it plays. */
-function Waveform({ peaks, progress, colour, onSeek }: { peaks: number[]; progress: number | null; colour: string; onSeek: (fraction: number) => void }) {
+function Waveform({ peaks, progress, colour, onSeek, marker = null }: { peaks: number[]; progress: number | null; colour: string; onSeek: (fraction: number) => void; marker?: number | null }) {
   if (!peaks.length) return <div className="h-10 flex-1 rounded bg-zinc-200/50 dark:bg-white/5" />;
   const w = 100 / peaks.length;
   return (
@@ -152,6 +170,7 @@ function Waveform({ peaks, progress, colour, onSeek }: { peaks: number[]; progre
       {peaks.map((p, i) => <rect key={i} x={i * w + w * 0.15} width={w * 0.7} y={20 - Math.max(0.5, p * 19)} height={Math.max(1, p * 38)}
         fill={progress !== null && i / peaks.length <= progress ? colour : '#a1a1aa'} />)}
       {progress !== null && <line x1={progress * 100} x2={progress * 100} y1={0} y2={40} stroke={colour} strokeWidth={0.6} />}
+      {marker !== null && <line x1={marker * 100} x2={marker * 100} y1={0} y2={40} stroke="#ef4444" strokeWidth={0.8} />}
     </svg>
   );
 }
@@ -185,6 +204,8 @@ interface PageProps {
   onKeep: (take: string) => void;
   onDelete: (take: string) => void;
   onUndo: (section?: number) => void;
+  /** Cuts the last kept take at a codec frame, or restores it (null). The crop row shows only when given. */
+  onCrop?: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') => void;
   onStartOver: () => void;
   onSave: () => void;
   onBack: () => void;
@@ -202,6 +223,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [count, setCount] = useState(3);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const [cropping, setCropping] = useState(false);
+  const [cutAt, setCutAt] = useState<number | null>(null);
+  const [cropMode, setCropMode] = useState<'regenerate' | 'advance' | null>(null);
   const dragging = useRef(false);
   const s = p.session;
   const next = buildNext(s);
@@ -221,6 +245,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const nameOf = (i: PlanItem) => p.sections[i.section]?.label ?? '?';
 
   useEffect(() => { setTarget(null); }, [next]);
+  // A cut belongs to the kept take it was set on; the choice belongs to the cut.
+  useEffect(() => { setCutAt(null); setCropMode(null); }, [spine?.id]);
+  useEffect(() => { setCropMode(null); }, [cutAt]);
   // An open editor belongs to the build it was opened on.
   useEffect(() => { setEditing(null); }, [s?.id]);
   const apply = async (text: string) => { if (await p.onApplyLyrics(text)) setEditing(null); };
@@ -274,8 +301,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const undo = (section?: number) => { stop(); p.onUndo(section); };
   const remove = (take: string) => { if (playing?.key === take) stop(); p.onDelete(take); };
   const takeWindow = (take: Yue2BuildTake) => {
-    const start = (take.starts[take.from] ?? 0) / FPS;
-    return { from: Math.max(0, start - (take.from ? LEAD_IN : 0)), to: take.frames / FPS, newPart: take.frames / FPS - start };
+    const start = takePrefix(take) / FPS;
+    return { from: Math.max(0, start - (start ? LEAD_IN : 0)), to: take.frames / FPS, newPart: take.frames / FPS - start };
   };
 
   // Lyrics of the chosen sections (block i pairs with section i).
@@ -283,6 +310,22 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
   const rangeLabel = range === null ? '' : `${nameOf(items[next])}${range > next ? ` → ${nameOf(items[range])}` : ''}`;
   const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => p.onPlan(editedPlan(items, next, change), ends);
+  // Cropping cuts the uncropped kept take, so a later cut can reach past an earlier one.
+  const cropBase = spine ? s?.takes.find(t => t.id === spine.cropOf) ?? spine : null;
+  const cropWin = cropBase ? takeWindow(cropBase) : null;
+  const cutFrame = cutAt === null ? null : Math.round(cutAt * FPS);
+  const cutValid = !!cropBase && cutFrame !== null && cutFrame > takePrefix(cropBase) && cutFrame < cropBase.frames;
+  const cut = cropBase && cutValid ? cropPoint(cropBase, cutFrame!) : null;
+  const cutItem = cut ? items[cut.occurrence] : undefined;
+  /** ", ≈ bar 3 of 8": the cut's share of the time between the occurrence's start and the next one's. */
+  const cutBar = (() => {
+    if (!cut?.inside || !cropBase || !cutItem) return '';
+    const a = cropBase.starts[cut.occurrence], b = cropBase.starts[cut.occurrence + 1];
+    if (a == null || b == null || b <= a) return '';
+    const n = bars(cutItem.section);
+    return `, ≈ bar ${Math.min(n, Math.floor((n * (cutFrame! - a)) / (b - a)) + 1)} of ${n} (approximate)`;
+  })();
+  const crop = (frame: number | null, mode?: 'regenerate' | 'advance') => { stop(); if (spine) p.onCrop?.(spine.id, frame, mode); };
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -372,6 +415,53 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             </div>;
           })}
         </div>
+        {spine && p.onCrop && <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <button type="button" onClick={() => setCropping(c => !c)} disabled={!editable}
+            className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Scissors className="w-3 h-3" />
+            {cropping ? 'Close crop' : 'Crop the last kept take'}</button>
+          {spine.cropOf && <>
+            <span>Cropped at {clock(spine.frames / FPS)}.</span>
+            <button type="button" onClick={() => crop(null)} disabled={!editable}
+              className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Undo crop</button>
+          </>}
+        </div>}
+        {p.onCrop && cropping && cropBase && cropWin && <div className="space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 p-2 text-xs text-zinc-500">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => toggle('crop', cropBase.audioUrl, cropWin.from, cropWin.to)}
+              aria-label={playing?.key === 'crop' && !paused ? 'Pause the kept take' : 'Play the kept take'}
+              className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
+              {playing?.key === 'crop' && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
+            <Waveform peaks={cropBase.peaks ?? []} progress={playing?.key === 'crop' ? progress : null} colour="#06b6d4"
+              marker={cutAt === null ? null : Math.min(1, Math.max(0, (cutAt - cropWin.from) / Math.max(0.1, cropWin.to - cropWin.from)))}
+              onSeek={f => setCutAt(Math.round((cropWin.from + f * (cropWin.to - cropWin.from)) * FPS) / FPS)} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <ParamLabel label="Cut at (s)" className="text-xs text-zinc-500"
+              info="Where the build stops, in seconds from the start of the song, on the composer's clock of 25 frames per second. Only the part this take composed can be cut. Click the waveform, or use Cut at playhead while it plays. The original stays: Undo crop puts it back." />
+            <input type="number" step={0.04} min={0} value={cutAt ?? ''} aria-label="Cut at, seconds"
+              onChange={e => setCutAt(e.target.value === '' ? null : Number(e.target.value))}
+              className="w-24 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 font-mono text-xs text-zinc-800 dark:text-zinc-200" />
+            <button type="button" disabled={playing?.key !== 'crop'}
+              onClick={() => { const t = audioRef.current?.currentTime; if (t !== undefined) setCutAt(Math.round(t * FPS) / FPS); }}
+              className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Cut at playhead</button>
+            <span>
+              {cutAt === null ? `Between ${clock(takePrefix(cropBase) / FPS)} and ${clock(cropBase.frames / FPS)}.`
+                : !cut ? `Outside the part this take composed (${clock(takePrefix(cropBase) / FPS)} to ${clock(cropBase.frames / FPS)}).`
+                : cut.occurrence > cropBase.to ? 'After the next section starts: only the tail that Save song renders is cut.'
+                : `${cut.inside ? 'Inside' : 'At the start of'} ${cutItem ? nameOf(cutItem) : 'a section'}${cutBar}.`}
+            </span>
+          </div>
+          {cut?.inside && cutItem && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
+            <span>The next take:</span>
+            {([['regenerate', `composes ${nameOf(cutItem)} again from the cut`],
+              ['advance', items[cut.occurrence + 1] ? `moves on to ${nameOf(items[cut.occurrence + 1])}` : `keeps ${nameOf(cutItem)} cut short and ends the song`]] as const)
+              .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={cropMode === mode} onClick={() => setCropMode(mode)}
+                className={`rounded-lg border px-2 py-1 ${cropMode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
+          </div>}
+          <button type="button" disabled={!editable || !cut || (cut.inside && !cropMode)}
+            onClick={() => cutFrame !== null && crop(cutFrame, cut?.inside ? cropMode ?? undefined : undefined)}
+            className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Crop</button>
+        </div>}
       </div>
 
       {/* The next sections: their lyrics, and their takes. */}
@@ -414,7 +504,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               const win = takeWindow(take);
               const colour = colours[items[take.from]?.section ?? -1] ?? '#ec4899';
               return <div key={take.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
-                <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200">Take {i + 1}</span>
+                <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.cropOf ? 'A cropped copy of a take' : undefined}>Take {i + 1}{take.cropOf ? ' ✂' : ''}</span>
                 <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
                   className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
                   {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
