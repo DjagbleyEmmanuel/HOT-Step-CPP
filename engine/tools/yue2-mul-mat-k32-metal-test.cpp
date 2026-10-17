@@ -137,7 +137,7 @@ int main(int argc, char ** argv) {
     const bool quick = argc > 1 && std::strcmp(argv[1], "--quick") == 0;
     ggml_backend_load_all();
     ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
-    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_name("MTL0");
     if (!gpu_dev) { std::puts("yue2-mul-mat-k32-metal-test: SKIP (no Metal device)"); return 0; }
     ggml_backend_t cpu = cpu_dev ? ggml_backend_dev_init(cpu_dev, nullptr) : nullptr;
     ggml_backend_t gpu = ggml_backend_dev_init(gpu_dev, nullptr);

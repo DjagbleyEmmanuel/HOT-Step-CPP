@@ -166,7 +166,7 @@ bool close(const std::vector<float> & a, const std::vector<float> & b) {
 int main() {
     ggml_backend_load_all();
     ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
-    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_name("MTL0");
     if (!gpu_dev || !cpu_dev) { std::puts("yue2-bf16-round-fuse-metal-test: SKIP (no Metal/CPU device)"); return 0; }
     ggml_backend_t cpu = ggml_backend_dev_init(cpu_dev, nullptr);
     ggml_backend_t gpu = ggml_backend_dev_init(gpu_dev, nullptr);

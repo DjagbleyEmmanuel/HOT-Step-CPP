@@ -79,8 +79,8 @@ int main(int argc, char ** argv) {
     const bool quick = argc > 1 && std::strcmp(argv[1], "--quick") == 0;
     ggml_backend_load_all();
     ggml_backend_dev_t cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
-    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
-    if (!gpu_dev || !cpu_dev) { std::puts("yue2-acc-metal-test: SKIP (need CPU and GPU device)"); return 0; }
+    ggml_backend_dev_t gpu_dev = ggml_backend_dev_by_name("MTL0");
+    if (!gpu_dev || !cpu_dev) { std::puts("yue2-acc-metal-test: SKIP (need CPU and Metal device)"); return 0; }
     ggml_backend_t cpu = ggml_backend_dev_init(cpu_dev, nullptr);
     ggml_backend_t gpu = ggml_backend_dev_init(gpu_dev, nullptr);
     if (!cpu || !gpu) { std::fprintf(stderr, "backend init failed\n"); return 1; }

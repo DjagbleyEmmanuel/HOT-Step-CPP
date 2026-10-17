@@ -209,7 +209,7 @@ int main() {
         std::fprintf(stderr, "yue2-out-prod-metal-numeric-test: no CPU backend device found\n");
         return 1;
     }
-    ggml_backend_dev_t metal_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    ggml_backend_dev_t metal_dev = ggml_backend_dev_by_name("MTL0");
     if (!metal_dev) {
         std::printf("yue2-out-prod-metal-numeric-test: SKIP (no Metal/GPU device on this machine -- "
                      "this test only makes sense on the author's Mac)\n");
