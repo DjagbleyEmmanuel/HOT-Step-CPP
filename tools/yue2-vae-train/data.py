@@ -38,6 +38,8 @@ def read_clip(path, start_s, dur_s):
         x, _ = sf.read(path, frames=n, start=start, dtype="float32", always_2d=True)
     except Exception:
         return None
+    if len(x) < n:  # header claimed more frames than the file delivers (seen: 0)
+        return None
     x = torch.from_numpy(x.T.copy())
     if x.shape[0] == 1:
         x = x.repeat(2, 1)
