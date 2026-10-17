@@ -547,10 +547,10 @@ function builtLyricsRefusal(stored: Stored, lyrics: string): string | null {
   if (!built) return null;
   const abc = stored.request.abc ?? '', old = stored.request.lyrics ?? '';
   try {
+    // The kept occurrences, in plan order: same text and same lyric spans.
     const plan = planSections(stored.arrangement).slice(0, built);
-    const before = sourceSections(abc, old), after = sourceSections(abc, lyrics);
-    const same = composeArrangement(abc, old, plan).lyrics === composeArrangement(abc, lyrics, plan).lyrics &&
-      before.slice(0, built).every((s, i) => s.lyricBlock === after[i].lyricBlock);
+    const kept = (text: string) => { const c = composeArrangement(abc, text, plan); return JSON.stringify([c.lyrics, c.occurrences.map(o => o.lyric)]); };
+    const same = kept(old) === kept(lyrics);
     return same ? null : 'The lyrics of built sections are locked; undo back to a section to change its lyrics.';
   } catch { return 'These lyrics do not fit the score; keep the section tags the score expects.'; }
 }

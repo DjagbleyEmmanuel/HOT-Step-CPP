@@ -496,6 +496,19 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.throws(() => keepBuildTake(s.id, 'user', fromB.id, 1), /before the last change/);
   });
 
+  await t.test('only the kept occurrences lock their lyrics, whatever their source position', async () => {
+    const { applyBuildLyrics } = await import('./yue2Takes.js');
+    const toRequest = (p: Record<string, unknown>) => ({ style: 'ambient', cot: 'full', abc: score, lyrics: String(p.lyrics) }) as Yue2SynthRequest;
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s2', 's0', 's1'], true);
+    const [chorus] = await take(s.id, 0, 1);
+    keepBuildTake(s.id, 'user', chorus.id, 1);
+    // The intro sits before the kept chorus in the source, but is not built yet.
+    const sungIntro = lyrics.replace('[intro]\n', '[intro]\nla la la\n');
+    assert.equal(applyBuildLyrics(s.id, 'user', 1, sungIntro, toRequest).revision, 2);
+    assert.throws(() => applyBuildLyrics(s.id, 'user', 2, sungIntro.replace('hook line now', 'other words'), toRequest), /locked/);
+  });
+
   await t.test('plan edits wait for pending takes', async () => {
     hold = true;
     const s = start();
