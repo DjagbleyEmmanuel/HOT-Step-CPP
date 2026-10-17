@@ -72,6 +72,11 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
     playFromList(clickedTrack, allTracks, 'playlist');
   }, [playlist.items, currentSongId]);
 
+  // Play All always (re)installs the playlist as the queue and starts at the top.
+  const handlePlayAll = useCallback(() => {
+    playFromList(playlistItemToTrack(playlist.items[0]), playlist.items.map(playlistItemToTrack), 'playlist');
+  }, [playlist.items]);
+
   const totalDuration = useMemo(() => {
     const total = playlist.items.reduce((sum, i) => sum + (i.duration || 0), 0);
     if (total <= 0) return '0:00';
@@ -230,7 +235,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
       {/* Footer */}
       {playlist.items.length > 0 && (
         <div className="flex items-center justify-between px-4 py-2 border-t border-zinc-200 dark:border-white/5 flex-shrink-0">
-          <button onClick={() => handlePlay(playlist.items[0])}
+          <button onClick={handlePlayAll}
             className="flex items-center gap-1.5 text-[10px] font-semibold text-pink-400 hover:text-pink-300 transition-colors">
             <Play className="w-3 h-3" /> {t('playlist.playAll')}
           </button>

@@ -78,7 +78,10 @@ Find it in the right-hand Activity column (Playlist tab, alongside Recent
 Songs). Add a track with the list-plus icon next to it anywhere in the app,
 or "Add to Playlist" from its action menu. From the playlist itself:
 reorder with the up/down arrows, remove a track with the x, or use the
-footer's Play All, Download All, and Clear.
+footer's Play All, Download All, and Clear. Clicking the track that is already
+loaded pauses or resumes it in place; Play All always restarts the queue from
+the top. The same pause/resume rule applies to the track in Recent Songs, Recent
+Covers, and the generation queue.
 
 If the panel finds an older browser-local playlist, choose **Import browser
 playlist** to move that snapshot to server storage; the browser copy stays in
