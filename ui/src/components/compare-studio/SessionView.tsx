@@ -1,7 +1,7 @@
 // SessionView.tsx - one Compare session: sticky transport, take rows, diff trace.
-// Keys: Space play/pause, 1-9 switch active take.
+// Keys: Space play/pause, 1-9 switch active take, B (or Tab) A/B quick switch.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
@@ -14,6 +14,7 @@ import { TakeRow } from './TakeRow';
 import { DiffTrace } from './DiffTrace';
 import { LoopOverlay, Playhead } from './Waveform';
 import { Toggle } from '../shared/Toggle';
+import { choosePair, initialPair, prunePair, toggleTarget, type AbPair } from './abPair';
 
 const mmss = (s: number) => {
   const v = Math.max(0, s || 0);
@@ -69,17 +70,36 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
     if (activeId && baselineId && activeId !== baselineId) void loadDiff(activeId, baselineId);
   }, [activeId, baselineId]);
 
+  // A/B quick switch: pair of take ids, updated whenever the active take changes.
+  const takeIds = useMemo(() => takes.map(tk => tk.songId), [takes]);
+  const [pair, setPair] = useState<AbPair>(() => initialPair(takeIds, baselineId));
+  const prevActive = useRef<string | null>(activeId);
+  useEffect(() => { setPair(p => prunePair(p, takeIds, baselineId)); }, [takeIds, baselineId]);
+  useEffect(() => {
+    if (activeId && activeId !== prevActive.current) setPair(p => choosePair(p, prevActive.current, activeId));
+    prevActive.current = activeId;
+  }, [activeId]);
+  const abSwitch = () => {
+    const target = toggleTarget(pair, activeId);
+    if (target) { void engine.unlock(); engine.setActive(target); }
+  };
+  const numOf = (id: string | null) => { const i = id ? takeIds.indexOf(id) : -1; return i >= 0 ? String(i + 1) : '-'; };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (e.code === 'Space') { e.preventDefault(); void engine.unlock().then(() => engine.toggle()); return; }
+      if ((e.key === 'b' || e.key === 'B' || e.key === 'Tab') && !e.ctrlKey && !e.metaKey && !e.altKey && takes.length > 1) {
+        e.preventDefault(); abSwitch(); return;
+      }
       const n = parseInt(e.key, 10);
       if (n >= 1 && n <= 9 && takes[n - 1]) { e.preventDefault(); engine.setActive(takes[n - 1].songId); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [engine, takes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, takes, pair, activeId]);
 
   const setIn = () => {
     const now = engine.getCurrentTime();
@@ -132,6 +152,19 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
           >
             {engine.isPlaying ? <Pause size={22} /> : <Play size={22} />}
           </button>
+          {takes.length > 1 && (
+            <button
+              onClick={abSwitch}
+              className="h-12 min-w-[48px] px-3 shrink-0 rounded-xl border-2 border-pink-500 text-pink-500 hover:bg-pink-500/10 flex flex-col items-center justify-center leading-tight"
+              title={t('compare.abSwitchInfo', 'Switch between the current take and the previous one at the same playhead (B or Tab)')}
+              aria-label={t('compare.abSwitch', 'A/B switch')}
+            >
+              <span className="text-sm font-black">A/B</span>
+              <span className="text-[10px] font-mono whitespace-nowrap">
+                {t('compare.abSlots', 'A: {{a}} / B: {{b}}', { a: numOf(pair.a), b: numOf(pair.b) })}
+              </span>
+            </button>
+          )}
           <SeekBar engine={engine} duration={duration} />
           <span className="hidden sm:inline"><TimeLabel engine={engine} duration={duration} /></span>
         </div>
@@ -155,7 +188,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             />
           </div>
         </div>
-        <div className="text-[10px] text-zinc-500 mt-1 hidden sm:block">{t('compare.keysHint', 'Space play/pause, 1-9 switch take, drag a waveform to set a loop')}</div>
+        <div className="text-[10px] text-zinc-500 mt-1 hidden sm:block">{t('compare.keysHint', 'Space play/pause, 1-9 switch take, B or Tab A/B switch, drag a waveform to set a loop')}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 flex flex-col gap-3">
@@ -171,6 +204,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             engine={engine}
             duration={duration}
             isBaseline={tk.songId === baselineId}
+            abSlot={takes.length > 1 ? (tk.songId === pair.a ? 'A' : tk.songId === pair.b ? 'B' : null) : null}
           />
         ))}
         {takes.length > 1 && (

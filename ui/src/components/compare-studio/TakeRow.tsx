@@ -12,6 +12,8 @@ import { Toggle } from '../shared/Toggle';
 
 interface Props {
   index: number;
+  /** 'A' or 'B' when this take is in the A/B quick-switch pair. */
+  abSlot?: 'A' | 'B' | null;
   take: CompareTake;
   criteria: CompareCriterion[];
   analysis: CompareAnalysis | null;
@@ -32,7 +34,7 @@ const Chip: React.FC<{ label: string; value: string; warn?: boolean; title?: str
   </span>
 );
 
-export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, analysisLoading, engine, duration, isBaseline }) => {
+export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, analysisLoading, engine, duration, isBaseline, abSlot }) => {
   const { t } = useTranslation();
   const active = engine.activeId === take.songId;
   const scoreOf = (c: string) => take.scores.find(s => s.criterion === c);
@@ -67,6 +69,11 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
         <span className={`flex items-center justify-center w-9 h-9 shrink-0 rounded-lg text-sm font-bold ${active ? 'bg-pink-500 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'}`}>
           {index + 1}
         </span>
+        {abSlot && (
+          <span className="px-1.5 py-0.5 rounded text-[11px] font-bold border border-pink-400/60 text-pink-500" title={t('compare.abSlotInfo', 'Slot in the A/B quick switch')}>
+            {abSlot}
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold truncate text-zinc-900 dark:text-zinc-100">{take.title || take.songId}</div>
           <div className="text-[11px] text-zinc-500 flex flex-wrap gap-x-3">

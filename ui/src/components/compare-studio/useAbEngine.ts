@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { dbToLinear, levelMatchGainsDb } from './levelMatch';
+import { pauseGlobalPlayback, registerExternalPlayer } from '../../stores/playbackStore';
 
 export interface AbTake {
   id: string;
@@ -358,6 +359,8 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
   const play = useCallback(async () => {
     await unlock();
     if (playingRef.current) return;
+    // Only one player audible: silence the global player bar first.
+    pauseGlobalPlayback();
     if (activeRef.current) await decode(activeRef.current);
     startAll(pausedAt.current);
     playingRef.current = true;
@@ -409,6 +412,9 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
     setLevelMatchState(on);
     rampGains();
   }, [rampGains]);
+
+  // Global playback starting pauses this engine (and vice versa in play()).
+  useEffect(() => registerExternalPlayer(() => { if (playingRef.current) pause(); }), [pause]);
 
   // Re-apply gains when analysis loudness arrives.
   useEffect(() => { rampGains(); }, [gainsDb, rampGains]);
