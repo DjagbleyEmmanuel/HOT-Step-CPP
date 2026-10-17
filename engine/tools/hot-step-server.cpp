@@ -110,6 +110,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -222,6 +223,27 @@ static void worker_main() {
         }
         fn();
     }
+}
+
+// Wrap a synchronous route so its body runs on the worker thread while the
+// HTTP thread waits for it. Every route that computes on the GPU and answers in
+// the same request needs it: the backend is one instance shared by all modules,
+// and two threads encoding on it at once abort the Metal driver ("A command
+// encoder is already encoding to this command buffer", GH #226).
+static httplib::Server::Handler on_worker(httplib::Server::Handler h) {
+    return [h = std::move(h)](const httplib::Request & req, httplib::Response & res) {
+        auto done = std::make_shared<std::promise<void>>();
+        auto fut  = done->get_future();
+        work_push([&h, &req, &res, done] {
+            try {
+                h(req, res);
+                done->set_value();
+            } catch (...) {
+                done->set_exception(std::current_exception());  // httplib answers 500, as before
+            }
+        });
+        fut.get();
+    };
 }
 
 // central GGML module store shared across pipelines. Policy picked at startup
@@ -3650,7 +3672,7 @@ int main(int argc, char ** argv) {
     // Accepts WAV audio body. Runs PP-VAE encode→decode round-trip with
     // RMS gain matching. Returns processed WAV (same sample rate, 16-bit).
     // Requires PP-VAE models in registry. Non-fatal: returns 501 if unavailable.
-    svr.Post("/pp-vae-reencode", [](const httplib::Request & req, httplib::Response & res) {
+    svr.Post("/pp-vae-reencode", on_worker([](const httplib::Request & req, httplib::Response & res) {
         if (req.body.empty()) {
             json_error(res, 400, "Empty body (expected WAV audio)");
             return;
@@ -3838,7 +3860,7 @@ int main(int argc, char ** argv) {
         // Encode and return (s16 by default, f32 for the PP chain)
         std::string wav = audio_encode_wav(decoded.data(), T_decoded, 48000, wav_fmt_param(req));
         res.set_content(wav, "audio/wav");
-    });
+    }));
 
     // POST /sa3-refine — synchronous SA3 SDEdit refine (instrumental de-fizz).
     // Encodes to SAME-L latents, partially re-noises, denoises with the SA3
@@ -3880,7 +3902,7 @@ int main(int argc, char ** argv) {
     //             makes APG-family modes a pass-through — see sa3-refine.h.
     //             Naming a solver REPLACES the pingpong renoise; they are
     //             alternatives, not a stack.
-    svr.Post("/sa3-refine", [models_dir](const httplib::Request & req, httplib::Response & res) {
+    svr.Post("/sa3-refine", on_worker([models_dir](const httplib::Request & req, httplib::Response & res) {
         if (req.body.empty()) {
             json_error(res, 400, "Empty body (expected WAV audio)");
             return;
@@ -4287,7 +4309,7 @@ int main(int argc, char ** argv) {
         std::string wav = audio_encode_wav(out_native, T_out, sr_out, sa3_out_fmt);
         free(out_native);
         res.set_content(wav, "audio/wav");
-    });
+    }));
 
     // ═══════════════════════════════════════════════════════════════════
     // SuperSep: Native stem separation (GGML)

@@ -986,7 +986,7 @@ static void yue2_register_routes(httplib::Server & svr, const char * models_dir)
     svr.Post("/yue2/tokenize-check", yue2_handle_tokenize_check);
     svr.Post("/yue2/synth", yue2_handle_synth);
     svr.Post("/yue2/imatrix", yue2_handle_imatrix);
-    svr.Post("/yue2/align", yue2_handle_align);
+    svr.Post("/yue2/align", on_worker(yue2_handle_align));
     fprintf(stderr, "[Server] YuE2 routes registered (models_dir=%s, available=%s)\n", models_dir,
             yue2_available(g_yue2) ? "yes" : "no");
 }
