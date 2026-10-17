@@ -541,7 +541,13 @@ function yue2CaptionToStyle(caption: string): string {
   return caption.split('\n').map(s => s.trim()).find(s => s.length > 0) || '';
 }
 
-function yue2StageText(phase: string | undefined, step: number, total: number): { stage: string; progress: number } {
+/** Stage shown from submit until the engine reports a YuE2 phase. The engine has
+ *  no YuE2 load phase on /job (it sits at `queued` while weights load), so this
+ *  is set at submit and kept until plan/semantic/nar/vae arrives. Starts with
+ *  "Loading" so the DAW facade reports phase loading_model and eta_s null. */
+export const YUE2_LOADING_STAGE = 'Loading YuE2 model...';
+
+export function yue2StageText(phase: string | undefined, step: number, total: number): { stage: string; progress: number } {
   // KEYED ON THE WIRE STRINGS job_phase_str() emits (hot-step-server.cpp:327),
   // not on the Yue2Stage enum names. `vae` was the enum's spelling and never
   // matched anything: the VAE stage arrives as `vae_decode`, so the whole
@@ -563,7 +569,12 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
     vae_decode: 'Decoding audio (VAE)',
     vae: 'Decoding audio (VAE)',
   };
-  const label = (phase && names[phase]) || 'YuE2: Working';
+  // Before the first YuE2 phase (queued, or an ACE-style loading_* phase)
+  // the engine is still loading weights.
+  if (!phase || phase === 'queued' || phase === 'unknown' || phase.startsWith('loading')) {
+    return { stage: YUE2_LOADING_STAGE, progress: 2 };
+  }
+  const label = names[phase] || 'YuE2: Working';
   // ": Step N/M" is the ticking-stage pattern pollUntilDone's stall watchdog
   // recognizes (services/generation/pollUntilDone.ts) — matching it here
   // gets the tight 2 min stall window on stages that are really progressing,
@@ -1056,7 +1067,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   let parts: Buffer[];
   let trackDetails: Yue2TrackDetail[];
   try {
-    setAll(j => { j.status = 'running'; j.stage = 'YuE2: submitting...'; j.progress = 2; });
+    setAll(j => { j.status = 'running'; j.stage = YUE2_LOADING_STAGE; j.progress = 2; });
     const submitStart = performance.now();
     sub = await yue2Synth(req);
     // /yue2/synth answers with the job id and nothing else (#177). The seed and

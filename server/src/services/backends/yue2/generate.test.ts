@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, type Yue2PreparedJob } from './generate.js';
+import { jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, yue2StageText, type Yue2PreparedJob } from './generate.js';
+import * as gen from './generate.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -266,4 +267,16 @@ test('planning keeps a pinned uint64 seed: engine plan request, then the render 
     assert.equal(sent[0].songs[0].seed, big, `plan request, autoReplan ${yue2AutoReplan}`);
     assert.equal(m.req.seed, big, `render request, autoReplan ${yue2AutoReplan}`);
   }
+
+test('YuE2 stage reads "Loading ..." while the model loads, then the progress stage takes over', () => {
+  const submitStage = (gen as any).YUE2_LOADING_STAGE;
+  const queued = yue2StageText('queued', 0, 0);
+  const none = yue2StageText(undefined, 0, 0);
+  const plan = yue2StageText('plan', 3, 10);
+  console.log('submit stage:', submitStage, '| queued:', queued.stage, '| no phase:', none.stage, '| plan:', plan.stage);
+  assert.match(String(submitStage), /^loading\b/i);
+  assert.match(queued.stage, /^loading\b/i);
+  assert.match(none.stage, /^loading\b/i);
+  assert.doesNotMatch(plan.stage, /^loading\b/i);
+  assert.equal(plan.stage, 'YuE2: Planning (ABC): Step 3/10');
 });

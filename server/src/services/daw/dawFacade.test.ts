@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError, parseDawRequest } from './dawSchema.js';
+import * as yue2Gen from '../backends/yue2/generate.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
 
 test('sweep removes an old upload-less job', () => {
@@ -560,5 +561,20 @@ test('a job still loading its model reports eta_s null and phase loading_model, 
     assert.equal(typeof r.eta_s, 'number');
     assert.ok(r.eta_s > 15, 'progressing job keeps its remaining estimate');
     assert.equal(r.phase, 'running');
+  } finally { __setCaller(prevC); }
+});
+
+test('a YuE2 job at its loading stage reports phase loading_model and eta_s null', async () => {
+  resetEta();
+  const stage = (yue2Gen as any).YUE2_LOADING_STAGE ?? 'YuE2: submitting...';
+  const prevC = __setCaller(async (_m: string, route: string) => route.endsWith('/up-y2load')
+    ? { status: 200, data: { status: 'running', stage, progress: 2 } } : { status: 404, data: {} });
+  try {
+    __test.addJob({ id: 'eta-y2load', upstreamId: 'up-y2load', seeds: [], createdAt: Date.now() - 30_000,
+      eta: { key: 'yue2', takes: 1, durationS: 30, estS: 4.2, cold: true } } as any);
+    const l = await getJob('eta-y2load') as any;
+    console.log('yue2 loading job: stage', stage, 'eta_s', l.eta_s, 'phase', l.phase);
+    assert.equal(l.phase, 'loading_model');
+    assert.equal(l.eta_s, null);
   } finally { __setCaller(prevC); }
 });
