@@ -7,7 +7,6 @@
 // DOM hosts and wires their callbacks to the store.
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-// (Menu is used in GlobalParamBar's mobile compact row, not here)
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';

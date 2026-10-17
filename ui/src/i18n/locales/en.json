@@ -2357,6 +2357,7 @@
     "lyric.selectIncomplete": "Select Incomplete",
     "lyric.deselectAll": "Deselect All",
     "lyric.allArtists": "All Artists",
+    "lyric.queueButton": "Queue",
     "lyric.fetchingLyrics": "Fetching lyrics for",
     "lyric.addArtist": "Add Artist",
     "lyric.addAlbum": "Add Album",

@@ -585,7 +585,7 @@ export const LyricStudioV2: React.FC = () => {
                 {/* Narrow/portrait: queue + prompt editor buttons since sidebar is hidden */}
                 <div className="max-[1023px]:flex portrait-wide:flex hidden items-center gap-2 ml-auto">
                   <button onClick={openQueuePanel} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
-                    Queue
+                    {t('lyric.queueButton')}
                   </button>
                   <button onClick={() => setPromptEditorOpen(true)} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors">
                     Prompts
