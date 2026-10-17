@@ -5,6 +5,9 @@ Same bands and measures as the first diagnosis on HOTSTEP-263:
   lsd    log-spectral distance per band, dB (lower is better)
   flat   spectral flatness 10-16 kHz minus the source's (0 is ideal; > 0 = noisier)
   mel    multi-scale log-mel L1 (lower is better)
+  buzz   periodic modulation of the 4-16 kHz envelope at 150/300 Hz (frame rate
+         x first upsample stride), dB above the source's; the ringing/buzz heard
+         in early checkpoints (lower is better, 0 = like source)
 Run standalone on a checkpoint:  python evaluate.py --base B --evalset E --ckpt C [--out DIR]
 """
 import argparse
@@ -38,6 +41,20 @@ def _logmel(x):
     return out
 
 
+def _modpeaks(x, rates=(150, 300)):
+    from scipy.signal import butter, sosfiltfilt, welch
+    sos = butter(6, [4000, 16000], "bandpass", fs=SR, output="sos")
+    e = np.abs(sosfiltfilt(sos, x.mean(0)))
+    e = e[: len(e) // 48 * 48].reshape(-1, 48).mean(1)  # envelope at 1 kHz
+    f, P = welch(e - e.mean(), 1000, nperseg=min(4000, len(e)))
+    out = []
+    for hz in rates:
+        i = int(np.argmin(abs(f - hz)))
+        nb = np.r_[P[i - 12:i - 3], P[i + 4:i + 13]]
+        out.append(10 * np.log10(P[i - 1:i + 2].mean() / np.median(nb)))
+    return np.array(out)
+
+
 def clip_metrics(src, y):
     n = min(src.shape[-1], y.shape[-1])
     src, y = src[..., :n], y[..., :n]
@@ -55,6 +72,7 @@ def clip_metrics(src, y):
         return (torch.exp(torch.log(P).mean(0)) / P.mean(0)).median().item()
 
     r["flat_10-16k"] = flat(Y) - flat(S)
+    r["buzz"] = float((_modpeaks(y.cpu().numpy()) - _modpeaks(src.cpu().numpy())).mean())
     r["mel"] = float(sum((a - b).abs().mean().item() for a, b in zip(_logmel(src), _logmel(y))))
     return r
 
@@ -83,13 +101,16 @@ def summarise(enc, dec, clips):
     return mean, rows
 
 
-HEADLINE = ["mel", "lsd_5-10k", "lsd_10-16k", "lsd_16-22k", "abslevel_10-16k", "abslevel_16-22k", "flat_10-16k"]
+HEADLINE = ["mel", "lsd_5-10k", "lsd_10-16k", "lsd_16-22k", "abslevel_10-16k", "abslevel_16-22k", "flat_10-16k",
+            "buzz"]
 
 
 def base_metrics(enc, base_dec, clips, cache):
     cache = Path(cache)
     if cache.exists():
-        return json.loads(cache.read_text())
+        m = json.loads(cache.read_text())
+        if all(k in m for k in HEADLINE):  # older caches predate newer metrics
+            return m
     m, _ = summarise(enc, base_dec, clips)
     cache.write_text(json.dumps(m, indent=1))
     return m
@@ -99,8 +120,10 @@ def report(out_dir, step, base, new, audio=None):
     """Append one checkpoint to metrics.csv and report.md; optional listening FLACs."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    csv_path = out / "metrics.csv"
     fields = ["step"] + sorted(new)
+    csv_path = out / "metrics.csv"
+    if csv_path.exists() and csv_path.read_text().splitlines()[0].split(",") != fields:
+        csv_path = out / f"metrics_{len(fields)}cols.csv"  # columns changed: new file, old one kept
     first = not csv_path.exists()
     with csv_path.open("a", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
@@ -109,11 +132,14 @@ def report(out_dir, step, base, new, audio=None):
             w.writerow({"step": "base", **base})
         w.writerow({"step": step, **new})
     md = out / "report.md"
-    if not md.exists():
-        md.write_text("# YuE2 decoder checkpoints vs original decoder\n\n"
-                      "Round-trip of the fixed held-out set. Lower is better except `flat` (0 = like source).\n\n"
-                      "| step | " + " | ".join(HEADLINE) + " | better |\n|" + "---|" * (len(HEADLINE) + 2) + "\n"
-                      "| original | " + " | ".join(f"{base[k]:.3f}" for k in HEADLINE) + " | |\n", encoding="utf-8")
+    header = "| step | " + " | ".join(HEADLINE) + " | better |"
+    text = md.read_text(encoding="utf-8") if md.exists() else (
+        "# YuE2 decoder checkpoints vs original decoder\n\n"
+        "Round-trip of the fixed held-out set. Lower is better except `flat` (0 = like source).\n")
+    if header not in text:  # first run, or the measures changed: start a new table
+        text += ("\n" + header + "\n|" + "---|" * (len(HEADLINE) + 2) + "\n"
+                 "| original | " + " | ".join(f"{base[k]:.3f}" for k in HEADLINE) + " | |\n")
+        md.write_text(text, encoding="utf-8")
 
     def better(k):
         return abs(new[k]) < abs(base[k]) if k.startswith("flat") else new[k] < base[k]
