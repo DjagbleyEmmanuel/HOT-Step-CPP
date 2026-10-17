@@ -374,7 +374,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     if (!abc) {
       throw new Error('A cover needs an approved lead sheet (yue2Abc) — none was supplied.');
     }
-    if (!hasSoundingVocalBar(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
+    if (!hasSoundingVocalBar(abc, true)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     coverAbc = abc;
   }
   const options: Record<string, unknown> = {};

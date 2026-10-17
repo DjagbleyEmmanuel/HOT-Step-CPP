@@ -68,6 +68,15 @@ test('bare sole voice and lyric-bearing voice count as vocal without changing na
   assert.equal(hasSoundingVocalBar('X:1\nV: Ins\nK:C\nGABc|\nw:la la la la'), false);
 });
 
+test('instrumental-only score is accepted only with includeInstrumental', () => {
+  const ins = 'X:1\nV: Ins\nK:C\nGABc|';
+  assert.equal(hasSoundingVocalBar(ins), false);
+  assert.equal(hasSoundingVocalBar(ins, true), true);
+  assert.equal(hasSoundingVocalBar('X:1\nV: Ins\nK:C\nzzzz|', true), false);
+  // a declared-but-silent Vocal voice still fails even with the flag
+  assert.equal(hasSoundingVocalBar('X:1\nV: Vocal\nZ4|\nV: Ins\nC4|', true), false);
+});
+
 // Legibility: what a plan the verdict passed can still get wrong.
 function sheet(vocalBars: string[], insBars: string[], sections = ['intro', 'verse', 'chorus', 'verse', 'chorus', 'outro']): string {
   const lines: string[] = [HEADER];

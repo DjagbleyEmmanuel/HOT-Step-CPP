@@ -213,14 +213,17 @@ export function scoreBarSegments(line: string): string[] {
 }
 
 /** A cover needs at least one audible melody bar. Unvoiced ABC is a single
- * melody voice; an explicit Ins voice never counts toward this check. */
-export function hasSoundingVocalBar(abc: string): boolean {
+ * melody voice; an explicit Ins voice never counts toward this check unless
+ * `includeInstrumental` is set and the score declares no vocal voice at all
+ * (inference accepts instrumental-only scores; a silent Vocal still fails). */
+export function hasSoundingVocalBar(abc: string, includeInstrumental = false): boolean {
   let inVocal = true;
   const vocalIds = vocalVoiceIds(abc);
-  for (const raw of abc.split('\n')) {
-    const line = raw.trim();
+  const lines = abc.split('\n').map(l => l.trim());
+  const countAll = includeInstrumental && !lines.some(l => /^V:/.test(l) && isScoreVocalVoice(l, vocalIds));
+  for (const line of lines) {
     if (!line || line.startsWith('%')) continue;
-    if (/^V:/.test(line)) { inVocal = isScoreVocalVoice(line, vocalIds); continue; }
+    if (/^V:/.test(line)) { inVocal = countAll || isScoreVocalVoice(line, vocalIds); continue; }
     if (/^[A-Za-z]:/.test(line) || !inVocal) continue;
     if (scoreBarSegments(line).some(hasNote)) return true;
   }
