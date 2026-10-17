@@ -54,13 +54,14 @@ Process RSS includes warmup; it is not isolated GPU allocation telemetry.
 
 ## Numeric gates
 
-The existing A4 reference limits remain unchanged: step-one loss, flow and AR CE
-relative error at most 0.005; each sampled B-gradient relative L2 below 0.03;
-each sampled post-update B relative L2 below 0.05. Reject nonfinite results,
-wrong shapes or placement, and unexplained accumulating drift. Exact copy and
-rounding changes require bitwise equality independently of these tolerances.
+The approved batch compares Metal against Metal. A4 recovery and replay are a
+separate backlog job; the archived A4 limits are not active batch gates.
 
-A scalar gradient norm is not a substitute for sampled gradient tensors. The
-baseline-repeatability tolerance must be derived from actual fixture replays
-and accepted by Reviewer before optimization starts. Do not infer a pass from
-the historical A4 limits or relax those limits after seeing a result.
+`gates.json` freezes per-update AR CE, NAR MSE, KL and gradient-norm limits.
+C, D, G and F require exact scalar bits. B uses
+`abs(candidate-reference) <= 2^-23 + 2^-17 * abs(reference)`.
+Apply every gate to all seven updates and reject nonfinite or missing values.
+See `REPORT.md` for the F32 budget derivation, isolated/incremental controls,
+cumulative budget and why G/F have no tolerance. Kernel and tensor probes remain
+required; scalar norms do not prove tensor equality. Reviewer must sign off
+before B starts. Do not relax limits after observing an optimization's results.

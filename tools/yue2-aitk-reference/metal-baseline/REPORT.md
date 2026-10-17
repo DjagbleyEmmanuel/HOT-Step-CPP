@@ -1,8 +1,9 @@
 # HOTSTEP-342 baseline evidence
 
-Timing and logged scalar repeatability are measured. **The slice is blocked:**
-the A4 fixture is missing, so its replay and a tensor-gradient tolerance cannot
-be supplied for Reviewer acceptance. B must not start from this report alone.
+Timing and logged scalar repeatability are measured. The warm metric is accepted.
+The gates below are frozen for Reviewer sign-off before B starts. The approved
+batch scope is Metal versus Metal; A4 recovery and replay are a separate backlog
+job and do not gate A or this batch. No A4 pass is claimed.
 
 ## Revisions and protocol
 
@@ -32,7 +33,7 @@ gradient norms equal the ordinary baseline exactly.
 
 Baseline warm seconds: **36.133547, 35.453133, 35.366556**. Median **35.453133 s**.
 Spread is maximum minus minimum, **0.766990417 s**. Three times spread is
-**2.300971251 s**. This proposal awaits Reviewer acceptance with the numeric gates.
+**2.300971251 s**. Reviewer accepted this metric and spread on HOTSTEP-342.
 
 Captured-master warm seconds: **35.846569, 35.650270, 35.615361**. Median
 **35.650270 s**, spread **0.231208291 s**, median delta **+0.197138 s**.
@@ -60,25 +61,77 @@ Peak process RSS in the full warm runs was 16.285 GiB for both revisions,
 including retained caches. Ordinary baseline peak was 15.060 GiB. This is not
 isolated GPU allocation telemetry.
 
-## Numeric gates and blocker
+## Frozen numeric gates
 
-All logged AR CE, KL, NAR MSE and gradient norms are identical at every matched
-update, with maximum observed absolute difference zero. This does not prove
-sampled tensor-gradient repeatability or justify a nonzero split-K tolerance.
-Those limits remain unset in `gates.json` pending the fixture and review.
+Every gate applies separately to AR CE, NAR MSE, KL and the logged gradient norm
+at **each of updates 1 through 7**, using the archived recipe and full-precision
+JSON values in `results.json`. Missing, duplicated or reordered updates fail.
+Reject nonfinite values before comparison. Rounded console summaries, means and
+final-update-only comparisons cannot establish a pass.
 
-Historical A4 limits are preserved: step-one loss/flow/AR CE relative error at
-most 0.5%; each sampled B-gradient relative L2 below 3%; each sampled post-update
-B relative L2 below 5%. Exact copy/rounding changes still require bitwise equality.
-No threshold was loosened and no A4 pass is claimed.
+| Slice | Per-update scalar gate |
+|---|---|
+| B, split-K | `abs(candidate-reference) <= 1.1920928955078125e-7 + 7.62939453125e-6 * abs(reference)` |
+| C, tiled copy | Bit-identical |
+| D, rounding fusion | Bit-identical, for each enabled producer family |
+| G, retained attention O/LSE | Bit-identical |
+| F, conditional half staging | Bit-identical |
 
-The documented `.scratch/ruach-parity/fixtures` and `a4_gates.py` are absent.
-Searches of the local project tree, prior scratch locations and both WSL home/temp
-trees found no `onestep.json`, replay inputs or gate script. Restore the original
-inputs and reference tensor outputs, run baseline A4 repeats, then obtain Reviewer
-acceptance of the loss/gradient tolerance and metric before B.
+Exact means identical IEEE-754 binary64 bit patterns after parsing the original
+full-precision JSON values, including signed zero. Do not cast to F32 or apply
+an epsilon. This checks the logged scalars, not every underlying tensor.
+The independent kernel/output/gradient probes in each slice remain required.
+
+B's allowance is fixed before its implementation is measured. F32 spacing at
+one is `epsilon = 2^-23 = 1.1920928955078125e-7`. Allocate one epsilon as the
+absolute floor and 64 epsilons as the relative budget:
+`atol = epsilon`, `rtol = 64 * epsilon = 2^-17`.
+The baseline's measured noise is zero, so there is no added repeatability margin.
+This choice allows small F32 regrouping differences while keeping a strict
+training acceptance limit. The factor 64 is an engineering budget, not a
+measured reduction depth or a theorem about training stability. Cancellation,
+BF16 rounding boundaries and optimizer propagation prevent inferring an
+end-to-end scalar error bound from F32 precision alone. B must separately justify
+its kernel reduction error with its real shapes and gradient probes. A scalar
+pass alone does not prove that an arbitrary reduction algorithm is correct.
+
+At baseline update 1 this allows approximately 4.4160e-5 AR CE, 9.4050e-6 NAR
+MSE, 1.1921e-7 KL and 1.0607e-6 gradient norm absolute difference. The zero KL
+reference uses the absolute floor, avoiding division by zero. The formula,
+not these rounded examples, decides pass/fail. B's fixed-order reduction must
+also reproduce its own scalars bit-for-bit across fresh-state repeats.
+
+Test each exact slice alone against the original baseline and incrementally
+against its immediate predecessor with the earlier optimizations held fixed.
+For cumulative comparisons against the original baseline, use the single B
+budget when B is enabled, otherwise exact equality. This keeps a prior accepted
+B difference from being attributed to C, D, G or F. No later slice earns another
+error allowance. Apply the same limit at every update; never multiply it by the
+update count, song length or repeat count. Report all signed differences and
+per-field maxima. An unexplained accumulating drift remains a rejection even
+inside the numeric envelope; investigate rather than raise a threshold.
+
+G gets no tolerance because retaining the correct adapted-forward O/LSE should
+reuse the same values as recomputation. Changes in precision, mask, layout,
+lifetime or training state are failures. F gets no tolerance: eligibility must
+preserve every staged BF16 value, and F32 accumulation order/results must remain
+unchanged. A range audit alone does not prove that. If half staging changes
+accumulation or hardware arithmetic and fails exact output/update comparisons,
+leave that path disabled or return it for a scope decision; do not borrow B's
+budget. D likewise must preserve the existing F32 result and BF16 rounding.
+
+Historical A4 thresholds remain archived in `gates.json`, explicitly inactive
+for this batch. The missing fixture has not been replayed. Scalar gradient norms
+do not establish sampled tensor-gradient parity or audio quality.
 
 ## Verification and evidence
+
+For this gate freeze, a Python JSON/`struct.pack('>d', value)` check verified
+all 180 scalars across the 45 archived updates are finite and bit-identical
+to their matching baseline update. It also checked the JSON constants against
+the powers-of-two derivation. `git diff --check` and
+`node tools/docs/check-docs.mjs` passed, with the same 11 screenshot warnings.
+No new GPU run or product build was needed for these documentation/JSON changes.
 
 The Mac mirror was synced from a local git bundle. `engine/build-mac.sh` passed,
 then `cmake --build engine/build --target ace-train` passed for the comparison.
@@ -99,5 +152,5 @@ sources and the same ggml pin. CUDA/CPU/Vulkan runtime checks were not run.
 Private raw logs, exact argv JSON, source worker log, binary hashes and input
 hashes are preserved under `.scratch/hs342/` locally and `.probe-logs/hs342/` on
 MacServer. The latter also retains all generated adapters. Public numeric evidence
-is `results.json`; the proposal and unresolved gates are `gates.json`. Public
+is `results.json`; the frozen gates awaiting sign-off are `gates.json`. Public
 argv substitutes private paths only; the archived argv retains the originals.
