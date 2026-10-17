@@ -139,7 +139,9 @@ are saved with the draft.
    A warning compares these sections with `[Tag]` headers in your lyrics, but
    never blocks Generate.
    **Match sections to score** is available for Source Audio only. It separates the
-   source's vocal (once per source, then cached), finds where each lyric block
+   source's vocal (once per audio file: the same bytes are never separated
+   again, even re-uploaded or after a restart; the stems are never deleted
+   automatically), finds where each lyric block
    is sung, and retags each block with the score section it starts in. It
    never changes a word. Tags are written exactly as the score labels them,
    so `[Verse 1]` over a `verse` section becomes `[verse]` and the result

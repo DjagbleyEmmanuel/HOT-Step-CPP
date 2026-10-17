@@ -13,7 +13,7 @@ import { getDataset } from './training/datasetsRepo.js';
 import { patchLabel } from './training/labelStore.js';
 import { readSidecar, writeSidecar } from './training/sidecarIO.js';
 import { loadSidecarMetadata } from './training/datasetScan.js';
-import { createHash } from 'node:crypto';
+import { createCoverStemCache } from './coverStemCache.js';
 import { NoVocalsError, separateOne, YUE2_STEMS_DEFAULT_LEVEL } from './training/yue2Stems.js';
 import { yue2Align } from './backends/yue2/client.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
@@ -45,19 +45,13 @@ export function createYue2CoverService(deps = {
   model: resolveYue2SheetModel,
   run: runYue2CoverSheetJob,
   datasetMatch: resolveCoverDatasetSource,
-  // The source's vocal stem, separated once and cached by path, size and
-  // mtime: MMS_FA places words reliably on a stem, not on the full mix.
-  vocalStem: async (audioPath: string): Promise<string> => {
-    const stat = fs.statSync(audioPath);
-    const key = createHash('sha256').update(JSON.stringify([audioPath, stat.size, stat.mtimeMs])).digest('hex').slice(0, 32);
-    const out = path.join(config.data.dir, 'tmp', 'cover-vocals', `${key}.wav`);
-    if (!fs.existsSync(out)) {
-      // Renamed into place so a separation cut short is never cached.
-      await separateOne(audioPath, `${out}.part`, YUE2_STEMS_DEFAULT_LEVEL, () => {});
-      fs.renameSync(`${out}.part`, out);
-    }
-    return out;
-  },
+  // The source's vocal stem, separated once per audio content: MMS_FA places
+  // words reliably on a stem, not on the full mix.
+  vocalStem: createCoverStemCache({
+    root: path.join(config.data.dir, 'tmp', 'cover-vocals'),
+    level: YUE2_STEMS_DEFAULT_LEVEL,
+    separate: (src, out, level) => separateOne(src, out, level, () => {}),
+  }).vocalStem,
   align: (audio: Buffer, lyrics: string): Promise<{ words: Yue2AlignWord[] }> => yue2Align(audio, lyrics),
   // The same merged read as a sample edit, so split caption/lyrics files
   // are folded into <stem>.txt rather than shadowing the new lyrics. Like a
