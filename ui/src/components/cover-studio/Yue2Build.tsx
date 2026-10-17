@@ -10,7 +10,8 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { CoverArStrength } from './Yue2CoverPanel';
-import { persist, restore } from './coverStudioUtils';
+import { persist, restore, transposeKey } from './coverStudioUtils';
+import { EditableSlider } from '../shared/EditableSlider';
 
 const FPS = 25;
 // A take plays from this long before its first section, so the join is heard.
@@ -40,13 +41,10 @@ export function finishSavedBuild(id: string): boolean {
 const TAKE_CAPTION = 'buildTakeCaption', TAKE_CAPTION_ON = 'buildTakeCaptionOn';
 /** The caption a Generate sends: none when Take caption is off (as before the field existed). */
 export const submittedCaption = (on: boolean, text: string) => (on ? text.trim() : '');
-// ponytail: the page hands its caption to the hook's generate in the same tick,
-// because CoverStudio's onGenerate(to, count) sits between them; a third
-// onGenerate argument forwarded there is the direct route.
-let handedCaption = '';
-export function handCaption(caption: string) { handedCaption = caption; }
-/** The caption handed over for this Generate, once. */
-export function takeHandedCaption(): string { const c = handedCaption; handedCaption = ''; return c; }
+
+/** The cover settings the Build page's row edits: params.yue2Cover's voices,
+ *  tempo, keyShift and cfgScale, and the Cover AR strength. */
+export interface BuildSettings { voices: 'vocal' | 'both'; tempo: 'free' | 'source' | number; keyShift: number; cfgScale: number; arStrength: number }
 
 /** The first section not yet built. */
 export function buildNext(session: Yue2BuildSession | null): number {
@@ -138,15 +136,15 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   const live = session && session.id === sessionId ? session : null;
   return {
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
-    /** Generates takes, starting the session from `params` if there is none. */
-    generate: (params: Record<string, unknown>, to: number, count: number) => {
-      const caption = takeHandedCaption();
-      return call(async () => {
+    /** Generates takes, starting the session from `params` if there is none. A non-empty
+     *  `caption` is these takes' own. */
+    generate: (params: Record<string, unknown>, to: number, count: number, caption: string) => call(async () => {
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
       return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, caption || undefined);
-      });
-    },
+    }),
+    /** Applies new cover settings to the session (before its first keep). */
+    settings: (settings: Record<string, unknown>) => call(() => yue2CoverApi.buildSettings(live!.id, live!.revision, settings, token!)),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
     plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
       let started = live;
@@ -190,6 +188,59 @@ function Waveform({ peaks, progress, colour, onSeek, marker = null }: { peaks: n
   );
 }
 
+/** The build's cover settings in one row. Before a build exists they are the
+ *  Prepare page's and change at once. A build has its own: edits wait for
+ *  Apply, which rebuilds the build's request before its first keep and starts
+ *  a fresh build after it. */
+function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBpm }: {
+  value: BuildSettings; onApply: (settings: BuildSettings) => void; build: boolean; kept: boolean; disabled: boolean; keyLabel: string; sourceBpm: number;
+}) {
+  const saved = JSON.stringify(value);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(JSON.parse(saved)); }, [saved]);
+  const shown = build ? draft : value;
+  const set = (patch: Partial<BuildSettings>) => { const next = { ...shown, ...patch }; if (build) setDraft(next); else onApply(next); };
+  const changed = build && JSON.stringify(draft) !== saved;
+  const tempoMode = typeof shown.tempo === 'number' ? 'set' : shown.tempo;
+  return (
+    <fieldset disabled={disabled} className="border-b border-zinc-200 dark:border-white/10 px-4 py-2 space-y-2">
+      <div className="flex flex-wrap items-start gap-x-5 gap-y-3 [&>*]:min-w-[150px] [&>*]:flex-1" aria-label="Build settings">
+        <div className="space-y-2">
+          <ParamLabel label="Voices" info="Vocal melody alone gives the new style room to choose its instruments. Both keeps the transcribed instrumental line too." />
+          <StyledSelect accent="pink" value={shown.voices} disabled={disabled} onChange={v => set({ voices: v as BuildSettings['voices'] })}
+            options={[{ value: 'vocal', label: 'Vocal melody only' }, { value: 'both', label: 'Vocal + instrumental line' }]} />
+        </div>
+        <div className="space-y-2">
+          <ParamLabel label="Tempo" info="Free removes the score tempo; Source retains it; Set writes a target BPM using the score's beat unit." />
+          <StyledSelect accent="pink" value={tempoMode} disabled={disabled}
+            onChange={v => set({ tempo: v === 'set' ? (typeof shown.tempo === 'number' ? shown.tempo : Math.max(20, Math.min(300, sourceBpm))) : v as 'free' | 'source' })}
+            options={[{ value: 'free', label: 'Free (style decides)' }, { value: 'source', label: 'Source tempo' }, { value: 'set', label: 'Set BPM' }]} />
+        </div>
+        {typeof shown.tempo === 'number' && <EditableSlider label="Target BPM" value={shown.tempo} min={20} max={300} step={1} disabled={disabled}
+          onChange={v => set({ tempo: v })} helpText={`Source: ${sourceBpm} BPM`} />}
+        <EditableSlider label="Pitch Shift" value={shown.keyShift} min={-12} max={12} step={1} defaultValue={0} disabled={disabled || !keyLabel}
+          onChange={v => set({ keyShift: v })}
+          formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
+          helpText={keyLabel ? `Source: ${keyLabel}.` : 'No supported score key found.'}
+          tooltip="Moves the score up or down by whole semitones, within twelve." />
+        <EditableSlider label="Condition strength" value={shown.cfgScale} min={0.1} max={2} step={0.05} defaultValue={1} disabled={disabled}
+          onChange={v => set({ cfgScale: v })} tooltip="Tightens style, lyrics and score together." />
+        <CoverArStrength value={shown.arStrength} onChange={v => set({ arStrength: v })} />
+      </div>
+      {build && (changed || kept) && <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        <span className="flex-1">{kept
+          ? 'The kept sections were built with the settings above. Changing them starts a fresh build; this one is set aside.'
+          : 'Applying rebuilds this build with the new settings. Takes made before it can no longer be kept.'}</span>
+        {changed && <>
+          <button type="button" onClick={() => setDraft(JSON.parse(saved))} className="rounded-lg px-3 py-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Discard</button>
+          <button type="button" onClick={() => onApply(draft)}
+            className="rounded-lg bg-cyan-600 px-3 py-1 font-semibold text-white disabled:opacity-40">{kept ? 'Start a fresh build with these' : 'Apply'}</button>
+        </>}
+      </div>}
+    </fieldset>
+  );
+}
+
 interface PageProps {
   session: Yue2BuildSession | null;
   /** The score's sections before a session exists; the session's after. */
@@ -203,16 +254,21 @@ interface PageProps {
   onApplyLyrics: (text: string) => Promise<boolean>;
   /** A saved build is still loading, so its lyrics cannot be edited yet. */
   loading: boolean;
-  summary: string;
-  /** AR strength: the session's captured value once it exists, else the Cover setting. */
-  arStrength: number;
-  onArStrength: (value: number) => void;
+  /** The settings the build uses: the session's once it exists, else the Prepare page's. */
+  settings: BuildSettings;
+  /** Sets them: on the Prepare page before a build exists, on the build before its
+   *  first keep, and through a fresh build after it. */
+  onSettings: (settings: BuildSettings) => void;
+  /** The score's key ('' when it has none) and tempo, for the pitch and BPM readouts. */
+  keyLabel: string;
+  sourceBpm: number;
   title: string;
   /** Why a build cannot start yet, or ''. */
   blocked: string;
   busy: boolean;
   error: string;
-  onGenerate: (to: number, count: number) => void;
+  /** `caption`, when non-empty, is these takes' own. */
+  onGenerate: (to: number, count: number, caption: string) => void;
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
   onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
@@ -353,10 +409,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       <div className="flex flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-white/10 px-4 py-2">
         <button type="button" onClick={p.onBack} className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300 hover:text-cyan-600">
           <ArrowLeft className="w-3.5 h-3.5" />Prepare</button>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{p.title}</p>
-          <p className="truncate text-xs text-zinc-500">{p.summary}</p>
-        </div>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900 dark:text-white">{p.title}</p>
         <div className="relative">
           <button type="button" onClick={() => setMenu(m => !m)} disabled={!s} aria-label="Build actions"
             className="rounded p-1.5 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-white/10 disabled:opacity-40"><MoreHorizontal className="w-4 h-4" /></button>
@@ -373,9 +426,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
           title="Render everything kept so far as a library song">Save song</button>
       </div>
 
-      <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-2">
-        <CoverArStrength value={p.arStrength} onChange={p.onArStrength} locked={!!s} />
-      </div>
+      <SettingsRow value={p.settings} onApply={p.onSettings} build={!!s} kept={!!s?.kept.length} disabled={!editable}
+        keyLabel={p.keyLabel} sourceBpm={p.sourceBpm} />
 
       {/* Source bar: the score as it is. Song bar: what the output will be, kept occurrences first. */}
       <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-3 space-y-2">
@@ -567,7 +619,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}
                   options={Array.from({ length: 10 }, (_, k) => ({ value: k + 1, label: String(k + 1) }))} />
               </div>
-              <button type="button" onClick={() => { if (range === null) return; handCaption(submittedCaption(captionOn, caption)); p.onGenerate(range, count); }} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
+              <button type="button" onClick={() => { if (range !== null) p.onGenerate(range, count, submittedCaption(captionOn, caption)); }} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
                 className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
                 {range === null ? 'Choose sections on the song bar' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
             </div>

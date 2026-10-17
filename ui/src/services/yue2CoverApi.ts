@@ -152,7 +152,7 @@ export interface Yue2Arrangement {
 }
 export interface Yue2BuildSession {
   id: string;
-  /** Counts changes to what the next take is sent (lyrics); mutations name the one they saw. */
+  /** Counts changes to what the next take is sent (lyrics, plan, settings); mutations name the one they saw. */
   revision: number;
   sections: Array<{ label: string; startBar: number }>;
   takes: Yue2BuildTake[];
@@ -199,6 +199,10 @@ export const yue2CoverApi = {
     request<{ ok: true }>('/build/lyrics-check', token, { method: 'POST', body: JSON.stringify({ lyrics }) }),
   buildLyrics: (id: string, revision: number, lyrics: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/lyrics`, token, { method: 'POST', body: JSON.stringify({ revision, lyrics }) }),
+  /** Before the first keep: the cover's voices, tempo, key, keyShift and cfgScale (as
+   *  params.yue2Cover carries them) and AR strength. Takes made before it cannot be kept. */
+  buildSettings: (id: string, revision: number, settings: Record<string, unknown>, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/settings`, token, { method: 'POST', body: JSON.stringify({ revision, settings }) }),
   /** Replaces the unbuilt part of the plan: `upcoming` lists source section ids (s0...) for new
    *  occurrences, or ids of upcoming occurrences (o3...) to keep them, in the order to build. */
   buildPlan: (id: string, revision: number, upcoming: string[], finished: boolean, token: string) =>

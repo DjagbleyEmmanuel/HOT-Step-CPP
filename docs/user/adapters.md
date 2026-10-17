@@ -278,7 +278,8 @@ adapter slots for that cover, or choose an AR composer and NAR renderer pair.
 The cover captures the pair and its strength settings when you click Generate;
 changing the global picker while it waits does not change the queued job. The
 AR strength is Cover Studio's own setting (0 to 10, default 0.6) and replaces the
-picker's AR scale for covers; values above 0.6 hurt adherence to the score. The
+picker's AR scale for covers; values above 0.6 hurt adherence to the score. A
+build by section can change it until its first keep. The
 approved ABC score supplies the composition plan in either mode. An adapter
 changes how its half of the model uses that plan, but the app does not promise
 to preserve the source performance or match a particular voice.

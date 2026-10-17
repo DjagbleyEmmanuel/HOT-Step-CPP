@@ -5,7 +5,7 @@ const store = new Map<string, string>();
 (globalThis as any).localStorage = {
   getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v),
 };
-const { finishSavedBuild, onBuildSaved, submittedCaption, handCaption, takeHandedCaption } = await import('./Yue2Build');
+const { finishSavedBuild, onBuildSaved, submittedCaption } = await import('./Yue2Build');
 const saved = () => JSON.parse(store.get('cover-studio-buildSessionId') ?? '""');
 
 test('a Save finishing after the studio was rebuilt clears its build and tells the mounted studio', () => {
@@ -86,13 +86,10 @@ test('a take is keepable only if it follows the spine at this revision and compo
   assert.equal(keepable(session, take({ parent: null })), false);
 });
 
-test('Generate sends the caption the page shows, not storage, and only once', () => {
+test('Generate sends the caption the page shows, not storage', () => {
   // Storage says on with an old caption (another tab, or a write that failed).
   store.set('cover-studio-buildTakeCaption', '"stale"');
   store.set('cover-studio-buildTakeCaptionOn', 'true');
   assert.equal(submittedCaption(false, 'shown'), '');
   assert.equal(submittedCaption(true, '  shown '), 'shown');
-  handCaption(submittedCaption(true, 'shown'));
-  assert.equal(takeHandedCaption(), 'shown');
-  assert.equal(takeHandedCaption(), '');
 });

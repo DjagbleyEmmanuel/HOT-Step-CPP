@@ -733,3 +733,99 @@ test('a repeated section is timed by its own copy of the lyrics', () => {
   assert.equal(early[1], Math.round(((2.4 + 8) / 2) * YUE2_FPS));
   assert.equal(early[2], null);
 });
+
+test('cover settings: rebuilt into params and request before the first keep, locked after it', async t => {
+  const { applyBuildSettings, editBuildPlan } = await import('./yue2Takes.js');
+  const { coverScoreChoices, transformCoverScore } = await import('./backends/yue2/coverScoreTransform.js');
+  const previousDir = config.data.dir;
+  const dir = fs.mkdtempSync(path.resolve('.test-yue2-settings-'));
+  config.data.dir = dir;
+  t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
+  const requests: Yue2SynthRequest[] = [];
+  let hold = false, cancelled = false;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/synth') {
+      const req = JSON.parse(String(init?.body)) as Yue2SynthRequest;
+      requests.push(req);
+      return Response.json({ id: String(requests.length) });
+    }
+    if (url.pathname === '/yue2/align') return Response.json({ words: [] });
+    if (url.searchParams.has('cancel')) { cancelled = true; return Response.json({}); }
+    if (url.searchParams.has('result')) return new Response(new Uint8Array(pcm(1)), { headers: { 'content-type': 'audio/wav' } });
+    if (hold) return Response.json({ status: cancelled ? 'cancelled' : 'running', phase: 'semantic', phase_step: 1, phase_total: 4 });
+    const req = requests[Number(url.searchParams.get('id')) - 1];
+    return Response.json({ status: 'done', tracks: [{ song: 0, seed: req.seed!, noise_seed: req.seed!, variation: 0,
+      semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(400).fill(1)], frames: 400 }] });
+  });
+  const until = async (condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!condition()) { assert.ok(Date.now() < deadline, 'finished within deadline'); await new Promise(r => setTimeout(r, 5)); }
+  };
+  // What the route's envelope does with these params, in miniature: the cover
+  // choices rewrite the score, and CFG and AR strength reach the request.
+  const toRequest = (p: Record<string, unknown>) => {
+    const choices = coverScoreChoices(p.yue2Cover as never);
+    return { style: 'ambient', cot: 'full', lyrics: String(p.lyrics), abc: transformCoverScore(String(p.yue2Abc), choices).renderedAbc,
+      cfg_scale: p.yue2CfgScale, lm_adapter_scale: (p.yue2Pick as { lmAdapterArScale: number }).lmAdapterArScale } as Yue2SynthRequest;
+  };
+  const cover = { sourceId: 'src', voices: 'both', keepChords: true, tempo: 'source', key: 'source', cfgScale: 1 };
+  const params = { lyrics, yue2Abc: score, yue2Cover: cover, yue2CfgScale: 1, yue2Pick: { lmAdapterAr: 'a.safetensors', lmAdapterArScale: 0.6 } };
+  const start = () => createBuildSession(params, toRequest(params), 'user');
+  const settle = (id: string) => until(() => !getBuildSession(id, 'user').pending.length);
+  const settings = { voices: 'vocal', tempo: 90, key: 'D', keyShift: 2, cfgScale: 1.2, arStrength: 0 };
+
+  await t.test('each setting reaches the stored params and the next take\'s request', async () => {
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await settle(s.id);
+    const old = getBuildSession(s.id, 'user').takes[0];
+    const next = applyBuildSettings(s.id, 'user', 0, settings, toRequest);
+    assert.equal(next.revision, 1);
+    assert.deepEqual(next.params.yue2Cover, { ...cover, voices: 'vocal', tempo: 90, key: 'D', keyShift: 2, cfgScale: 1.2 });
+    assert.equal(next.params.yue2CfgScale, 1.2);
+    assert.deepEqual(next.params.yue2Pick, { lmAdapterAr: 'a.safetensors', lmAdapterArScale: 0 });
+    assert.equal(next.params.yue2Abc, score, 'the approved score stays; the request carries the rewritten one');
+    assert.throws(() => keepBuildTake(s.id, 'user', old.id, 1), /before the last change/);
+    // The same settings again change nothing.
+    assert.equal(applyBuildSettings(s.id, 'user', 1, settings, toRequest).revision, 1);
+    generateBuildTakes(s.id, 'user', 0, 1, 1);
+    await settle(s.id);
+    const sent = requests.at(-1)!;
+    assert.match(sent.abc!, /^Q:1\/8=90$/m);
+    assert.match(sent.abc!, /^K:D$/m);
+    assert.equal(sent.cfg_scale, 1.2);
+    assert.equal((sent as unknown as Record<string, unknown>).lm_adapter_scale, 0);
+    // Back to the source key: keyShift goes, as the Prepare page sends it.
+    const back = applyBuildSettings(s.id, 'user', 1, { ...settings, key: 'source', keyShift: undefined }, toRequest);
+    assert.equal((back.params.yue2Cover as Record<string, unknown>).keyShift, undefined);
+  });
+
+  await t.test('the plan survives a settings change', () => {
+    const s = start();
+    const planned = editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2', 's3'], true);
+    const next = applyBuildSettings(s.id, 'user', 1, settings, toRequest);
+    assert.deepEqual(next.arrangement.plan, planned.arrangement.plan);
+  });
+
+  await t.test('bad values, stale revisions, pending takes and kept takes are refused', async () => {
+    const s = start();
+    assert.throws(() => applyBuildSettings(s.id, 'user', 0, { ...settings, arStrength: 11 }, toRequest), /AR strength/);
+    assert.throws(() => applyBuildSettings(s.id, 'user', 0, { ...settings, tempo: 900 }, toRequest), /tempo must/);
+    assert.throws(() => applyBuildSettings(s.id, 'user', 3, settings, toRequest), /changed since/);
+    assert.throws(() => applyBuildSettings(s.id, 'other', 0, settings, toRequest), /not found/);
+    assert.equal(getBuildSession(s.id, 'user').revision, 0);
+    hold = true;
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 25);
+    assert.throws(() => applyBuildSettings(s.id, 'user', 0, settings, toRequest), /pending/);
+    await cancelBuildTakes(s.id, 'user');
+    await settle(s.id);
+    hold = false;
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await settle(s.id);
+    keepBuildTake(s.id, 'user', getBuildSession(s.id, 'user').takes.at(-1)!.id, 0);
+    assert.throws(() => applyBuildSettings(s.id, 'user', 0, settings, toRequest), /fresh build/);
+    assert.deepEqual(getBuildSession(s.id, 'user').params.yue2Cover, cover);
+  });
+});

@@ -310,13 +310,22 @@ Prepare. Finish preparing those before generating the first takes.
 **AR strength** (0 to 10, default 0.6) is Cover Studio's own setting, shown on
 both Prepare and Build. It replaces the adapter picker's AR scale for every
 Cover render, including 0. Values above 0.6 hurt adherence to the score: on
-one seed, 1.0 matched 11% of chords against 89% at 0.6. A build keeps the
-value it started with; the control locks until you start over.
+one seed, 1.0 matched 11% of chords against 89% at 0.6.
 
-Once the first takes start, the build's settings, score and lyrics are fixed.
-Edits on Prepare do not change that build. Choose **Start over** in Build actions
-or beside **Build in progress** on Prepare to unlock them for a new build.
-**Open** on Prepare returns to the existing build.
+A row of settings sits at the top of the Build tab: **Voices**, **Tempo** (with
+**Target BPM** when set), **Pitch Shift**, **Condition strength** and **AR
+strength**, the same controls and explanations as on Prepare. Before a build
+exists they are Prepare's settings and change at once. Once a build exists it
+has its own copy: change the row, then choose **Apply**. Until the first keep,
+Apply rewrites the build's score and request with the new settings, keeps the
+planned sections, and Prepare follows. Takes made before it can no longer be
+kept. After a keep, the kept audio was composed under the old settings, so the
+button becomes **Start a fresh build with these**: it sets them on Prepare and
+leaves the current build. The row is locked while takes are rendering.
+
+Edits on Prepare do not change a build that exists. Choose **Start over** in
+Build actions or beside **Build in progress** on Prepare to start a new build
+from Prepare. **Open** on Prepare returns to the existing build.
 
 A take's seed reproduces its composition only with the same group size. The
 same seed rendered alone can differ from one rendered in a group of four.

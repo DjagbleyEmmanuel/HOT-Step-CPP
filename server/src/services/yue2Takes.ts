@@ -97,8 +97,8 @@ export interface Yue2BuildSession extends ArrangedSession {
   /** Takes still rendering. */
   pending: Array<{ from: number; to: number; count: number; activeCount?: number; phase?: string; progress?: number }>;
   error: string | null;
-  /** The params a Save song render submits. Applying lyrics replaces
-   *  params.lyrics and the stored request together. */
+  /** The params a Save song render submits. Applying lyrics or settings
+   *  replaces them and the stored request together. */
   params: Record<string, unknown>;
 }
 
@@ -720,6 +720,47 @@ export function applyBuildLyrics(id: string, userId: string, revision: unknown, 
   stored.request = request;
   stored.revision++;
   stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? '') };
+  save(stored);
+  return view(stored);
+}
+
+/** Replaces a cover build's settings before its first keep: voices, tempo,
+ *  key (with its keyShift), condition strength and AR strength, as the
+ *  one-shot cover params carry them. `toRequest` rebuilds the request the way
+ *  a render would and validates the params, so params (what Save song
+ *  submits) and request agree. A rewritten score keeps the plan when its
+ *  sections match, else the plan returns to the score's order. Every take not
+ *  yet kept becomes ineligible through the revision. After a keep the kept
+ *  audio was composed under these settings: a change needs a fresh build. */
+export function applyBuildSettings(id: string, userId: string, revision: unknown, settings: unknown,
+  toRequest: (params: Record<string, unknown>) => Yue2SynthRequest): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (stored.kept.length) throw new TakesError('The kept sections were built with these settings; start a fresh build to change them.', 409);
+  const cover = stored.params.yue2Cover;
+  if (!cover || typeof cover !== 'object') throw new TakesError('Only a cover build has these settings.');
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new TakesError('settings are required.');
+  const { voices, tempo, key, keyShift, cfgScale, arStrength } = settings as Record<string, unknown>;
+  if (typeof arStrength !== 'number' || !Number.isFinite(arStrength) || arStrength < 0 || arStrength > 10) {
+    throw new TakesError('AR strength must be a number from 0 to 10.');
+  }
+  const nextCover: Record<string, unknown> = { ...cover, voices, tempo, key, cfgScale };
+  if (keyShift === undefined) delete nextCover.keyShift; else nextCover.keyShift = keyShift;
+  const params = { ...stored.params, yue2Cover: nextCover, yue2CfgScale: cfgScale,
+    yue2Pick: { ...(stored.params.yue2Pick as Record<string, unknown> | undefined), lmAdapterArScale: arStrength } };
+  if (JSON.stringify(params) === JSON.stringify(stored.params)) return view(stored);
+  const request = plainRequest(toRequest(params));
+  const sections = scoreSections(request.abc ?? '').map(s => ({ label: s.label.trim(), startBar: s.startBar }));
+  if (!sections.length) throw new TakesError('The score has no section labels.');
+  const source = sourceSections(request.abc!, request.lyrics ?? '');
+  let arrangement = stored.arrangement;
+  if (JSON.stringify(source) !== JSON.stringify(arrangement.sections)) {
+    const n = arrangement.nextOccurrence;
+    arrangement = { sections: source, plan: source.map((s, i) => ({ id: `o${n + i}`, section: s.id })), nextOccurrence: n + source.length, finished: true };
+  }
+  arranged({ request, arrangement });
+  Object.assign(stored, { params, request, sections, arrangement, revision: stored.revision + 1 });
   save(stored);
   return view(stored);
 }

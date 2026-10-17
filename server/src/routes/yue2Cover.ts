@@ -15,7 +15,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, applyBuildLyrics, cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -239,6 +239,13 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   router.post('/build/:id/lyrics', (req: Request, res: Response) => {
     const userId = authenticate(req)!;
     return takes(res, () => applyBuildLyrics(String(req.params.id), userId, req.body?.revision, req.body?.lyrics,
+      params => buildRequest(params, userId)));
+  });
+  // Before the first keep: `settings` holds the cover's voices, tempo, key,
+  // keyShift and cfgScale (as params.yue2Cover carries them) and arStrength.
+  router.post('/build/:id/settings', (req: Request, res: Response) => {
+    const userId = authenticate(req)!;
+    return takes(res, () => applyBuildSettings(String(req.params.id), userId, req.body?.revision, req.body?.settings,
       params => buildRequest(params, userId)));
   });
   // The order the next sections are built in: `upcoming` lists source

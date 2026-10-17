@@ -56,7 +56,7 @@ import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { SectionMatchReview } from './SectionMatchReview';
 import { ScorePlanReview } from './ScorePlanReview';
-import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build } from './Yue2Build';
+import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
@@ -92,6 +92,24 @@ function coverScoreKeyLabel(abc: string): string {
   const key = abc.match(/^K:\s*([A-Ga-g][#b]?)(m)?(?:\s+(minor|major|maj))?(?=\s|$)/m);
   if (!key) return '';
   return `${key[1]} ${key[2] || key[3]?.toLowerCase() === 'minor' ? 'minor' : 'major'}`;
+}
+
+/** The score choices params.yue2Cover carries for `s`, its key moved from score `abc`'s. */
+function coverChoicesFor(abc: string, s: Omit<BuildSettings, 'arStrength'>) {
+  const sourceKey = coverScoreKeyLabel(abc);
+  const movedKey = s.keyShift && sourceKey ? transposeKey(sourceKey, s.keyShift) : '';
+  const key = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
+  return { voices: s.voices, tempo: s.tempo, key, ...(movedKey ? { keyShift: s.keyShift } : {}), cfgScale: s.cfgScale };
+}
+
+/** A build's settings, read back from its params. */
+function buildSettingsOf(params: Record<string, unknown>): BuildSettings {
+  const cover = (params.yue2Cover ?? {}) as Record<string, unknown>;
+  const ar = Number((params.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale);
+  return { voices: cover.voices === 'vocal' ? 'vocal' : 'both',
+    tempo: typeof cover.tempo === 'number' || cover.tempo === 'source' ? cover.tempo : 'free',
+    keyShift: Number(cover.keyShift ?? 0), cfgScale: Number(params.yue2CfgScale ?? cover.cfgScale ?? 1),
+    arStrength: Number.isFinite(ar) ? ar : COVER_AR_DEFAULT };
 }
 
 interface CoverStudioProps {
@@ -1273,9 +1291,25 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (typeof built === 'string') { showToast(built); return null; }
     return built.params;
   };
-  const generateBuildTakes = (to: number, count: number) => {
+  const generateBuildTakes = (to: number, count: number, caption: string) => {
     const params = buildParams();
-    if (params) void build.generate(params, to, count);
+    if (params) void build.generate(params, to, count, caption);
+  };
+  const setPrepareSettings = (s: BuildSettings) => {
+    setCoverVoices(s.voices);
+    if (typeof s.tempo === 'number') { setCoverTempoMode('set'); setCoverBpm(s.tempo); } else setCoverTempoMode(s.tempo);
+    setCoverKeyShift(s.keyShift); setCoverCfgScale(s.cfgScale); setCoverArStrength(clampCoverAr(s.arStrength));
+  };
+  // The Build page's settings row: the Prepare page's settings until a build
+  // exists, the build's until its first keep, then a fresh build. The Prepare
+  // page follows every applied change, so it and a fresh build agree.
+  const applyBuildSettings = async (s: BuildSettings) => {
+    if (buildSession && !buildSession.kept.length) {
+      const choices = coverChoicesFor(String(buildSession.params.yue2Abc ?? ''), s);
+      if (!await build.settings({ ...choices, arStrength: clampCoverAr(s.arStrength) })) return;
+    }
+    setPrepareSettings(s);
+    if (buildSession?.kept.length) build.startOver();
   };
   const planBuild = (upcoming: string[], finished: boolean) => {
     const params = buildParams();
@@ -1310,23 +1344,17 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const renderBuildPage = () => {
     const draftParams = buildSession ? null : yue2CoverParams();
     const params = buildSession?.params ?? (typeof draftParams === 'string' || !draftParams ? null : draftParams.params);
-    const cover = (params?.yue2Cover ?? {}) as Record<string, unknown>;
     const abc = String(params?.yue2Abc ?? sheetAbc);
-    const summary = params ? [
-      String(params.artist || params.artistName || 'Base YuE2'),
-      `CFG ${params.yue2CfgScale ?? 1}`,
-      typeof cover.tempo === 'number' ? `${cover.tempo} BPM` : `tempo ${cover.tempo ?? 'source'}`,
-      cover.keyShift ? `${Number(cover.keyShift) > 0 ? '+' : ''}${cover.keyShift} st` : 'source key',
-      cover.voices === 'vocal' ? 'vocal only' : 'vocal + instrumental',
-    ].join(' · ') : 'Settings come from the Prepare page.';
     const sections = buildSession?.sections ?? scoreSections.map(x => ({ label: x.label, startBar: x.startBar }));
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
       lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : buildLyrics ?? lyrics}
       prepareLyrics={lyrics} onApplyLyrics={build.applyLyrics} loading={build.loading}
-      arStrength={buildSession ? Number((params?.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale ?? coverArStrength) : coverArStrength}
-      onArStrength={v => setCoverArStrength(clampCoverAr(v))}
-      title={String(params?.title ?? (songTitle || 'Cover'))} summary={summary}
+      settings={buildSession ? buildSettingsOf(buildSession.params) : { voices: coverVoices,
+        tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale, arStrength: coverArStrength }}
+      onSettings={s => void applyBuildSettings(s)} keyLabel={coverScoreKeyLabel(abc)}
+      sourceBpm={Number(abc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120)}
+      title={String(params?.title ?? (songTitle || 'Cover'))}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error}
       onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
@@ -1376,12 +1404,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     lmAdapterAr: activeYue2Ar,
     lmAdapterNar: activeYue2Nar };
   const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-  const scoreSourceKey = coverScoreKeyLabel(approvedSheet.abc);
-  const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
-  const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
-  const coverChoices = { voices: coverVoices, keepChords,
-    tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
-    key: renderKey, ...(movedKey ? { keyShift: coverKeyShift } : {}), cfgScale: coverCfgScale };
+  const coverChoices = { keepChords, ...coverChoicesFor(approvedSheet.abc, { voices: coverVoices,
+    tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale }) };
   const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
     yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
     title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
