@@ -9,7 +9,9 @@ interface Props {
   plan: Yue2ScorePlan;
   /** The score or the lyrics changed after planning. */
   stale: boolean;
+  saving: boolean;
   onApply: () => void;
+  onSave: () => void;
   onDiscard: () => void;
 }
 
@@ -26,7 +28,7 @@ function Diff({ label, before, after }: { label: string; before: string; after: 
 
 /** Match score to lyrics: the score's section changes and the retagged
  *  lyrics, applied together to this cover's copies only. */
-export const ScorePlanReview: React.FC<Props> = ({ beforeSections, beforeLyrics, plan, stale, onApply, onDiscard }) => {
+export const ScorePlanReview: React.FC<Props> = ({ beforeSections, beforeLyrics, plan, stale, saving, onApply, onSave, onDiscard }) => {
   const sections = (list: Array<{ label: string; bar: number }>) => list.map(s => `${s.label} · bar ${s.bar}`).join('\n');
   return (
     <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2 space-y-2">
@@ -48,6 +50,9 @@ export const ScorePlanReview: React.FC<Props> = ({ beforeSections, beforeLyrics,
       <div className="flex flex-wrap gap-2">
         {!plan.unchanged && <button type="button" onClick={onApply} disabled={stale}
           className="disabled:opacity-40 rounded bg-cyan-600 px-2 py-1 text-xs font-semibold text-white">Apply</button>}
+        {!plan.unchanged && plan.datasetSong && <button type="button" onClick={onSave} disabled={saving || stale}
+          className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">
+          {saving ? 'Saving…' : 'Apply and save to dataset'}</button>}
         <button type="button" onClick={onDiscard} className="rounded px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400">Discard</button>
       </div>
     </div>

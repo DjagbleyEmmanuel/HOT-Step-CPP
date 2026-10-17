@@ -159,6 +159,15 @@ are saved with the draft.
    song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`.
    If a `.txt.bak` is already there, it is left alone and the previous file
    goes to `.txt.<date>-<time>.bak` instead, so no save loses a backup.
+   **Match score to lyrics** has the same button for a dataset song. It writes
+   the retagged lyrics to the `.txt` and the revised score to the song's `.abc`
+   (the old score kept as `.abc.bak`, or a dated one the same way). A save is
+   refused if the song's files changed since you matched, so match again. The
+   `.txt` is written first; if the `.abc` then fails, you are told the lyrics
+   were saved and the score was not. **Discard** writes nothing, uploaded
+   sources never write to a dataset, and the Build page's lyrics never do
+   either. Reopening the song brings the saved lyrics and score back without
+   matching again.
    When a dataset song's tempo or key differs from the score's, Analysis
    shows the score's values with **Save to dataset**. After a confirmation it
    replaces the BPM and key in the song's `.txt`, keeping a backup the same way.

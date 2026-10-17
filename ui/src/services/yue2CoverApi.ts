@@ -54,6 +54,8 @@ export interface Yue2SectionMatch {
   filled: Array<{ section: number; label: string; copiedFrom: number | null }>;
   unchanged: boolean;
   datasetSong: boolean;
+  /** For a dataset song: what the proposal was made against; a save sends it back. */
+  revision?: string;
 }
 
 /** Match score to lyrics: the score's new sections (1-based bars) and the
@@ -63,6 +65,8 @@ export interface Yue2ScorePlan {
   lyrics: string;
   unsure: Array<{ block: number; tag: string | null }>;
   unchanged: boolean;
+  datasetSong: boolean;
+  revision?: string;
 }
 
 export interface Yue2CoverDatasetMetadata {
@@ -180,9 +184,11 @@ export const yue2CoverApi = {
     request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
-  /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */
-  saveDatasetDetails: (input: Yue2CoverSourceInput & ({ lyrics: string } | { bpm: number; key: string }), token: string) =>
-    request<{ saved: true; file: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),
+  /** Lyrics (.txt) and/or the revised score (.abc) of a matched proposal, with the
+   *  `revision` it returned; or the score's tempo and key into the .txt. The two
+   *  files are separate writes: `abcSaved: false` means the lyrics went in and the score did not. */
+  saveDatasetDetails: (input: Yue2CoverSourceInput & ({ lyrics?: string; abc?: string; revision: string } | { bpm: number; key: string }), token: string) =>
+    request<{ saved: true; file: string; abcSaved?: boolean; abcError?: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),
   sourceMetadata: (input: Yue2CoverSourceInput, token: string, options: ReadOptions = {}) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
     ...options, method: 'POST', body: JSON.stringify(input),
   }),

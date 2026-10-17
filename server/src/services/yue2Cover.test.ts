@@ -12,6 +12,7 @@ import { createYue2CoverService } from './yue2Cover.js';
 import { createYue2CoverRouter } from '../routes/yue2Cover.js';
 import { readSidecar, writeSidecar } from './training/sidecarIO.js';
 import { sidecarPathFor } from './training/paths.js';
+import { abcSidecarPath, writeAbcSidecar } from './training/abcSidecar.js';
 
 function fixture(missing = false, defer = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-api-'));
@@ -28,6 +29,7 @@ function fixture(missing = false, defer = false) {
   let runnerCalls = 0;
   let duration = 120;
   let datasetAudio: string | null = null;
+  let failAbc = false;
   let pending: (() => Promise<void>) | undefined;
   let alignTimes: Array<[string, number]> = [];
   const fakeQueue = {
@@ -67,6 +69,10 @@ function fixture(missing = false, defer = false) {
       const file = sidecarPathFor(audioPath);
       await writeSidecar(file, { ...readSidecar(file), ...fields }, { keepBackups: true });
     },
+    saveAbc: ({ audioPath }: { audioPath: string }, abc: string) => {
+      if (failAbc) throw new Error('disk full');
+      return writeAbcSidecar(audioPath, abc, { keepBackups: true });
+    },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
     run: async (job, _audioPath, dir) => {
@@ -82,6 +88,7 @@ function fixture(missing = false, defer = false) {
   });
   return { root, referenceDir, libraryDir, upload, service, setDuration: (n: number) => { duration = n; },
     setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
+    failAbcWrites: (fail: boolean) => { failAbc = fail; },
     setAlign: (times: Array<[string, number]>) => { alignTimes = times; },
     counts: () => ({ started, cancelled, runnerCalls }), drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
@@ -335,7 +342,10 @@ test('match sections retags from aligned times; save writes the dataset sidecar 
     f.setDatasetAudio(path.join(f.referenceDir, f.upload));
     const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');
     fs.writeFileSync(sidecar, `caption: test\nbpm: 120\nkey: E Major\nlyrics:\n${lyrics}\n`);
-    const saved = await f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics }, 'owner');
+    const onDataset = await f.service.matchSections({ ...input, abc, lyrics }, 'owner');
+    assert.equal(onDataset.datasetSong, true);
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics }, 'owner'), /changed since matching/);
+    const saved = await f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics, revision: onDataset.revision }, 'owner');
     assert.equal(saved.saved, true);
     assert.equal(readSidecar(sidecar).lyrics, matched.lyrics);
     assert.equal(readSidecar(sidecar).caption, 'test');
@@ -366,4 +376,59 @@ test('saving with keepBackups never replaces an existing .bak', async () => {
     assert.equal(stamped.length, 1);
     assert.equal(readSidecar(path.join(dir, stamped[0])).lyrics, 'current words');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an accepted score plan saves lyrics and the revised score with backups, and a reload reuses them', async () => {
+  const f = fixture();
+  try {
+    const input = { sourceAudioUrl: `/references/${f.upload}` };
+    const abc = ['X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C', '% verse', 'V: Vocal', 'C6|D6|',
+      '% chorus', 'V: Vocal', 'E6|F6|', ''].join('\n');
+    const revised = abc.replace('% chorus', '% hook');
+    const lyrics = '[Verse 1]\nfirst line\n[Hook]\nsecond line';
+    f.setAlign([['first', 0.2], ['second', 6.1]]);
+    f.setDatasetAudio(path.join(f.referenceDir, f.upload));
+    const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');
+    const abcFile = abcSidecarPath(path.join(f.referenceDir, f.upload));
+    fs.writeFileSync(sidecar, `caption: test\nbpm: 120\nkey: E Major\nis_instrumental: false\nlyrics:\n${lyrics}\n`);
+    fs.writeFileSync(abcFile, `${abc}\n`);
+    const plan = await f.service.planScoreSections({ ...input, abc, lyrics }, 'owner');
+    assert.equal(plan.datasetSong, true);
+
+    // Nothing is written by planning, and a score with no vocal is refused before any write.
+    assert.equal(readSidecar(sidecar).lyrics, lyrics);
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, lyrics: plan.lyrics, abc: 'X:1\nK:C\n', revision: plan.revision }, 'owner'), /sounding vocal/);
+    assert.equal(readSidecar(sidecar).lyrics, lyrics);
+    // A song edited since matching is refused whole.
+    fs.appendFileSync(sidecar, 'extra\n');
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, lyrics: plan.lyrics, abc: revised, revision: plan.revision }, 'owner'), /changed since matching/);
+    const fresh = await f.service.planScoreSections({ ...input, abc, lyrics }, 'owner');
+    assert.notEqual(fresh.revision, plan.revision);
+
+    // An .abc failure after the .txt is written is reported, not hidden.
+    f.failAbcWrites(true);
+    const partial = await f.service.saveDatasetDetails({ ...input, lyrics: fresh.lyrics, abc: revised, revision: fresh.revision }, 'owner') as { saved: boolean; abcSaved?: boolean; abcError?: string };
+    assert.equal(partial.saved, true);
+    assert.equal(partial.abcSaved, false);
+    assert.match(partial.abcError || '', /disk full/);
+    assert.equal(readSidecar(sidecar).lyrics, fresh.lyrics);
+    assert.equal(fs.readFileSync(abcFile, 'utf8').trim(), abc.trim());
+    f.failAbcWrites(false);
+
+    const again = await f.service.planScoreSections({ ...input, abc, lyrics }, 'owner');
+    const done = await f.service.saveDatasetDetails({ ...input, lyrics: again.lyrics, abc: revised, revision: again.revision }, 'owner') as { abcSaved?: boolean };
+    assert.equal(done.abcSaved, true);
+    assert.equal(fs.readFileSync(abcFile, 'utf8').trim(), revised.trim());
+    assert.equal(readSidecar(sidecar).caption, 'test');
+    assert.equal(fs.readFileSync(`${abcFile}.bak`, 'utf8').trim(), abc.trim());
+    assert.equal(readSidecar(`${sidecar}.bak`).lyrics, lyrics + '\nextra');
+
+    // Reload: the dataset supplies the saved score and lyrics, with no job.
+    const looked = await f.service.lookup(input, 'owner');
+    assert.equal(looked.matched && looked.metadataAvailable && looked.lyrics, again.lyrics);
+    const started = await f.service.start(input, 'owner');
+    assert.equal(started.status, 'done');
+    assert.equal(started.abc, revised.trim());
+    assert.equal(f.counts().started, 0);
+  } finally { f.close(); }
 });

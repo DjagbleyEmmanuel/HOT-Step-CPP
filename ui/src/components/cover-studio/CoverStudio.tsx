@@ -243,6 +243,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sections: Yue2ScoreSection[]; key: string } | null>(null);
   const [sectionSaving, setSectionSaving] = useState(false);
   const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
+  const [planSaveConfirm, setPlanSaveConfirm] = useState(false);
   const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
   // ½×/2× on the score tempo, for when the transcriber counted half or double time.
   const [scoreTempoScale, setScoreTempoScale] = useState(() => restore('scoreTempoScale', { abc: '', factor: 1 }));
@@ -1041,6 +1042,24 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     changeSheetAbc(next.abc);
     setScorePlan(null);
   };
+  // Apply and save: the retagged lyrics go to the dataset .txt and the revised
+  // score to its .abc (each keeps a backup), then the same change is applied here.
+  // Nothing is applied when the server refuses; a score write that fails after the
+  // lyrics went in is reported, and the change is still applied here.
+  const saveScorePlan = async () => {
+    if (!token || !scorePlan || scorePlanStale || !scorePlan.plan.revision) return;
+    const next = resectionScore(sheetAbc, scorePlan.plan.sections);
+    if ('error' in next) { setSheetError(next.error); return; }
+    setSectionSaving(true);
+    try {
+      const saved = await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: scorePlan.plan.lyrics,
+        abc: next.abc, revision: scorePlan.plan.revision }, token);
+      if (sourceKeyRef.current === scorePlan.key) applyScorePlan();
+      if (saved.abcSaved === false) setSheetError(`Lyrics saved to the dataset, but the score was not: ${saved.abcError}`);
+      else showToast('Lyrics and score saved to the dataset');
+    } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
+    finally { setSectionSaving(false); }
+  };
   // The proposal is for the lyrics it was made from; edits since void it.
   const sectionMatchStale = !!sectionMatch && sectionMatch.before !== lyrics;
   const applySectionMatch = () => {
@@ -1051,10 +1070,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSectionMatch(null);
   };
   const saveSectionMatch = async () => {
-    if (!token || !sectionMatch || sectionMatchStale) return;
+    if (!token || !sectionMatch || sectionMatchStale || !sectionMatch.match.revision) return;
     setSectionSaving(true);
     try {
-      await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: sectionMatch.match.lyrics }, token);
+      await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: sectionMatch.match.lyrics, revision: sectionMatch.match.revision }, token);
       if (sourceKeyRef.current === sectionMatch.key) applySectionMatch();
       showToast('Lyrics saved to the dataset');
     } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
@@ -1752,8 +1771,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button></span>
             </div>
             {scorePlan && scorePlan.key === sourceKey && <ScorePlanReview beforeSections={scorePlan.sections}
-              beforeLyrics={scorePlan.lyrics} plan={scorePlan.plan} stale={scorePlanStale}
-              onApply={applyScorePlan} onDiscard={() => setScorePlan(null)} />}
+              beforeLyrics={scorePlan.lyrics} plan={scorePlan.plan} stale={scorePlanStale} saving={sectionSaving}
+              onApply={applyScorePlan} onSave={() => setPlanSaveConfirm(true)} onDiscard={() => setScorePlan(null)} />}
             {sectionMatch && sectionMatch.key === sourceKey && <SectionMatchReview before={sectionMatch.before} match={sectionMatch.match} stale={sectionMatchStale}
               saving={sectionSaving} onApply={applySectionMatch} onSave={() => setSectionSaveConfirm(true)} onDiscard={() => setSectionMatch(null)} />}
             {/* In-page, not window.confirm: a native dialog stalls browser automation. */}
@@ -1761,6 +1780,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               message="Write these lyrics into the dataset song’s .txt? The current file is kept as a backup."
               confirmLabel="Save" onCancel={() => setSectionSaveConfirm(false)}
               onConfirm={() => { setSectionSaveConfirm(false); void saveSectionMatch(); }} />
+            <ConfirmDialog isOpen={planSaveConfirm} title="Save lyrics and score to dataset"
+              message="Write the retagged lyrics into the dataset song’s .txt and the revised score into its .abc? Both current files are kept as backups."
+              confirmLabel="Save" onCancel={() => setPlanSaveConfirm(false)}
+              onConfirm={() => { setPlanSaveConfirm(false); void saveScorePlan(); }} />
             <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
               message={`Replace the dataset song’s tempo and key with the score’s (${scaledScoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
               confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
