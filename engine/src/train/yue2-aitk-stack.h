@@ -152,10 +152,19 @@ inline bool make_device_tape(ggml_backend_t backend, const Yue2AitkGraphConfig &
 // Fix 5: Metal keeps each layer's attention O+LSE from the saving forward for
 // the backward (about 63 MB a layer at S = 7,668). CUDA, CPU and Vulkan keep
 // the recompute and build the same graphs as before. YUE2_AITK_ATTENTION_RECOMPUTE=1
-// restores the recompute on Metal too. No memory for it: recompute, with a warning.
+// restores the recompute on Metal too. It is kept only when the device still
+// has the step's working memory free afterwards (block scratch, the teacher,
+// the head); otherwise recompute, with a warning. Metal oversubscribes instead
+// of failing an allocation, so this reserve, not a failure, is the guard.
 inline bool keep_attention(ggml_backend_t backend) {
     static const bool recompute = std::getenv("YUE2_AITK_ATTENTION_RECOMPUTE") != nullptr;
     return !recompute && yue2_aitk_is_metal(backend) && !yue2_aitk_graph::math_attention();
+}
+// ponytail: fixed 8 GiB reserve, a guess until the Mac peak-memory run sets it;
+// YUE2_AITK_ATTENTION_RESERVE_MB overrides it (a huge value tests the fallback).
+inline size_t attention_reserve() {
+    static const size_t mb = [] { const char * v = std::getenv("YUE2_AITK_ATTENTION_RESERVE_MB"); return v && *v ? size_t(std::strtoull(v, nullptr, 10)) : size_t(8192); }();
+    return mb << 20;
 }
 inline void make_attention_tape(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
                                 size_t layers, int64_t length, Yue2AitkStackTape * tape) {
@@ -169,12 +178,15 @@ inline void make_attention_tape(ggml_backend_t backend, const Yue2AitkGraphConfi
             ggml_new_tensor_4d(shape, GGML_TYPE_F32, c.head_dim, length, c.heads, 1)) : 0;
         if (shape) ggml_free(shape);
         for (size_t i = 0; n > 0 && i < layers; ++i) tape->attention.push_back(ggml_new_tensor_1d(tape->attention_ctx, GGML_TYPE_F32, n));
-        if (tape->attention.size() == layers) tape->attention_buffer = ggml_backend_alloc_ctx_tensors(tape->attention_ctx, backend);
+        size_t avail = 0, total = 0;
+        ggml_backend_dev_memory(ggml_backend_get_device(backend), &avail, &total);
+        const size_t need = size_t(n) * sizeof(float) * layers + attention_reserve();
+        if (tape->attention.size() == layers && avail >= need) tape->attention_buffer = ggml_backend_alloc_ctx_tensors(tape->attention_ctx, backend);
     }
     if (!tape->attention_buffer) {
         tape->clear_attention();
         static bool warned = false;
-        if (!warned) { warned = true; std::fprintf(stderr, "[yue2-aitk] warning: no device memory to keep attention for the backward; recomputing it\n"); }
+        if (!warned) { warned = true; std::fprintf(stderr, "[yue2-aitk] warning: not enough device memory to keep attention for the backward; recomputing it\n"); }
     }
 }
 inline bool make_prefix_device(ggml_backend_t backend, const Yue2AitkGraphConfig & c, size_t layers,
@@ -348,7 +360,7 @@ using StoreGradients=std::function<bool(size_t,const Yue2AitkBlockBackwardHost &
 // accumulate, add) into them directly and `store` is not called.
 using GradientSinks=std::function<const std::vector<ggml_tensor *> *(size_t)>;
 inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
-                      const Yue2AitkExpertAdapters & adapters,const Yue2AitkStackTape & tape,
+                      const Yue2AitkExpertAdapters & adapters,Yue2AitkStackTape & tape,
                       const Yue2AitkPrefixHost * prefix,std::vector<float> gradient,
                       const StoreGradients & store,std::string * error=nullptr,
                       const GradientSinks & sinks={},bool accumulate=false) {
@@ -362,6 +374,10 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
         adapters.layers.size()!=expert.layers.size() ||
         (gradient.size()!=size_t(tape.length*c.hidden) && !(device && gradient.empty())))
         return fail(error,"invalid expert backward tape");
+    // The kept attention serves this backward only: free it on every return,
+    // after SyncOnExit (declared later, so destroyed first) has waited for the
+    // blocks reading it, and before the caller's clip and update.
+    struct ReleaseAttention { Yue2AitkStackTape & tape; ~ReleaseAttention() { tape.clear_attention(); } } release_attention{tape};
     Yue2AitkBlockWorkspace workspace;
     SyncOnExit sync_on_exit{backend};
     const Yue2AitkMaskMode mask_mode = tape.nar ? Yue2AitkMaskMode::noncausal : Yue2AitkMaskMode::causal;
