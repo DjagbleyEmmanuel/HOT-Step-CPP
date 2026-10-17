@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
-import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
+import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
@@ -500,4 +500,15 @@ test('YuE2 takes=2 capped at 1 song per job runs 2 single-take jobs with seeds b
     assert.deepEqual(up.posts.map((p) => p.seed), [4242, 4243]);
     assert.deepEqual(up.posts.map((p) => p.batchSize), [1, 1]);
   } finally { __setCaller(prevC); __setPollMs(prevP); }
+});
+
+test('audio path containment rejects a sibling dir and accepts a real child', () => {
+  const base = path.resolve(os.tmpdir(), 'daw-audio');
+  const sibling = isInsideDir(base, base + 'X' + path.sep + 'a.flac');
+  const child = isInsideDir(base, path.join(base, 'sub', 'a.flac'));
+  const up = isInsideDir(base, path.join(base, '..', 'a.flac'));
+  console.log('containment sibling:', sibling, 'child:', child, 'parent:', up);
+  assert.equal(sibling, false);
+  assert.equal(child, true);
+  assert.equal(up, false);
 });

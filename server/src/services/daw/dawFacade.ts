@@ -554,6 +554,12 @@ export function convertOnce(src: string, out: string, opts?: ConvertOpts): Promi
   return p;
 }
 
+/** True when p resolves to a path strictly inside dir (a sibling like <dir>X is outside). */
+export function isInsideDir(dir: string, p: string): boolean {
+  const rel = path.relative(path.resolve(dir), path.resolve(p));
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+}
+
 /** Path of a cached 48 kHz float32 stereo WAV for take n, converting on first use. */
 export async function takeWavPath(id: string, n: number): Promise<string> {
   const j = requireJob(id);
@@ -573,7 +579,7 @@ export async function takeWavPath(id: string, n: number): Promise<string> {
   if (!url) throw new DawError(404, 'not_found', `no take ${n}`);
   const rel = url.replace(/^\/audio\//, '').split('?')[0];
   const src = path.resolve(config.data.audioDir, rel);
-  if (!src.startsWith(path.resolve(config.data.audioDir)) || !fs.existsSync(src)) {
+  if (!isInsideDir(config.data.audioDir, src) || !fs.existsSync(src)) {
     throw new DawError(404, 'not_found', `take ${n} audio file is missing`);
   }
   const out = path.join(newTmpDir(id), `take_${n}.wav`);
