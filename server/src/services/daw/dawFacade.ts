@@ -451,7 +451,12 @@ export async function getJob(id: string) {
   } else if (!j.finalState) {
     j.lastPollAt = seenAt;
   }
-  (out as Record<string, unknown>).eta_s = jobEtaS(j);
+  // While the engine loads weights the job reads 'running' with no render yet,
+  // and elapsed time can pass the estimate. Report eta_s null (unknown) and an
+  // additive phase field instead of a misleading 0. State stays unchanged.
+  const loading = !j.finalState && out.state !== 'done' && /^loading\b/i.test(String(out.stage ?? ''));
+  (out as Record<string, unknown>).phase = j.finalState ?? (loading ? 'loading_model' : out.state);
+  (out as Record<string, unknown>).eta_s = loading ? null : jobEtaS(j);
   (out as Record<string, unknown>).dit_model = j.ditModel ?? null;
   if (j.eta) (out as Record<string, unknown>).eta_backend = j.eta.key;
   return out;

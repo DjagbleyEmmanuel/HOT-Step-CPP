@@ -534,3 +534,31 @@ test('a seed at the uint32 max with takes 2 is rejected, not run past the engine
   // The last valid start for 2 takes still parses.
   assert.equal(parseDawRequest({ ...raw, seed: 4294967294 }).seed, 4294967294);
 });
+
+test('a job still loading its model reports eta_s null and phase loading_model, a progressing job a number', async () => {
+  resetEta();
+  const stageFor: Record<string, any> = {
+    'up-load': { status: 'running', stage: 'Loading DiT...', progress: 10 },
+    'up-run': { status: 'running', stage: 'Synthesizing', progress: 50, ace_phase_progress: 'Step 4/8' },
+  };
+  const prevC = __setCaller(async (_m: string, route: string) => {
+    const id = route.split('/').pop()!;
+    return stageFor[id] ? { status: 200, data: stageFor[id] } : { status: 404, data: {} };
+  });
+  try {
+    // Loading: 30 s since submit against a 4.2 s estimate, so the old code clamps to 0.
+    __test.addJob({ id: 'eta-load', upstreamId: 'up-load', seeds: [], createdAt: Date.now() - 30_000,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 4.2, cold: true } } as any);
+    __test.addJob({ id: 'eta-run', upstreamId: 'up-run', seeds: [], createdAt: Date.now() - 1_000,
+      eta: { key: 'ace_turbo', takes: 1, durationS: 30, estS: 20, cold: false } } as any);
+    const l = await getJob('eta-load') as any;
+    const r = await getJob('eta-run') as any;
+    console.log('loading job: state', l.state, 'eta_s', l.eta_s, 'phase', l.phase, '| running job: eta_s', r.eta_s, 'phase', r.phase);
+    assert.equal(l.state, 'running');
+    assert.equal(l.eta_s, null);
+    assert.equal(l.phase, 'loading_model');
+    assert.equal(typeof r.eta_s, 'number');
+    assert.ok(r.eta_s > 15, 'progressing job keeps its remaining estimate');
+    assert.equal(r.phase, 'running');
+  } finally { __setCaller(prevC); }
+});
