@@ -238,6 +238,14 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
     };
   }, [showMobileSettings]);
 
+  // Close the sheet when the viewport crosses into the desktop layout (where its opener is hidden).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px) and (orientation: landscape)');
+    const onChange = (e: MediaQueryListEvent) => { if (e.matches) setShowMobileSettings(false); };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
   const modelsQuery = useQuery(aceModelsOptions());
   const availableModels = modelsQuery.data;
   useEffect(() => {
