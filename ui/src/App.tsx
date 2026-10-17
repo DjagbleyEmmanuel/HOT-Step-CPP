@@ -1463,7 +1463,7 @@ const AppContent: React.FC = () => {
             every view, so the queue and the engine log are never more than a
             glance away regardless of which studio is open. */}
         <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors max-[1023px]:hidden"
+          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors max-[1023px]:hidden portrait-wide:hidden"
           onMouseDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -1486,7 +1486,7 @@ const AppContent: React.FC = () => {
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
         </div>
         <DiscoPulseWrapper hue={DISCO.activity}
-          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden"
+          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden"
           style={{ width: activitySidebarWidth }}
         >
           <ActivitySidebar

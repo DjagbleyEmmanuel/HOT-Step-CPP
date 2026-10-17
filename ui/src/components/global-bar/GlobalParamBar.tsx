@@ -88,7 +88,7 @@ const SheetSection: React.FC<SheetSectionProps> = ({
         onClick={onToggle}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
         className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-150 border-b-2
-          ${isOpen ? `${accent.bgHover} ${accent.border}` : `${accent.bg} border-transparent hover:${accent.bgHover}`}`}
+          ${isOpen ? `${accent.bgHover} ${accent.border}` : `${accent.bg} border-transparent ${accent.hoverBg}`}`}
       >
         <span className={`flex-shrink-0 transition-colors duration-150 ${isOpen ? accent.iconColor : 'text-zinc-500'}`}>
           {icon}
