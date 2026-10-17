@@ -19,7 +19,7 @@ submodule at configure time.
 | metal-bin-threads | Metal binary ops without the 256-thread cap | — |
 | metal-im2col-ic | Metal im2col parallel over input channels for N == 1 1D convs | — |
 | metal-kquant-cpy | Metal K-quant (Q2_K to Q6_K) → F32/F16 `CPY`, the dequant the `mm-backward` arm needs to train on a K-quant base | — |
-| mm-backward | `GGML_BACKWARD_MM=1` mul_mat formulation of the activation gradient | 8 |
+| mm-backward | `GGML_BACKWARD_MM=1` mul_mat formulation of the activation gradient; on Windows the latch reads the process environment, so a static-CRT build sees the trainer's `_putenv` | 8 |
 | quant-cpy-kquant | quant → F32 `CPY` for every type the dequantizers cover | 10 |
 | sched-unplaced-log | name the node no backend accepts | — |
 | bf16-mul-mat-grad | a BF16 `MUL_MAT` weight operand may carry a gradient | 18 |
