@@ -220,6 +220,13 @@ test('a cover submission rejects a silent Vocal score', async () => {
   /The transcriber heard no melody in this source/);
 });
 
+test('a vocal-only cover of an instrumental-only score is rejected after the transform', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c',
+    yue2Cover: { sourceId: 's', voices: 'vocal' }, yue2Abc: 'X:1\nV: Ins\nK:C\nV: Ins\nC4|' }),
+  /The transcriber heard no melody in this source/);
+});
+
 test('cover submission captures both voices by default and preserves explicit vocal-only', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-submit-'));
   try {

@@ -384,6 +384,8 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   if (cover && coverAbc) {
     const choices = coverScoreChoices(cover);
     const score = transformCoverScore(coverAbc, choices);
+    // Dropping the instrumental voices can leave nothing to sing.
+    if (!hasSoundingVocalBar(score.renderedAbc, true)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     options.yue2Cover = { ...(cover.sourceId ? { sourceId: cover.sourceId } : {}),
       ...(cover.sourceKind ? { sourceKind: cover.sourceKind } : {}),
       ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),
