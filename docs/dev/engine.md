@@ -118,6 +118,17 @@ build context, run DiT, decode). Task routing (text2music, cover, repaint, lego,
 extract, complete) is described in the
 [generation modes reference](../../engine/docs/ARCHITECTURE.md#generation-modes).
 
+On Metal, the matrix-matrix kernel (used when a matmul has more than 8 columns, so
+on every prefill) stages its f32 input as half. The 1.7B LM's SwiGLU output goes past
+half's 65504, which would make `down_proj` return inf and fill the KV cache with NaN.
+`qwen3_build_mlp` therefore takes a `down_scale`: `qw3lm_init_backend` sets it to 1/16
+on Metal and to 1 everywhere else, and the MLP scales the `down_proj` input by it and
+divides the output by it again. If a prefill still produces non-finite logits,
+`pipeline-lm.cpp` logs `[LM] ERROR: prefill logits are not finite`. On the server
+side, a `/lm` result that comes back without audio codes fails the generation with
+"LM planner returned no audio codes" (`services/backends/ace/generate.ts`) instead of
+rendering from the caption alone.
+
 ### MiniMax-Music3: planner LM, then DiT renderer
 
 ```
