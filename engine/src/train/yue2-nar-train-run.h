@@ -130,6 +130,13 @@ struct Yue2NarTrainArgs : Yue2OptimConfig {
     // schema in 08 §5) and the directory that takes the checkpoints, the
     // snapshots and the final adapter.
     std::string manifest;
+    // A repeated --manifest appends here: every listed cache trains as one set
+    // (same latent_dim and clip length required). `manifest` stays the first.
+    std::vector<std::string> extra_manifests;
+    // --companion: merge the tokenizer's companion decoder adapter
+    // (nar_lora_joint_v9) under the NAR before training, exactly as the server
+    // does under every render, so the adapter learns on the decoder it ships on.
+    bool        companion = false;
     std::string out_dir;
     std::string name = "yue2_nar_lora";  // export stem: <out>/<name>.safetensors
 
@@ -414,10 +421,18 @@ static bool yue2_nt_open_model(Yue2Model * m, const Yue2NarTrainArgs & a, const 
         fprintf(stderr, "[%s] --vae-dir is accepted and IGNORED: latents reach this trainer through the "
                         "preprocess manifest, never by encoding audio here\n", tag);
     }
+    m->companion_enabled = a.companion;
     if (!yue2_load_parts(m, /*want_lm=*/true, /*want_vae=*/false, YUE2_VAE_STANDARD, /*want_encoder=*/false,
                          err)) {
         *err = "load: " + *err;
         return false;
+    }
+    if (a.companion && !m->companion_applied) {
+        *err = "--companion was given but the companion was not merged (see the [YuE2-Companion] line above)";
+        return false;
+    }
+    if (a.companion) {
+        fprintf(stderr, "[%s] training on top of the companion: %s\n", tag, m->companion_path.c_str());
     }
     if (std::fabs((double) m->lm_cfg.timestep_shift - 1.0) > 1e-6) {
         fprintf(stderr,
@@ -2264,6 +2279,9 @@ static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs 
     // loader only prints it (yue2-adapter.h:504-508), so a breadcrumb is
     // exactly what it is for — and an invented hash would be worse than none.
     md.emplace_back("base_sha", base_id);
+    // Which decoder this adapter was trained on: it belongs on top of the
+    // companion only if it was trained on top of it.
+    md.emplace_back("companion", a.companion ? "nar_lora_joint_v9" : "none");
     // doc 19 decision 4 / contract §19, exactly the AR trainer's own
     // convention (yue2-ar-train-run.h): "off,full" iff this run could ever
     // draw "full" (a clip carried a sheet and --abc-dropout < 1), else the
@@ -2328,6 +2346,26 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
     if (!yue2_nt_load_manifest(a.manifest, a.no_abc, &ds, &err)) {
         fprintf(stderr, "[yue2-train] %s\n", err.c_str());
         return 1;
+    }
+    for (const std::string & extra : a.extra_manifests) {
+        Yue2TrainSet more;
+        if (!yue2_nt_load_manifest(extra, a.no_abc, &more, &err)) {
+            fprintf(stderr, "[yue2-train] %s\n", err.c_str());
+            return 1;
+        }
+        if (more.latent_dim != ds.latent_dim || more.clip_frames != ds.clip_frames) {
+            fprintf(stderr, "[yue2-train] %s: latent_dim %lld / clip_frames %lld differ from the first manifest's "
+                            "%lld / %lld\n", extra.c_str(), (long long) more.latent_dim, (long long) more.clip_frames,
+                    (long long) ds.latent_dim, (long long) ds.clip_frames);
+            return 1;
+        }
+        ds.codec_ids_present = ds.codec_ids_present && more.codec_ids_present;
+        ds.clips.insert(ds.clips.end(), std::make_move_iterator(more.clips.begin()),
+                        std::make_move_iterator(more.clips.end()));
+    }
+    if (!a.extra_manifests.empty()) {
+        fprintf(stderr, "[yue2-train] %zu manifests, %zu clips in total\n", a.extra_manifests.size() + 1,
+                ds.clips.size());
     }
 
     static Yue2Model m;

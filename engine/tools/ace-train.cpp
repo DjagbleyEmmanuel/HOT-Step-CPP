@@ -547,6 +547,11 @@ static void print_usage(void) {
             "                [--target nar_attn|nar_attn_mlp|nar_attn_mlp_proj] default\n"
             "                nar_attn_mlp; --fd-check promotes it to ..._proj unless given\n"
             "                explicitly, so the flow-head probes have tensors to address.\n"
+            "                [--manifest <json>] may repeat: every cache listed trains as one\n"
+            "                set (same latent_dim and clip length).\n"
+            "                [--companion] merge the tokenizer's companion decoder adapter\n"
+            "                (nar_lora_joint_v9) under the NAR first, as the server does at\n"
+            "                render time, so the adapter trains on the decoder it ships on.\n"
             "                [--style \"text\"] [--lyrics \"text\"] conditioning for the gate's\n"
             "                cot=off prefix (the loop takes captions from the manifest, and\n"
             "                --lyrics only as the fallback for a clip that states none).\n"
@@ -4566,7 +4571,11 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
         if      (!strcmp(argv[i], "--lm"))          a.lm_path    = next("--lm");
         else if (!strcmp(argv[i], "--models"))      a.models_dir = next("--models");
         else if (!strcmp(argv[i], "--vae-dir"))     a.vae_dir    = next("--vae-dir");
-        else if (!strcmp(argv[i], "--manifest"))    a.manifest   = next("--manifest");
+        else if (!strcmp(argv[i], "--manifest")) {
+            const char * v = next("--manifest");
+            if (a.manifest.empty()) a.manifest = v; else a.extra_manifests.push_back(v);
+        }
+        else if (!strcmp(argv[i], "--companion"))   a.companion  = true;
         else if (!strcmp(argv[i], "--out"))         a.out_dir    = next("--out");
         else if (!strcmp(argv[i], "--style"))       a.style      = next("--style");
         else if (!strcmp(argv[i], "--lyrics"))      a.lyrics     = next("--lyrics");
