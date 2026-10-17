@@ -171,7 +171,7 @@ launchers below are the end-user path.
 | `LAUNCH.bat` | Production (Windows) | Builds `ui/dist` if it is missing, then runs `npx tsx src/index.ts` in `server/` in a restart loop. Open `http://localhost:3001`. End-user path — agents use `dev.bat` |
 | `dev.bat` | Development (Windows) | Two minimised windows: the server through `server/restart-loop.cmd` (`npx tsx watch src/index.ts`, with `HOT_STEP_DEV=1`), and Vite with `npx vite --port 3000 --host`. Open `http://localhost:3000` |
 | `launch.sh` | Production (macOS, Linux) | The Node server, using a bundled, Homebrew or system Node in that order |
-| `dev.sh` | Development (macOS) | Vite HMR plus `tsx watch` |
+| `dev.sh` | Development (macOS) | Vite with `npx vite --port 3000 --host` and the server with `tsx watch src/index.ts` (`HOT_STEP_DEV=1`), in a restart loop like `dev.bat`'s. Open `http://localhost:3000` |
 
 No `.env` is needed for a standard setup. The server finds the engine binary and
 `<data root>/models/` on its own. [config.md](config.md) lists everything you can override.
@@ -183,6 +183,20 @@ check that the app is idle before editing server code while it runs.
 
 `HOT_STEP_DEV=1` tells `POST /api/shutdown` that the Vite process on port 3000 belongs to
 the app. Shutdown kills it only after confirming it is a Node process running Vite.
+
+On macOS, `dev.sh` does both jobs itself. `tsx watch` keeps running after the server
+exits, so `dev.sh` watches the server process. When the server exits after writing
+`.restart-requested` (in-app Restart, or a finished worker update), `dev.sh` stops Vite
+and `tsx`, then starts both again from the current checkout. After Quit, Ctrl-C or
+`SIGTERM` it stops them and exits. A server crash with neither waits for a file change, as
+`tsx watch` always has. It stops only its own child processes. To start it over ssh so it
+survives the session closing:
+
+```
+nohup ./dev.sh > logs/dev.log 2>&1 < /dev/null &
+```
+
+`logs/dev.pid` holds the PID; `kill $(cat logs/dev.pid)` stops the stack.
 
 ## Type-checking
 
