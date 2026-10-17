@@ -100,7 +100,7 @@ test('magic-byte sniff rejects a .wav that is really text', () => {
  * holds, so tests sync on events instead of sleeping. `statusFail(id)` returns
  * a status code to fail that poll with, `gatePost(n)` holds the n-th POST open.
  */
-function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: string, n: number) => number | null; gatePost?: (n: number) => Promise<void> | null; nUrls?: number } = {}) {
+function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: string, n: number) => number | null; gatePost?: (n: number) => Promise<void> | null; nUrls?: number; batchMax?: number } = {}) {
   const posts: any[] = [];
   const cancels: string[] = [];
   const statusCalls: string[] = [];
@@ -110,6 +110,7 @@ function fakeUpstream(backend: string, ticks = 2, opts: { statusFail?: (id: stri
   const waitFor = (pred: () => boolean) => new Promise<void>((resolve) => { if (pred()) resolve(); else waiters.push({ pred, resolve }); });
   const handle = async (method: string, route: string, body?: any) => {
     if (route === '/api/backends') return { status: 200, data: { activeId: backend } };
+    if (route.startsWith('/api/capabilities')) return { status: 200, data: { core: { batch: { max: opts.batchMax ?? 1 } } } };
     if (method === 'POST' && route === '/api/generate') {
       const n = posts.length;
       posts.push(body);
@@ -470,7 +471,7 @@ test('ACE fit pads 9.44 s to exactly 480000 frames and cuts 11 s to 480000, with
 });
 
 test('YuE2 takes=2 reports seed + i per take', async () => {
-  const up = fakeUpstream('yue2', 0, { nUrls: 2 });
+  const up = fakeUpstream('yue2', 0, { nUrls: 2, batchMax: 2 });
   const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
   try {
     await submitGenerate('yue2-seeds', { mode: 'text2music', caption: 'x', takes: 2, seed: 4242 } as any, { batchSize: 2, seed: 4242 });
@@ -480,5 +481,23 @@ test('YuE2 takes=2 reports seed + i per take', async () => {
     assert.equal(r.takes.length, 2);
     assert.ok(seeds.every((s: unknown) => typeof s === 'number'));
     assert.deepEqual(seeds, [4242, 4243]);
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
+});
+
+test('YuE2 takes=2 capped at 1 song per job runs 2 single-take jobs with seeds base+i', async () => {
+  const up = fakeUpstream('yue2', 0, { batchMax: 1 });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('yue2-cap', { mode: 'text2music', caption: 'x', takes: 2, seed: 4242 } as any, { batchSize: 2, seed: 4242 });
+    await __test.getJob('yue2-cap')!.seq?.done;
+    const r = await getJob('yue2-cap') as any;
+    const seeds = r.takes.map((t: any) => t.seed);
+    console.log('yue2 capped posts:', up.posts.length, 'takes:', r.takes.length, 'seeds:', JSON.stringify(seeds),
+      'postSeeds:', JSON.stringify(up.posts.map((p) => p.seed)), 'urls:', JSON.stringify(r.takes.map((t: any) => t.audio_url ?? t.url)), 'state:', r.state);
+    assert.equal(up.posts.length, 2);
+    assert.equal(r.takes.length, 2);
+    assert.deepEqual(seeds, [4242, 4243]);
+    assert.deepEqual(up.posts.map((p) => p.seed), [4242, 4243]);
+    assert.deepEqual(up.posts.map((p) => p.batchSize), [1, 1]);
   } finally { __setCaller(prevC); __setPollMs(prevP); }
 });

@@ -267,8 +267,10 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const eta = { key, takes, durationS, estS: estimate(key, takes, durationS, resident), cold };
   const trimTo = backend === 'yue2' && req.duration_s !== undefined ? req.duration_s : undefined;
   const fitTo = backend === 'ace' && req.mode === 'text2music' && req.duration_s !== undefined ? req.duration_s : undefined;
-  if (backend === 'sa3' && takes > 1) {
-    // SA3 ignores batchSize, so run N single-take jobs with distinct seeds.
+  // SA3 ignores batchSize; YuE2 caps songs per job at max_lm_batch. Either
+  // way, run N single-take jobs with distinct seeds under one facade id.
+  const sequential = takes > 1 && (backend === 'sa3' || (backend === 'yue2' && (await batchMax(backend)) < takes));
+  if (sequential) {
     const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
     const first = await submitOne(params, seeds[0]);
     const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
@@ -283,6 +285,15 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
   const seeds = req.seed !== undefined ? Array.from({ length: takes }, (_, i) => req.seed! + (backend === 'yue2' ? i : 0)) : [];
   jobs.set(id, { id, upstreamId: data.jobId, seeds, backend, ditModel: req.dit_model ?? null, trimTo, fitTo, eta, createdAt: Date.now() });
   return id;
+}
+
+/** Songs per job the backend reports (capabilities core.batch.max); 1 when unknown. */
+async function batchMax(backend: string): Promise<number> {
+  try {
+    const { status, data } = await call('GET', `/api/capabilities?backend=${encodeURIComponent(backend)}`);
+    const n = Number(data?.core?.batch?.max);
+    return status === 200 && Number.isFinite(n) && n >= 1 ? n : 1;
+  } catch { return 1; }
 }
 
 async function submitOne(params: Record<string, unknown>, seed: number): Promise<string> {
