@@ -25,7 +25,7 @@
  *  and eta_s null instead of a made-up eta; "saving audio" replaces it. */
 export const SA3_LOADING_STAGE = 'Loading SA3 model...';
 export function sa3RenderStage(durationSec: number, steps: number): string {
-  return `Loading SA3 model, rendering ${Math.round(durationSec)}s (${steps} steps)...`;
+  return `SA3: rendering ${Math.round(durationSec)}s (${steps} steps)...`;
 }
 
 import fs from 'fs';

@@ -12,10 +12,11 @@ test('SA3 stage at submit reads as loading', () => {
   assert.match(SA3_LOADING_STAGE, FACADE_LOADING_RE);
 });
 
-test('SA3 stage while the synchronous render is pending reads as loading', () => {
+test('SA3 stage once the render fetch is sent does not read as loading', () => {
   const s = sa3RenderStage(30.4, 8);
-  console.log('pending stage:', s);
-  assert.match(s, FACADE_LOADING_RE);
+  console.log('render stage:', s);
+  assert.doesNotMatch(s, FACADE_LOADING_RE);
+  assert.ok(s.startsWith('SA3: rendering'));
   assert.ok(s.includes('30s') && s.includes('8 steps'));
 });
 
