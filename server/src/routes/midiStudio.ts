@@ -30,11 +30,12 @@ import { config } from '../config.js';
 import {
   getHfToken, setHfToken, looksLikeGatedError, aceMidiExe,
   modelDir, isModelDownloaded, startModelDownload, getModelStates,
-  MUSCRIPTOR_MODELS, type MuscriptorModel,
+  MUSCRIPTOR_MODELS, type MuscriptorModel, partialMidiFromEvents,
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
 import { addMidiLyrics } from '../services/midiLyrics.js';
 import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
+import { runOnGpuLane } from '../services/generation/gpuLane.js';
 
 const router = Router();
 
@@ -64,7 +65,12 @@ interface MidiJob {
 
 const jobs = new Map<string, MidiJob>();
 registerJobsBusyCheck('MIDI', jobs);
-let queueTail: Promise<void> = Promise.resolve();
+
+/** Run MIDI work on the shared GPU lane, behind any render or post-process
+ *  already running or queued (#227: running beside YuE2 starved both). */
+export function runOnMidiLane(jobId: string, fn: () => Promise<void>): Promise<void> {
+  return runOnGpuLane(fn, { label: 'midi:' + jobId, family: 'midi' });
+}
 
 /** Resolve a URL-style audio path to an absolute filesystem path */
 function resolveAudioPath(audioUrl: string): string {
@@ -188,29 +194,7 @@ async function runTranscription(job: MidiJob): Promise<void> {
       }
     }
 
-    // Parse for the piano-roll preview (preview failure is non-fatal)
-    let noteCount = job.noteCount;
-    let durationSec = 0;
-    try {
-      const parsed = parseMidiFile(fs.readFileSync(midPath(job.id)));
-      noteCount = parsed.noteCount;
-      durationSec = parsed.durationSec;
-      fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify(parsed));
-    } catch (err: any) {
-      console.warn(`[MidiStudio] Job ${job.id}: MIDI parse for preview failed (${err.message})`);
-    }
-
-    fs.writeFileSync(path.join(dir, '_meta.json'), JSON.stringify({
-      id: job.id,
-      sourceAudioUrl: job.sourceAudioUrl,
-      sourceFileName: job.sourceFileName,
-      songId: job.songId,
-      model: job.model,
-      noteCount,
-      durationSec,
-      createdAt: new Date(job.createdAt).toISOString(),
-    }, null, 2));
-
+    const { noteCount, durationSec } = saveResult(job);
     job.status = 'done';
     console.log(`[MidiStudio] Job ${job.id}: done (${noteCount} notes, ${durationSec.toFixed(1)}s)`);
   } catch (err: any) {
@@ -219,10 +203,56 @@ async function runTranscription(job: MidiJob): Promise<void> {
       job.error = err.message || 'Unknown error';
       job.gated = looksLikeGatedError(job.error || '');
       console.error(`[MidiStudio] Job ${job.id}: FAILED — ${job.error}`);
+      savePartial(job);
     }
   } finally {
     endStream(job);
   }
+}
+
+/** A failed run keeps the notes it streamed before it died (#227). */
+function savePartial(job: MidiJob): void {
+  try {
+    if (!fs.existsSync(midPath(job.id))) {
+      const mid = partialMidiFromEvents(job.events);
+      if (!mid) return;
+      fs.mkdirSync(jobDir(job.id), { recursive: true });
+      fs.writeFileSync(midPath(job.id), mid);
+    }
+    const { noteCount } = saveResult(job, true);
+    console.log(`[MidiStudio] Job ${job.id}: kept partial MIDI (${noteCount} notes, ${job.chunksDone}/${job.chunksTotal} chunks)`);
+  } catch (err: any) {
+    console.warn(`[MidiStudio] Job ${job.id}: could not keep partial MIDI (${err.message})`);
+  }
+}
+
+/** Write notes.json and _meta.json for out.mid; returns what the preview parsed. */
+function saveResult(job: MidiJob, partial = false): { noteCount: number; durationSec: number } {
+  const dir = jobDir(job.id);
+  // Parse for the piano-roll preview (preview failure is non-fatal)
+  let noteCount = job.noteCount;
+  let durationSec = 0;
+  try {
+    const parsed = parseMidiFile(fs.readFileSync(midPath(job.id)));
+    noteCount = parsed.noteCount;
+    durationSec = parsed.durationSec;
+    fs.writeFileSync(path.join(dir, 'notes.json'), JSON.stringify(parsed));
+  } catch (err: any) {
+    console.warn(`[MidiStudio] Job ${job.id}: MIDI parse for preview failed (${err.message})`);
+  }
+
+  fs.writeFileSync(path.join(dir, '_meta.json'), JSON.stringify({
+    id: job.id,
+    sourceAudioUrl: job.sourceAudioUrl,
+    sourceFileName: job.sourceFileName,
+    songId: job.songId,
+    model: job.model,
+    noteCount,
+    durationSec,
+    createdAt: new Date(job.createdAt).toISOString(),
+    ...(partial ? { partial: true, error: job.error, chunksDone: job.chunksDone, chunksTotal: job.chunksTotal } : {}),
+  }, null, 2));
+  return { noteCount, durationSec };
 }
 
 // ── Routes ───────────────────────────────────────────────────────────────
@@ -300,7 +330,13 @@ router.post('/transcribe', (req: Request, res: Response) => {
   };
   jobs.set(job.id, job);
   // Tracked from enqueue: a queued job deleted from the map still runs later.
-  queueTail = trackBusy('MIDI', queueTail.then(() => runTranscription(job)));
+  void trackBusy('MIDI', runOnMidiLane(job.id, () => runTranscription(job))).catch((err: any) => {
+    // Only a queue reset rejects here; runTranscription settles its own errors.
+    if (job.status !== 'queued') return;
+    job.status = 'cancelled';
+    job.error = err.message || 'Queue reset';
+    endStream(job);
+  });
 
   console.log(`[MidiStudio] Job ${job.id} queued: ${job.sourceFileName} (model=${m})`);
   res.json({ id: job.id });
@@ -318,6 +354,8 @@ router.get('/jobs', (_req: Request, res: Response) => {
         if (!fs.existsSync(metaPath)) continue;
         try {
           const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+          const live = jobs.get(meta.id || entry.name);
+          if (live && live.status !== 'done') continue; // a kept partial lists as failed until restart
           onDisk.add(meta.id || entry.name);
           summaries.push({
             id: meta.id || entry.name,
@@ -329,6 +367,7 @@ router.get('/jobs', (_req: Request, res: Response) => {
             noteCount: meta.noteCount || 0,
             durationSec: meta.durationSec || 0,
             createdAt: meta.createdAt || '',
+            ...(meta.partial ? { partial: true, error: meta.error } : {}),
           });
         } catch { /* skip corrupted meta */ }
       }

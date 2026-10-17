@@ -178,3 +178,85 @@ export function startModelDownload(m: MuscriptorModel): { started: boolean; erro
 registerBusyCheck('muscriptor-downloads', () => [...downloads.entries()]
   .filter(([, s]) => s.downloading)
   .map(([m]) => `downloading MuScriptor ${m}`));
+
+// ── Partial MIDI from the streamed events ────────────────────────────────
+
+// ace-midi's instrument names (instrument_for_program in engine/tools/ace-midi.cpp)
+// back to their GM programs; names it formats as program_<n> parse below.
+const INSTRUMENT_PROGRAMS: Record<string, number> = {
+  acoustic_piano: 0, electric_piano: 2, chromatic_percussion: 8, organ: 16,
+  acoustic_guitar: 24, clean_electric_guitar: 26, distorted_electric_guitar: 29,
+  acoustic_bass: 32, electric_bass: 33, violin: 40, viola: 41, cello: 42,
+  contrabass: 43, orchestral_harp: 46, timpani: 47, string_ensemble: 48,
+  synth_strings: 50, voice: 52, orchestra_hit: 55, trumpet: 56, trombone: 57,
+  tuba: 58, french_horn: 60, brass_section: 61, soprano_and_alto_sax: 64,
+  tenor_sax: 66, baritone_sax: 67, oboe: 68, english_horn: 69, bassoon: 70,
+  clarinet: 71, flutes: 72, synth_lead: 80, synth_pad: 88,
+};
+
+function varLen(n: number): number[] {
+  const out = [n & 0x7f];
+  while ((n >>= 7) > 0) out.unshift((n & 0x7f) | 0x80);
+  return out;
+}
+
+/**
+ * Build a type-0 SMF (480 tpb, 120 bpm, velocity 100) from ace-midi's JSONL
+ * note events, so a run that dies before writing out.mid still leaves the
+ * notes it decoded. Notes still open at the cut are dropped. Null when no
+ * note completed.
+ */
+export function partialMidiFromEvents(events: any[]): Buffer | null {
+  const open = new Map<number, { pitch: number; time: number; instrument: string }>();
+  const notes: { pitch: number; on: number; off: number; instrument: string }[] = [];
+  for (const ev of events) {
+    if (ev?.type === 'note_start') open.set(ev.index, ev);
+    else if (ev?.type === 'note_end' && open.has(ev.index)) {
+      const s = open.get(ev.index)!;
+      open.delete(ev.index);
+      notes.push({ pitch: s.pitch, on: s.time, off: Math.max(ev.time, s.time), instrument: s.instrument });
+    }
+  }
+  if (!notes.length) return null;
+
+  // Channels by first appearance: 0-8, 10-15 (overflow shares 15), drums on 9.
+  const channels = new Map<string, number>();
+  const free = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+  const setup: number[] = [];
+  const chanFor = (instrument: string): number => {
+    let ch = channels.get(instrument);
+    if (ch !== undefined) return ch;
+    if (instrument === 'drums') ch = 9;
+    else {
+      ch = free.shift() ?? 15;
+      const program = INSTRUMENT_PROGRAMS[instrument] ?? (parseInt(instrument.replace(/^program_/, ''), 10) || 0);
+      setup.push(0, 0xc0 | ch, program & 0x7f);
+    }
+    channels.set(instrument, ch);
+    return ch;
+  };
+
+  const tick = (sec: number) => Math.round(sec * 960); // 480 tpb at 120 bpm
+  const evs: { tick: number; status: number; pitch: number; vel: number }[] = [];
+  for (const n of notes) {
+    const ch = chanFor(n.instrument);
+    evs.push({ tick: tick(n.on), status: 0x90 | ch, pitch: n.pitch, vel: 100 });
+    evs.push({ tick: tick(n.off), status: 0x80 | ch, pitch: n.pitch, vel: 0 });
+  }
+  // Offs before ons at the same tick, so a repeated pitch is not cut short.
+  evs.sort((a, b) => a.tick - b.tick || (a.status & 0xf0) - (b.status & 0xf0));
+
+  const body: number[] = [0, 0xff, 0x51, 3, 0x07, 0xa1, 0x20, ...setup];
+  let last = 0;
+  for (const e of evs) {
+    body.push(...varLen(e.tick - last), e.status, e.pitch & 0x7f, e.vel);
+    last = e.tick;
+  }
+  body.push(0, 0xff, 0x2f, 0);
+
+  const header = Buffer.from([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xe0]);
+  const trackHead = Buffer.alloc(8);
+  trackHead.write('MTrk', 0, 'ascii');
+  trackHead.writeUInt32BE(body.length, 4);
+  return Buffer.concat([header, trackHead, Buffer.from(body)]);
+}
