@@ -3,16 +3,34 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createCoverStemCache } from './coverStemCache.js';
+import { createCoverStemCache, isCompleteWav } from './coverStemCache.js';
 import { NoVocalsError } from './training/yue2Stems.js';
 
-function wav(): Buffer {
-  const b = Buffer.alloc(64);
-  b.write('RIFF', 0, 'ascii'); b.writeUInt32LE(56, 4); b.write('WAVE', 8, 'ascii');
-  return b;
+/** A real 16-bit mono PCM WAV with `frames` frames; `chunks` can override the layout. */
+function wav(frames = 8, opts: { fmt?: boolean; dataSize?: number; riffSize?: number; tag?: number } = {}): Buffer {
+  const fmt = Buffer.alloc(24);
+  fmt.write('fmt ', 0, 'ascii'); fmt.writeUInt32LE(16, 4); fmt.writeUInt16LE(opts.tag ?? 1, 8); fmt.writeUInt16LE(1, 10);
+  fmt.writeUInt32LE(44100, 12); fmt.writeUInt32LE(88200, 16); fmt.writeUInt16LE(2, 20); fmt.writeUInt16LE(16, 22);
+  const pcm = Buffer.alloc(frames * 2, 1);
+  const data = Buffer.concat([Buffer.from('data'), Buffer.alloc(4), pcm]);
+  data.writeUInt32LE(opts.dataSize ?? pcm.length, 4);
+  const body = Buffer.concat([Buffer.from('WAVE'), opts.fmt === false ? Buffer.alloc(0) : fmt, data]);
+  const head = Buffer.alloc(8);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(opts.riffSize ?? body.length, 4);
+  return Buffer.concat([head, body]);
 }
 
-function setup(mode: 'ok' | 'none' | 'bad' = 'ok') {
+const MALFORMED: Array<[string, Buffer]> = [
+  ['RIFF header only', (() => { const b = Buffer.alloc(64); b.write('RIFF', 0); b.writeUInt32LE(56, 4); b.write('WAVE', 8); return b; })()],
+  ['no fmt chunk', wav(8, { fmt: false })],
+  ['unsupported format tag', wav(8, { tag: 2 })],
+  ['empty data', wav(0)],
+  ['data past end of file', wav(8, { dataSize: 4000 })],
+  ['partial frame', wav(8, { dataSize: 15 })],
+  ['truncated RIFF size', wav(8, { riffSize: 9999 })],
+];
+
+function setup(mode: 'ok' | 'none' | 'bad' = 'ok', bad: Buffer = Buffer.from('junk')) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stemcache-'));
   const root = path.join(dir, 'cache');
   let calls = 0;
@@ -20,7 +38,7 @@ function setup(mode: 'ok' | 'none' | 'bad' = 'ok') {
     calls++;
     await new Promise(r => setTimeout(r, 10));
     if (mode === 'none') throw new NoVocalsError('none');
-    fs.writeFileSync(out, mode === 'bad' ? Buffer.from('junk') : wav());
+    fs.writeFileSync(out, mode === 'bad' ? bad : wav());
   };
   const audio = (name: string, body: string) => { const p = path.join(dir, name); fs.writeFileSync(p, body); return p; };
   const make = (level = 4, version?: number) => createCoverStemCache({ root, level, separate, version });
@@ -79,4 +97,31 @@ test('a no-vocals result is cached and replays as NoVocalsError', async () => {
   await assert.rejects(t.make().vocalStem(a), NoVocalsError);
   await assert.rejects(t.make().vocalStem(t.audio('b.wav', 'x')), NoVocalsError);
   assert.equal(t.calls(), 1);
+});
+
+test('malformed WAVs are rejected by the validator and the real one passes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stemwav-'));
+  const f = path.join(dir, 'x.wav');
+  fs.writeFileSync(f, wav());
+  assert.equal(isCompleteWav(f), true);
+  for (const [name, body] of MALFORMED) {
+    fs.writeFileSync(f, body);
+    assert.equal(isCompleteWav(f), false, name);
+  }
+});
+
+test('a malformed stem is never published and a malformed cached stem is rebuilt', async () => {
+  for (const [name, body] of MALFORMED) {
+    const t = setup('bad', body);
+    const a = t.audio('a.wav', 'x');
+    await assert.rejects(t.make().vocalStem(a));
+    assert.deepEqual(fs.readdirSync(t.root), [], name);
+    // hit path: plant the same malformed file where the entry would live
+    const good = setup();
+    const out = await good.make().vocalStem(good.audio('a.wav', 'x'));
+    fs.writeFileSync(out, body);
+    await good.make().vocalStem(good.audio('b.wav', 'x'));
+    assert.equal(good.calls(), 2, name);
+    assert.ok(fs.readFileSync(out).equals(wav()), name);
+  }
 });

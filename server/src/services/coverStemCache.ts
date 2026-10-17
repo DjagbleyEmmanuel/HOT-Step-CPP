@@ -11,15 +11,32 @@ export const COVER_STEM_VERSION = 1;
 
 export type StemSeparator = (audioPath: string, outPath: string, level: number) => Promise<void>;
 
-/** A complete PCM WAV: RIFF/WAVE header whose declared size matches the file. */
-function isCompleteWav(file: string): boolean {
+/** A usable WAV: chunks stay inside the file, `fmt ` is a supported format, and
+ *  `data` holds at least one whole audio frame. Exported for the tests. */
+export function isCompleteWav(file: string): boolean {
   try {
-    const head = Buffer.alloc(12);
-    const fd = fs.openSync(file, 'r');
-    try { fs.readSync(fd, head, 0, 12, 0); } finally { fs.closeSync(fd); }
-    const size = fs.statSync(file).size;
-    return size > 44 && head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WAVE'
-      && head.readUInt32LE(4) + 8 === size;
+    const buf = fs.readFileSync(file);
+    if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return false;
+    if (buf.readUInt32LE(4) + 8 > buf.length) return false;  // truncated
+    let blockAlign = 0;
+    for (let pos = 12; pos + 8 <= buf.length;) {
+      const id = buf.toString('ascii', pos, pos + 4);
+      const size = buf.readUInt32LE(pos + 4);
+      const body = pos + 8;
+      if (body + size > buf.length) return false;
+      if (id === 'fmt ') {
+        if (size < 16) return false;
+        const tag = buf.readUInt16LE(body);
+        const channels = buf.readUInt16LE(body + 2);
+        blockAlign = buf.readUInt16LE(body + 12);
+        const bits = buf.readUInt16LE(body + 14);
+        if (![1, 3, 0xfffe].includes(tag) || !channels || !bits || !blockAlign) return false;
+      } else if (id === 'data') {
+        return blockAlign > 0 && size >= blockAlign && size % blockAlign === 0;
+      }
+      pos = body + size + (size & 1);
+    }
+    return false;  // no data chunk
   } catch { return false; }
 }
 
