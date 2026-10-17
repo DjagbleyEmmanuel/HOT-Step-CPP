@@ -139,8 +139,10 @@ while :; do
 
     # Leave when tsx dies, or when its server exited after Quit or Restart.
     # A crash without either (a typo mid-edit) waits for the fix, as before.
+    # Match `node` only: bash forks the output filter above before the exec,
+    # so a bash child of tsx is always there.
     while kill -0 "${SERVER_PID}" 2>/dev/null; do
-        if ! pgrep -P "${SERVER_PID}" >/dev/null \
+        if ! pgrep -x -P "${SERVER_PID}" node >/dev/null \
             && { [ -f "${MARKER}" ] || [ -f "${QUIT_FLAG}" ]; }; then
             break
         fi
