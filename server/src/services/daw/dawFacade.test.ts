@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
-import { __setCaller, __setConverter, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
+import { __setCaller, __setConverter, startUnderstand, getUnderstand, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError, parseDawRequest } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
@@ -590,3 +590,15 @@ test('an SA3 render past its estimate reports eta_s null and phase running, ACE 
   } finally { __setCaller(prevC); }
 });
 
+
+test('fast sync understand response carries analysis_id equal to id', async () => {
+  const prevC = __setCaller((async () => ({ status: 200, data: { bpm: 120, key: 'C', scale: 'major', tags: [] } })) as any);
+  try {
+    const { id, result } = await startUnderstand('und-sync-1', '/tmp/x.wav', 1000);
+    assert.ok(result, 'expected sync result');
+    console.log('understand sync result:', JSON.stringify(result));
+    assert.equal(result.analysis_id, id);
+    assert.equal(result.id, id);
+    assert.equal(getUnderstand(id).analysis_id, id);
+  } finally { __setCaller(prevC); }
+});

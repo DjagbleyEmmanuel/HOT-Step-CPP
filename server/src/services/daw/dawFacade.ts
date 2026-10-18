@@ -616,6 +616,7 @@ export async function startUnderstand(id: string, filePath: string, waitMs = 500
     u.result = {
       api: DAW_API_VERSION,
       id,
+      analysis_id: id,
       state: 'done',
       bpm: data.bpm ?? null,
       key: [data.key, data.scale].filter(Boolean).join(' ') || null,
@@ -633,8 +634,8 @@ export function getUnderstand(id: string) {
   const u = understands.get(id);
   if (!u) throw new DawError(404, 'not_found', `unknown analysis ${id}`);
   if (u.finalState === 'done') return u.result;
-  if (u.finalState === 'failed') return { api: DAW_API_VERSION, id, state: 'failed', error: u.error };
-  return { api: DAW_API_VERSION, id, state: 'running' };
+  if (u.finalState === 'failed') return { api: DAW_API_VERSION, id, analysis_id: id, state: 'failed', error: u.error };
+  return { api: DAW_API_VERSION, id, analysis_id: id, state: 'running' };
 }
 
 export const newId = () => uuidv4();
