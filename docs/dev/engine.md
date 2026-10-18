@@ -187,10 +187,19 @@ the negative CFG rows; scheduled lyrics replay the prefix as a batch. Every row'
 output must begin with the exact prefix, or the whole job fails. Reproduction by
 seed requires the same batch width.
 A lyric schedule still needs `cfg_scale` 1. The stage fails if the output does not begin with the exact
-prefix. The NAR and VAE then render the whole stream again, prefix included. Prefix
-noise is the same for the same `noise_seed`, but the NAR attends both ways across its
-chunk, so the prefix audio is close to the original render without being identical.
-Render the whole song; do not splice old prefix audio onto the new suffix.
+prefix. The NAR and VAE then render the whole stream again, prefix included, unless
+`render_from_frame` starts them later. Prefix noise is the same for the same
+`noise_seed`, but the NAR attends both ways across its chunk, so the prefix audio is
+close to the original render without being identical. Render the whole song for
+anything kept; do not splice old prefix audio onto the new suffix.
+
+`render_from_frame` is what keeps late section takes cheap. Each NAR chunk attends
+over the prompt and its own frames only (`yue2_seal_chunks`), so starting the chunks
+at a later frame drops no context the NAR reads; the composer still prefills the
+whole prefix. The VAE decodes the same window, and each track reports it as
+`audio_from`. The window's audio is a slightly different render of the same codes
+than a full render, because the chunk edges and the peak normalisation move with
+it. On a 3.5-minute build a take went from 22.6 s to 7.7 s.
 Every finished track in the `/job` status `tracks` array carries its `semantic_ids`, and
 the server saves them beside the WAV as `<song>.semantic.json`, with the request that made
 them as `<song>.yue2-request.json`, so a later request can resume the stream. Add

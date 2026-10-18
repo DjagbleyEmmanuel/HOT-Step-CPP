@@ -374,6 +374,7 @@ static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request 
             yyjson_mut_obj_add_strcpy(doc, o, "noise_seed", std::to_string(tr.noise_seed).c_str());
             yyjson_mut_obj_add_strcpy(doc, o, "end_reason", tr.end_reason.c_str());
             yyjson_mut_obj_add_int(doc, o, "frames", (int) tr.total_frames);
+            yyjson_mut_obj_add_int(doc, o, "audio_from", (int) tr.audio_from);
             const std::string sr = stage_reasons_json(tr);
             yyjson_doc * srd = yyjson_read(sr.data(), sr.size(), 0);
             if (srd) {

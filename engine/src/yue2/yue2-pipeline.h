@@ -86,6 +86,7 @@ struct Yue2TrackResult {
     // semantic carry a terminator/limit concept at all; nar/vae stay "").
     std::string stage_end_reason[4];
     int64_t     total_frames = 0;  // NAR latent frame count (== semantic codec token count)
+    int64_t     audio_from   = 0;  // codec frame the audio starts at (render_from_frame, clamped)
 
     // "completed" | "limit_hit" | "preview_limit" -- derived per track by
     // yue2_pipeline_run from the stage reasons (06-engine-port-plan.md §7).
@@ -183,6 +184,12 @@ static std::vector<std::pair<int64_t, int64_t>> yue2_chunk_ranges(int64_t frames
         out.push_back({ a, std::min(a + size, frames) });
     }
     return out;
+}
+
+// The codec frame a song's NAR and VAE start at: render_from_frame, kept
+// inside the stream so at least one frame renders.
+static int64_t yue2_render_from(int64_t render_from_frame, int64_t frames) {
+    return std::max<int64_t>(0, std::min<int64_t>(render_from_frame, frames - 1));
 }
 
 static uint64_t yue2_token_hash(const std::vector<int32_t> & ids) {
@@ -1057,7 +1064,7 @@ struct Yue2ChunkPlan {
 
 static bool yue2_seal_chunks(Yue2Model & m, std::vector<Yue2SongState> & songs, Yue2ArKvCache & sem_cache,
                              Yue2ArKvCache * nar_cache, std::vector<Yue2ChunkPlan> * plan, std::string * err,
-                             int64_t chunk_cap = 0) {
+                             int64_t chunk_cap = 0, int64_t render_from_frame = 0) {
     plan->clear();
     int64_t capacity = 0;
     for (int b = 0; b < (int) songs.size(); b++) {
@@ -1068,7 +1075,11 @@ static bool yue2_seal_chunks(Yue2Model & m, std::vector<Yue2SongState> & songs, 
             if (err) *err = "NAR stage: semantic stage produced zero codec frames";
             return false;
         }
-        const auto ranges = yue2_chunk_ranges(frames, prefix_len, (int64_t) m.lm_cfg.context_length, chunk_cap);
+        // Chunks cover [from, frames). Every chunk already attends over the prompt and
+        // its own frames only, so starting later drops no context the NAR would read.
+        const int64_t from = yue2_render_from(render_from_frame, frames);
+        auto ranges = yue2_chunk_ranges(frames - from, prefix_len, (int64_t) m.lm_cfg.context_length, chunk_cap);
+        for (auto & r : ranges) { r.first += from; r.second += from; }
         if (ranges.empty()) {
             if (err) *err = "NAR stage: chunk_ranges computed size < 1 (prompt too long for the context window)";
             return false;
@@ -1562,7 +1573,8 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
         if (err) *err = "cancelled";
         return false;
     }
-    if (!yue2_seal_chunks(m, songs, sem_cache, &ho->nar_cache, &ho->plan, err, (int64_t) req.nar_chunk_frames)) {
+    if (!yue2_seal_chunks(m, songs, sem_cache, &ho->nar_cache, &ho->plan, err, (int64_t) req.nar_chunk_frames,
+                          (int64_t) req.render_from_frame)) {
         yue2_ar_kv_cache_free(&sem_cache);
         return false;
     }
@@ -1625,8 +1637,9 @@ static bool yue2_pipeline_run_nar(Yue2Model & m, const Yue2Request & req, Yue2Ar
             tr.score_abc    = songs[(size_t) b].score_abc;
             tr.semantic_ids = songs[(size_t) b].codec_ids;
             tr.total_frames = (int64_t) songs[(size_t) b].codec_ids.size();
+            tr.audio_from   = yue2_render_from(req.render_from_frame, tr.total_frames);
             for (int s = 0; s < 4; s++) tr.stage_end_reason[s] = songs[(size_t) b].stage_end_reason[s];
-            if (!yue2_run_vae_stage(m, req, latents[(size_t) b][(size_t) j], tr.total_frames, progress,
+            if (!yue2_run_vae_stage(m, req, latents[(size_t) b][(size_t) j], tr.total_frames - tr.audio_from, progress,
                                     &tr.audio_planar, &tr.samples, err)) {
                 return false;
             }

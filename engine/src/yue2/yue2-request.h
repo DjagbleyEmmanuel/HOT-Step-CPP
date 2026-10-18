@@ -152,6 +152,11 @@ struct Yue2Request {
     // Training previews only: 0 retains the model's normal semantic limit.
     // This bounds work rather than trimming a full-song render afterward.
     int preview_max_frames = 0;
+    // Section-by-section takes: the NAR and VAE start at this codec frame
+    // (clamped to the stream), so a take renders only its lead-in and new part
+    // instead of the whole song. The composer still reads every frame. Each
+    // track reports the frame its audio starts at. 0 renders everything.
+    int render_from_frame = 0;
 
     float cfg_scale         = 0.0f;  // resolved by yue2_request_resolve_defaults if not present
     bool  cfg_scale_present = false;
@@ -643,6 +648,17 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             yyjson_doc_free(doc); return false;
         }
         out->preview_max_frames = static_cast<int>(num);
+    }
+
+    if (!yue2_req_num(root, "render_from_frame", &num, &present, err)) {
+        yyjson_doc_free(doc); return false;
+    }
+    if (present) {
+        if (!std::isfinite(num) || num < 0 || num > 9000 || std::floor(num) != num) {
+            if (err) *err = "render_from_frame must be an integer in [0,9000]";
+            yyjson_doc_free(doc); return false;
+        }
+        out->render_from_frame = static_cast<int>(num);
     }
 
     // "lyric_schedule": {"mode": "bias"|"mask", "bias"?: <0, "abc"?: bool,

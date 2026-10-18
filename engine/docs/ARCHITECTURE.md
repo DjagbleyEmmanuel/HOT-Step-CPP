@@ -416,6 +416,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Without continuation, single song and single variation only |
 | `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
+| `render_from_frame` | 0 | 0 to 9000. The NAR and VAE start at this codec frame (clamped to the stream), so the audio covers only the frames from it to the end. The composer still reads every frame. Section takes send their lead-in |
 | `vae_variant` | `"standard"` | `standard`, `legacy`, or `dec2x` (a local fine-tuned decoder; only when `yue2-vae-dec2x-*.gguf` is present) |
 | `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
 | `id` | `"yue2"` | Request label |
@@ -433,6 +434,7 @@ and logits. A lyric schedule replays the prefix in a batched decode.
 
 Completed job status includes `tracks`, with one entry per audio part in part
 order. Each entry has `song`, `variation`, `seed`, `noise_seed`, `frames`,
+`audio_from` (the codec frame its audio starts at, 0 unless `render_from_frame` was set),
 `end_reason` and `semantic_ids`. The audio result is a WAV for one track or
 `multipart/mixed` for several tracks. Pair each part with its metadata, then
 map by `song` and `seed`: a dropped song leaves a gap in the song indices.
