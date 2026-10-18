@@ -78,9 +78,12 @@ are saved with the draft.
    the YuE2 cover request. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
    select a part when prompted, and review conversion warnings. Switching modes
    clears the previous source and its Prepare confirmations.
-2. For Source Audio, click **Transcribe full score**. SheetSage2 writes the melody and detected
-   chords into ABC. The score panel shows queue and transcription
-   progress, with Cancel and Retry. SheetSage2 must be registered for automatic
+2. For Source Audio, transcription starts by itself once the recording has
+   loaded (after the upload, the analysis and the dataset lookup, which can supply
+   a score of its own). SheetSage2 writes the melody and detected chords into ABC.
+   The score panel shows queue and transcription progress, with Cancel and
+   **Retranscribe**; **Transcribe full score** is there if the automatic run was
+   cancelled or failed. A source restored with the page is not transcribed again. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
    In Source Audio mode you can also paste ABC or import MusicXML in the score
    editor to replace the transcribed ABC while keeping the source recording.
@@ -123,7 +126,7 @@ are saved with the draft.
    source. Editing the score or changing the source audio, stem mix or source mode
    withdraws them. The raw ABC editor is still there as an advanced editor in step
    1; a change made in it counts as a structure edit.
-   A score in 2/4 shows **Convert 2/4 to 4/4** under the score sections in step 1. It pairs
+   A score whose bars are mostly 2/4 shows a **Convert 2/4 to 4/4** button in step 1. It pairs
    every two 2/4 bars into one 4/4 bar, in every voice, and shows the result as a
    chart before anything changes. Each note keeps its pitch and timing: where a
    removed bar line would carry an accidental into the second half of the new
@@ -155,7 +158,7 @@ are saved with the draft.
    Section edits and lyric assignment happen on the Prepare tab, described under
    [Prepare](#prepare-fix-the-structure-then-assign-lyrics) below. The old chip
    editor and the **Match sections to score** and **Match score to lyrics** buttons
-   are gone; **Suggest assignments** replaces them and never rewrites the score.
+   are gone; lyric suggestions replace them and never rewrite the score.
    Prepare edits only this cover's draft. Dataset files are not touched.
    When a dataset song's tempo or key differs from the score's, Analysis
    shows the score's values with **Save to dataset**. After a confirmation it
@@ -198,9 +201,17 @@ section.
 #### Step 1: Fix structure
 
 A strip shows every section with its occurrence number, label, bar range and
-duration. Click a section to select it; Shift-click, or Shift with the arrow keys,
-adds its neighbours. The selected bars are highlighted in the chart and the
-notation. Lyrics are not needed in this step.
+duration, in one row that scrolls sideways when the song is long. Click a section
+to select it; Shift-click, or Shift with the arrow keys, adds its neighbours. The
+selected bars are highlighted in the chart and the notation. Clicking a section
+also opens a small popup with the playback buttons (below); hovering the section
+you last clicked brings it back, and clicking another section moves it there. The
+**Stop** button stays in the toolbar beside Undo and Redo. Lyrics are not needed
+in this step.
+
+The edits sit in two collapsed panels side by side, **Edit the selection** and
+**Fix bar grouping**. Open one to use it; the open panel spans the width beneath
+them.
 
 - **Merge**: select adjacent sections and press Merge. The merged name starts as
   the first label; you can type another. Only the boundaries go. Every note, rest,
@@ -235,7 +246,7 @@ reason shown and the score untouched, when:
 - the score uses notation it cannot read exactly, or the check that the result
   sounds the same as the original fails.
 
-**Hear score** plays the selection with the built-in synthesizer. **Hear
+In the section popup, **Hear score** plays the selection with the built-in synthesizer. **Hear
 recording (approximate)** plays the source recording from one bar before the
 selection to its end. Its position is worked out from the score's own tempo, so it
 can drift from the real recording; that is why it is labelled approximate. **Loop**
@@ -245,7 +256,8 @@ and after any cut (**Delete section and its music**, or a cut in a draft from an
 earlier version), because the score no longer follows the recording. Score
 playback still works. Undoing every cut brings the recording back.
 
-**Confirm structure & continue** checks that the score has at least one section
+**Confirm structure & continue** stays pinned to the bottom of the column, so it is
+always in view. It checks that the score has at least one section
 and that its section names are usable as lyric tags (no square brackets), then
 locks the structure. It does not need lyrics and does not start a transcription.
 The confirmation is tied to the exact score: any later change to the ABC
@@ -253,7 +265,8 @@ withdraws it.
 
 #### Step 2: Assign lyrics
 
-The left side holds your pasted lyrics as blocks, one per `[Tag]` line. The tag
+The left side holds the full lyrics text and, in the collapsed **Lyric Blocks**
+panel, your pasted lyrics as blocks, one per `[Tag]` line. The tag
 is only a hint about where the words were meant to go; it never renames a section.
 The right side has one row for each section of the confirmed score, in order. Each
 row shows its words, **Instrumental**, or **Needs words**, and a **Hear** button.
@@ -268,14 +281,15 @@ The score itself is read-only here.
   blocks. A block cannot span two sections until you split it.
 - **Exclude** keeps a block in the draft without singing it. **Instrumental**
   marks a section as wordless.
-- **Suggest assignments** proposes placements from the tags and the order. It
-  marks doubtful ones **not sure** and lists blocks it left unplaced. Pick which
+- Suggestions from the tags and the order are made when you first arrive at this
+  step, once per confirmed structure, as long as a section still needs words. They
+  mark doubtful ones **not sure** and list blocks left unplaced. Pick which
   suggestions to take and press **Accept selected**, or **Discard**. Nothing
   changes until you accept, and suggestions are dropped if the score or lyrics
   change while they are being made.
-- **Use the recording to improve suggestions** is off by default. When on, the
-  studio listens to the vocal in the source recording to see where each block is
-  sung. It takes longer, and the first run may need to separate the vocals. If it
+- **Use the recording to improve suggestions** is a button for when the first
+  suggestions are not good enough. It listens to the vocal in the source recording
+  to see where each block is sung. It takes longer, and the first run may need to separate the vocals. If it
   fails, you get the tag and order suggestions with a note. It is not offered when
   there is no recording or after a cut. Manual assignment always works.
 - **Reuse these words for Chorus 2 and 3** appears when you pasted one chorus and
@@ -287,8 +301,9 @@ The score itself is read-only here.
   ambiguous, such as identical blocks that cannot be told apart, comes in
   unassigned for review. The structure stays confirmed.
 
-The list headed **What will be sent, in score order** shows exactly the lyrics a
-render receives. **Confirm lyrics & finish** needs every section to have words or
+The collapsed **What will be sent, in score order** panel shows exactly the lyrics a
+render receives. **Confirm lyrics & finish** is pinned to the bottom of the column
+and needs every section to have words or
 be Instrumental, and every block to be used or excluded. Changing any words,
 assignments or Instrumental and Excluded choices withdraws the lyrics confirmation
 only.
@@ -459,7 +474,7 @@ sidecar selects Instrumental. If the sidecar is absent or incomplete, the
 usual lookup and analysis path applies. Dataset lyrics are recorded as such in
 the cover's generation parameters until you edit them. A saved `<stem>.abc`
 beside the dataset audio opens in the score editor without a transcription job;
-**Retry transcription** replaces that saved score after a successful run.
+**Retranscribe** replaces that saved score after a successful run.
 
 ## ACE-Step controls
 

@@ -3,8 +3,9 @@
 // a row by a click, a drag or the Assign menu; a row that already has words
 // asks whether to append or swap. The score is locked here: nothing in this
 // view can change a section, a boundary or a label (the hook refuses it too).
-// Suggestions come from tags and order at once, and from the recording only
-// when asked; they are proposals the user accepts row by row.
+// Suggestions from tags and order are asked for on arrival, once per score;
+// the recording is used only when asked. They are proposals the user accepts
+// row by row.
 //
 // Ready (the last step) shows the ordered pair that Generate and Build send.
 
@@ -36,6 +37,9 @@ interface Props {
   /** Two columns, when the panel is wide enough. */
   wide: boolean;
 }
+
+/** Score structures whose suggestions were already asked for on arrival. */
+const suggestedOnArrival = new Set<string>();
 
 interface Proposal { guard: ReturnType<Prepare['captureGuard']>; reply: Yue2AssignmentSuggestions; off: string[] }
 
@@ -99,10 +103,9 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
   }, [locked, doc.sourceKey, doc.blocks.length, lyrics]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Suggestions ──
-  const [useRecording, setUseRecording] = useState(false);
   const [asking, setAsking] = useState(false);
   const [proposal, setProposal] = useState<Proposal | null>(null);
-  const ask = async () => {
+  const ask = async (useRecording: boolean) => {
     const guard = prep.captureGuard();
     setAsking(true); setMessage('');
     try {
@@ -115,6 +118,14 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
     finally { setAsking(false); }
   };
   const stale = !!proposal && !prep.matchesGuard(proposal.guard);
+  // On arrival, with blocks to place and a section still empty, ask once for this score.
+  const arrivalKey = `${doc.sourceKey}|${prep.captureGuard().structureHash}`;
+  const anyEmpty = doc.sectionIds.some(id => !doc.assignments[id]);
+  useEffect(() => {
+    if (locked || ready || asking || proposal || !doc.blocks.length || !anyEmpty || suggestedOnArrival.has(arrivalKey)) return;
+    suggestedOnArrival.add(arrivalKey);
+    void ask(false);
+  }, [locked, ready, doc.blocks.length, anyEmpty, arrivalKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const reuseGroups = useMemo(() => {
     const groups = new Map<string, string[]>();
     for (const r of proposal?.reply.reuse ?? []) groups.set(r.blockId, [...(groups.get(r.blockId) ?? []), r.sectionId]);
@@ -181,13 +192,15 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
         <div className="min-w-0 space-y-2">
           <div className="space-y-1">
             <textarea aria-label={t('cover.prepare.lyrics.pasteLabel')} value={lyrics} onChange={e => onLyricsText(e.target.value)}
-              placeholder={t('cover.lyricsPlaceholder')} rows={4} disabled={locked}
+              placeholder={t('cover.lyricsPlaceholder')} rows={12} disabled={locked}
               className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 font-mono text-xs text-zinc-900 dark:text-white" />
             <button type="button" className={btn} disabled={locked || !pasteStale}
               onClick={() => run(prep.applyLyricOp({ kind: 'paste', paste: lyrics }))}>{t('cover.prepare.lyrics.updateBlocks')}</button>
             <span className="ml-2 text-[11px] text-zinc-500">{t('cover.prepare.lyrics.updateHint')}</span>
           </div>
           {doc.blocks.length === 0 && <p className="text-zinc-500">{t('cover.prepare.lyrics.noBlocks')}</p>}
+          {doc.blocks.length > 0 && <details className="space-y-2">
+          <summary className="cursor-pointer font-medium">{t('cover.prepare.lyrics.blocks')} ({doc.blocks.length})</summary>
           {doc.blocks.map(block => {
             const at = home.get(block.id), span = at ? spanOf(at) : undefined;
             const excluded = doc.excluded.includes(block.id);
@@ -224,15 +237,15 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
               </div>
             </div>;
           })}
+          </details>}
         </div>
 
         {/* Right: the score's sections */}
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={btn} disabled={locked || asking || !doc.blocks.length} onClick={() => void ask()}>
-              {asking ? t('cover.prepare.lyrics.suggesting') : t('cover.prepare.lyrics.suggest')}</button>
-            <Toggle size="sm" accent="cyan" checked={useRecording && prep.recordingAlignmentAvailable} disabled={!prep.recordingAlignmentAvailable || locked}
-              onChange={setUseRecording} label={t('cover.prepare.lyrics.useRecording')} info={t('cover.prepare.lyrics.useRecordingInfo')} />
+            <button type="button" className={btn} disabled={locked || asking || !doc.blocks.length || !prep.recordingAlignmentAvailable}
+              onClick={() => void ask(true)} title={t('cover.prepare.lyrics.useRecordingInfo')}>{t('cover.prepare.lyrics.useRecording')}</button>
+            {asking && <span role="status" className="text-zinc-500">{t('cover.prepare.lyrics.suggesting')}</span>}
             <button type="button" className={btn} disabled={locked || doc.sectionIds.every(id => doc.assignments[id])} onClick={markEmpty}>
               {t('cover.prepare.lyrics.allInstrumental')}</button>
           </div>
@@ -307,11 +320,12 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
         </div>
       </div>
 
-      {!locked && list.length > 0 && <div className="space-y-1">
-        <p className="font-medium">{t('cover.prepare.lyrics.order')}</p>
+      {!locked && list.length > 0 && <details className="space-y-1">
+        <summary className="cursor-pointer font-medium">{t('cover.prepare.lyrics.order')}</summary>
         {orderedPreview}
-      </div>}
-      <div className="flex flex-wrap items-center gap-3">
+      </details>}
+      {/* Stuck to the bottom of the scrolling column, so it is always in view. */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
         <button type="button" disabled={locked || !!problem} onClick={() => run(prep.confirmLyrics())}
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{t('cover.prepare.lyrics.confirm')}</button>
         {problem && <span className="text-[11px] text-amber-700 dark:text-amber-300">{problem}</span>}

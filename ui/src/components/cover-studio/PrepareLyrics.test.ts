@@ -34,13 +34,15 @@ test('the structure step shows every section with its bars, and the confirm butt
   assert.doesNotMatch(out, /cover\.prepare\.structure\.locked/);
 });
 
-test('a confirmed structure is shown locked, and its edit controls are disabled', () => {
+test('a confirmed structure is shown locked: edit panels collapsed, confirm disabled', () => {
   const c = createYue2Prepare({ sourceKey: 'k', abc: ABC, lyrics: PASTE });
   assert.ok(c.confirmStructure());
   c.showStep('structure');
   const out = html(c, 'structure');
   assert.match(out, /cover\.prepare\.structure\.locked/);
-  assert.match(out, /<fieldset disabled=""/);
+  assert.doesNotMatch(out, /<fieldset/);
+  assert.match(out, /aria-expanded="false"[^>]*>cover.prepare.structure.edits/);
+  assert.match(out, /disabled=""[^>]*>cover.prepare.structure.confirm</);
 });
 
 test('the lyrics step lists every pasted block and every section, and the Ready step the ordered pair', () => {

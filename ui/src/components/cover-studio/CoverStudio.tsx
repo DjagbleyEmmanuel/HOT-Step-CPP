@@ -55,7 +55,7 @@ import { CoverResizeHandle } from './CoverResizeHandle';
 import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
 import { PrepareStructure } from './PrepareStructure';
-import type { ScoreRange } from './prepareView';
+import { mainMeter, type ScoreRange } from './prepareView';
 import { PrepareLyrics } from './PrepareLyrics';
 import { useYue2Prepare, PREPARE_DRAFT_KEY, type PrepareCut } from './useYue2Prepare';
 import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
@@ -979,6 +979,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     }
   };
 
+  // A newly loaded recording is transcribed by itself, once: there is nothing
+  // else to do with it first. It waits for the upload, the analysis and the
+  // dataset lookup (which may bring a score of its own), and never runs for
+  // the source a page load restores.
+  const autoTranscribedRef = useRef(sourceKey);
+  useEffect(() => {
+    if (autoTranscribedRef.current === sourceKey) return;
+    if (!yue2Mode || !token || sourceMode !== 'audio' || !sourceAudioUrl || isUploading || isAnalyzing) return;
+    if (sheetAbc.trim() || sheetPreparing || sheetJobId || !readiness?.ready) return;
+    if (sourceAssetId && (!coverDraftId || !coverDraftRevision)) return;
+    autoTranscribedRef.current = sourceKey;
+    void handleTranscribe();
+  }); // Every render: it acts once per source, when that source is ready.
+
   const handleCancelSheet = async () => {
     sheetRequestRef.current += 1;
     if (coverWorkflowJobRef.current && token) {
@@ -1798,10 +1812,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               ? <PrepareStructure prep={prep} sourceAudioUrl={sourceMode === 'audio' ? sourceAudioUrl : ''} scorePlaying={scorePlaying}
                 onPlayScore={playScore} scoreStarts={scoreStarts} onHighlight={setScoreHighlight}
                 onConfirmed={() => void handleApproveSheet()}>
-                {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
+                {mainMeter(sheetAbc) === '2/4' && !remeterOpen &&
                   <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
                     title="Rewrite the score in 4/4 by pairing its 2/4 bars. Every note keeps its pitch and timing. Shows a preview before applying."
-                    className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Convert 2/4 to 4/4</button>}
+                    className="rounded-md border border-cyan-500/50 px-2 py-1 text-xs text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-40">Convert 2/4 to 4/4</button>}
                 {remeterOpen && <div className="space-y-2 rounded-lg border border-cyan-500/30 p-2">
                   <Toggle size="sm" accent="cyan" checked={remeterOpen.pickup} label="First bar is a pickup"
                     info="Keep bar 1 as a 2/4 bar and pair the bars from bar 2. Turn it on when the preview puts the downbeats in the middle of the 4/4 bars."

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mergeScoreSections } from '../../utils/abcSectionMove';
-import { barTimes, clock, createPlaybackOwner, sectionSpans, shortBars, spanName, startPlayer, stopPlayer, type AbcPlayer } from './prepareView';
+import { barTimes, clock, createPlaybackOwner, mainMeter, sectionSpans, shortBars, spanName, startPlayer, stopPlayer, type AbcPlayer } from './prepareView';
 
 const HEADER = ['X:1', 'T:', 'M:4/4', 'L:1/32', 'Q:1/4=120',
   'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"', 'V: Ins clef=treble name="Ins Melody" snm="Inst."', 'K:C#m'];
@@ -108,4 +108,11 @@ test('one source at a time, in both directions, however the score was started', 
   assert.deepEqual(calls, ['stop score', 'pause recording'], 'nothing else to silence once the score gave up its claim');
   owner.ended('recording');        // a stale end from the other source changes nothing
   assert.equal(owner.current, 'score');
+});
+
+test('main meter: the meter most bars are in, so one 2/4 bar does not make a 2/4 score', () => {
+  assert.equal(mainMeter(REPORT), '4/4');
+  const twoFour = [...HEADER.map(l => l === 'M:4/4' ? 'M:2/4' : l), '% verse', 'V: Vocal', 'c8c8|c8c8|c16|', 'V: Ins', 'Z3|'].join('\n');
+  assert.equal(mainMeter(twoFour), '2/4');
+  assert.equal(mainMeter(''), null);
 });

@@ -1,12 +1,13 @@
-// Prepare, step 1: fix the score's structure. A strip of the score's sections
-// (select one or several adjacent ones), the score-only edits on the
-// selection, bar regrouping with a preview, approximate playback from the
-// recording and exact playback from the score. Lyrics are not needed here and
+// Prepare, step 1: fix the score's structure. A scrolling strip of the score's
+// sections (select one or several adjacent ones; the clicked one offers
+// playback in a popup), then two collapsed panels: the score-only edits on the
+// selection and bar regrouping with a preview. Playback is approximate from
+// the recording and exact from the score. Lyrics are not needed here and
 // are never touched; every edit goes through the Prepare hook, which owns undo
 // and the confirmation (useYue2Prepare.ts, utils/yue2Prepare.ts).
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Redo2, Square, Undo2 } from 'lucide-react';
+import { ChevronDown, Redo2, Square, Undo2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { previewRegroup, type RegroupResult } from '../../utils/abcRebar';
 import { cutSection, mergeScoreSections } from '../../utils/abcSectionMove';
@@ -61,6 +62,13 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
   useEffect(() => { onHighlight(bars); }, [bars?.[0], bars?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onHighlight(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The section last clicked: hovering it (and only it) brings back its playback popup.
+  const [anchor, setAnchor] = useState('');
+  const [popup, setPopup] = useState<{ id: string; left: number; top: number } | null>(null);
+  const openPopup = (id: string, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    setPopup({ id, left: r.left, top: r.bottom });
+  };
   const select = (i: number, extend: boolean) => {
     if (!extend || !range) { setSelected([list[i].id]); return; }
     const [a, b] = [Math.min(range[0], i), Math.max(range[1], i)];
@@ -147,7 +155,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
     if (!live || 'error' in live.result) return;
     if (ok(prep.applyStructuralOp({ kind: 'replace', abc: live.result.abc }))) setRegroup(null);
   };
-  const fixShort = (n: number) => change({ from: String(n), to: String(n), bar: String(n) });
+  const fixShort = (n: number) => { change({ from: String(n), to: String(n), bar: String(n) }); setPanel('regroup'); };
 
   // ── Playback: one source at a time, whoever starts it ──
   const [loop, setLoop] = useState(false);
@@ -185,6 +193,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
   const confirmDisabled = !editing || typeof spans === 'string';
   const doConfirm = () => { if (prep.confirmStructure()) { setMessage(''); onConfirmed(); } };
   const section = 'space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 p-2';
+  const [panel, setPanel] = useState<'edits' | 'regroup' | null>(null);
 
   return (
     <div className="space-y-3 text-xs text-zinc-700 dark:text-zinc-200">
@@ -193,6 +202,8 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
           title={t('cover.prepare.undo')} aria-label={t('cover.prepare.undo')}><Undo2 className="h-3 w-3" /></button>
         <button type="button" className={btn} disabled={!prep.canRedo} onClick={() => prep.redo()}
           title={t('cover.prepare.redo')} aria-label={t('cover.prepare.redo')}><Redo2 className="h-3 w-3" /></button>
+        <button type="button" className={btn} disabled={!hearing && !scorePlaying} onClick={stop}
+          title={t('cover.prepare.structure.stop')} aria-label={t('cover.prepare.structure.stop')}><Square className="h-3 w-3" /></button>
         {!editing && <>
           <span className="text-emerald-600 dark:text-emerald-400">{t('cover.prepare.structure.locked')}</span>
           <button type="button" className={btn} onClick={() => { prep.beginStructureEdit(); }}>{t('cover.prepare.structure.edit')}</button>
@@ -200,21 +211,44 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
         </>}
       </div>
 
-      {typeof spans === 'string' && <p role="alert" className="text-amber-600 dark:text-amber-400">{spans}</p>}
-      {!list.length && typeof spans !== 'string' && <p className="text-zinc-500">{t('cover.prepare.structure.empty')}</p>}
+      {!doc.abc.trim() ? <p className="text-zinc-500">{t('cover.prepare.structure.noScore')}</p>
+        : typeof spans === 'string' && <p role="alert" className="text-amber-600 dark:text-amber-400">{spans}</p>}
+      {!list.length && doc.abc.trim() && typeof spans !== 'string' && <p className="text-zinc-500">{t('cover.prepare.structure.empty')}</p>}
 
-      {/* The strip: a section per button, wider for more bars. */}
-      {list.length > 0 && <div className="flex flex-wrap gap-1" role="group" aria-label={t('cover.prepare.structure.strip')}>
+      {/* The strip: a section per button, wider for more bars, scrolling sideways when the song is long. */}
+      {list.length > 0 && <div className="flex gap-1 overflow-x-auto pb-1" role="group" aria-label={t('cover.prepare.structure.strip')}
+        onScroll={() => setPopup(null)}>
         {list.map((s, i) => {
           const on = selected.includes(s.id);
           const seconds = spanSeconds(clockMap, s.start, s.end);
-          return <button key={s.id} type="button" aria-pressed={on}
-            onClick={e => select(i, e.shiftKey)} onKeyDown={e => onKey(e, i)}
-            style={{ borderColor: colours[i], flexGrow: Math.max(1, s.end - s.start + 1), flexBasis: 96, backgroundColor: on ? `${colours[i]}40` : `${colours[i]}14` }}
-            className={`min-w-[96px] rounded border-l-4 px-2 py-1 text-left ${on ? 'ring-2 ring-cyan-500' : ''}`}>
-            <span className="block font-semibold">{s.label}{s.repeats > 1 && <span className="ml-1 rounded bg-zinc-500/20 px-1 text-[10px] font-normal">{s.occurrence}/{s.repeats}</span>}</span>
-            <span className="block text-[10px] text-zinc-500">{t('cover.prepare.structure.bars', { bars: spanBars(s) })}{seconds !== null && ` · ${clock(seconds)}`}</span>
-          </button>;
+          const length = s.end - s.start + 1;
+          const name = picked.length === 1 ? spanName(picked[0]) : t('cover.prepare.structure.selection', { count: picked.length });
+          return <div key={s.id} className="flex" style={{ flex: `${length} 0 ${Math.max(96, length * 10)}px` }}
+            onMouseEnter={e => { if (s.id === anchor && on) openPopup(s.id, e.currentTarget); }}
+            onMouseLeave={() => setPopup(p => p?.id === s.id ? null : p)}>
+            <button type="button" aria-pressed={on} aria-haspopup="dialog" onKeyDown={e => onKey(e, i)}
+              onClick={e => { select(i, e.shiftKey); setAnchor(s.id); openPopup(s.id, e.currentTarget.parentElement!); }}
+              style={{ borderColor: colours[i], backgroundColor: on ? `${colours[i]}40` : `${colours[i]}14` }}
+              className={`w-full rounded border-l-4 px-2 py-1 text-left ${on ? 'ring-2 ring-inset ring-cyan-500' : ''}`}>
+              <span className="block truncate font-semibold">{s.label}{s.repeats > 1 && <span className="ml-1 rounded bg-zinc-500/20 px-1 text-[10px] font-normal">{s.occurrence}/{s.repeats}</span>}</span>
+              <span className="block truncate text-[10px] text-zinc-500">{t('cover.prepare.structure.bars', { bars: spanBars(s) })}{seconds !== null && ` · ${clock(seconds)}`}</span>
+            </button>
+            {/* Fixed, so the scrolling strip cannot clip it; inside the wrapper, so moving onto it keeps it open. */}
+            {popup?.id === s.id && range && <div role="dialog" aria-label={name} className="fixed z-30 pt-1" style={{ left: popup.left, top: popup.top }}>
+              <div className="w-64 space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900 p-2 shadow-xl">
+                <p className="font-medium">{name}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className={btn} onClick={hearScore}>{t('cover.prepare.structure.hearScore')}</button>
+                  <button type="button" className={btn} disabled={!prep.recordingSeekAvailable || !window_ || !sourceAudioUrl} onClick={hearRecording}
+                    title={prep.recordingSeekAvailable ? t('cover.prepare.structure.hearRecordingInfo') : t('cover.prepare.structure.noRecording')}>
+                    {t('cover.prepare.structure.hearRecording')}</button>
+                  <Toggle size="sm" accent="cyan" checked={loop} onChange={setLoop} label={t('cover.prepare.structure.loop')}
+                    info={t('cover.prepare.structure.loopInfo')} />
+                </div>
+                <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.approx')}</p>
+              </div>
+            </div>}
+          </div>;
         })}
       </div>}
       {list.length > 0 && <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.selectHint')}</p>}
@@ -228,28 +262,21 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
 
       {err && <p role="alert" className="text-red-500">{err}</p>}
 
-      {/* Playback */}
-      {range && <div className={section}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{picked.length === 1 ? spanName(picked[0]) : t('cover.prepare.structure.selection', { count: picked.length })}</span>
-          <button type="button" className={btn} onClick={hearScore}>{t('cover.prepare.structure.hearScore')}</button>
-          <button type="button" className={btn} disabled={!prep.recordingSeekAvailable || !window_ || !sourceAudioUrl} onClick={hearRecording}
-            title={prep.recordingSeekAvailable ? t('cover.prepare.structure.hearRecordingInfo') : t('cover.prepare.structure.noRecording')}>
-            {t('cover.prepare.structure.hearRecording')}</button>
-          <button type="button" className={btn} disabled={!hearing && !scorePlaying} onClick={stop} aria-label={t('cover.prepare.structure.stop')}><Square className="h-3 w-3" /></button>
-          <Toggle size="sm" accent="cyan" checked={loop} onChange={setLoop} label={t('cover.prepare.structure.loop')}
-            info={t('cover.prepare.structure.loopInfo')} />
-        </div>
-        <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.approx')}</p>
-        {sourceAudioUrl && <audio ref={audio} src={sourceAudioUrl} preload="auto" className="hidden"
-          onPlay={() => { owner.start('recording'); setHearing(true); }}
-          onPause={() => { owner.ended('recording'); setHearing(false); }}
-          onEnded={() => { owner.ended('recording'); setHearing(false); }} />}
+      {sourceAudioUrl && <audio ref={audio} src={sourceAudioUrl} preload="auto" className="hidden"
+        onPlay={() => { owner.start('recording'); setHearing(true); }}
+        onPause={() => { owner.ended('recording'); setHearing(false); }}
+        onEnded={() => { owner.ended('recording'); setHearing(false); }} />}
+
+      {/* Two collapsed panels side by side; the open one spans the width beneath them. */}
+      {list.length > 0 && <div className="grid grid-cols-2 gap-2">
+        {(['edits', 'regroup'] as const).map(id => <button key={id} type="button" aria-expanded={panel === id}
+          onClick={() => setPanel(open => open === id ? null : id)}
+          className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-white/10 px-2 py-1.5 text-left font-medium hover:bg-zinc-100 dark:hover:bg-white/5">
+          {t(`cover.prepare.structure.${id}`)}<ChevronDown className={`h-3 w-3 transition-transform ${panel === id ? 'rotate-180' : ''}`} /></button>)}
       </div>}
 
-      {/* Edits */}
-      {range && <fieldset disabled={!editing} className={`${section} ${editing ? '' : 'opacity-60'}`}>
-        <legend className="px-1 font-medium">{t('cover.prepare.structure.edits')}</legend>
+      {panel === 'edits' && !range && <p className="text-zinc-500">{t('cover.prepare.structure.selectFirst')}</p>}
+      {panel === 'edits' && range && <fieldset disabled={!editing} className={`${section} ${editing ? '' : 'opacity-60'}`}>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-0.5"><ParamLabel label={single ? t('cover.prepare.structure.name') : t('cover.prepare.structure.mergedName')}
             info={single ? t('cover.prepare.structure.nameInfo') : t('cover.prepare.structure.mergedNameInfo')} />
@@ -282,9 +309,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
         </div>}
       </fieldset>}
 
-      {/* Bar grouping */}
-      {list.length > 0 && <fieldset disabled={!editing} className={`${section} ${editing ? '' : 'opacity-60'}`}>
-        <legend className="px-1 font-medium">{t('cover.prepare.structure.regroup')}</legend>
+      {panel === 'regroup' && list.length > 0 && <fieldset disabled={!editing} className={`${section} ${editing ? '' : 'opacity-60'}`}>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-0.5"><ParamLabel label={t('cover.prepare.structure.fromBar')} info={t('cover.prepare.structure.fromBarInfo')} />
             <input value={from} inputMode="numeric" onChange={e => change({ from: e.target.value })} className={`${field} w-14`} /></label>
@@ -308,7 +333,8 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
 
       {editing && children}
 
-      <div className="flex items-center gap-3">
+      {/* Stuck to the bottom of the scrolling column, so it is always in view. */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
         <button type="button" disabled={confirmDisabled} onClick={doConfirm}
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{t('cover.prepare.structure.confirm')}</button>
         <span className="text-[11px] text-zinc-500">{t('cover.prepare.structure.confirmHint')}</span>

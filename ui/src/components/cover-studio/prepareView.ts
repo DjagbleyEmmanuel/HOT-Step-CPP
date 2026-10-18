@@ -83,10 +83,19 @@ export function shortBars(abc: string): number[] {
   const meters = barMeters(abc);
   if (!Array.isArray(meters) || meters.length < 3) return [];
   const length = (m: string) => { const [n, d] = m.split('/').map(Number); return n / d; };
+  const usual = usualMeter(meters);
+  return meters.flatMap((m, i) => i > 0 && i < meters.length - 1 && length(m) < length(usual) - 1e-9 ? [i + 1] : []);
+}
+
+/** The meter most bars are in ("2/4"), or null when the score cannot be read. */
+export function mainMeter(abc: string): string | null {
+  const meters = barMeters(abc);
+  return Array.isArray(meters) && meters.length ? usualMeter(meters) : null;
+}
+function usualMeter(meters: string[]): string {
   const count = new Map<string, number>();
   meters.forEach(m => count.set(m, (count.get(m) ?? 0) + 1));
-  const usual = [...count].sort((a, b) => b[1] - a[1])[0][0];
-  return meters.flatMap((m, i) => i > 0 && i < meters.length - 1 && length(m) < length(usual) - 1e-9 ? [i + 1] : []);
+  return [...count].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 // ── Playback ──

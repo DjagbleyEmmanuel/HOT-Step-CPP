@@ -215,7 +215,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     </div>;
   const transcribe = <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
     className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-    {p.abc ? 'Retry transcription' : 'Transcribe full score'}
+    {p.abc ? 'Retranscribe' : 'Transcribe full score'}
   </button>;
   // The ABC and the score, under the import row so both start level. The
   // score scales to its column (responsive: 'resize'), so the half-width one
