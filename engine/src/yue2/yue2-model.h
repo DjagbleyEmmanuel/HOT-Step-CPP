@@ -1807,7 +1807,7 @@ static bool yue2_load_parts(Yue2Model * m, bool want_ar, bool want_nar, bool wan
     fprintf(stderr, "[YuE2] Loaded%s%s%s: AR %.2f + NAR %.2f + VAE(%s) %.2f = %.2f GB in %.0f ms\n",
             need_ar ? " ar" : "", need_nar ? " nar" : "", need_vae ? " vae" : "",
             (double) m->vram_lm / (1024.0 * 1024.0 * 1024.0), (double) m->vram_nar / (1024.0 * 1024.0 * 1024.0),
-            YUE2_VAE_VARIANT_NAME[m->vae_loaded_variant], (double) m->vram_vae / (1024.0 * 1024.0 * 1024.0),
+            m->vae_resident ? YUE2_VAE_VARIANT_NAME[m->vae_loaded_variant] : "none", (double) m->vram_vae / (1024.0 * 1024.0 * 1024.0),
             (double) yue2_vram_bytes(*m) / (1024.0 * 1024.0 * 1024.0), m->load_ms);
     return true;
 }
