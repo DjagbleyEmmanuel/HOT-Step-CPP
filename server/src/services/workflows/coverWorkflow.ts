@@ -20,6 +20,7 @@ import {
   coverCaptionSchema as captionInput, coverRenderSchema as render,
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
+import { preparedPair } from '../../contracts/yue2Prepare.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -277,9 +278,14 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     });
     return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: result.scoreSource };
   } }, { kind: 'cover-render', input: render, async run(ctx) {
-    const input = ctx.input as CoverRenderInput;
-    if (!input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
+    let input = ctx.input as CoverRenderInput;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
+    if (input.prepare !== undefined && input.expectedBackend === 'yue2') {
+      const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
+      if ('error' in pair) throw new WorkflowError(409, pair.error);
+      input = { ...input, lyrics: pair.lyrics };
+    }
+    if (!input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     if (!await (dep('capability') || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');

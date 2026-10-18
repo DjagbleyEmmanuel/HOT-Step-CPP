@@ -13,6 +13,7 @@ import { createStudioDraftsRouter } from '../routes/studioDrafts.js';
 // n=finite number inf=Infinity null o=object a=array; '-' = no studio.
 const RECORDED: Record<string, string[]> = {
   'cover|null,o,': ['cover-studio-analysis', 'cover-studio-metadata', 'cover-studio-selectedPreset', 'cover-studio-scoreTempoScale', 'cover-studio-approvedSheet'],
+  'cover|null,': ['cover-studio-prepareV2'],
   'cover|s,': ['cover-studio-artistCaption', 'cover-studio-coverNoiseMethod', 'cover-studio-coverTimbreOverride', 'cover-studio-coverVocalLanguage',
     'cover-studio-lyrics', 'cover-studio-songArtist', 'cover-studio-songTitle', 'cover-studio-sourceAssetId', 'cover-studio-sourceAudioUrl',
     'cover-studio-sourceFileName', 'cover-studio-sourceLatentUrl', 'cover-studio-sourceSongId',

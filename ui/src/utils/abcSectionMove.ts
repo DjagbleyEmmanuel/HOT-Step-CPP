@@ -284,19 +284,20 @@ export function resectionScore(abc: string, sections: Array<{ label: string; bar
 }
 
 // ── Merge, relabel and split: section edits that keep every bar ──
-// Score section i pairs with lyric block i, so each edit changes both, after
-// checking that every section already pairs with its tag; otherwise it
-// refuses rather than guess which block to change. Lyrics with no tags at
-// all have nothing to pair, and stay as they are. None of these edits removes
-// music, so a score's alignment to its audio still holds.
+// The score-only edits (mergeScoreSections and the rest) change the ABC
+// alone: Prepare's structure step uses them, and they never read lyrics. The
+// paired wrappers (mergeSections and the rest) edit lyric block i with score
+// section i, after checking that every section already pairs with its tag;
+// otherwise they refuse rather than guess which block to change. Lyrics with
+// no tags at all have nothing to pair, and stay as they are. None of these
+// edits removes music, so a score's alignment to its audio still holds.
 
 export type SectionEdit = { abc: string; lyrics: string; removedMusic: false } | { error: string };
+export type ScoreEdit = { abc: string } | { error: string };
 
-/** The score's lines and the line of each section marker, with whether the
- *  lyrics pair with it, or why section `index` (and the `span - 1` after it)
- *  cannot be edited. */
-function editable(abc: string, lyrics: string, index: number, span: number)
-  : { lines: string[]; markers: number[]; paired: boolean } | { error: string } {
+/** The score's lines and the line of each section marker, or why section
+ *  `index` (and the `span - 1` after it) cannot be edited. */
+function scoreEditable(abc: string, index: number, span: number): { lines: string[]; markers: number[]; labels: string[] } | { error: string } {
   const text = abc.replace(/\r\n?/g, '\n');
   const parsed = parseScore(text);
   if (typeof parsed === 'string') return { error: parsed };
@@ -308,11 +309,18 @@ function editable(abc: string, lyrics: string, index: number, span: number)
   if (text.split('\n').some(line => line.trim().startsWith('%%') && line.trim().slice(1).trim()))
     return { error: 'The score has a %% directive line, which the section check counts as a section; remove it in the ABC text first.' };
   if (!Number.isInteger(index) || index < 0 || index + span > labels.length) return { error: 'That section is not in the score.' };
-  const paired = hasLyricTags(lyrics);
-  const mismatch = paired ? sectionPairingError(labels, lyrics) : null;
-  if (mismatch) return { error: mismatch };
   const lines = text.split('\n');
-  return { lines, markers: lines.flatMap((line, i) => isMarker(line) ? [i] : []), paired };
+  return { lines, markers: lines.flatMap((line, i) => isMarker(line) ? [i] : []), labels };
+}
+
+/** scoreEditable, plus whether the lyrics pair with the score (or why not). */
+function editable(abc: string, lyrics: string, index: number, span: number)
+  : { lines: string[]; markers: number[]; paired: boolean } | { error: string } {
+  const at = scoreEditable(abc, index, span);
+  if ('error' in at) return at;
+  const paired = hasLyricTags(lyrics);
+  const mismatch = paired ? sectionPairingError(at.labels, lyrics) : null;
+  return mismatch ? { error: mismatch } : { lines: at.lines, markers: at.markers, paired };
 }
 
 /** Why `label` cannot name a section, or null. */
@@ -322,15 +330,45 @@ const badLabel = (label: string) => !label.trim() || /[[\]\r\n]/.test(label) || 
 /** A marker line with its label replaced, keeping its `%` and spacing. */
 const relabelMarker = (line: string, label: string) => line.match(/^\s*%\s*/)![0] + label.trim();
 
+/** Sections `index` and `index + 1` as one, named after the first or the second. */
+export function mergeScoreSections(abc: string, index: number, keep: 'first' | 'second'): ScoreEdit {
+  const at = scoreEditable(abc, index, 2);
+  if ('error' in at) return at;
+  const { lines, markers } = at;
+  if (keep === 'second') lines[markers[index]] = lines[markers[index + 1]];
+  lines.splice(markers[index + 1], 1);
+  return { abc: lines.join('\n') };
+}
+
+/** Section `index` renamed to `label`. */
+export function relabelScoreSection(abc: string, index: number, label: string): ScoreEdit {
+  const bad = badLabel(label);
+  if (bad) return { error: bad };
+  const at = scoreEditable(abc, index, 1);
+  if ('error' in at) return at;
+  at.lines[at.markers[index]] = relabelMarker(at.lines[at.markers[index]], label);
+  return { abc: at.lines.join('\n') };
+}
+
+/** Section `index` split in two: a new section `label` from score bar `bar`. */
+export function splitScoreSection(abc: string, index: number, bar: number, label: string): ScoreEdit {
+  const bad = badLabel(label);
+  if (bad) return { error: bad };
+  const at = scoreEditable(abc, index, 1);
+  if ('error' in at) return at;
+  // The new marker starts beside the old one, then moves to its bar.
+  at.lines.splice(at.markers[index] + 1, 0, `% ${label.trim()}`);
+  return moveSectionStart(at.lines.join('\n'), index + 1, bar);
+}
+
 /** Sections `index` and `index + 1` as one, named after the first or the
  *  second; the lyric blocks join the same way. */
 export function mergeSections(abc: string, lyrics: string, index: number, keep: 'first' | 'second'): SectionEdit {
   const at = editable(abc, lyrics, index, 2);
   if ('error' in at) return at;
-  const { lines, markers } = at;
-  if (keep === 'second') lines[markers[index]] = lines[markers[index + 1]];
-  lines.splice(markers[index + 1], 1);
-  return { abc: lines.join('\n'), lyrics: at.paired ? mergeLyricBlocks(lyrics, index, keep === 'second') : lyrics, removedMusic: false };
+  const merged = mergeScoreSections(abc, index, keep);
+  if ('error' in merged) return merged;
+  return { abc: merged.abc, lyrics: at.paired ? mergeLyricBlocks(lyrics, index, keep === 'second') : lyrics, removedMusic: false };
 }
 
 /** Section `index` and its lyric tag renamed to `label`. */
@@ -339,8 +377,9 @@ export function relabelSection(abc: string, lyrics: string, index: number, label
   if (bad) return { error: bad };
   const at = editable(abc, lyrics, index, 1);
   if ('error' in at) return at;
-  at.lines[at.markers[index]] = relabelMarker(at.lines[at.markers[index]], label);
-  return { abc: at.lines.join('\n'), lyrics: at.paired ? relabelLyricBlock(lyrics, index, label.trim()) : lyrics, removedMusic: false };
+  const renamed = relabelScoreSection(abc, index, label);
+  if ('error' in renamed) return renamed;
+  return { abc: renamed.abc, lyrics: at.paired ? relabelLyricBlock(lyrics, index, label.trim()) : lyrics, removedMusic: false };
 }
 
 /** Section `index` split in two: a new section `label` from score bar `bar`,
@@ -353,8 +392,6 @@ export function splitSection(abc: string, lyrics: string, index: number, bar: nu
   if ('error' in at) return at;
   const newLyrics = at.paired ? splitLyricBlock(lyrics, index, lyricLine, label.trim()) : lyrics;
   if (newLyrics === null) return { error: 'That lyric line is not in the section being split.' };
-  // The new marker starts beside the old one, then moves to its bar.
-  at.lines.splice(at.markers[index] + 1, 0, `% ${label.trim()}`);
-  const moved = moveSectionStart(at.lines.join('\n'), index + 1, bar);
-  return 'error' in moved ? moved : { abc: moved.abc, lyrics: newLyrics, removedMusic: false };
+  const split = splitScoreSection(abc, index, bar, label);
+  return 'error' in split ? split : { abc: split.abc, lyrics: newLyrics, removedMusic: false };
 }

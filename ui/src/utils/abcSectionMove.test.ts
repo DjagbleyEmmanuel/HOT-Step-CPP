@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeSections, relabelSection, splitSection, type SectionEdit } from './abcSectionMove';
+import { mergeScoreSections, mergeSections, relabelScoreSection, relabelSection, splitScoreSection, splitSection, type ScoreEdit, type SectionEdit } from './abcSectionMove';
 import { lyricBlockLines } from './abcSections';
 // The server's own readers: its section lint, and the planner's block split.
 import { lintScoreSections, scoreSections } from '../../../server/src/services/backends/yue2/scoreSections';
@@ -103,6 +103,17 @@ test('edits refuse when the lyrics do not already pair with the sections', () =>
   assert.ok('error' in counts && /3 sections but the lyrics have 2 tags/.test(counts.error));
   const label = relabelSection(ABC, swapped, 0, 'hook');
   assert.ok('error' in label && /section 3 is chorus but lyric tag 3 is Bridge/.test(label.error));
+});
+
+test('score-only edits never read lyrics and give the paired edits\' score', () => {
+  const abcOf = (edit: SectionEdit | ScoreEdit) => { if ('error' in edit) assert.fail(edit.error); return edit.abc; };
+  assert.equal(abcOf(mergeScoreSections(ABC, 1, 'second')), abcOf(mergeSections(ABC, LYRICS, 1, 'second')));
+  assert.equal(abcOf(relabelScoreSection(ABC, 1, 'hook')), abcOf(relabelSection(ABC, LYRICS, 1, 'hook')));
+  assert.equal(abcOf(splitScoreSection(ABC, 1, 7, 'hook')), abcOf(splitSection(ABC, LYRICS, 1, 7, 1, 'hook')));
+  assert.deepEqual(scoreSections(abcOf(splitScoreSection(ABC, 1, 7, 'hook'))).map(s => `${s.label}@${s.startBar}`),
+    ['intro@1', 'verse@5', 'hook@7', 'chorus@9']);
+  assert.ok('error' in mergeScoreSections(ABC, 2, 'first'));
+  assert.ok('error' in relabelScoreSection(ABC, 0, '[x]'));
 });
 
 test('edits refuse bad indexes, bars, lyric lines and names', () => {

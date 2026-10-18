@@ -88,13 +88,18 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
 /** POST /api/workflows/jobs { kind: 'cover-render', input }. `analysis` and
  *  the ACE/YuE2 `controls` block carry every per-run override the engine
  *  request needs; the draft document supplies the resolved asset and, for
- *  YuE2, the approved ABC score (409 if the draft has none approved yet). */
+ *  YuE2, the approved ABC score (409 if the draft has none approved yet).
+ *  `prepare` (YuE2, optional) is the Prepare document (contracts/yue2Prepare.ts):
+ *  when sent, both its confirmations must be current and its structure must
+ *  be the approved score, and the lyrics rendered are the ones it exports,
+ *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
   expectedBackend: z.enum(['ace', 'yue2']), engineParams: z.record(z.string(), z.unknown()),
   title: z.string(), artistName: z.string(), targetArtistName: z.string(),
   lyrics: z.string(), caption: z.string(),
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),
   scoreSource: z.enum(['dataset']).nullable(),
+  prepare: z.unknown().optional(),
   analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }).nullable().optional(),
   settings: z.record(z.string(), z.unknown()),
   controls: z.object({

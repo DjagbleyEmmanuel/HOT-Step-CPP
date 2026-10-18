@@ -829,3 +829,23 @@ test('cover settings: rebuilt into params and request before the first keep, loc
     assert.deepEqual(getBuildSession(s.id, 'user').params.yue2Cover, cover);
   });
 });
+
+test('a build from a Prepare document checks it once and keeps the confirmed pair', async () => {
+  const { structureHash } = await import('../contracts/yue2Prepare.js');
+  const hash = structureHash(score);
+  const prepare = { version: 2, sourceKey: 'src', abc: score, sectionIds: ['s1', 's2', 's3', 's4'], paste: '',
+    blocks: [{ id: 'b1', text: 'first line here', tag: 'Verse' }, { id: 'b2', text: 'hook line now', tag: 'Chorus' }],
+    assignments: { s1: { kind: 'instrumental' }, s2: { kind: 'words', blockIds: ['b1'] }, s3: { kind: 'words', blockIds: ['b2'] }, s4: { kind: 'instrumental' } },
+    excluded: [], lyricRevision: 2, flagged: [], nextId: 7,
+    confirmed: { structure: { structureHash: hash }, lyrics: { structureHash: hash, lyricRevision: 2 } } };
+  const request = (text: string): Yue2SynthRequest => ({ style: 'ambient', cot: 'off', abc: score, lyrics: text });
+  const s = createBuildSession({ yue2Abc: score, lyrics, yue2Prepare: prepare }, request(lyrics), 'user');
+  assert.deepEqual(s.prepared, { structureHash: hash, lyricRevision: 2 });
+  assert.equal(s.params.yue2Prepare, undefined, 'the session keeps the pair, not the document');
+  assert.throws(() => createBuildSession({ yue2Abc: score, lyrics: '[verse]\nother', yue2Prepare: prepare }, request('[verse]\nother'), 'user'),
+    /not the confirmed Prepare lyrics/);
+  assert.throws(() => createBuildSession({ yue2Abc: score, lyrics, yue2Prepare: { ...prepare, lyricRevision: 3 } }, request(lyrics), 'user'),
+    /Confirm the lyrics/);
+  assert.throws(() => createBuildSession({ yue2Abc: score.replace('E6|', 'G6|'), lyrics, yue2Prepare: prepare }, request(lyrics), 'user'),
+    /score changed/);
+});

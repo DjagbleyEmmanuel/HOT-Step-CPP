@@ -38,6 +38,7 @@ import {
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
 import { buildYue2LyricSchedule } from './backends/yue2/lyricSchedule.js';
+import { preparedPair } from '../contracts/yue2Prepare.js';
 
 /** Codec frames per second (the composer's frame clock). */
 export const YUE2_FPS = 25;
@@ -100,6 +101,9 @@ export interface Yue2BuildSession extends ArrangedSession {
   /** The params a Save song render submits. Applying lyrics or settings
    *  replaces them and the stored request together. */
   params: Record<string, unknown>;
+  /** The Prepare confirmations the session started from, when it started
+   *  from a Prepare document (contracts/yue2Prepare.ts). */
+  prepared?: { structureHash: string; lyricRevision: number };
 }
 
 /** `request` holds the score and lyrics in source order; arranged() writes them out in plan order. */
@@ -292,8 +296,22 @@ function plainRequest(request: Yue2SynthRequest): Yue2SynthRequest {
   return request;
 }
 
-/** Starts a build session for a cover's request. */
+/** Starts a build session for a cover's request. With `params.yue2Prepare`
+ *  (the Prepare document), the shared submission check runs once here: the
+ *  score must be the confirmed one and the lyrics the ones it exports. The
+ *  session keeps the checked pair and the confirmations, not the document. */
 export function createBuildSession(params: Record<string, unknown>, request: Yue2SynthRequest, userId: string): Yue2BuildSession {
+  let prepared: Yue2BuildSession['prepared'];
+  if (params.yue2Prepare !== undefined) {
+    const pair = preparedPair(params.yue2Prepare, typeof params.yue2Abc === 'string' ? params.yue2Abc : '');
+    if ('error' in pair) throw new TakesError(pair.error, 409);
+    const text = typeof params.lyrics === 'string' ? params.lyrics.replace(/\r\n?/g, '\n').trim() : '';
+    if (params.instrumental !== true && text !== pair.lyrics)
+      throw new TakesError('These lyrics are not the confirmed Prepare lyrics; confirm them on the Prepare page.', 409);
+    const { yue2Prepare: _, ...rest } = params;
+    params = rest;
+    prepared = { structureHash: pair.structureHash, lyricRevision: pair.lyricRevision };
+  }
   if (!request.abc) throw new TakesError('Build by section needs an approved score.');
   const sections = scoreSections(request.abc).map(s => ({ label: s.label.trim(), startBar: s.startBar }));
   if (!sections.length) throw new TakesError('The score has no section labels.');
@@ -305,6 +323,7 @@ export function createBuildSession(params: Record<string, unknown>, request: Yue
     id, userId, sections, takes: [], kept: [], pending: [], error: null, params, request,
     version: BUILD_SESSION_VERSION, revision: 0,
     arrangement: { sections: source, plan: source.map((s, i) => ({ id: `o${i}`, section: s.id })), nextOccurrence: source.length, finished: true },
+    ...(prepared ? { prepared } : {}),
   };
   save(stored);
   return view(stored);

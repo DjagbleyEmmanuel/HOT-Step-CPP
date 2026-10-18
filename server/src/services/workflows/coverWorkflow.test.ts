@@ -5,6 +5,7 @@ import { WorkflowJobs, type WorkflowDeps } from './workflowJobs.js';
 import { WorkflowDocuments } from './revisions.js';
 import { coverScoreDetails, createCoverKinds, effectiveCoverRequest, type CoverRenderInput } from './coverWorkflow.js';
 import type { AudioIntentItem } from '../../contracts/audioQueue.js';
+import { structureHash } from '../../contracts/yue2Prepare.js';
 
 const input: CoverRenderInput = {
   documentId: '11111111-1111-4111-8111-111111111111', revision: 1,
@@ -279,4 +280,30 @@ test('render cancellation cancels the audio intent', async () => {
   await s.jobs.settled();
   assert.equal([...s.items.values()][0].status, 'cancelled');
   assert.equal(s.jobs.get(job.id).status, 'cancelled');
+});
+
+test('a YuE2 render with a Prepare document renders its exported lyrics, and refuses a stale one', async () => {
+  const abc = 'X:1\nK:C\n% intro\nV: Vocal\nZ|\n% verse\nV: Vocal\nC4|';
+  const confirmedPrepare = (score = abc) => ({ version: 2, sourceKey: 'src', abc: score, sectionIds: ['s1', 's2'], paste: '',
+    blocks: [{ id: 'b1', text: 'hello', tag: 'Verse' }],
+    assignments: { s1: { kind: 'instrumental' }, s2: { kind: 'words', blockIds: ['b1'] } },
+    excluded: [], lyricRevision: 3, flagged: [], nextId: 4,
+    confirmed: { structure: { structureHash: structureHash(score) }, lyrics: { structureHash: structureHash(score), lyricRevision: 3 } } });
+  const prepare = confirmedPrepare();
+  const s = setup();
+  const opened = await s.open();
+  const doc = s.documents.get(opened.documentId, 'owner');
+  const approved = s.documents.update(opened.documentId, 'owner', opened.revision, { ...doc.data, approvedAbc: prepare.abc });
+  const yue = { ...input, ...opened, revision: approved.revision, expectedBackend: 'yue2', lyrics: '[stale]\nold words' };
+  const ok = s.submit('cover-render', 'prepared', { ...yue, prepare }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(ok.id).status, 'succeeded');
+  assert.equal((s.jobs.get(ok.id).result as any).request.lyrics, '[intro]\n\n[verse]\nhello');
+  const stale = s.submit('cover-render', 'stale-lyrics', { ...yue, prepare: { ...prepare, lyricRevision: 9 } }).job;
+  const moved = s.submit('cover-render', 'other-score', { ...yue,
+    prepare: confirmedPrepare(abc.replace('C4|', 'E4|')) }).job;
+  await s.jobs.settled();
+  assert.match(s.jobs.get(stale.id).error ?? '', /Confirm the lyrics/);
+  assert.match(s.jobs.get(moved.id).error ?? '', /score changed/);
+  assert.equal(s.items.size, 1);
 });
