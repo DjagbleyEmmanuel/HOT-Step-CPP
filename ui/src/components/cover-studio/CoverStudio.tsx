@@ -28,6 +28,7 @@ import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { StemMixer } from '../shared/StemMixer';
+import { StyledSelect } from '../shared/StyledSelect';
 import { useCoverStemsStore } from '../../stores/coverStemsStore';
 import {
   addManualQueueItem, updateManualQueueItem,
@@ -39,8 +40,8 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
-import { cutSection, resectionScore } from '../../utils/abcSectionMove';
+import { lyricBlockLines, lyricBlockRanges, sectionColours } from '../../utils/abcSections';
+import { cutSection, mergeSections, relabelSection, resectionScore, splitSection } from '../../utils/abcSectionMove';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
@@ -243,7 +244,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // the score and lyrics from before it and the ones it produced. Only this
   // session and its drafts change; the source's dataset files never do. While
   // any cut stands, the score no longer follows the source audio.
-  const [scoreCuts, setScoreCuts] = useState<Array<{ abc: string; lyrics: string; after: string; afterLyrics: string }>>(
+  const [scoreCuts, setScoreCuts] = useState<Array<{ abc: string; lyrics: string; after: string; afterLyrics: string; removedMusic?: boolean }>>(
     () => restore('scoreCuts', []));
   const sectionChipColours = sectionColours(scoreSections.map(section => section.label));
   const [seekSection, setSeekSection] = useState<{ index: number } | null>(null);
@@ -482,7 +483,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-captionMode')) setCaptionMode(f['cover-studio-captionMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAbc')) setSheetAbc(f['cover-studio-sheetAbc'] as never);
     if (Object.hasOwn(f, 'cover-studio-scoreSections')) setScoreSections(f['cover-studio-scoreSections'] as never);
-    // A draft from before cuts existed has none.
+    // A draft from before cuts existed has none; a cut saved before merge,
+    // relabel and split has no removedMusic flag and counts as removing music.
+    setSectionEditor(null); setSectionEditError('');
     setScoreCuts((f['cover-studio-scoreCuts'] ?? []) as never);
     if (Object.hasOwn(f, 'cover-studio-scoreTempoScale')) setScoreTempoScale(f['cover-studio-scoreTempoScale'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAudioUrl')) setSheetAudioUrl(f['cover-studio-sheetAudioUrl'] as never);
@@ -1013,17 +1016,40 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const block = instrumental ? undefined : lyricBlockRanges(lyrics)[index];
     let afterLyrics = block ? lyrics.slice(0, block.start) + lyrics.slice(block.end) : lyrics;
     if (block && block.end === lyrics.length) afterLyrics = afterLyrics.trimEnd() + '\n';
-    setSheetError('');
-    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: cut.abc, afterLyrics }]);
+    setSheetError(''); setSectionEditError(''); setSectionEditor(null);
+    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: cut.abc, afterLyrics, removedMusic: true }]);
     setSectionMatch(null);
     if (afterLyrics !== lyrics) { lyricEditRef.current++; setLyrics(afterLyrics); setLyricsSource(null); }
     changeSheetAbc(cut.abc);
     if (!instrumental && !block) showToast(`No lyric block ${index + 1} to remove; only the score was cut`);
   };
+  // Merge, relabel and split go through the same stack as cuts. The edit
+  // functions refuse with a reason rather than guess; it shows inline.
+  const [sectionEditError, setSectionEditError] = useState('');
+  const [sectionEditor, setSectionEditor] = useState<
+    { index: number; kind: 'merge' | 'relabel' | 'split'; label: string; bar: string; line: string } | null>(null);
+  const applySectionEdit = (edit: ReturnType<typeof mergeSections>) => {
+    if ('error' in edit) { setSectionEditError(edit.error); return; }
+    setSectionEditError(''); setSectionEditor(null);
+    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: edit.abc, afterLyrics: edit.lyrics, removedMusic: edit.removedMusic }]);
+    setSectionMatch(null);
+    if (edit.lyrics !== lyrics) { lyricEditRef.current++; setLyrics(edit.lyrics); setLyricsSource(null); }
+    changeSheetAbc(edit.abc);
+  };
+  const submitSectionEditor = () => {
+    if (!sectionEditor) return;
+    const { index, kind, label, bar, line } = sectionEditor;
+    if (kind === 'merge') return applySectionEdit(mergeSections(sheetAbc, lyrics, index, label === 'second' ? 'second' : 'first'));
+    if (kind === 'relabel') return applySectionEdit(relabelSection(sheetAbc, lyrics, index, label));
+    if (!/^\d+$/.test(bar.trim()) || !/^\d+$/.test(line.trim())) { setSectionEditError('Bar and lyric line must be whole numbers.'); return; }
+    applySectionEdit(splitSection(sheetAbc, lyrics, index, Number(bar), Number(line), label));
+  };
   const lastCut = scoreCuts.at(-1);
+  // A cut taken from an older draft has no flag and removed music.
+  const musicRemoved = scoreCuts.some(cut => cut.removedMusic !== false);
   const undoCut = () => {
     if (!lastCut) return;
-    setScoreCuts(cuts => cuts.slice(0, -1));
+    setScoreCuts(cuts => cuts.slice(0, -1)); setSectionEditError(''); setSectionEditor(null);
     if (lastCut.lyrics !== lyrics) { lyricEditRef.current++; setLyrics(lastCut.lyrics); setLyricsSource(null); }
     changeSheetAbc(lastCut.abc);
   };
@@ -1834,14 +1860,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
               <span className="flex gap-3"><button type="button" onClick={() => void handleMatchSections()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || scoreCuts.length > 0}
-                title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || musicRemoved}
+                title={musicRemoved ? 'Off while sections are cut: the score no longer follows the source audio.'
                   : "Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
                 {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match lyrics to score'}</button>
               <button type="button" onClick={() => void handlePlanScore()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || scoreCuts.length > 0}
-                title={scoreCuts.length ? 'Off while sections are cut: the score no longer follows the source audio.'
+                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || musicRemoved}
+                title={musicRemoved ? 'Off while sections are cut: the score no longer follows the source audio.'
                   : "Set the score's sections from where the source vocal sings each lyric block, and retag the lyrics to match. Shows the changes before applying."}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button></span>
             </div>
@@ -1874,12 +1900,40 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                   <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
                     title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
                     className="px-1 text-zinc-500 hover:text-red-500">✕</button>
+                  {([['merge', '⤵', `Merge ${section.label} with the next section`, index < scoreSections.length - 1],
+                    ['relabel', '✎', `Rename ${section.label}`, true],
+                    ['split', '✂', `Split ${section.label} in two`, true]] as const).map(([kind, icon, title, shown]) => shown &&
+                    <button key={kind} type="button" aria-label={title} title={title}
+                      onClick={() => { setSectionEditError(''); setSectionEditor(open => open?.index === index && open.kind === kind ? null : {
+                        index, kind, label: kind === 'merge' ? 'first' : kind === 'relabel' ? section.label : '',
+                        bar: String(section.startBar + 1), line: '0' }); }}
+                      className="px-1 text-zinc-500 hover:text-cyan-500">{icon}</button>)}
                 </span>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
+            {sectionEditor && scoreSections[sectionEditor.index] && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/30 p-2 text-xs text-zinc-700 dark:text-zinc-200">
+              {sectionEditor.kind === 'merge' && <>
+                <span>Merge {scoreSections[sectionEditor.index].label} with {scoreSections[sectionEditor.index + 1]?.label}, keeping the label:</span>
+                <StyledSelect accent="cyan" value={sectionEditor.label} onChange={label => setSectionEditor({ ...sectionEditor, label })}
+                  options={[{ value: 'first', label: scoreSections[sectionEditor.index].label },
+                    { value: 'second', label: scoreSections[sectionEditor.index + 1]?.label ?? '' }]} className="w-32" /></>}
+              {sectionEditor.kind !== 'merge' && <label className="flex items-center gap-1">{sectionEditor.kind === 'split' ? 'New section label' : 'Label'}
+                <input value={sectionEditor.label} onChange={e => setSectionEditor({ ...sectionEditor, label: e.target.value })}
+                  className="w-28 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label>}
+              {sectionEditor.kind === 'split' && <>
+                <label className="flex items-center gap-1">Starts at bar
+                  <input value={sectionEditor.bar} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, bar: e.target.value })}
+                    className="w-14 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label>
+                <label className="flex items-center gap-1">Lyric line (0–{lyricBlockLines(lyrics, sectionEditor.index).length})
+                  <input value={sectionEditor.line} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, line: e.target.value })}
+                    className="w-12 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label></>}
+              <button type="button" onClick={submitSectionEditor} className="text-cyan-700 dark:text-cyan-300">Apply</button>
+              <button type="button" onClick={() => { setSectionEditor(null); setSectionEditError(''); }} className="text-zinc-500">Cancel</button>
+            </div>}
+            {sectionEditError && <p role="alert" className="text-xs text-red-500">{sectionEditError}</p>}
             {scoreCuts.length > 0 && <p className="text-xs text-zinc-500">
-              {scoreCuts.length} section{scoreCuts.length > 1 ? 's' : ''} cut from this cover; the dataset's score and lyrics are unchanged.
+              {scoreCuts.length} section edit{scoreCuts.length > 1 ? 's' : ''} made to this cover; the dataset's score and lyrics are unchanged.
               {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
-                <button type="button" onClick={undoCut} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo cut</button>}
+                <button type="button" onClick={undoCut} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo edit</button>}
             </p>}
             {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
               <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}

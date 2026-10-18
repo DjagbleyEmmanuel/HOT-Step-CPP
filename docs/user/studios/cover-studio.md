@@ -152,6 +152,15 @@ are saved with the draft.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but
    never blocks Generate.
+   Each section chip in the strip can be cut (✕), merged with the next section
+   (⤵, keeping either label), renamed (✎) or split (✂, asking for the bar the new
+   section starts at and the lyric line it takes). Each edit changes the score and
+   the paired lyric block together, only for this cover, and the dataset files are
+   not touched. An edit that cannot keep the score and the lyric tags paired is
+   refused with the reason shown under the strip. Every edit needs the score
+   approved again. **Undo edit** steps back through them in order while the score
+   and lyrics are as the last edit left them. The two Match buttons turn off only
+   after a cut, since merging, renaming and splitting leave the music as it was.
    **Match sections to score** is available for Source Audio only. It separates the
    source's vocal (once per audio file: the same bytes are never separated
    again, even re-uploaded or after a restart; the stems are never deleted
