@@ -210,6 +210,7 @@ import { killActiveChildren } from './services/training/labelingQueue.js';
 // before starting ace-server, with clear progress and error messages.
 
 import { modelDownloadService } from './services/modelDownloadService.js';
+import { hasRuntimeFile } from './services/runtimeFiles.js';
 
 /** Detect CUDA major version from engine build marker */
 function detectCudaMajorVersion(): number {
@@ -235,7 +236,7 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // Downloads land in the data folder's tools/runtime in a release
   // (modelDownloadService.engineDir); older installs keep them beside the exe.
   const runtimeDirs = [modelDownloadService.engineDir, path.dirname(config.aceServer.exe)];
-  const present = (filename: string) => runtimeDirs.some(d => fs.existsSync(path.join(d, filename)));
+  const present = (filename: string) => hasRuntimeFile(runtimeDirs, filename);
   const registry = JSON.parse(
     fs.readFileSync(path.join(__dirname, 'data', 'model-registry.json'), 'utf-8')
   );
