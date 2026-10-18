@@ -87,7 +87,7 @@ for (const file of [...tracked, ...untrackedNew]) {
       ? execFileSync('git', ['show', `:${file}`], { cwd: ROOT, encoding: 'utf8' })
       : fs.readFileSync(path.join(ROOT, file), 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') { warn.push(`${file}: unreadable (skipped — broken symlink?)`); continue; }
+    if (e.code === 'ENOENT') { warn.push(`${file}: unreadable (skipped - broken symlink?)`); continue; }
     throw e;
   }
   const text = raw.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
