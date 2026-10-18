@@ -2,7 +2,7 @@
 # HOTSTEP-347: one fresh seven-update audit run with A's frozen argv (HOTSTEP-342),
 # then the exact-bits gate against the frozen warm baseline. Run from the mirror root.
 # usage: run-audit.sh <audit-binary> <outdir>
-set -eu
+set -eu -o pipefail
 bin=$1; out=$2
 python3 - <<'PY'
 import json, urllib.request
@@ -20,5 +20,10 @@ print -r -- "env ${vars[*]} $bin ${targs[*]}" > $out/run-1.cmd
 echo 'HS342_PHASE measured_fresh_state' > $out/run-1.log
 set +e
 env "${vars[@]}" /usr/bin/time -l $bin "${targs[@]}" >> $out/run-1.log 2>&1
-echo "exit $?" | tee $out/exit.txt
+rc=$?
+echo "exit $rc" | tee $out/exit.txt
 python3 .probe-logs/hs346/bits.py .probe-logs/hs342/warm-baseline-full/run-1.log $out/run-1.log | tee $out/bits.txt
+gate=$?
+# A trainer failure outranks the gate result; pipefail keeps the checker's status through tee.
+(( rc == 0 )) || exit $rc
+exit $gate
