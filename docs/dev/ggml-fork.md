@@ -193,8 +193,9 @@ It applies only in graphs built with grads, on Apple8 without the tensor API, to
 2-D contiguous BF16-by-F32 GEMMs with `K % 32 == 0` whose weight reaches a frozen
 leaf without a transpose. dX GEMMs, BF16 casts of trainable LoRA factors, graphs
 without grads and inference keep the existing kernel. The copies share one private
-scratch buffer grown on demand; the op puts barriers around its pre-pass, and a
-replaced buffer is leaked because it may still be in flight.
+scratch buffer grown on demand; the op puts barriers around its pre-pass. Each use
+holds a reference until its command buffer completes, and a replaced buffer is freed
+once none remain, on the next scratch request or in `ggml_metal_free`.
 `GGML_METAL_HALF_PREPASS_DISABLE=1` turns it off.
 
 Measured on an M2 Max. Microbenchmark on the base-forward shapes with the audit's
@@ -204,8 +205,9 @@ fresh-state warm-song updates took 31.765/32.259/32.032 s for the predecessor an
 31.146/31.173/31.402 s with it; median paired saving 0.629 s (1.97%), and 7.35 s over
 the seven updates. Peak process footprint rose 0.53 GB at the median. All seven
 matched updates log bit-identical AR CE, NAR MSE, KL and gradient norm against the
-original Metal baseline, with equal exported adapter hashes, and so does the
-switched-off control. Report: `tools/yue2-aitk-reference/hs353-half-prepass/REPORT.md`
+original Metal baseline, with equal exported adapter hashes, and so do the
+switched-off control and this change alone on the original fork. `scratch-life.cpp`
+checks that replaced scratch buffers outlive their command buffers and are all freed. Report: `tools/yue2-aitk-reference/hs353-half-prepass/REPORT.md`
 (HOTSTEP-353).
 
 ## Why each change exists

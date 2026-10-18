@@ -35,8 +35,11 @@ LoRA factors, the head graphs (no grads) and inference keep today's kernel.
 
 The copies live in one private scratch buffer shared by all GEMMs and grown on demand, in
 64 MB steps. Command buffers are ordered on it by Metal's hazard tracking; inside an encoder
-the op puts a barrier before and after the pre-pass. A replaced buffer is leaked because it
-may still be in flight, as the existing ConvRot8 scratch does. Weights are converted on every
+the op puts a barrier before and after the pre-pass. Each use holds a reference until its
+command buffer completes (a completed handler drops it), and the current buffer holds one more.
+A replaced buffer is freed once no command buffer uses it, on the next scratch request or in
+`ggml_metal_free`, never on Metal's completion thread. (Fork `d5831e92` leaked replaced
+buffers; the review fix replaced that.) Weights are converted on every
 GEMM, not cached: the base weights reach the GEMM as unnamed tensors, and nothing proves a
 cache keyed on their address stays valid.
 
@@ -107,6 +110,23 @@ binary with `GGML_METAL_HALF_PREPASS_DISABLE=1`, run by `runarm.py` because `run
 `GGML_` variables). The candidate logs show the hp pipelines compiling; the predecessor and
 switched-off logs do not. An earlier candidate trial on the uncommitted tree also matched.
 
+After the scratch-lifetime fix, two more arms matched the same way (`fix-results.json`):
+
+- the fixed candidate (31.278 s warm, 291.764 s over seven updates, peak footprint 16.499 GB);
+- the isolated control: the original baseline fork `6d57c78a` plus this change alone, on the
+  same trainer (34.863 s warm). That fork has no BF16_ROUND epilogue, so the port passes
+  `round_epilogue = false` and declares the function constant itself
+  (`.probe-logs/hs353/iso-applied.patch` on the mirror).
+
+Both logs show every scratch buffer freed by teardown: the trainer grew it five times, to
+384 MB, and freed three of them mid-run.
+
+`scratch-life.cpp` checks the lifetime directly. It launches 25 base-forward GEMMs in graphs
+with grads, without synchronizing, with N rising from 2,048 to 24,576, then falling, then
+partial tiles. Each output matches the same GEMM in a graph without grads (today's kernel) bit
+for bit. The scratch was replaced 3 times while earlier command buffers were in flight, 2 were
+freed during the run, and all 4 by `ggml_metal_free`: RESULT PASS.
+
 ## Memory
 
 `/usr/bin/time -l` over the whole process (load, warmup, seven updates, export), decimal GB.
@@ -118,12 +138,14 @@ switched-off logs do not. An earlier candidate trial on the uncommitted tree als
 
 Peak footprint is 0.53 GB higher at the median (0.26 to 0.85 GB by pair): the scratch, whose
 largest need here is the down projection (about 25 MB of weights plus 4 bytes per activation
-element), plus the smaller buffers leaked as it grew. RSS is unchanged.
+element), plus the smaller buffers d5831e92 leaked as it grew. RSS is unchanged. With the
+lifetime fix, the peak is the largest scratch (384 MB here); the one fixed-candidate run's
+footprint was 16.499 GB.
 
 ## Non-Metal proof
 
-`git -C engine/ggml diff --stat cf9db4c0..d5831e92`: only `src/ggml-metal/ggml-metal-ops.cpp`
-and `src/ggml-metal/kernels/mul_mm.metal`. The kernels are compiled only without the tensor
+`git -C engine/ggml diff --stat cf9db4c0..hot-step-neutral`: only files under `src/ggml-metal/`
+(`ggml-metal-ops.cpp`/`.h`, `ggml-metal-device.h`/`.m`, `ggml-metal-context.m`, `kernels/mul_mm.metal`). The kernels are compiled only without the tensor
 API and with BF16; no shared op, ABI, graph or CPU, CUDA or Vulkan code changes.
 
 ## Reproduce
