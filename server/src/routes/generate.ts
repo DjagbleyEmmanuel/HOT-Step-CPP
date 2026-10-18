@@ -32,6 +32,7 @@ import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
 import { isGenerationIntent } from '../contracts/generation.js';
+import { preparedParams } from '../contracts/yue2Prepare.js';
 import { GenerationIntentError, resolveGenerationIntent } from '../services/generation/intent.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
 import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
@@ -319,6 +320,17 @@ export type SubmitGenerationResult =
   | { ok: true; jobId: string; status: GenerationJob['status'] }
   | { ok: false; status: number; body: Record<string, unknown> };
 
+/** A submission carrying a YuE2 Prepare document (`yue2Prepare`) passes the
+ *  shared check (contracts/yue2Prepare.ts) and is queued without it; any
+ *  other submission is returned as it came. */
+export function withoutPrepareDocument(submission: any): { submission: any } | { error: string } {
+  if (!submission || typeof submission !== 'object' || submission.yue2Prepare === undefined) return { submission };
+  const pair = preparedParams(submission);
+  if ('error' in pair) return pair;
+  const { yue2Prepare: _, ...rest } = submission;
+  return { submission: rest };
+}
+
 /** Validate and queue one generation, exactly as POST /api/generate does.
  *  Exported so the durable audio intent queue (services/audioQueue) submits
  *  through the same checks, job map and GPU lane instead of a second path. */
@@ -380,6 +392,10 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
       return { ok: false, status: 400, body: { error: `Timbre reference file is missing (${missing}). The upload it referred to is gone; re-upload it or clear the reference.` } };
     }
   }
+
+  const prepared = withoutPrepareDocument(submission);
+  if ('error' in prepared) return { ok: false, status: 409, body: { error: prepared.error } };
+  submission = prepared.submission;
 
   const jobId = uuidv4();
   const enqueuedAt = Date.now();

@@ -197,3 +197,17 @@ export function preparedPair(value: unknown, scoreAbc?: string): PreparedPair | 
   return { abc: normalizeAbc(p.abc), lyrics: exportPreparedLyrics(p), structureHash: hash, lyricRevision: p.lyricRevision,
     instrumental: p.sectionIds.every(id => p.assignments[id].kind === 'instrumental') };
 }
+
+/** preparedPair for /api/generate-style params (`yue2Prepare`, `yue2Abc`,
+ *  `lyrics`, `instrumental`), as Build and the direct generate route send
+ *  them: the document must be current, the score the confirmed one, the mode
+ *  agree with it and, unless instrumental, the lyrics be the ones it exports. */
+export function preparedParams(params: Record<string, unknown>): PreparedPair | { error: string } {
+  const pair = preparedPair(params.yue2Prepare, typeof params.yue2Abc === 'string' ? params.yue2Abc : '');
+  if ('error' in pair) return pair;
+  const conflict = instrumentalConflict(pair, params.instrumental);
+  if (conflict) return { error: conflict };
+  const text = typeof params.lyrics === 'string' ? params.lyrics.replace(/\r\n?/g, '\n').trim() : '';
+  if (!pair.instrumental && text !== pair.lyrics) return { error: 'These lyrics are not the confirmed Prepare lyrics; confirm them on the Prepare page.' };
+  return pair;
+}
