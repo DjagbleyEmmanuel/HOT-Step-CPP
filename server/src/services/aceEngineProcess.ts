@@ -18,7 +18,7 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { config, USER_PLUGINS_DIR } from '../config.js';
 import { logEngine } from './logger.js';
 import { pushLog } from '../routes/logs.js';
-import { setEngineReady, setEngineNoModels } from '../engineState.js';
+import { setEngineReady, setEngineNoModels, noteEngineBackendLine, resetEngineDevice } from '../engineState.js';
 import { aceClient } from './aceClient.js';
 import { buildGpuEnv } from './gpuDevices.js';
 
@@ -241,6 +241,7 @@ export function startAceServer(): ChildProcess | null {
     console.log(`[Server] TensorRT libs: ${config.aceServer.trtLibs}`);
   }
 
+  resetEngineDevice();
   const child = testHooks.spawn(exe, args, spawnOpts);
 
   // Filter repetitive GGML noise from console output (still written to ace_engine.log via logEngine)
@@ -252,6 +253,7 @@ export function startAceServer(): ChildProcess | null {
     for (const line of lines) {
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
+      noteEngineBackendLine(line);
       pushLog(line, 'engine');
     }
   });
@@ -264,6 +266,7 @@ export function startAceServer(): ChildProcess | null {
     for (const line of lines) {
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
+      noteEngineBackendLine(line);
       pushLog(line, 'engine');
     }
   });

@@ -21,3 +21,31 @@ export function setEngineReady(ready: boolean, status: string) {
   engineReady = ready;
   engineBootStatus = status;
 }
+
+/** Raw ggml device name ("CUDA0", "Vulkan0", "CPU") from the engine's last "[Load] <label> backend:" line; null until a model has loaded. */
+export let engineDevice: string | null = null;
+
+/** Record the device from one engine log line. Returns true if the line was a backend line. */
+export function noteEngineBackendLine(line: string): boolean {
+  const m = /^\[Load\] .+? backend: (\S+)/.exec(line);
+  if (!m) return false;
+  engineDevice = m[1];
+  return true;
+}
+
+/** Forget the device on every respawn: the new process has not loaded anything yet. */
+export function resetEngineDevice() {
+  engineDevice = null;
+}
+
+/** Coarse backend family from a ggml device name; null for an unknown name. */
+export function backendFamily(device: string | null): 'cuda' | 'vulkan' | 'metal' | 'hip' | 'cpu' | null {
+  if (!device) return null;
+  const d = device.toLowerCase();
+  if (d.startsWith('cuda')) return 'cuda';
+  if (d.startsWith('vulkan')) return 'vulkan';
+  if (d.startsWith('metal') || d.startsWith('mtl')) return 'metal';
+  if (d.startsWith('rocm') || d.startsWith('hip')) return 'hip';
+  if (d.startsWith('cpu')) return 'cpu';
+  return null;
+}
