@@ -206,9 +206,8 @@ duration, in one row that scrolls sideways when the song is long. Click a sectio
 to select it; Shift-click, or Shift with the arrow keys, adds its neighbours. The
 selected bars are highlighted in the chart and the notation. Clicking a section
 also opens a small popup with the playback buttons (below); hovering the section
-you last clicked brings it back, and clicking another section moves it there. The
-**Stop** button stays in the toolbar beside Undo and Redo. Lyrics are not needed
-in this step.
+you last clicked brings it back, and clicking another section moves it there.
+**Stop** is in the popup too. Lyrics are not needed in this step.
 
 The edits sit in two collapsed panels side by side, **Edit the selection** and
 **Fix bar grouping**. Open one to use it; the open panel spans the width beneath
@@ -341,12 +340,17 @@ and recording suggestions stay off for those scores.
 For a one-shot cover, **Generate cover** renders the song in one go. Choose
 **Build by section** on **Prepare** to compare takes a few sections at a time.
 It opens the **Build** tab, using the approved score, lyrics and settings from
-Prepare. Finish preparing those before generating the first takes.
+Prepare. Finish preparing those before generating the first takes. The title at
+the top reads covering artist, then song, as the saved track is named.
 
 1. Two bars show the song. The **Source** bar is the score as it is, and never
    changes. The **Song** bar is the output you are building. It starts empty:
    click a source section to add it to the end of the song, and click it again to
-   repeat it (a repeated chorus is its own entry on the Song bar). Added sections
+   repeat it (a repeated chorus is its own entry on the Song bar). Hovering a
+   source section opens the same playback popup as on Prepare: **Hear score**,
+   **Hear recording (approximate)**, **Stop** and **Loop**. The source section
+   after the song's last one has a dashed outline and reads **next in source**,
+   so you can see where the original goes next; you don't have to use it. Added sections
    arrive selected, so Generate is ready straight away; adding the score's last
    section also ticks **Ends the song**, which you can untick. Built sections
    have ticks and start times, the next one has an arrow, and the rest are planned.

@@ -1306,7 +1306,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale, arStrength: coverArStrength }}
       onSettings={s => void applyBuildSettings(s)} keyLabel={coverScoreKeyLabel(abc)}
       sourceBpm={Number(abc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120)}
-      title={String(params?.title ?? (songTitle || 'Cover'))}
+      title={[params?.artist, params?.title ?? (songTitle || 'Cover')].filter(Boolean).join(' - ')}
+      scoreAbc={abc} recordingUrl={sourceMode === 'audio' && prep.recordingSeekAvailable ? sourceAudioUrl : ''}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
       onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}

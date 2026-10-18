@@ -10,6 +10,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { CoverArStrength } from './Yue2CoverPanel';
+import { SectionPlayPopup, useHoverPopup, useSectionPlayer } from './SectionPlayback';
 import { persist, restore, transposeKey } from './coverStudioUtils';
 import { EditableSlider } from '../shared/EditableSlider';
 
@@ -378,6 +379,10 @@ interface PageProps {
   keyLabel: string;
   sourceBpm: number;
   title: string;
+  /** The score in source order, and the source recording ('' when there is none or a cut means the
+   *  score no longer follows it), for the source bar's playback popup. */
+  scoreAbc: string;
+  recordingUrl: string;
   /** Why a build cannot start yet, or ''. */
   blocked: string;
   busy: boolean;
@@ -438,6 +443,13 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const done = !!items.length && next >= items.length;
   const editable = !p.busy && waiting === 0 && !p.loading;
   const nameOf = (i: PlanItem) => p.sections[i.section]?.label ?? '?';
+  // The source section after the song's last one: where the source would go next, if the user wants it.
+  const nextSource = items.length ? items[items.length - 1].section + 1 : 0;
+  const sourcePopup = useHoverPopup<number>();
+  const [sourceLoop, setSourceLoop] = useState(false);
+  const section = useSectionPlayer(p.scoreAbc, p.recordingUrl);
+  /** Bars of source section `i`, first and last (1-based). */
+  const sourceBars = (i: number): [number, number] => [p.sections[i].startBar, (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - 1];
 
   // Each section starts from the build's caption.
   useEffect(() => { setTarget(null); setCaption(p.caption); }, [next, s?.id, p.caption]);
@@ -470,6 +482,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const start = (key: string, url: string, from: number, to: number, at = from, offset = 0) => {
     const audio = audioRef.current;
     if (!audio) return;
+    section.stop();
     const mine = ++generation.current;
     audio.src = url;
     audio.currentTime = Math.max(0, at - offset);
@@ -579,16 +592,26 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
           <span className="ml-auto">Click a section to add it to the end of the song; repeat it as often as you like.</span>
         </div>
         <div className="flex gap-1 select-none" aria-label="Source sections">
-          {p.sections.map((section, i) => {
+          {p.sections.map((src, i) => {
             const uses = items.filter(x => x.section === i).length;
-            return <button type="button" key={i} disabled={!editable}
-              style={{ flexGrow: Math.max(1, bars(i)), flexBasis: 0, borderColor: colours[i], backgroundColor: `${colours[i]}22` }}
-              onClick={() => add(i)}
-              title={`Add ${section.label} to the end of the song${i === p.sections.length - 1 ? '; it is the last section, so this also ticks Ends the song' : ''}`}
-              className="min-w-0 rounded-md border-t-4 px-1.5 py-1 text-left disabled:opacity-40">
-              <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">{section.label}</p>
-              <p className="truncate text-[10px] text-zinc-500">{bars(i)} bars{uses > 1 ? ` · used ${uses}×` : ''}</p>
-            </button>;
+            const upNext = i === nextSource;
+            return <div key={i} className="flex min-w-0" style={{ flexGrow: Math.max(1, bars(i)), flexBasis: 0 }}
+              onMouseEnter={e => sourcePopup.show(i, e.currentTarget)} onMouseLeave={sourcePopup.close}>
+              <button type="button" disabled={!editable} onClick={() => add(i)} aria-label={`Add ${src.label} to the end of the song`}
+                style={{ borderColor: colours[i], backgroundColor: `${colours[i]}22` }}
+                className={`w-full min-w-0 rounded-md border-t-4 px-1.5 py-1 text-left disabled:opacity-40 ${upNext ? 'outline-dashed outline-1 outline-offset-1 outline-pink-500' : ''}`}>
+                <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">{src.label}</p>
+                <p className="truncate text-[10px] text-zinc-500">{upNext ? <span className="text-pink-600 dark:text-pink-400">next in source · </span> : ''}{bars(i)} bars{uses > 1 ? ` · used ${uses}×` : ''}</p>
+              </button>
+              {sourcePopup.open?.key === i && <SectionPlayPopup at={sourcePopup.open} name={src.label}
+                onMouseEnter={sourcePopup.keep} onMouseLeave={sourcePopup.close}
+                onHearScore={() => { stop(); void section.hearScore(...sourceBars(i), sourceLoop); }}
+                onHearRecording={() => { stop(); section.hearRecording(...sourceBars(i), sourceLoop); }}
+                recordingDisabled={!section.canHearRecording}
+                recordingTitle={section.canHearRecording ? 'Plays the source recording from one bar before the section to its end, by the score\'s own tempo, so it can drift.'
+                  : 'Not available: there is no recording, or a cut means the score no longer follows it.'}
+                playing={section.playing !== null} onStop={section.stop} loop={sourceLoop} onLoop={setSourceLoop} />}
+            </div>;
           })}
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">

@@ -7,16 +7,15 @@
 // and the confirmation (useYue2Prepare.ts, utils/yue2Prepare.ts).
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { ChevronDown, Redo2, Square, Undo2 } from 'lucide-react';
+import { ChevronDown, Redo2, Undo2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { previewRegroup, type RegroupResult } from '../../utils/abcRebar';
 import { cutSection, mergeScoreSections } from '../../utils/abcSectionMove';
 import { sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { AbcChart } from './AbcChart';
+import { SectionPlayPopup, useHoverPopup } from './SectionPlayback';
 import { barTimes, clock, createPlaybackOwner, sectionSpans, shortBars, spanBars, spanName, spanSeconds, type Prepare, type ScoreRange } from './prepareView';
 
 
@@ -65,17 +64,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
 
   // The section last clicked: hovering it (and only it) brings back its playback popup.
   const [anchor, setAnchor] = useState('');
-  const [popup, setPopup] = useState<{ id: string; left: number; top: number } | null>(null);
-  // Leaving the section or the popup closes it after a moment, so the pointer can cross between them.
-  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const keepPopup = () => { if (closing.current) clearTimeout(closing.current); closing.current = null; };
-  const closePopup = () => { keepPopup(); closing.current = setTimeout(() => setPopup(null), 200); };
-  useEffect(() => keepPopup, []);
-  const openPopup = (id: string, el: HTMLElement) => {
-    keepPopup();
-    const r = el.getBoundingClientRect();
-    setPopup({ id, left: Math.max(8, Math.min(r.left, window.innerWidth - 264)), top: r.bottom });
-  };
+  const popup = useHoverPopup<string>();
   const select = (i: number, extend: boolean) => {
     if (!extend || !range) { setSelected([list[i].id]); return; }
     const [a, b] = [Math.min(range[0], i), Math.max(range[1], i)];
@@ -209,8 +198,6 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
           title={t('cover.prepare.undo')} aria-label={t('cover.prepare.undo')}><Undo2 className="h-3 w-3" /></button>
         <button type="button" className={btn} disabled={!prep.canRedo} onClick={() => prep.redo()}
           title={t('cover.prepare.redo')} aria-label={t('cover.prepare.redo')}><Redo2 className="h-3 w-3" /></button>
-        <button type="button" className={btn} disabled={!hearing && !scorePlaying} onClick={stop}
-          title={t('cover.prepare.structure.stop')} aria-label={t('cover.prepare.structure.stop')}><Square className="h-3 w-3" /></button>
         {!editing && <>
           <span className="text-emerald-600 dark:text-emerald-400">{t('cover.prepare.structure.locked')}</span>
           <button type="button" className={btn} onClick={() => { prep.beginStructureEdit(); }}>{t('cover.prepare.structure.edit')}</button>
@@ -224,38 +211,27 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
 
       {/* The strip: a section per button, wider for more bars, scrolling sideways when the song is long. */}
       {list.length > 0 && <div className="flex gap-1 overflow-x-auto pb-1" role="group" aria-label={t('cover.prepare.structure.strip')}
-        onScroll={() => setPopup(null)}>
+        onScroll={popup.hide}>
         {list.map((s, i) => {
           const on = selected.includes(s.id);
           const seconds = spanSeconds(clockMap, s.start, s.end);
           const length = s.end - s.start + 1;
           const name = picked.length === 1 ? spanName(picked[0]) : t('cover.prepare.structure.selection', { count: picked.length });
           return <div key={s.id} className="flex" style={{ flex: `${length} 0 ${Math.max(96, length * 10)}px` }}
-            onMouseEnter={e => { if (s.id === anchor && on) openPopup(s.id, e.currentTarget); }}
-            onMouseLeave={() => { if (popup?.id === s.id) closePopup(); }}>
+            onMouseEnter={e => { if (s.id === anchor && on) popup.show(s.id, e.currentTarget); }}
+            onMouseLeave={() => { if (popup.open?.key === s.id) popup.close(); }}>
             <button type="button" aria-pressed={on} aria-haspopup="dialog" onKeyDown={e => onKey(e, i)}
-              onClick={e => { select(i, e.shiftKey); setAnchor(s.id); openPopup(s.id, e.currentTarget.parentElement!); }}
+              onClick={e => { select(i, e.shiftKey); setAnchor(s.id); popup.show(s.id, e.currentTarget.parentElement!); }}
               style={{ borderColor: colours[i], backgroundColor: on ? `${colours[i]}40` : `${colours[i]}14` }}
               className={`w-full rounded border-l-4 px-2 py-1 text-left ${on ? 'ring-2 ring-inset ring-cyan-500' : ''}`}>
               <span className="block truncate font-semibold">{s.label}{s.repeats > 1 && <span className="ml-1 rounded bg-zinc-500/20 px-1 text-[10px] font-normal">{s.occurrence}/{s.repeats}</span>}</span>
               <span className="block truncate text-[10px] text-zinc-500">{t('cover.prepare.structure.bars', { bars: spanBars(s) })}{seconds !== null && ` · ${clock(seconds)}`}</span>
             </button>
-            {/* In a portal on the body: an ancestor's transform would otherwise move a fixed box off the section. */}
-            {popup?.id === s.id && range && createPortal(<div role="dialog" aria-label={name} className="fixed z-50 pt-1 text-xs text-zinc-700 dark:text-zinc-200"
-              style={{ left: popup.left, top: popup.top }} onMouseEnter={keepPopup} onMouseLeave={closePopup}>
-              <div className="w-64 space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900 p-2 shadow-xl">
-                <p className="font-medium">{name}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className={btn} onClick={hearScore}>{t('cover.prepare.structure.hearScore')}</button>
-                  <button type="button" className={btn} disabled={!prep.recordingSeekAvailable || !window_ || !sourceAudioUrl} onClick={hearRecording}
-                    title={prep.recordingSeekAvailable ? t('cover.prepare.structure.hearRecordingInfo') : t('cover.prepare.structure.noRecording')}>
-                    {t('cover.prepare.structure.hearRecording')}</button>
-                  <Toggle size="sm" accent="cyan" checked={loop} onChange={setLoop} label={t('cover.prepare.structure.loop')}
-                    info={t('cover.prepare.structure.loopInfo')} />
-                </div>
-                <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.approx')}</p>
-              </div>
-            </div>, document.body)}
+            {popup.open?.key === s.id && range && <SectionPlayPopup at={popup.open} name={name} onMouseEnter={popup.keep} onMouseLeave={popup.close}
+              onHearScore={hearScore} onHearRecording={hearRecording}
+              recordingDisabled={!prep.recordingSeekAvailable || !window_ || !sourceAudioUrl}
+              recordingTitle={prep.recordingSeekAvailable ? t('cover.prepare.structure.hearRecordingInfo') : t('cover.prepare.structure.noRecording')}
+              playing={hearing || scorePlaying} onStop={stop} loop={loop} onLoop={setLoop} />}
           </div>;
         })}
       </div>}
