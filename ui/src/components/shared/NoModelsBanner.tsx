@@ -5,27 +5,24 @@
  * crash and not a missing DLL, so say what is actually needed and open the Model
  * Manager. The server restarts the engine by itself when a download finishes or a
  * model file appears in the models folder. The shared health query is polled
- * (Query owns the timer and its cancellation) until the engine reports ready.
+ * (Query owns the timer and its cancellation) for as long as the app is open,
+ * because ready flips true before the engine's model scan decides otherwise.
  */
 
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { PackageOpen } from 'lucide-react';
-import { pollWhile } from '../../queries/contract';
-import type { HealthResponse } from '../../../../server/src/contracts/health';
+import { noModelsRefetchInterval } from './noModelsPoll';
 import { healthOptions } from '../../queries/shell-queue/settings';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
-
-const POLL_MS = 5000;
 
 export const NoModelsBanner: React.FC = () => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { data } = useQuery({
     ...healthOptions(),
-    // Poll only until the engine is up; an unreachable server keeps the last data.
-    refetchInterval: pollWhile<HealthResponse>(d => d?.engine?.ready !== true, POLL_MS),
+    refetchInterval: noModelsRefetchInterval,
   });
 
   if (data?.engine?.noModels !== true) return null;
