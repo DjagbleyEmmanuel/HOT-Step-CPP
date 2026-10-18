@@ -414,6 +414,9 @@ Layout of a Windows package, as assembled by `release.yml`:
 | `VERSION` | The release version, shown by the app |
 | `.env.example` | Copied from the repo root |
 | `HOT-Step.bat` | Launcher. Sets `HOT_STEP_ROOT` and runs `runtime\node.exe server\server.mjs` |
+| `open-browser-if-needed.mjs` | Browser helper the launcher starts on the bundled Node. It waits for `/api/health`, skips if a tab is already connected, and otherwise opens the URL through `explorer.exe` |
+
+The launcher must not spawn PowerShell. It used to start the browser helper with `powershell -ExecutionPolicy Bypass`, and behaviour-based antivirus quarantined the app's scripts for it. The helper is now `open-browser-if-needed.mjs` (it replaced the `.ps1`), `release/build-release.ps1` and `release.yml` copy it into the package, and `release/check-layout.mjs` fails if a portable launcher mentions PowerShell.
 
 The package step fails the build if `ace-server`, `ace-train` or `ace-caption` is missing.
 A new engine tool the app runs must be added to both the copy list and that required list

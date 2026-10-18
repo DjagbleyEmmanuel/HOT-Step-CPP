@@ -311,6 +311,6 @@ itself, for that one matrix entry only.
 
 ## Data layout acceptance
 
-Archives contain app binaries and immutable `server/data/` resources. User data is initialized in sibling `HOT-Step-Data` or reused through the profile pointer. Package `release/.env.example`, `profile-path.mjs`, the platform launcher and `README.txt`; do not create mutable app-root models or adapters. Windows uses `runtime/node.exe`, Linux and macOS use `runtime/bin/node`. Local packagers follow the same layout.
+Archives contain app binaries and immutable `server/data/` resources. User data is initialized in sibling `HOT-Step-Data` or reused through the profile pointer. Package `release/.env.example`, `profile-path.mjs`, the platform launcher and `README.txt`, plus `open-browser-if-needed.mjs` on Windows (a Node helper; the launcher must never start PowerShell, which antivirus quarantines); do not create mutable app-root models or adapters. Windows uses `runtime/node.exe`, Linux and macOS use `runtime/bin/node`. Local packagers follow the same layout.
 
 The prereq script checks three workflow platform sections and both local assemblers, required engine targets and wholesale resource copies, unset managed defaults, profile marker agreement and disposable release/dev fixtures. Run it without `--offline` to retain Hugging Face checks. Actual native platform startup remains a release smoke-test requirement. See [Data folder and upgrades](../user/data-folder.md).
