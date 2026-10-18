@@ -168,7 +168,15 @@ export function exportPreparedLyrics(p: Pick<PrepareV2, 'abc' | 'sectionIds' | '
   }).join('\n\n');
 }
 
-export interface PreparedPair { abc: string; lyrics: string; structureHash: string; lyricRevision: number }
+/** `instrumental`: no section has words. A render's Instrumental mode must
+ *  agree with it (instrumentalConflict). */
+export interface PreparedPair { abc: string; lyrics: string; structureHash: string; lyricRevision: number; instrumental: boolean }
+
+/** Why a render's Instrumental mode contradicts the confirmed lyrics, or null. */
+export const instrumentalConflict = (pair: PreparedPair, instrumental: unknown): string | null =>
+  (instrumental === true) === pair.instrumental ? null
+    : pair.instrumental ? 'Every section is confirmed Instrumental; turn on Instrumental mode.'
+      : 'The confirmed lyrics have words; turn off Instrumental mode or mark every section Instrumental.';
 
 /** The one submission check Generate and Build share: the score and tagged
  *  lyrics to render, or why not. `scoreAbc`, when given, is the score the
@@ -186,5 +194,6 @@ export function preparedPair(value: unknown, scoreAbc?: string): PreparedPair | 
   if (lyrics?.structureHash !== hash || lyrics.lyricRevision !== p.lyricRevision) return { error: 'Confirm the lyrics first.' };
   const assigned = assignmentProblem(p);
   if (assigned) return { error: assigned };
-  return { abc: normalizeAbc(p.abc), lyrics: exportPreparedLyrics(p), structureHash: hash, lyricRevision: p.lyricRevision };
+  return { abc: normalizeAbc(p.abc), lyrics: exportPreparedLyrics(p), structureHash: hash, lyricRevision: p.lyricRevision,
+    instrumental: p.sectionIds.every(id => p.assignments[id].kind === 'instrumental') };
 }

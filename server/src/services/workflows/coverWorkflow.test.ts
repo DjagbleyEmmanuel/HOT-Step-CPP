@@ -302,8 +302,16 @@ test('a YuE2 render with a Prepare document renders its exported lyrics, and ref
   const stale = s.submit('cover-render', 'stale-lyrics', { ...yue, prepare: { ...prepare, lyricRevision: 9 } }).job;
   const moved = s.submit('cover-render', 'other-score', { ...yue,
     prepare: confirmedPrepare(abc.replace('C4|', 'E4|')) }).job;
+  // Instrumental mode cannot drop confirmed words, nor sing an all-instrumental map.
+  const muted = s.submit('cover-render', 'muted', { ...yue, instrumental: true, prepare }).job;
+  const allInstrumental = { ...prepare, blocks: [], assignments: { s1: { kind: 'instrumental' }, s2: { kind: 'instrumental' } } };
+  const sung = s.submit('cover-render', 'sung', { ...yue, prepare: allInstrumental }).job;
+  const quiet = s.submit('cover-render', 'quiet', { ...yue, instrumental: true, prepare: allInstrumental }).job;
   await s.jobs.settled();
   assert.match(s.jobs.get(stale.id).error ?? '', /Confirm the lyrics/);
   assert.match(s.jobs.get(moved.id).error ?? '', /score changed/);
-  assert.equal(s.items.size, 1);
+  assert.match(s.jobs.get(muted.id).error ?? '', /have words; turn off Instrumental/);
+  assert.match(s.jobs.get(sung.id).error ?? '', /turn on Instrumental/);
+  assert.equal(s.jobs.get(quiet.id).status, 'succeeded');
+  assert.equal(s.items.size, 2);
 });

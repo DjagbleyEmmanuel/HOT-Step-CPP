@@ -20,7 +20,7 @@ import {
   coverCaptionSchema as captionInput, coverRenderSchema as render,
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
-import { preparedPair } from '../../contracts/yue2Prepare.js';
+import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -283,6 +283,8 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     if (input.prepare !== undefined && input.expectedBackend === 'yue2') {
       const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
       if ('error' in pair) throw new WorkflowError(409, pair.error);
+      const conflict = instrumentalConflict(pair, input.instrumental);
+      if (conflict) throw new WorkflowError(409, conflict);
       input = { ...input, lyrics: pair.lyrics };
     }
     if (!input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');

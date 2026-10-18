@@ -848,4 +848,10 @@ test('a build from a Prepare document checks it once and keeps the confirmed pai
     /Confirm the lyrics/);
   assert.throws(() => createBuildSession({ yue2Abc: score.replace('E6|', 'G6|'), lyrics, yue2Prepare: prepare }, request(lyrics), 'user'),
     /score changed/);
+  // Instrumental mode must agree with the map, either way.
+  assert.throws(() => createBuildSession({ yue2Abc: score, lyrics: '', instrumental: true, yue2Prepare: prepare }, request(''), 'user'),
+    /have words; turn off Instrumental/);
+  const quiet = { ...prepare, blocks: [], assignments: Object.fromEntries(prepare.sectionIds.map(id => [id, { kind: 'instrumental' }])) };
+  assert.throws(() => createBuildSession({ yue2Abc: score, lyrics, yue2Prepare: quiet }, request(lyrics), 'user'), /turn on Instrumental/);
+  assert.ok(createBuildSession({ yue2Abc: score, lyrics: '', instrumental: true, yue2Prepare: quiet }, request(''), 'user').prepared);
 });
