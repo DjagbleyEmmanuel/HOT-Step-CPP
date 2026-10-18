@@ -36,6 +36,7 @@ export function checkReleaseLayout(root) {
     const src = read(launcher);
     if (!src.includes('profile-path.mjs') || !src.includes('RESTART_MARKER')) errors.push(`${launcher}: restart must use the profile helper`);
     if (src.includes('.restart-requested') || /mkdir[^\n]*models/.test(src)) errors.push(`${launcher}: writes state inside app`);
+    if (/powershell|pwsh/i.test(src)) errors.push(`${launcher}: spawns PowerShell, which behaviour-based antivirus quarantines`);
   }
   return errors;
 }

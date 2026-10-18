@@ -15,7 +15,7 @@ for /f "delims=" %%P in ('""%~dp0runtime\node.exe" "%~dp0profile-path.mjs""') do
 if not defined RESTART_MARKER exit /b 1
 
 REM Open browser if no existing tab is found
-start /MIN "" powershell -ExecutionPolicy Bypass -File "%~dp0open-browser-if-needed.ps1" "http://localhost:3001/"
+start /MIN "" "%~dp0runtime\node.exe" "%~dp0open-browser-if-needed.mjs" "http://localhost:3001/"
 
 REM ── Restart loop ──────────────────────────────────────────
 REM The server writes the profile restart marker when the user clicks

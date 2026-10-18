@@ -658,7 +658,7 @@ jobs:
           Copy-Item "release/.env.example" "$dist/.env.example"
           Copy-Item "release/profile-path.mjs" "$dist/profile-path.mjs"
           Copy-Item "release/HOT-Step.bat" "$dist/HOT-Step.bat"
-          Copy-Item "open-browser-if-needed.ps1" "$dist/open-browser-if-needed.ps1"
+          Copy-Item "open-browser-if-needed.mjs" "$dist/open-browser-if-needed.mjs"
           Copy-Item "release/README.txt" "$dist/README.txt"
 
       - name: Smoke test packaged engine

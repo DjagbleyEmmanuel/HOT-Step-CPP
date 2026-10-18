@@ -404,7 +404,7 @@ Copy-Item (Join-Path $ReleaseDir ".env.example") (Join-Path $dist ".env.example"
 Copy-Item (Join-Path $ReleaseDir "profile-path.mjs") (Join-Path $dist "profile-path.mjs")
 Copy-Item (Join-Path $ReleaseDir "HOT-Step.bat") (Join-Path $dist "HOT-Step.bat")
 Copy-Item (Join-Path $ReleaseDir "README.txt") (Join-Path $dist "README.txt")
-Copy-Item (Join-Path $ProjectRoot "open-browser-if-needed.ps1") (Join-Path $dist "open-browser-if-needed.ps1")
+Copy-Item (Join-Path $ProjectRoot "open-browser-if-needed.mjs") (Join-Path $dist "open-browser-if-needed.mjs")
 
 Write-Host "  Assembly complete" -ForegroundColor Green
 
