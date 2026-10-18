@@ -102,7 +102,7 @@ test('section take chunks save every song with its own WAV, codes and seed', asy
       // Reversed response order must still map each WAV to its song and seed.
       tracks.reverse(); parts.reverse();
       if (mode === 'drop') { tracks.splice(1, 1); parts.splice(1, 1); }
-      if (mode === 'mismatch') tracks[0].seed++;
+      if (mode === 'mismatch') tracks[0].seed = Number(tracks[0].seed) + 1;
       const id = String(requests.length);
       results.set(id, { tracks, parts });
       return Response.json({ id });

@@ -46,7 +46,7 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
-import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed, yue2SeedPlus } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { buildYue2LyricSchedule } from './lyricSchedule.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
@@ -407,10 +407,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // Draw it here, not in the engine: the engine's random seed is a full uint64,
   // which JSON.parse rounds past 2^53, so the take would record (and replay) a
   // different seed. 32 bits leaves the engine's derived seeds (seed + song,
-  // + 1000003 per retry) far below 2^53, so they stay exact too.
-  const seed: number = params.randomSeed || !(typeof params.seed === 'number' && params.seed >= 0)
-    ? Math.floor(Math.random() * 2 ** 32)
-    : params.seed;
+  // + 1000003 per retry) far below 2^53, so they stay exact too. A pinned seed
+  // may be a decimal string (a replayed uint64) and rides through unrounded.
+  const seed: Yue2Seed = (params.randomSeed ? undefined : yue2Seed(params.seed)) ?? Math.floor(Math.random() * 2 ** 32);
 
   // A previewed-and-approved lead sheet (score preview flow): the engine
   // renders this score instead of planning one. Meaningless under cot=off,
@@ -480,8 +479,8 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const synth_batch_size = Math.min(askedVars, maxVars);
   if (askedSongs > maxSongs) notes.push(`batchSize ${askedSongs} requested — this engine renders at most ${maxSongs} song(s) per job`);
   if (askedVars > maxVars) notes.push(`yue2Variations ${askedVars} requested — this engine renders at most ${maxVars} variation(s) per song`);
-  const noiseSeedRaw = Number(params.yue2NoiseSeed);
-  const noise_seed = Number.isFinite(noiseSeedRaw) && noiseSeedRaw >= 0 ? Math.floor(noiseSeedRaw) : undefined;
+  const noiseSeedRaw = params.yue2NoiseSeed;
+  const noise_seed = yue2Seed(typeof noiseSeedRaw === 'number' ? Math.floor(noiseSeedRaw) : noiseSeedRaw);
 
   // LM tab: forward only what the UI actually sent (an untouched control is
   // absent), so the engine keeps its checkpoint value otherwise.
@@ -721,14 +720,14 @@ export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'a
 
 /** Plan attempt k's seed (k from 1): the base itself, then fixed steps from it
  *  (the engine's compose retries step the same way), within uint32. */
-export function yue2ReplanSeed(base: number, k: number): number {
+export function yue2ReplanSeed(base: Yue2Seed, k: number): number {
   return Number((BigInt(base) + 1000003n * BigInt(k - 1)) % 4294967296n);
 }
 
 async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
-    once: boolean; sheets: string[]; done: boolean; seedBase?: number;
+    once: boolean; sheets: string[]; done: boolean; seedBase?: Yue2Seed;
   };
   const pending: Pending[] = [];
   for (const m of members) {
@@ -771,7 +770,7 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
       const p = live[i];
       const k = nextAttempt.get(p) ?? p.m.autoReplan!.attempts.length + 1;
       nextAttempt.set(p, k + 1);
-      p.seedBase ??= typeof p.m.req.seed === 'number' && p.m.req.seed >= 0 ? p.m.req.seed : randomSeed();
+      p.seedBase ??= yue2Seed(p.m.req.seed) ?? randomSeed();
       return { p, seed: yue2ReplanSeed(p.seedBase, k) };
     });
     for (const p of live) {
@@ -860,8 +859,8 @@ function yue2SongEntries(p: Yue2PreparedJob): NonNullable<Yue2SynthRequest['song
     style: p.req.style,
     ...(p.req.lyrics ? { lyrics: p.req.lyrics } : {}),
     ...(p.req.abc ? { abc: p.req.abc } : {}),
-    ...(typeof p.req.seed === 'number' ? { seed: p.req.seed + i } : {}),
-    ...(typeof p.req.noise_seed === 'number' ? { noise_seed: p.req.noise_seed + i } : {}),
+    ...(p.req.seed !== undefined ? { seed: yue2SeedPlus(p.req.seed, i) } : {}),
+    ...(p.req.noise_seed !== undefined ? { noise_seed: yue2SeedPlus(p.req.noise_seed, i) } : {}),
   }));
 }
 
@@ -1056,7 +1055,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     // /yue2/synth answers with the job id and nothing else (#177). The seed and
     // the instrumental flag come from what we sent; a random seed (-1) is only
     // known once the job reports its tracks, and is recorded then.
-    const reqSeed = lead.req.seed ?? -1;
+    const reqSeed: Yue2Seed = lead.req.seed ?? -1;
     job.aceJobId = sub.job_id;   // standard /job id — /cancel/:id reaches it unchanged
     if (members.length > 1) {
       const entry = { engineJobId: sub.job_id, members: members.map((m, i) => ({ job: m.job, bits: songBits[i] })) };
@@ -1065,14 +1064,14 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       const early = entry.members.filter(e => (e.job.status as string) === 'cancelled').reduce((a, e) => a | e.bits, 0);
       if (early && !allCancelled()) await aceClient.dropSongs(sub.job_id, early).catch(() => {});
     }
-    if (reqSeed >= 0) {
+    if (Number(reqSeed) >= 0) {
       deps.attempt.effective.seed = reqSeed;
       job.params.seed = reqSeed;
       job.params.randomSeed = false;
     }
     log('INFO', `[YuE2] Job ${sub.job_id} submitted — cot=${req.cot}, ode_steps=${req.ode_steps}, `
       + `cfg=${req.cfg_scale ?? '(default)'}, vae=${req.vae_variant}, `
-      + `seed ${reqSeed >= 0 ? reqSeed : 'random'}${lead.req.lyrics ? '' : ', instrumental'}`);
+      + `seed ${Number(reqSeed) >= 0 ? reqSeed : 'random'}${lead.req.lyrics ? '' : ', instrumental'}`);
 
     // ── Progress ticker ──
     // No /yue2/job route exists (docs/plans/yue2/06-engine-port-plan.md §7
@@ -1249,7 +1248,7 @@ async function finishYue2Job(
       if (eosStages.length) log('INFO', `[YuE2] Stages reaching their own terminator: ${eosStages.join(', ')}`);
     }
     const resolvedSeed = trackDetails[0]?.seed;
-    if (typeof resolvedSeed === 'number' && resolvedSeed >= 0) {
+    if (resolvedSeed !== undefined && Number(resolvedSeed) >= 0) {
       if (p.attempt) p.attempt.effective.seed = resolvedSeed;
       job.params.seed = resolvedSeed;
       job.params.randomSeed = false;
@@ -1548,7 +1547,7 @@ async function finishYue2Job(
 
 export interface Yue2PlanPreview {
   abc: string;
-  seed: number;
+  seed: Yue2Seed;
   end_reason: string;
   stage_end_reasons?: Yue2FinalDetail['stage_end_reasons'];
   health: Yue2ScoreHealth;

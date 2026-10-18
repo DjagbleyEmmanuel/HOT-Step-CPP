@@ -28,7 +28,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
 import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
-import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './backends/yue2/client.js';
+import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed } from './backends/yue2/client.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
@@ -67,7 +67,7 @@ export interface Yue2Take {
   /** The occurrences it composed, plan indexes, 0-based and inclusive. */
   from: number;
   to: number;
-  seed: number;
+  seed: Yue2Seed;
   /** Played through /audio. */
   audioUrl: string;
   frames: number;
@@ -474,11 +474,11 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
 }
 
 /** Validate every track before any take is saved. Parts follow track order. */
-export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts: Buffer[]): Array<{ seed: number; ids: number[]; wav: Buffer }> {
+export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts: Buffer[]): Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer }> {
   if (tracks.length !== seeds.length || parts.length !== tracks.length) {
     throw new Error(`YuE2 take chunk expected ${seeds.length} tracks, received ${tracks.length} metadata rows and ${parts.length} audio parts. No takes saved.`);
   }
-  const mapped: Array<{ seed: number; ids: number[]; wav: Buffer }> = [];
+  const mapped: Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer }> = [];
   for (let i = 0; i < tracks.length; i++) {
     const track = tracks[i];
     if (!Number.isInteger(track.song) || track.song < 0 || track.song >= seeds.length || mapped[track.song]

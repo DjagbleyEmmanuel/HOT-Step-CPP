@@ -369,8 +369,9 @@ static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request 
             yyjson_mut_val * o = yyjson_mut_obj(doc);
             yyjson_mut_obj_add_int(doc, o, "song", tr.song);
             yyjson_mut_obj_add_int(doc, o, "variation", tr.variation);
-            yyjson_mut_obj_add_uint(doc, o, "seed", tr.seed);
-            yyjson_mut_obj_add_uint(doc, o, "noise_seed", tr.noise_seed);
+            // Decimal strings: a uint64 past 2^53 does not survive the Node side's JSON.parse.
+            yyjson_mut_obj_add_strcpy(doc, o, "seed", std::to_string(tr.seed).c_str());
+            yyjson_mut_obj_add_strcpy(doc, o, "noise_seed", std::to_string(tr.noise_seed).c_str());
             yyjson_mut_obj_add_strcpy(doc, o, "end_reason", tr.end_reason.c_str());
             yyjson_mut_obj_add_int(doc, o, "frames", (int) tr.total_frames);
             const std::string sr = stage_reasons_json(tr);

@@ -49,6 +49,17 @@ const TIMEOUT_PROPS = 2_500;
 const TIMEOUT_QUICK = 15_000;   // synth submit, warm, unload, select-model
 /** An unload or a weight change waits engine-side for every render already on
  *  the NAR lane (#204), each up to a few minutes. Long enough for a full queue. */
+/** A uint64 seed, exact: a Number while it is a safe integer, else its decimal string
+ *  (JSON.parse/JS arithmetic round past 2^53; the engine takes either form). */
+export type Yue2Seed = number | string;
+export function yue2Seed(v: unknown): Yue2Seed | undefined {
+  if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return Number.isSafeInteger(v) ? v : String(BigInt(v));
+  if (typeof v !== 'string' || !/^\d{1,20}$/.test(v)) return undefined;
+  const b = BigInt(v);
+  return b > 0xFFFFFFFFFFFFFFFFn ? undefined : b <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(b) : b.toString();
+}
+export const yue2SeedPlus = (s: Yue2Seed, n: number): Yue2Seed => yue2Seed((BigInt(s) + BigInt(n)).toString())!;
+
 export const TIMEOUT_DRAIN = 30 * 60_000;
 
 // ── Wire shapes (mirrors engine/src/yue2/yue2-server.h, per the port plan) ──
@@ -252,7 +263,7 @@ export interface Yue2SynthRequest {
   /** Recompose on a composer runaway (semantic stage at its cap): new seed,
    *  up to this many extra tries, before the NAR runs. 0/absent = off. */
   semantic_retries?: number;
-  seed?: number;
+  seed?: Yue2Seed;
   /** Optional override; unset = mode-dependent engine default
    *  (1.01 for cot=off, 1.0 otherwise, per protocol.py's own SongRequest). */
   cfg_scale?: number;
@@ -286,11 +297,11 @@ export interface Yue2SynthRequest {
    *  seeds; everything else comes from the request. Sets the batch size
    *  (1..props.max_lm_batch) and replaces style/lyrics/abc/seed/noise_seed.
    *  Not combinable with lm_batch_size > 1. Tracks come back song-major. */
-  songs?: Array<{ style: string; lyrics?: string; abc?: string; seed?: number; noise_seed?: number }>;
+  songs?: Array<{ style: string; lyrics?: string; abc?: string; seed?: Yue2Seed; noise_seed?: Yue2Seed }>;
   /** Noise variations per song (NAR noise seeds noise_seed+j), 1..props.max_synth_batch. Omitted at 1. */
   synth_batch_size?: number;
   /** NAR noise seed; defaults to `seed`. Set from a track's echoed noise_seed to replay one variation. */
-  noise_seed?: number;
+  noise_seed?: Yue2Seed;
   /** LM tab: per-stage sampler overrides. Absent = the checkpoint's own
    *  yue2.sampling.<stage>.* value (props.sampling shows them). */
   plan_temperature?: number;
@@ -329,8 +340,8 @@ export interface Yue2StageDefaults {
 export interface Yue2TrackDetail {
   song: number;
   variation: number;
-  seed: number;
-  noise_seed: number;
+  seed: Yue2Seed;
+  noise_seed: Yue2Seed;
   end_reason?: Yue2JobEndReason;
   frames?: number;
   stage_end_reasons?: Partial<Record<'plan' | 'semantic' | 'nar' | 'vae', Yue2StageEndReason>>;
@@ -547,7 +558,10 @@ export async function yue2FinalDetail(jobId: string): Promise<Yue2FinalDetail> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return {};
-    return await res.json() as Yue2FinalDetail;
+    const detail = await res.json() as Yue2FinalDetail;
+    // The engine echoes seeds as decimal strings (a uint64 does not survive JSON.parse as a number).
+    for (const t of detail.tracks ?? []) { t.seed = yue2Seed(t.seed) ?? t.seed; t.noise_seed = yue2Seed(t.noise_seed) ?? t.noise_seed; }
+    return detail;
   } catch {
     return {};
   }

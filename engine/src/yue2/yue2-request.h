@@ -237,6 +237,44 @@ static bool yue2_req_num(yyjson_val * root, const char * key, double * out, bool
     return true;
 }
 
+// A uint64 seed, exact: a JSON non-negative integer, or a decimal string (the
+// Node side sends strings past 2^53, which a double cannot hold).
+static bool yue2_req_seed(yyjson_val * root, const char * key, uint64_t * out, bool * present, std::string * err) {
+    *present       = false;
+    yyjson_val * v = root ? yyjson_obj_get(root, key) : nullptr;
+    if (!v || yyjson_is_null(v)) {
+        return true;
+    }
+    if (yyjson_is_uint(v)) {
+        *out = yyjson_get_uint(v);
+    } else if (yyjson_is_str(v) && yyjson_get_len(v) > 0 && yyjson_get_len(v) <= 20) {
+        const char * s = yyjson_get_str(v);
+        uint64_t     n = 0;
+        for (size_t i = 0; i < yyjson_get_len(v); i++) {
+            const unsigned d = (unsigned char) s[i] - '0';
+            if (d > 9 || n > (UINT64_MAX - d) / 10) {
+                if (err) {
+                    *err = std::string("\"") + key + "\" must be a non-negative integer or decimal string";
+                }
+                return false;
+            }
+            n = n * 10 + d;
+        }
+        *out = n;
+    } else {
+        double d = 0.0;
+        if (!yyjson_is_num(v) || (d = yyjson_get_num(v)) < 0.0 || d != std::floor(d)) {
+            if (err) {
+                *err = std::string("\"") + key + "\" must be a non-negative integer or decimal string";
+            }
+            return false;
+        }
+        *out = (uint64_t) d;
+    }
+    *present = true;
+    return true;
+}
+
 static bool yue2_req_str(yyjson_val * root, const char * key, std::string * out, bool * present, std::string * err) {
     *present       = false;
     yyjson_val * v = root ? yyjson_obj_get(root, key) : nullptr;
@@ -385,12 +423,11 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
 
     double num = 0.0;
-    if (!yue2_req_num(root, "seed", &num, &present, err)) {
+    if (!yue2_req_seed(root, "seed", &out->seed, &present, err)) {
         yyjson_doc_free(doc);
         return false;
     }
     if (present) {
-        out->seed         = (uint64_t) num;
         out->seed_present = true;
     }
 
@@ -436,12 +473,11 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         }
     }
 
-    if (!yue2_req_num(root, "noise_seed", &num, &present, err)) {
+    if (!yue2_req_seed(root, "noise_seed", &out->noise_seed, &present, err)) {
         yyjson_doc_free(doc);
         return false;
     }
     if (present) {
-        out->noise_seed         = (uint64_t) num;
         out->noise_seed_present = true;
     }
     struct BatchField {
@@ -511,20 +547,18 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
                 yyjson_doc_free(doc);
                 return false;
             }
-            if (!yue2_req_num(sv, "seed", &num, &sp, err)) {
+            if (!yue2_req_seed(sv, "seed", &spec.seed, &sp, err)) {
                 yyjson_doc_free(doc);
                 return false;
             }
             if (sp) {
-                spec.seed         = (uint64_t) num;
                 spec.seed_present = true;
             }
-            if (!yue2_req_num(sv, "noise_seed", &num, &sp, err)) {
+            if (!yue2_req_seed(sv, "noise_seed", &spec.noise_seed, &sp, err)) {
                 yyjson_doc_free(doc);
                 return false;
             }
             if (sp) {
-                spec.noise_seed         = (uint64_t) num;
                 spec.noise_seed_present = true;
             }
             out->songs.push_back(std::move(spec));

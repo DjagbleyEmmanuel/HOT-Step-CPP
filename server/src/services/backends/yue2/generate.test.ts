@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { jobCover, mapYue2Params, yue2PlanMode } from './generate.js';
+import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
 
@@ -211,7 +212,7 @@ test('re-plan seeds follow from the job seed, so a pinned seed replays the same 
 test('a random seed is drawn exact (32 bits), so a take replays under the seed it recorded', () => {
   for (let i = 0; i < 200; i++) {
     const seed = mapYue2Params({ caption: 'folk', lyrics: 'la', randomSeed: true }, pick).req.seed!;
-    assert.ok(Number.isSafeInteger(seed) && seed >= 0);
+    assert.ok(Number.isSafeInteger(seed) && Number(seed) >= 0);
     assert.equal(Number(JSON.stringify({ seed }).match(/\d+/)![0]), seed);
   }
   assert.equal(mapYue2Params({ caption: 'folk', lyrics: 'la', seed: 12345 }, pick).req.seed, 12345);
@@ -226,4 +227,17 @@ test('the largest random seed stays exact after the engine derives from it (song
     const derived = BigInt(seed) + 1000003n * 100n + 64n;
     assert.equal(BigInt(JSON.parse(JSON.stringify({ s: Number(derived) })).s), derived);
   } finally { Math.random = real; }
+});
+
+test('a seed above 2^53 reaches the engine request as its exact decimal string', () => {
+  const big = '15213961153666092475';
+  const { req } = mapYue2Params({ caption: 'folk', lyrics: 'la', seed: big, yue2NoiseSeed: big }, pick);
+  assert.equal(req.seed, big);
+  assert.equal(req.noise_seed, big);
+  assert.match(JSON.stringify(req), /"seed":"15213961153666092475"/);
+  assert.equal(yue2SeedPlus(big, 3), '15213961153666092478');
+  assert.equal(yue2Seed(big), big);
+  assert.equal(yue2Seed('42'), 42);        // a safe value stays a plain number
+  assert.equal(yue2Seed(123456789), 123456789); // legacy numeric sessions
+  assert.equal(yue2Seed('18446744073709551616'), undefined); // past uint64
 });
