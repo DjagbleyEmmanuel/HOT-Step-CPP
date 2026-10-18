@@ -93,15 +93,19 @@ const label = (line: string) => (line.startsWith('%') ? line.slice(1).trim() : '
 /** Non-empty lyric blocks, as yue2Takes pairs them. */
 const sungBlocks = (lyrics: string) => splitLyricBlocks(lyrics).filter(block => block.body.trim());
 
-/** Each section's lyric block: the next unused one of its kind (yue2Takes' pairBlocks). */
+/** Each section's lyric block: the next unused tag of its kind, as a sung
+ *  block index, or null when that tag is empty or there is none. Empty tags
+ *  count, so of two intros the first takes Prepare's empty [Intro] and the
+ *  second its words, not the first both. */
 function pairSections(labels: string[], lyrics: string): Array<number | null> {
-  const blocks = sungBlocks(lyrics);
+  const blocks = splitLyricBlocks(lyrics);
+  const sung = blocks.filter(block => block.body.trim());
   let next = 0;
   return labels.map(name => {
     const at = blocks.findIndex((block, i) => i >= next && !!block.tag && sectionKind(block.tag) === sectionKind(name));
     if (at < 0) return null;
     next = at + 1;
-    return at;
+    return blocks[at].body.trim() ? sung.indexOf(blocks[at]) : null;
   });
 }
 

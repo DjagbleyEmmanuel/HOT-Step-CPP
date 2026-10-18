@@ -123,7 +123,7 @@ function load(id: string, userId: string): Stored {
   try { stored = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')); }
   catch { throw new TakesError('Build session not found', 404); }
   if (stored.userId !== userId) throw new TakesError('Build session not found', 404);
-  if (stored.version === BUILD_SESSION_VERSION) return stored;
+  if (stored.version === BUILD_SESSION_VERSION) return repaired(stored);
   // A session from before revisions: upgrade it once, on first open.
   let upgraded: Stored;
   try {
@@ -132,6 +132,16 @@ function load(id: string, userId: string): Stored {
   } catch (err) { throw new TakesError(`This build session cannot be opened: ${(err as Error).message}`, 409); }
   save(upgraded);
   return upgraded;
+}
+
+/** Sessions saved before empty tags counted in pairing (coverArrangement's
+ *  pairSections) read their sections' lyric blocks afresh. */
+function repaired(stored: Stored): Stored {
+  const fresh = sourceSections(stored.request.abc ?? '', stored.request.lyrics ?? '');
+  if (fresh.length === stored.arrangement.sections.length) {
+    stored.arrangement.sections = stored.arrangement.sections.map((s, i) => ({ ...s, lyricBlock: fresh[i].lyricBlock }));
+  }
+  return stored;
 }
 
 function save(stored: Stored): void {

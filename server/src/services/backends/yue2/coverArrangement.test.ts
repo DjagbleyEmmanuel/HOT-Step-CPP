@@ -135,6 +135,21 @@ test('kept text and offsets survive leaving the source order, with odd whitespac
   }
 });
 
+test('two sections of one kind pair with their own tags, the empty one included', () => {
+  // Prepare writes an empty tag for an instrumental section: the first intro
+  // is that one, the second intro sings.
+  const abc = ['X:1', 'M:4/4', 'L:1/16', 'Q:1/4=120', 'K:C', '% intro', 'V: Vocal', 'Z|', '% intro', 'V: Vocal', 'C16|',
+    '% verse', 'V: Vocal', 'c16|', ''].join('\n');
+  const text = '[Intro]\n\n[Intro]\nla la\n\n[Verse]\noh oh\n';
+  assert.deepEqual(sourceSections(abc, text).map(s => s.lyricBlock), [null, 0, 1]);
+  const chars = (o: ReturnType<typeof composeArrangement>) => o.occurrences.map(x => (x.lyric ? Array.from(o.lyrics).slice(...x.lyric).join('').trim() : null));
+  // Skipping the sung intro leaves its words out, not in the silent one.
+  const skip = composeArrangement(abc, text, [0, 2]);
+  assert.deepEqual(chars(skip), [null, '[Verse]\noh oh']);
+  assert.equal(skip.lyrics.includes('la la'), false);
+  assert.deepEqual(chars(composeArrangement(abc, text, [0, 1, 2])), [null, '[Intro]\nla la', '[Verse]\noh oh']);
+});
+
 test('an unsung section moved before a sung one of its kind breaks re-pairing the text', () => {
   const abc = ['X:1', 'M:4/4', 'L:1/16', 'Q:1/4=120', 'K:C', '% verse', 'V: Vocal', 'C16|',
     '% chorus', 'V: Vocal', 'c16|', '% chorus', 'V: Vocal', 'Z|', ''].join('\n');
