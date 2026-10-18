@@ -39,7 +39,7 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { exportPrepare, structureHash } from '../../utils/yue2Prepare';
+import { exportPrepare, structureHash, type PrepareV2 } from '../../utils/yue2Prepare';
 import { normalizeAbc } from '../../../../server/src/contracts/yue2Prepare';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
@@ -57,7 +57,7 @@ import { MusicXmlImport } from './MusicXmlImport';
 import { PrepareStructure } from './PrepareStructure';
 import type { ScoreRange } from './prepareView';
 import { PrepareLyrics } from './PrepareLyrics';
-import { useYue2Prepare } from './useYue2Prepare';
+import { useYue2Prepare, PREPARE_DRAFT_KEY, type PrepareCut } from './useYue2Prepare';
 import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
@@ -246,8 +246,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const activeSection = activeSectionOf?.abc === sheetAbc ? activeSectionOf.index : null;
   // Prepare's selection and playback in the score view (Hear score).
   const [scoreHighlight, setScoreHighlight] = useState<[number, number] | null>(null);
-  const [scorePlay, setScorePlay] = useState<{ range: ScoreRange } | null>(null);
+  const [scorePlay, setScorePlay] = useState<{ range: ScoreRange | null } | null>(null);
   const [scorePlaying, setScorePlaying] = useState(false);
+  // Every start of the score player, so the recording can be silenced by any of them.
+  const [scoreStarts, setScoreStarts] = useState(0);
+  const onScorePlaying = (playing: boolean) => { setScorePlaying(playing); if (playing) setScoreStarts(n => n + 1); };
+  // A new object each call, so asking to stop is acted on even when nothing was playing from a range.
+  const playScore = (range: ScoreRange | null) => setScorePlay({ range });
   const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
   // ½×/2× on the score tempo, for when the transcriber counted half or double time.
   const [scoreTempoScale, setScoreTempoScale] = useState(() => restore('scoreTempoScale', { abc: '', factor: 1 }));
@@ -287,11 +292,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const prep = useYue2Prepare({ sourceKey, abc: sheetAbc, lyrics,
     hasRecording: sourceMode === 'audio' && !!sourceAudioUrl });
   const docAbc = prep.doc.abc;
+  // A transcription result becomes the score only when it arrives: a retry that fails or is cancelled
+  // leaves the current preparation alone. A different score replaces the document (recoverable below)
+  // and needs approving again; the same one changes nothing.
+  const acceptTranscript = (abc: string, sections: Yue2ScoreSection[]) => {
+    if (normalizeAbc(abc) !== docAbc) setApprovedSheet(null);
+    setSheetAbc(abc); setScoreSections(sections);
+  };
+  // The preparation a replacing score pushed aside, to bring back.
+  const [replaced, setReplaced] = useState<{ doc: PrepareV2; cuts: PrepareCut[]; sourceKey: string } | null>(null);
   const lastDocAbc = useRef(docAbc);
   const pendingDraft = useRef<Record<string, unknown> | null>(null);
   useEffect(() => {
     // A score from outside the document replaces it; sheetAbc and the document already agree otherwise.
     if (normalizeAbc(sheetAbc) === docAbc) return;
+    if (sheetAbc.trim() && docAbc) setReplaced({ doc: prep.doc, cuts: prep.cuts, sourceKey });
     prep.restoreDraft({}, { sourceKey, abc: sheetAbc, lyrics });
   }, [sheetAbc]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -344,7 +359,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!result) return;
     setSheetJob(result.job ?? null);
     if (result.job?.status === 'done') {
-      setSheetAbc(result.abc || ''); setScoreSections(result.sections || []);
+      acceptTranscript(result.abc || '', result.sections || []);
       setSheetJobId(''); sheetJobRef.current = '';
     } else if (result.job?.status === 'failed' || result.job?.status === 'cancelled') {
       setSheetError(result.job.error || `Transcription ${result.job.status}`);
@@ -928,7 +943,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const key = sourceKey;
     const request = ++sheetRequestRef.current;
     let workflowId = '';
-    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSheetPreparing(true);
+    setSheetError(''); setSheetPreparing(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
         const { job } = await coverWorkflowApi.transcribe(token, coverDraftId, coverDraftRevision, !!sheetAbc);
@@ -939,10 +954,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
         const result = done.result as CoverDraftResult;
         setCoverDraftRevision(result.revision);
-        setSheetAbc(result.abc || '');
+        acceptTranscript(result.abc || '', []);
         setSheetScoreSource(result.scoreSource === 'dataset' ? 'dataset' : null);
         setSheetAudioUrl(sourceAudioUrl);
-        setScoreSections([]);
         return;
       }
       const source = await prepareYue2Source();
@@ -955,7 +969,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       setSheetAudioUrl(source.audioUrl);
       if (result.jobId) { sheetJobRef.current = result.jobId; setSheetJobId(result.jobId); }
       else if (result.abc) {
-        setSheetAbc(result.abc); setScoreSections(result.sections || []);
+        acceptTranscript(result.abc, result.sections || []);
         setSheetScoreSource(result.scoreSource === 'dataset' ? 'dataset' : null);
       }
     } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
@@ -1770,9 +1784,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                 <button type="button" onClick={() => void handleApproveSheet()} disabled={sheetPreparing || !sheetAbc.trim()}
                   title={t('cover.prepare.approveInfo')} className="ml-2 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{t('cover.prepare.approve')}</button>}
             </div>
+            {replaced && replaced.sourceKey === sourceKey && <p role="status" className="flex flex-wrap items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
+              {t('cover.prepare.replaced')}
+              <button type="button" className="text-cyan-700 dark:text-cyan-300" onClick={() => {
+                prep.restoreDraft({ [PREPARE_DRAFT_KEY]: replaced.doc, 'cover-studio-scoreCuts': replaced.cuts, 'cover-studio-sheetAbc': replaced.doc.abc,
+                  'cover-studio-lyrics': lyrics }, { sourceKey, abc: replaced.doc.abc, lyrics });
+                setReplaced(null);
+              }}>{t('cover.prepare.restore')}</button>
+              <button type="button" className="text-zinc-500" onClick={() => setReplaced(null)}>{t('cover.prepare.dismiss')}</button>
+            </p>}
             {prep.step === 'structure'
               ? <PrepareStructure prep={prep} sourceAudioUrl={sourceMode === 'audio' ? sourceAudioUrl : ''} scorePlaying={scorePlaying}
-                onPlayScore={range => setScorePlay(range ? { range } : null)} onHighlight={setScoreHighlight}
+                onPlayScore={playScore} scoreStarts={scoreStarts} onHighlight={setScoreHighlight}
                 onConfirmed={() => void handleApproveSheet()}>
                 {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
                   <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
@@ -1802,7 +1825,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               : <PrepareLyrics prep={prep} lyrics={lyrics} wide={scoreWidth > 560}
                 onLyricsText={value => { lyricEditRef.current++; setLyrics(value); setLyricsSource(null); }}
                 suggest={suggestAssignments} scorePlaying={scorePlaying} activeSection={activeSection}
-                onPlayScore={range => setScorePlay(range ? { range } : null)} />}
+                onPlayScore={playScore} />}
           </div>}
           {/* In-page, not window.confirm: a native dialog stalls browser automation. */}
           <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
@@ -1821,7 +1844,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             readOnly={!(prep.editingStructure && prep.step === 'structure')}
             onMoveSection={(index, bar) => { prep.applyStructuralOp({ kind: 'move', index, bar }); }}
             highlightBars={prep.step === 'structure' ? scoreHighlight : null}
-            play={scorePlay} onPlaying={setScorePlaying}
+            play={scorePlay} onPlaying={onScorePlaying}
             scoreSource={sheetScoreSource} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet}
           />}

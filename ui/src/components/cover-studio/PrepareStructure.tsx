@@ -15,7 +15,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { AbcChart } from './AbcChart';
-import { barTimes, clock, sectionSpans, shortBars, spanBars, spanName, spanSeconds, type Prepare, type ScoreRange } from './prepareView';
+import { barTimes, clock, createPlaybackOwner, sectionSpans, shortBars, spanBars, spanName, spanSeconds, type Prepare, type ScoreRange } from './prepareView';
 
 
 const clockText = (seconds: number | null) => seconds === null ? '?' : clock(seconds);
@@ -28,6 +28,9 @@ interface Props {
   /** The recording, for Hear recording; empty for a MusicXML source. */
   sourceAudioUrl: string;
   scorePlaying: boolean;
+  /** Counts every start of the score player, including the embedded player's own play button. */
+  scoreStarts: number;
+  /** Plays the range; null stops the score player however it was started. */
   onPlayScore: (range: ScoreRange | null) => void;
   /** The selected bars, for the score view to light up. */
   onHighlight: (bars: [number, number] | null) => void;
@@ -37,7 +40,7 @@ interface Props {
   children?: React.ReactNode;
 }
 
-export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scorePlaying, onPlayScore, onHighlight, onConfirmed, children }) => {
+export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scorePlaying, scoreStarts, onPlayScore, onHighlight, onConfirmed, children }) => {
   const { t } = useTranslation();
   const { doc } = prep;
   const editing = prep.editingStructure && prep.step === 'structure';
@@ -146,11 +149,17 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
   };
   const fixShort = (n: number) => change({ from: String(n), to: String(n), bar: String(n) });
 
-  // ── Playback: never the recording and the score together ──
+  // ── Playback: one source at a time, whoever starts it ──
   const [loop, setLoop] = useState(false);
   const [hearing, setHearing] = useState(false);
   const audio = useRef<HTMLAudioElement>(null);
-  const stopRecording = () => { audio.current?.pause(); setHearing(false); };
+  const stops = useRef({ recording: () => {}, score: () => {} });
+  useEffect(() => { stops.current = { recording: () => audio.current?.pause(), score: () => onPlayScore(null) }; });
+  const owner = useMemo(() => createPlaybackOwner({ recording: () => stops.current.recording(), score: () => stops.current.score() }), []); // eslint-disable-line react-hooks/refs -- the callbacks only run from events
+  // The embedded score player starting (its own play button included) silences the recording;
+  // the score going quiet gives up its claim.
+  useEffect(() => { if (scoreStarts) owner.start('score'); }, [scoreStarts, owner]);
+  useEffect(() => { if (!scorePlaying) owner.ended('score'); }, [scorePlaying, owner]);
   useEffect(() => () => { audio.current?.pause(); }, []);
   // One bar before the selection, to the end of it; null when the clock does not reach the selected bars.
   const lead = bars ? spanSeconds(clockMap, bars[0], bars[0]) : null;
@@ -161,18 +170,17 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
     const timer = setInterval(() => {
       const a = audio.current;
       if (!a) return;
-      if (a.ended || a.currentTime >= window_.to) { if (loop) a.currentTime = window_.from; else stopRecording(); }
+      if (a.ended || a.currentTime >= window_.to) { if (loop) a.currentTime = window_.from; else a.pause(); }
     }, 60);
     return () => clearInterval(timer);
   }, [hearing, loop, window_?.from, window_?.to]); // eslint-disable-line react-hooks/exhaustive-deps
   const hearRecording = () => {
     if (!audio.current || !window_) return;
-    onPlayScore(null);
     audio.current.currentTime = window_.from;
-    void audio.current.play().then(() => setHearing(true)).catch(e => fail(String(e?.message ?? e)));
+    void audio.current.play().catch(e => fail(String(e?.message ?? e)));
   };
-  const hearScore = () => { if (bars) { stopRecording(); onPlayScore({ from: bars[0], to: bars[1], loop }); } };
-  const stop = () => { stopRecording(); onPlayScore(null); };
+  const hearScore = () => { if (bars) { owner.start('score'); onPlayScore({ from: bars[0], to: bars[1], loop }); } };
+  const stop = () => { audio.current?.pause(); onPlayScore(null); };
 
   const confirmDisabled = !editing || typeof spans === 'string';
   const doConfirm = () => { if (prep.confirmStructure()) { setMessage(''); onConfirmed(); } };
@@ -233,7 +241,10 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
             info={t('cover.prepare.structure.loopInfo')} />
         </div>
         <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.approx')}</p>
-        {sourceAudioUrl && <audio ref={audio} src={sourceAudioUrl} preload="auto" className="hidden" onEnded={() => setHearing(false)} />}
+        {sourceAudioUrl && <audio ref={audio} src={sourceAudioUrl} preload="auto" className="hidden"
+          onPlay={() => { owner.start('recording'); setHearing(true); }}
+          onPause={() => { owner.ended('recording'); setHearing(false); }}
+          onEnded={() => { owner.ended('recording'); setHearing(false); }} />}
       </div>}
 
       {/* Edits */}

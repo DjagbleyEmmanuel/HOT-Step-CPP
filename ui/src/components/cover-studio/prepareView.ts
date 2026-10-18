@@ -88,3 +88,44 @@ export function shortBars(abc: string): number[] {
   const usual = [...count].sort((a, b) => b[1] - a[1])[0][0];
   return meters.flatMap((m, i) => i > 0 && i < meters.length - 1 && length(m) < length(usual) - 1e-9 ? [i + 1] : []);
 }
+
+// ── Playback ──
+
+/** The slice of abcjs's SynthController the score view drives. At runtime
+ *  `pause()` leaves `isStarted` set (only `play()` flips it) and the real
+ *  "sounding" flag is the timer's `isRunning`; none of these are in abcjs's typings. */
+export interface AbcPlayer {
+  isStarted: boolean;
+  timer?: { isRunning: boolean };
+  play(): Promise<unknown>;
+  seek(position: number, units: 'seconds'): void;
+}
+
+export const isSounding = (player: AbcPlayer) => player.isStarted && !!player.timer?.isRunning;
+
+/** Stops a sounding player by toggling it off, which leaves it ready for a fresh start. */
+export async function stopPlayer(player: AbcPlayer) {
+  if (isSounding(player)) await player.play();
+}
+
+/** Starts the player, or resumes one that was paused (still `isStarted`, timer idle: toggle off, then on). */
+export async function startPlayer(player: AbcPlayer) {
+  if (isSounding(player)) return;
+  if (player.isStarted) await player.play();
+  await player.play();
+}
+
+/** One thing sounds at a time, the source recording or the score. `start`
+ *  silences the other; `ended` clears the claim when the owner stops by itself. */
+export type PlaybackSource = 'recording' | 'score';
+export function createPlaybackOwner(stop: Record<PlaybackSource, () => void>) {
+  let owner: PlaybackSource | null = null;
+  return {
+    get current() { return owner; },
+    start(next: PlaybackSource) {
+      if (owner && owner !== next) stop[owner]();
+      owner = next;
+    },
+    ended(source: PlaybackSource) { if (owner === source) owner = null; },
+  };
+}

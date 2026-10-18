@@ -8,7 +8,7 @@ import { withChoirVocal } from '../../utils/abcChoirVocal';
 import { barAtChar, barRanges } from '../../utils/abcSectionMove';
 import { AbcChart } from './AbcChart';
 import { MusicXmlImport } from './MusicXmlImport';
-import type { ScoreRange } from './prepareView';
+import { startPlayer, stopPlayer, type AbcPlayer, type ScoreRange } from './prepareView';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
 interface Props {
@@ -37,9 +37,9 @@ interface Props {
   onMoveSection: (index: number, bar: number) => void;
   /** The bars (1-based, inclusive) selected in Prepare's strip, drawn highlighted. */
   highlightBars: [number, number] | null;
-  /** Play these bars; a new object each time, so the same range plays again.
-   *  Null stops. */
-  play: { range: ScoreRange } | null;
+  /** Play these bars, or (range null) stop the player however it was started.
+   *  A new object each time, so the same request is acted on again. */
+  play: { range: ScoreRange | null } | null;
   /** Whether a range started by `play` is sounding. */
   onPlaying: (playing: boolean) => void;
   /** The score section now playing or just picked. */
@@ -183,7 +183,8 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     onPlayingRef.current = p.onPlaying; readOnlyRef.current = p.readOnly;
   });
   useEffect(() => {
-    if (p.play) void playRangeRef.current(p.play.range); else stopRangeRef.current();
+    if (!p.play) return;
+    if (p.play.range) void playRangeRef.current(p.play.range); else stopRangeRef.current();
   }, [p.play]);
   // The selected bars: each bar's nodes are collected when the score renders.
   const applyHighlightRef = useRef<() => void>(() => {});
@@ -293,10 +294,12 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     };
     // Hear score: play from the range's first bar and stop (or loop) when a note past its last bar begins.
     let range: ScoreRange | null = null;
+    const player = () => control as unknown as AbcPlayer | null;
+    // Stops whatever the player is doing, a range or the embedded player's own play.
     const endRange = () => {
-      if (!range) return;
       range = null;
-      try { control?.pause(); } catch { /* the player was never started */ }
+      const current = player();
+      if (current) void stopPlayer(current);
       onPlayingRef.current(false);
     };
     playRangeRef.current = async next => {
@@ -311,13 +314,11 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     const seekTo = async (start: TimingEvent, index: number) => {
       if (index >= 0) onSectionRef.current?.(index);
       followNoteInBox(start.elements?.[0]?.[0], box);
-      if (!control) return;
-      // seek() only moves a player that has started; play() toggles, so it
-      // must not run on one that is already playing. Both seek and isStarted
-      // exist at runtime (synth-controller.js) but not in abcjs's typings.
-      const player = control as unknown as { isStarted: boolean; play(): Promise<unknown>; seek(position: number, units: 'seconds'): void };
-      if (!player.isStarted) await player.play();
-      player.seek(start.milliseconds / 1000, 'seconds');
+      const current = player();
+      if (!current) return;
+      // seek() only moves a player that is sounding; a stopped or paused one is started first.
+      await startPlayer(current);
+      current.seek(start.milliseconds / 1000, 'seconds');
     };
     if (!audioRef.current || !abcjs.synth.supportsAudio()) return;
     const synth = control = new abcjs.synth.SynthController();
@@ -325,7 +326,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     const marks = abcSectionMarks(abc);
     let section = -1, playingNow: number | null = null;
     synth.load(audioRef.current, {
-      onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
+      onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; onPlayingRef.current(true); },
       onEvent(ev: { elements?: Element[][]; startCharArray?: number[] }) {
         const char = ev.startCharArray?.find(value => typeof value === 'number');
         const index = char === undefined ? -1 : sectionAtChar(marks, char);

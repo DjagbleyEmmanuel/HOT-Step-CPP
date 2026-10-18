@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mergeScoreSections } from '../../utils/abcSectionMove';
-import { barTimes, clock, sectionSpans, shortBars, spanName } from './prepareView';
+import { barTimes, clock, createPlaybackOwner, sectionSpans, shortBars, spanName, startPlayer, stopPlayer, type AbcPlayer } from './prepareView';
 
 const HEADER = ['X:1', 'T:', 'M:4/4', 'L:1/32', 'Q:1/4=120',
   'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"', 'V: Ins clef=treble name="Ins Melody" snm="Inst."', 'K:C#m'];
@@ -54,4 +54,58 @@ test('short bars: interior bars shorter than the usual one, never the first or l
 test('clock formats minutes and seconds', () => {
   assert.equal(clock(0), '0:00');
   assert.equal(clock(65.9), '1:05');
+});
+
+// abcjs's controller as it behaves at runtime: play() toggles isStarted and the timer, pause() (the embedded
+// player's own pause button) stops the timer but leaves isStarted set.
+const fakePlayer = () => {
+  const log: string[] = [];
+  const player = {
+    isStarted: false, timer: { isRunning: false }, log,
+    async play() { player.isStarted = !player.isStarted; player.timer.isRunning = player.isStarted; log.push(player.isStarted ? 'play' : 'pause'); },
+    seek(position: number) { log.push(`seek ${position}`); },
+    pauseFromControls() { player.timer.isRunning = false; },
+  };
+  return player satisfies AbcPlayer & Record<string, unknown>;
+};
+const hear = async (player: ReturnType<typeof fakePlayer>, at: number) => { await startPlayer(player); player.seek(at, 'seconds'); };
+
+test('Hear score, Stop, Hear score sounds again (the player is toggled off, not just paused)', async () => {
+  const player = fakePlayer();
+  await hear(player, 4);
+  assert.equal(player.timer.isRunning, true);
+  await stopPlayer(player);
+  assert.equal(player.timer.isRunning, false);
+  assert.equal(player.isStarted, false);
+  await hear(player, 4);
+  assert.equal(player.timer.isRunning, true, 'the second Hear score is audible');
+  assert.deepEqual(player.log, ['play', 'seek 4', 'pause', 'play', 'seek 4']);
+});
+
+test('a player paused from its own controls is resumed by the next Hear score, and a sounding one is not toggled', async () => {
+  const player = fakePlayer();
+  await hear(player, 0);
+  player.pauseFromControls();
+  assert.equal(player.isStarted, true);
+  await hear(player, 8);
+  assert.equal(player.timer.isRunning, true);
+  const before = player.log.length;
+  await hear(player, 12);
+  assert.deepEqual(player.log.slice(before), ['seek 12'], 'seeking a sounding player does not toggle it');
+  await stopPlayer(fakePlayer());
+});
+
+test('one source at a time, in both directions, however the score was started', () => {
+  const calls: string[] = [];
+  const owner = createPlaybackOwner({ recording: () => calls.push('pause recording'), score: () => calls.push('stop score') });
+  owner.start('score');            // the embedded player's play button
+  owner.start('recording');        // then Hear recording
+  assert.deepEqual(calls, ['stop score']);
+  owner.start('score');            // the embedded player starts during the recording
+  assert.deepEqual(calls, ['stop score', 'pause recording']);
+  owner.ended('score');
+  owner.start('score');
+  assert.deepEqual(calls, ['stop score', 'pause recording'], 'nothing else to silence once the score gave up its claim');
+  owner.ended('recording');        // a stale end from the other source changes nothing
+  assert.equal(owner.current, 'score');
 });

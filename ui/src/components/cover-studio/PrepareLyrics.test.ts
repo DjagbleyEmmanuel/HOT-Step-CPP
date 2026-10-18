@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createYue2Prepare } from './useYue2Prepare';
+import { createYue2Prepare, PREPARE_DRAFT_KEY } from './useYue2Prepare';
 import { PrepareLyrics } from './PrepareLyrics';
 import { PrepareStructure } from './PrepareStructure';
 import type { Prepare } from './prepareView';
@@ -75,4 +75,37 @@ test('an editing structure locks the lyrics view', () => {
   assert.ok(c.beginStructureEdit());
   const out = html(c, 'lyrics');
   assert.match(out, /cover\.prepare\.lyrics\.needStructure/);
+});
+
+test('a score that replaces the preparation can be undone: the previous document comes back whole', () => {
+  const c = createYue2Prepare({ sourceKey: 'k', abc: ABC, lyrics: PASTE });
+  assert.ok(c.confirmStructure());
+  const [verse] = c.getSnapshot().doc.blocks;
+  const ids = c.getSnapshot().doc.sectionIds;
+  assert.ok(c.applyLyricOp({ kind: 'assign', blockId: verse.id, sectionId: ids[1] }));
+  const before = c.getSnapshot();
+  // What CoverStudio does when a new score arrives: set the old document aside, then reseed.
+  const aside = { doc: before.doc, cuts: before.cuts };
+  const other = ABC.replace('% verse', '% bridge');
+  assert.ok(c.restoreDraft({}, { sourceKey: 'k', abc: other, lyrics: PASTE }));
+  assert.notEqual(c.getSnapshot().doc.abc, before.doc.abc);
+  assert.deepEqual(c.getSnapshot().doc.assignments, {});
+  // Restore brings back the sections, the assignment, the confirmation and the cuts.
+  assert.ok(c.restoreDraft({ [PREPARE_DRAFT_KEY]: aside.doc, 'cover-studio-scoreCuts': aside.cuts, 'cover-studio-sheetAbc': aside.doc.abc },
+    { sourceKey: 'k', abc: aside.doc.abc, lyrics: PASTE }));
+  assert.deepEqual(c.getSnapshot().doc, before.doc);
+  assert.deepEqual(c.getSnapshot().cuts, before.cuts);
+});
+
+test('a retry that never produces a score leaves the preparation as it was', () => {
+  const c = createYue2Prepare({ sourceKey: 'k', abc: ABC, lyrics: PASTE });
+  assert.ok(c.confirmStructure());
+  const ids = c.getSnapshot().doc.sectionIds;
+  assert.ok(c.applyLyricOp({ kind: 'instrumental', sectionId: ids[0] }));
+  const snapshot = c.getSnapshot();
+  // Failed and cancelled transcriptions never reach restoreDraft (the score only changes on success),
+  // so the document, its confirmation and its undo history are untouched.
+  assert.equal(c.getSnapshot(), snapshot);
+  assert.ok(c.canUndo);
+  assert.equal(c.getSnapshot().doc.confirmed.structure !== null, true);
 });
