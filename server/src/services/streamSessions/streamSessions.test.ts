@@ -170,7 +170,8 @@ test('session cap evicts the oldest ended session; idle and ended sessions expir
     assert.ok(c);
     assert.throws(() => sessions.get(a.id), /not found/);
     assert.equal(sessions.open('storm', { streamId: 'd' }), null, 'all live: no session, stream still plays');
-    await new Promise(r => setTimeout(r, 20));
+    // dispose() deletes fire-and-forget behind pending writes: poll, don't guess
+    for (const end = Date.now() + 2000; fs.readdirSync(dir).length && Date.now() < end;) await new Promise(r => setTimeout(r, 10));
     assert.deepEqual(fs.readdirSync(dir), [], 'evicted recording deleted');
 
     clock.t = 5003;
