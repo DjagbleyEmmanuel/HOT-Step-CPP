@@ -267,6 +267,7 @@ test('planning keeps a pinned uint64 seed: engine plan request, then the render 
     assert.equal(sent[0].songs[0].seed, big, `plan request, autoReplan ${yue2AutoReplan}`);
     assert.equal(m.req.seed, big, `render request, autoReplan ${yue2AutoReplan}`);
   }
+});
 
 test('YuE2 stage reads "Loading ..." while the model loads, then the progress stage takes over', () => {
   const submitStage = (gen as any).YUE2_LOADING_STAGE;
