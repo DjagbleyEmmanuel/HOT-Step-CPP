@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
+import { useTranslation } from 'react-i18next';
 import { followNoteInBox } from '../../utils/abcFollow';
 import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
 import { withChoirVocal } from '../../utils/abcChoirVocal';
-import { barAtChar, barRanges, moveSectionStart } from '../../utils/abcSectionMove';
+import { barAtChar, barRanges } from '../../utils/abcSectionMove';
 import { AbcChart } from './AbcChart';
 import { MusicXmlImport } from './MusicXmlImport';
+import type { ScoreRange } from './prepareView';
 import type { Yue2CoverJob, Yue2CoverReadiness } from '../../services/yue2CoverApi';
 
 interface Props {
@@ -22,14 +24,24 @@ interface Props {
   abc: string;
   sourceKey: string;
   scoreSource?: 'dataset' | null;
+  /** The confirmed score has been approved for rendering. */
   approved: boolean;
+  /** One edit of the score: the Apply button of the ABC text, a chart edit or an import. */
   onAbcChange: (value: string) => void;
   onTranscribe: () => void;
   onCancel: () => void;
-  onApprove: () => void;
-  /** Play from this score section; a new object each click, so a repeat
-   *  click on the same section plays it again. */
-  seekSection?: { index: number } | null;
+  /** The score is locked (Prepare's lyrics step, or a confirmed structure):
+   *  no ABC, chart or import edits and no dragging a section marker. */
+  readOnly: boolean;
+  /** A section marker dropped on a bar. */
+  onMoveSection: (index: number, bar: number) => void;
+  /** The bars (1-based, inclusive) selected in Prepare's strip, drawn highlighted. */
+  highlightBars: [number, number] | null;
+  /** Play these bars; a new object each time, so the same range plays again.
+   *  Null stops. */
+  play: { range: ScoreRange } | null;
+  /** Whether a range started by `play` is sounding. */
+  onPlaying: (playing: boolean) => void;
   /** The score section now playing or just picked. */
   onSection?: (index: number) => void;
 }
@@ -42,9 +54,10 @@ type TimingEvent = InstanceType<typeof abcjs.TimingCallbacks>['noteTimings'][num
  *  Sections come from the ABC's `%Label` lines by character offset, the same
  *  offsets abcjs records on each element, so multi-bar rests (Z4) and the
  *  interleaved Vocal/Ins voices need no bar counting. Returns each section's
- *  first timed event, the seek target, or null for a section with no notes. */
+ *  first timed event, the seek target, or null for a section with no notes.
+ *  Without `onMove` (a locked score) a label only plays. */
 function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index: number) => void,
-  onMove: (index: number, bar: number) => void): Array<TimingEvent | null> {
+  onMove: ((index: number, bar: number) => void) | null): Array<TimingEvent | null> {
   const marks = abcSectionMarks(abc);
   if (!marks.length) return [];
   const colours = sectionColours(marks.map(mark => mark.label));
@@ -75,7 +88,7 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
     if (!svg || !start || start.left == null || start.top == null || start.height == null) return;
     const x = start.left - 3;
     const g = document.createElementNS(ns, 'g');
-    g.setAttribute('class', 'cursor-grab');
+    g.setAttribute('class', onMove ? 'cursor-grab' : 'cursor-pointer');
     // Click plays from the section; a drag drops its start on another bar.
     g.addEventListener('pointerdown', down => {
       const ctm = svg.getScreenCTM()?.inverse();
@@ -85,6 +98,7 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
       const origin = toSvg(down);
       let dragging = false;
       const move = (e: PointerEvent) => {
+        if (!onMove) return;
         if (!dragging && Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < 4) return;
         dragging = true;
         const at = toSvg(e);
@@ -94,7 +108,7 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         g.removeAttribute('transform');
-        if (!dragging) { onPick(index); return; }
+        if (!dragging || !onMove) { onPick(index); return; }
         const at = toSvg(e);
         const char = dropChar(events, x + at.x - origin.x, start.top! + start.height! / 2 + at.y - origin.y);
         const bar = char === null ? null : barAtChar(abc, char);
@@ -111,7 +125,8 @@ function markSections(tune: Tune, abc: string, host: HTMLElement, onPick: (index
       .forEach(([key, value]) => text.setAttribute(key, String(value)));
     text.textContent = `▶ ${marks[index].label}`;
     const title = document.createElementNS(ns, 'title');
-    title.textContent = `Click to play from ${marks[index].label}; drag onto a bar to move where it starts`;
+    title.textContent = onMove ? `Click to play from ${marks[index].label}; drag onto a bar to move where it starts`
+      : `Click to play from ${marks[index].label}`;
     // A wide invisible stroke so the 2px rule is easy to grab.
     const grip = rule.cloneNode() as SVGLineElement;
     grip.setAttribute('stroke', 'transparent');
@@ -140,26 +155,44 @@ function dropChar(events: TimingEvent[], x: number, y: number): number | null {
 }
 
 export const Yue2CoverScore: React.FC<Props> = p => {
+  const { t } = useTranslation();
   const scoreRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLDivElement>(null);
   const [previewValid, setPreviewValid] = useState(false);
-  const [moveError, setMoveError] = useState('');
-  // The last section drag, undoable while the ABC is still its result.
-  const [undoMove, setUndoMove] = useState<{ before: string; after: string } | null>(null);
+  // The ABC text is typed freely and applied as one edit, so Prepare's undo has one step per Apply.
+  const [typed, setTyped] = useState({ for: p.abc, text: p.abc });
+  if (typed.for !== p.abc) setTyped({ for: p.abc, text: p.abc });
+  const draft = typed.text;
   // Plays from score section i, or from score bar n; replaced on every render of the ABC.
   const playFromRef = useRef<(index: number) => Promise<void>>(async () => {});
   const playBarRef = useRef<(bar: number) => Promise<void>>(async () => {});
+  // Prepare's Hear score: play a bar range, or stop.
+  const playRangeRef = useRef<(range: ScoreRange) => Promise<void>>(async () => {});
+  const stopRangeRef = useRef<() => void>(() => {});
   // The left pane shows the raw ABC or the same score as a song chart.
   const [view, setView] = useState<'abc' | 'chart'>(() =>
     localStorage.getItem('cover-studio-abcView') === 'chart' ? 'chart' : 'abc');
   useEffect(() => { localStorage.setItem('cover-studio-abcView', view); }, [view]);
   const [playingBar, setPlayingBar] = useState<number | null>(null);
   const onSectionRef = useRef(p.onSection);
-  const onAbcChangeRef = useRef(p.onAbcChange);
-  useEffect(() => { onSectionRef.current = p.onSection; onAbcChangeRef.current = p.onAbcChange; });
+  const onMoveRef = useRef(p.onMoveSection);
+  const onPlayingRef = useRef(p.onPlaying);
+  const readOnlyRef = useRef(p.readOnly);
   useEffect(() => {
-    if (p.seekSection) void playFromRef.current(p.seekSection.index);
-  }, [p.seekSection]);
+    onSectionRef.current = p.onSection; onMoveRef.current = p.onMoveSection;
+    onPlayingRef.current = p.onPlaying; readOnlyRef.current = p.readOnly;
+  });
+  useEffect(() => {
+    if (p.play) void playRangeRef.current(p.play.range); else stopRangeRef.current();
+  }, [p.play]);
+  // The selected bars: each bar's nodes are collected when the score renders.
+  const applyHighlightRef = useRef<() => void>(() => {});
+  const highlightRef = useRef(p.highlightBars);
+  const firstBar = p.highlightBars?.[0], lastBar = p.highlightBars?.[1];
+  useEffect(() => {
+    highlightRef.current = firstBar === undefined || lastBar === undefined ? null : [firstBar, lastBar];
+    applyHighlightRef.current();
+  }, [firstBar, lastBar]);
   const busy = p.preparing || p.job?.status === 'queued' || p.job?.status === 'running';
   // Side by side, the ABC and the score share the panel's height, less its
   // heading, the import row and the approve button.
@@ -170,11 +203,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       {mode === 'abc' ? 'ABC' : 'Chart'}</button>)}
   </div>;
   const editor = view === 'chart' && p.abc.trim()
-    ? <AbcChart abc={p.abc} disabled={busy} height={boxHeight ?? 320} playingBar={playingBar}
+    ? <AbcChart abc={p.abc} disabled={busy || p.readOnly} height={boxHeight ?? 320} playingBar={playingBar}
       onAbcChange={p.onAbcChange} onPlayBar={bar => void playBarRef.current(bar)} />
-    : <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
-    placeholder="Paste an ABC score here to skip transcription" style={{ height: boxHeight }}
-    className={`w-full ${p.wide ? 'resize-none' : 'h-28 resize-y'} rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white`} />;
+    : <div className="space-y-1">
+      <textarea aria-label="Editable ABC score" value={draft} disabled={busy} readOnly={p.readOnly} onChange={e => setTyped({ for: p.abc, text: e.target.value })}
+        placeholder="Paste an ABC score here to skip transcription" style={{ height: p.wide && boxHeight ? boxHeight - 24 : boxHeight }}
+        className={`w-full ${p.wide ? 'resize-none' : 'h-28 resize-y'} rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white`} />
+      {!p.readOnly && <button type="button" onClick={() => p.onAbcChange(draft)} disabled={busy || draft === p.abc}
+        className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{t('cover.prepare.score.applyAbc')}</button>}
+    </div>;
   const transcribe = <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
     className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
     {p.abc ? 'Retry transcription' : 'Transcribe full score'}
@@ -183,20 +220,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // score scales to its column (responsive: 'resize'), so the half-width one
   // zooms out. Wrapping it in MusicXmlImport or not (and a new sourceKey)
   // remounts scoreRef's div, which is why the render effect keys on those too.
-  // Side by side, Approve sits under the ABC box, level with the player
-  // under the score; stacked, it comes last.
   const sheet = <div className={`grid gap-3 items-start ${p.wide ? 'grid-cols-2' : 'grid-cols-1'}`}>
     {/* Imported scores have no import row, so the toggle sits on the box. */}
-    <div className="min-w-0">{p.sourceMode !== 'audio' && p.abc.trim() && <div className="mb-1 flex justify-end">{viewToggle}</div>}{editor}</div>
+    <div className="min-w-0">{(p.sourceMode !== 'audio' || p.readOnly) && p.abc.trim() && <div className="mb-1 flex justify-end">{viewToggle}</div>}{editor}</div>
     <div className={`${p.abc.trim() ? '' : 'hidden'} min-w-0 bg-white rounded-lg border border-zinc-200 overflow-y-auto ${p.wide ? '' : 'max-h-48'}`}
       style={{ height: boxHeight }}>
-      <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.abcjs-highlight]:fill-amber-500" />
+      <div ref={scoreRef} className="text-black p-2 [&_svg]:fill-current [&_.prep-selected]:fill-fuchsia-600 [&_.abcjs-highlight]:fill-amber-500" />
     </div>
     <div className={p.wide ? '' : 'order-last'}>
-      <button onClick={p.onApprove} disabled={!p.sourceReady || !previewValid || busy || p.approved}
-        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
-        {p.approved ? 'Score approved' : 'Approve score'}
-      </button>
+      {p.approved && <p className="text-xs text-emerald-600 dark:text-emerald-400">{t('cover.prepare.score.approved')}</p>}
     </div>
     <div ref={audioRef} className={`min-w-0 text-xs ${previewValid ? '' : 'hidden'}`} />
   </div>;
@@ -206,6 +238,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     scoreRef.current.innerHTML = '';
     if (audioRef.current) audioRef.current.innerHTML = '';
     setPreviewValid(false);
+    applyHighlightRef.current = () => {};
     if (!p.abc.trim()) return;
     let tunes: ReturnType<typeof abcjs.renderAbc>;
     const abc = withChoirVocal(p.abc);
@@ -215,20 +248,35 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     setPreviewValid(true);
     const box = scoreRef.current.parentElement;
     let control: InstanceType<typeof abcjs.synth.SynthController> | null = null;
-    const starts = markSections(tunes[0], abc, scoreRef.current, index => void playFromRef.current(index), (index, bar) => {
-      // Bars number the same in the preview copy, so the move edits the real ABC.
-      const moved = moveSectionStart(p.abc, index, bar);
-      if ('error' in moved) { setMoveError(moved.error); return; }
-      setMoveError('');
-      if (moved.abc === p.abc) return;
-      setUndoMove({ before: p.abc, after: moved.abc });
-      onAbcChangeRef.current(moved.abc);
-    });
     // Bars by character offset in the preview copy, which abcjs's events index.
     const ranges = barRanges(abc);
     const barOf = (char: number | undefined) => char === undefined ? null
       : ranges.find(range => char >= range.start && char <= range.end)?.bar ?? null;
     const charOf = (event: { startCharArray?: number[] }) => event.startCharArray?.find(value => typeof value === 'number');
+    // A locked score cannot move a section marker (the click still plays from it).
+    const starts = markSections(tunes[0], abc, scoreRef.current, index => void playFromRef.current(index),
+      readOnlyRef.current ? null : (index, bar) => onMoveRef.current(index, bar));
+    // The nodes of each bar, for the Prepare strip's selection.
+    type RenderedItem = { startChar?: number; abselem?: { elemset?: Array<SVGElement | null> } };
+    const barNodes: Array<{ bar: number; nodes: SVGElement[] }> = [];
+    for (const line of tunes[0].lines ?? [])
+      for (const staff of line.staff ?? [])
+        for (const voice of (staff.voices ?? []) as unknown as RenderedItem[][])
+          for (const item of voice) {
+            const bar = barOf(item.startChar);
+            const nodes = (item.abselem?.elemset ?? []).filter((n): n is SVGElement => !!n);
+            if (bar !== null && nodes.length) barNodes.push({ bar, nodes });
+          }
+    let lit: Element[] = [];
+    let selected: SVGElement[] = [];
+    applyHighlightRef.current = () => {
+      selected.forEach(node => node.classList.remove('prep-selected'));
+      const bars = highlightRef.current;
+      selected = bars ? barNodes.filter(entry => entry.bar >= bars[0] && entry.bar <= bars[1]).flatMap(entry => entry.nodes) : [];
+      selected.forEach(node => node.classList.add('prep-selected'));
+      if (selected[0]) followNoteInBox(selected[0], box);
+    };
+    applyHighlightRef.current();
     const events = new abcjs.TimingCallbacks(tunes[0], {}).noteTimings.filter(event => event.type === 'event');
     playBarRef.current = async bar => {
       // The first event, in time, in this bar or the nearest one after it.
@@ -243,6 +291,23 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       const start = starts[index];
       if (start) await seekTo(start, index);
     };
+    // Hear score: play from the range's first bar and stop (or loop) when a note past its last bar begins.
+    let range: ScoreRange | null = null;
+    const endRange = () => {
+      if (!range) return;
+      range = null;
+      try { control?.pause(); } catch { /* the player was never started */ }
+      onPlayingRef.current(false);
+    };
+    playRangeRef.current = async next => {
+      const start = events.find(event => barOf(charOf(event)) === next.from)
+        ?? events.find(event => (barOf(charOf(event)) ?? 0) > next.from);
+      if (!start) return;
+      range = next;
+      onPlayingRef.current(true);
+      await seekTo(start, -1);
+    };
+    stopRangeRef.current = endRange;
     const seekTo = async (start: TimingEvent, index: number) => {
       if (index >= 0) onSectionRef.current?.(index);
       followNoteInBox(start.elements?.[0]?.[0], box);
@@ -256,7 +321,6 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     };
     if (!audioRef.current || !abcjs.synth.supportsAudio()) return;
     const synth = control = new abcjs.synth.SynthController();
-    let lit: Element[] = [];
     // Report a section once, when playback crosses into it.
     const marks = abcSectionMarks(abc);
     let section = -1, playingNow: number | null = null;
@@ -268,24 +332,31 @@ export const Yue2CoverScore: React.FC<Props> = p => {
         if (index >= 0 && index !== section) onSectionRef.current?.(section = index);
         const bar = barOf(char);
         if (bar !== null && bar !== playingNow) setPlayingBar(playingNow = bar);
+        if (range && bar !== null && bar > range.to) {
+          if (range.loop) void playRangeRef.current(range); else endRange();
+          return;
+        }
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
         lit = (ev.elements ?? []).flat();
         lit.forEach(el => el.classList.add('abcjs-highlight'));
         followNoteInBox(lit[0], box);
       },
-      onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
+      onFinished() {
+        lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = [];
+        if (range?.loop) void playRangeRef.current(range); else endRange();
+      },
     }, { displayLoop: false, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: false });
     void synth.setTune(tunes[0], false).catch(() => {});
-    return () => { try { synth.pause(); } catch {} };
-  }, [p.abc, p.sourceMode, p.sourceKey]);
+    return () => { range = null; try { synth.pause(); } catch { /* the player was never started */ } onPlayingRef.current(false); };
+  }, [p.abc, p.sourceMode, p.sourceKey, p.readOnly]);
 
   return (
     <div className="min-h-0 flex-shrink-0 border-t border-zinc-200 dark:border-white/10 p-4 space-y-3 overflow-y-auto max-h-[calc(100%-160px)]" style={{ height: p.height }}>
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">YuE2 lead sheet</h3>
         <p className="text-xs text-zinc-500">{p.sourceMode === 'audio'
-          ? 'Transcribe the source melody and chords or paste ABC, then review and approve it.'
-          : 'Review the imported ABC score, then approve it.'}</p>
+          ? 'Transcribe the source melody and chords or paste ABC, then fix its sections and confirm the structure.'
+          : 'Review the imported ABC score, then fix its sections and confirm the structure.'}</p>
       </div>
       {p.sourceMode === 'audio' && p.readiness?.message && <p className="text-xs text-amber-600 dark:text-amber-400">{p.readiness.message}</p>}
       {busy && (
@@ -296,11 +367,8 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
       {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
-      {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before approval.</p>}
-      {moveError && <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">{moveError}</p>}
-      {undoMove?.after === p.abc && <button type="button" onClick={() => { p.onAbcChange(undoMove.before); setUndoMove(null); }}
-        className="text-xs text-cyan-700 dark:text-cyan-300">Undo section move</button>}
-      {p.sourceMode === 'audio'
+      {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before confirming.</p>}
+      {p.sourceMode === 'audio' && !p.readOnly
         ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange} action={transcribe}
           wide={p.wide} toggle={p.abc.trim() ? viewToggle : undefined}>{sheet}</MusicXmlImport>
         : sheet}

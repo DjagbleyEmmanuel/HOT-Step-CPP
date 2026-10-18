@@ -28,8 +28,6 @@ import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { StemMixer } from '../shared/StemMixer';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
 import { useCoverStemsStore } from '../../stores/coverStemsStore';
 import {
   addManualQueueItem, updateManualQueueItem,
@@ -41,29 +39,30 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { lyricBlockLines, lyricBlockRanges, sectionColours } from '../../utils/abcSections';
-import { cutSection, mergeSections, relabelSection, resectionScore, splitSection } from '../../utils/abcSectionMove';
+import { exportPrepare, structureHash } from '../../utils/yue2Prepare';
+import { normalizeAbc } from '../../../../server/src/contracts/yue2Prepare';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
-  type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
+  type Yue2ScoreSection } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { CoverResizeHandle } from './CoverResizeHandle';
 import { startDragResize } from './startDragResize';
 import { MusicXmlImport } from './MusicXmlImport';
-import { SectionMatchReview } from './SectionMatchReview';
-import { ScorePlanReview } from './ScorePlanReview';
+import { PrepareStructure } from './PrepareStructure';
+import type { ScoreRange } from './prepareView';
+import { PrepareLyrics } from './PrepareLyrics';
+import { useYue2Prepare } from './useYue2Prepare';
 import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
 import { AbcChart } from './AbcChart';
-import type { Yue2ScorePlan, Yue2SectionMatch } from '../../services/yue2CoverApi';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
 import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
 
@@ -241,31 +240,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetError, setSheetError] = useState('');
   const [sheetAbc, setSheetAbc] = useState(() => restore('sheetAbc', ''));
   const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>(() => restore('scoreSections', []));
-  // Sections cut from this cover's score and lyrics, newest last, each with
-  // the score and lyrics from before it and the ones it produced. Only this
-  // session and its drafts change; the source's dataset files never do. While
-  // any cut stands, the score no longer follows the source audio.
-  const [scoreCuts, setScoreCuts] = useState<Array<{ abc: string; lyrics: string; after: string; afterLyrics: string; removedMusic?: boolean }>>(
-    () => restore('scoreCuts', []));
-  const sectionChipColours = sectionColours(scoreSections.map(section => section.label));
-  const [seekSection, setSeekSection] = useState<{ index: number } | null>(null);
-  // The score section playing or last picked; its lyric block is highlighted.
+  // The score section playing or last picked, marked in Prepare's lyric rows.
   // Kept with the score it indexes, so a new score drops it.
   const [activeSectionOf, setActiveSectionOf] = useState<{ abc: string; index: number } | null>(null);
   const activeSection = activeSectionOf?.abc === sheetAbc ? activeSectionOf.index : null;
-  const activeBlock = yue2Mode && activeSection !== null ? lyricBlockRanges(lyrics)[activeSection] : undefined;
-  const lyricHighlight = activeBlock && activeSection !== null
-    ? { ...activeBlock, colour: sectionChipColours[activeSection] ?? '#06b6d4' } : null;
-  const [sectionLint, setSectionLint] = useState<Yue2SectionReview['lint'] | null>(null);
-  // Match sections to score: the proposal and the lyrics it was made from.
-  const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
-  const [sectionMatching, setSectionMatching] = useState(false);
-  // Match score to lyrics: the plan, and the score sections and lyrics it was made from.
-  const [scorePlan, setScorePlan] = useState<{ plan: Yue2ScorePlan; abc: string; lyrics: string;
-    sections: Yue2ScoreSection[]; key: string } | null>(null);
-  const [sectionSaving, setSectionSaving] = useState(false);
-  const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
-  const [planSaveConfirm, setPlanSaveConfirm] = useState(false);
+  // Prepare's selection and playback in the score view (Hear score).
+  const [scoreHighlight, setScoreHighlight] = useState<[number, number] | null>(null);
+  const [scorePlay, setScorePlay] = useState<{ range: ScoreRange } | null>(null);
+  const [scorePlaying, setScorePlaying] = useState(false);
   const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
   // ½×/2× on the score tempo, for when the transcriber counted half or double time.
   const [scoreTempoScale, setScoreTempoScale] = useState(() => restore('scoreTempoScale', { abc: '', factor: 1 }));
@@ -298,12 +280,39 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const sourceResetKeyRef = useRef(sourceKey);
   const skipSourceResetRef = useRef(false);
   sourceKeyRef.current = sourceKey;
+  // Prepare's document: the score's structure, then the lyrics assigned to
+  // its sections. It owns the score while it is edited (sheetAbc follows it);
+  // a score that arrives from elsewhere (a transcription, an import, a
+  // dataset sidecar) starts a new document. Cuts live in the document's hook.
+  const prep = useYue2Prepare({ sourceKey, abc: sheetAbc, lyrics,
+    hasRecording: sourceMode === 'audio' && !!sourceAudioUrl });
+  const docAbc = prep.doc.abc;
+  const lastDocAbc = useRef(docAbc);
+  const pendingDraft = useRef<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    // A score from outside the document replaces it; sheetAbc and the document already agree otherwise.
+    if (normalizeAbc(sheetAbc) === docAbc) return;
+    prep.restoreDraft({}, { sourceKey, abc: sheetAbc, lyrics });
+  }, [sheetAbc]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // An edit, undo or redo of the document's score reaches the rest of the studio.
+    if (lastDocAbc.current === docAbc) return;
+    lastDocAbc.current = docAbc;
+    if (normalizeAbc(sheetAbc) !== docAbc) changeSheetAbc(docAbc);
+  }, [docAbc]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // A restored draft whose source key arrives a render later.
+    if (!pendingDraft.current) return;
+    const fields = pendingDraft.current;
+    pendingDraft.current = null;
+    prep.restoreDraft(fields, { sourceKey, abc: sheetAbc, lyrics });
+  }, [sourceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (sourceResetKeyRef.current === sourceKey) return;
     sourceResetKeyRef.current = sourceKey;
     if (skipSourceResetRef.current) { skipSourceResetRef.current = false; return; }
     sheetRequestRef.current += 1;
-    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null); setSectionMatch(null); setScoreCuts([]);
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]);
     setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId('');
@@ -344,17 +353,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   }, [sheetJobId, sheetSnapshot.data]);
 
   useEffect(() => {
-    if (!yue2Mode || !token || !sheetAbc.trim()) { setSectionLint(null); return; }
+    if (!yue2Mode || !token || !sheetAbc.trim()) return;
     let live = true;
     const timer = setTimeout(() => {
-      void yue2CoverApi.reviewSections(sheetAbc, lyrics, token).then(review => {
-        if (!live) return;
-        setScoreSections(review.sections);
-        setSectionLint(review.lint);
-      }).catch(() => { if (live) setSectionLint(null); });
+      // The sections only: the lyrics are paired with them by Prepare's own check.
+      void yue2CoverApi.reviewSections(sheetAbc, '', token).then(review => {
+        if (live) setScoreSections(review.sections);
+      }).catch(() => {});
     }, 250);
     return () => { live = false; clearTimeout(timer); };
-  }, [yue2Mode, token, sheetAbc, lyrics]);
+  }, [yue2Mode, token, sheetAbc]);
 
 
   // ── Persist ──
@@ -410,14 +418,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('captionMode', captionMode); }, [captionMode]);
   useEffect(() => { persist('sheetAbc', sheetAbc); }, [sheetAbc]);
   useEffect(() => { persist('scoreSections', scoreSections); }, [scoreSections]);
-  useEffect(() => { persist('scoreCuts', scoreCuts); }, [scoreCuts]);
   useEffect(() => { persist('scoreTempoScale', scoreTempoScale); }, [scoreTempoScale]);
   useEffect(() => { persist('sheetAudioUrl', sheetAudioUrl); }, [sheetAudioUrl]);
   useEffect(() => { persist('approvedSheet', approvedSheet); }, [approvedSheet]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, 'cover-studio-scoreCuts': scoreCuts, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -484,10 +491,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-captionMode')) setCaptionMode(f['cover-studio-captionMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAbc')) setSheetAbc(f['cover-studio-sheetAbc'] as never);
     if (Object.hasOwn(f, 'cover-studio-scoreSections')) setScoreSections(f['cover-studio-scoreSections'] as never);
-    // A draft from before cuts existed has none; a cut saved before merge,
-    // relabel and split has no removedMusic flag and counts as removing music.
-    setSectionEditor(null); setSectionEditError('');
-    setScoreCuts((f['cover-studio-scoreCuts'] ?? []) as never);
+    // The Prepare document and its cuts come back with the draft. A draft from
+    // before version 2 has none and migrates from its saved score and lyrics;
+    // a cut saved before merge, relabel and split has no removedMusic flag and
+    // counts as removing music. Their source key may arrive a render later.
+    const restoring = { ...f, 'cover-studio-sheetAbc': Object.hasOwn(f, 'cover-studio-sheetAbc') ? f['cover-studio-sheetAbc'] : sheetAbc,
+      'cover-studio-lyrics': Object.hasOwn(f, 'cover-studio-lyrics') ? f['cover-studio-lyrics'] : lyrics };
+    if (nextSourceKey === sourceKey) prep.restoreDraft(restoring, { sourceKey, abc: sheetAbc, lyrics });
+    else pendingDraft.current = restoring;
     if (Object.hasOwn(f, 'cover-studio-scoreTempoScale')) setScoreTempoScale(f['cover-studio-scoreTempoScale'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAudioUrl')) setSheetAudioUrl(f['cover-studio-sheetAudioUrl'] as never);
     if (Object.hasOwn(f, 'cover-studio-approvedSheet')) setApprovedSheet(f['cover-studio-approvedSheet'] as never);
@@ -917,7 +928,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const key = sourceKey;
     const request = ++sheetRequestRef.current;
     let workflowId = '';
-    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setScoreCuts([]); setSheetPreparing(true);
+    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSheetPreparing(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
         const { job } = await coverWorkflowApi.transcribe(token, coverDraftId, coverDraftRevision, !!sheetAbc);
@@ -1004,64 +1015,17 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
   };
 
-  // The score change, as the lead sheet's own edits make it.
+  // The score change, as the Prepare document's edits make it: the rest of the
+  // studio follows (the score needs approving again, its sections are re-read).
   const changeSheetAbc = (value: string) => {
     sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
-    setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null);
-  };
-  // Cuts section i from the score and its paired lyric block (block i, as the
-  // section lint pairs them) together, so the blocks after it stay paired.
-  const handleCutSection = (index: number) => {
-    const cut = cutSection(sheetAbc, index);
-    if ('error' in cut) { setSheetError(cut.error); return; }
-    const block = instrumental ? undefined : lyricBlockRanges(lyrics)[index];
-    let afterLyrics = block ? lyrics.slice(0, block.start) + lyrics.slice(block.end) : lyrics;
-    if (block && block.end === lyrics.length) afterLyrics = afterLyrics.trimEnd() + '\n';
-    setSheetError(''); setSectionEditError(''); setSectionEditor(null);
-    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: cut.abc, afterLyrics, removedMusic: true }]);
-    setSectionMatch(null);
-    if (afterLyrics !== lyrics) { lyricEditRef.current++; setLyrics(afterLyrics); setLyricsSource(null); }
-    changeSheetAbc(cut.abc);
-    if (!instrumental && !block) showToast(`No lyric block ${index + 1} to remove; only the score was cut`);
-  };
-  // Merge, relabel and split go through the same stack as cuts. The edit
-  // functions refuse with a reason rather than guess; it shows inline.
-  const [sectionEditError, setSectionEditError] = useState('');
-  // Bound to the score and source it was opened on: a changed source or score
-  // would otherwise let the index edit a different section.
-  const [editorState, setSectionEditor] = useState<
-    { index: number; kind: 'merge' | 'relabel' | 'split'; label: string; bar: string; line: string; abc: string; key: string } | null>(null);
-  const sectionEditor = editorState?.abc === sheetAbc && editorState.key === sourceKey ? editorState : null;
-  const applySectionEdit = (edit: ReturnType<typeof mergeSections>) => {
-    if ('error' in edit) { setSectionEditError(edit.error); return; }
-    setSectionEditError(''); setSectionEditor(null);
-    setScoreCuts(cuts => [...cuts, { abc: sheetAbc, lyrics, after: edit.abc, afterLyrics: edit.lyrics, removedMusic: edit.removedMusic }]);
-    setSectionMatch(null);
-    if (edit.lyrics !== lyrics) { lyricEditRef.current++; setLyrics(edit.lyrics); setLyricsSource(null); }
-    changeSheetAbc(edit.abc);
-  };
-  const submitSectionEditor = () => {
-    if (!sectionEditor) return;
-    const { index, kind, label, bar, line } = sectionEditor;
-    if (kind === 'merge') return applySectionEdit(mergeSections(sheetAbc, lyrics, index, label === 'second' ? 'second' : 'first'));
-    if (kind === 'relabel') return applySectionEdit(relabelSection(sheetAbc, lyrics, index, label));
-    if (!/^\d+$/.test(bar.trim()) || !/^\d+$/.test(line.trim())) { setSectionEditError('Bar and lyric line must be whole numbers.'); return; }
-    applySectionEdit(splitSection(sheetAbc, lyrics, index, Number(bar), Number(line), label));
-  };
-  const lastCut = scoreCuts.at(-1);
-  // A cut taken from an older draft has no flag and removed music.
-  const musicRemoved = scoreCuts.some(cut => cut.removedMusic !== false);
-  const undoCut = () => {
-    if (!lastCut) return;
-    setScoreCuts(cuts => cuts.slice(0, -1)); setSectionEditError(''); setSectionEditor(null);
-    if (lastCut.lyrics !== lyrics) { lyricEditRef.current++; setLyrics(lastCut.lyrics); setLyricsSource(null); }
-    changeSheetAbc(lastCut.abc);
+    setScoreSections([]); setSheetScoreSource(null); setApprovedSheet(null);
   };
 
-  // 2/4 to 4/4: the server rewrites the score for a preview. Applying it is a
-  // score edit like any other, so the score has to be approved again.
+  // 2/4 to 4/4: the server rewrites the score for a preview. Applying it is one
+  // more edit of the Prepare document (undoable there), so the structure has
+  // to be confirmed again.
   const [remeter, setRemeter] = useState<{ from: string; pickup: boolean; abc?: string; twoFourBars?: number; error?: string } | null>(null);
-  const [remeterUndo, setRemeterUndo] = useState<{ before: string; after: string } | null>(null);
   const remeterOpen = remeter?.from === sheetAbc ? remeter : null;
   const previewRemeter = async (pickup: boolean) => {
     if (!token) return;
@@ -1073,104 +1037,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     catch (err) { settle({ error: (err as Error).message }); }
   };
   const applyRemeter = () => {
-    if (!remeterOpen?.abc) return;
-    setRemeterUndo({ before: sheetAbc, after: remeterOpen.abc });
-    setRemeter(null);
-    changeSheetAbc(remeterOpen.abc);
-  };
-  const undoRemeter = () => {
-    if (!remeterUndo) return;
-    setRemeterUndo(null);
-    changeSheetAbc(remeterUndo.before);
+    if (remeterOpen?.abc && prep.applyStructuralOp({ kind: 'replace', abc: remeterOpen.abc })) setRemeter(null);
   };
 
   // The original source, never a recombined mix: its vocal stem is what the
   // aligner reads, and its path is what finds the dataset song.
   const sectionSource = () => sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl };
-  const handleMatchSections = async () => {
-    if (!token || !sheetAbc.trim() || !lyrics.trim() || !sourceAudioUrl) return;
-    const key = sourceKey, before = lyrics;
-    setSheetError(''); setSectionMatch(null); setScorePlan(null); setSectionMatching(true);
-    try {
-      const match = await yue2CoverApi.matchSections({ ...sectionSource(), abc: sheetAbc, lyrics: before }, token);
-      if (sourceKeyRef.current === key) setSectionMatch({ match, before, key });
-    } catch (err: any) { if (sourceKeyRef.current === key) setSheetError(`Match sections: ${err.message}`); }
-    finally { setSectionMatching(false); }
-  };
-  const handlePlanScore = async () => {
-    if (!token || !sheetAbc.trim() || !lyrics.trim() || !sourceAudioUrl) return;
-    const key = sourceKey, abc = sheetAbc, before = lyrics, sections = scoreSections;
-    setSheetError(''); setSectionMatch(null); setScorePlan(null); setSectionMatching(true);
-    try {
-      const plan = await yue2CoverApi.planScoreSections({ ...sectionSource(), abc, lyrics: before }, token);
-      if (sourceKeyRef.current === key) setScorePlan({ plan, abc, lyrics: before, sections, key });
-    } catch (err: any) { if (sourceKeyRef.current === key) setSheetError(`Match score to lyrics: ${err.message}`); }
-    finally { setSectionMatching(false); }
-  };
-  const scorePlanStale = !!scorePlan && (scorePlan.abc !== sheetAbc || scorePlan.lyrics !== lyrics);
-  const applyScorePlan = () => {
-    if (!scorePlan || scorePlanStale) return;
-    const next = resectionScore(sheetAbc, scorePlan.plan.sections);
-    if ('error' in next) { setSheetError(next.error); return; }
-    lyricEditRef.current++;
-    setLyrics(scorePlan.plan.lyrics);
-    setLyricsSource(null);
-    changeSheetAbc(next.abc);
-    setScorePlan(null);
-  };
-  // Apply and save: the retagged lyrics go to the dataset .txt and the revised
-  // score to its .abc (each keeps a backup), then the same change is applied here.
-  // Nothing is applied when the server refuses; a score write that fails after the
-  // lyrics went in is reported, and the change is still applied here.
-  const sectionMatchRef = useRef(sectionMatch); sectionMatchRef.current = sectionMatch;
-  const scorePlanRef = useRef(scorePlan); scorePlanRef.current = scorePlan;
-  // Snapshot of what a save started from. The returned check is true only while
-  // the source, lyrics, score and proposal are all still those: an edit, a new
-  // match or Discard while the save is in flight means the late apply must not run.
-  const captureEdits = (key: string, sameProposal: () => boolean) => {
-    const lyricEdits = lyricEditRef.current, sheetRequest = sheetRequestRef.current;
-    return () => sourceKeyRef.current === key && lyricEditRef.current === lyricEdits &&
-      sheetRequestRef.current === sheetRequest && sameProposal();
-  };
-  const saveScorePlan = async () => {
-    if (!token || !scorePlan || scorePlanStale || !scorePlan.plan.revision) return;
-    const next = resectionScore(sheetAbc, scorePlan.plan.sections);
-    if ('error' in next) { setSheetError(next.error); return; }
-    const stillCurrent = captureEdits(scorePlan.key, () => scorePlanRef.current === scorePlan);
-    setSectionSaving(true);
-    try {
-      const saved = await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: scorePlan.plan.lyrics,
-        abc: next.abc, revision: scorePlan.plan.revision }, token);
-      const apply = stillCurrent();
-      if (apply) applyScorePlan();
-      const kept = apply || sourceKeyRef.current !== scorePlan.key ? '' : ' Your later changes were kept, so they were not applied here.';
-      if (saved.abcSaved === false) setSheetError(`Lyrics saved to the dataset, but the score was not: ${saved.abcError}${kept}`);
-      else showToast(`Lyrics and score saved to the dataset.${kept}`);
-    } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
-    finally { setSectionSaving(false); }
-  };
-  // The proposal is for the lyrics it was made from; edits since void it.
-  const sectionMatchStale = !!sectionMatch && sectionMatch.before !== lyrics;
-  const applySectionMatch = () => {
-    if (!sectionMatch || sectionMatchStale) return;
-    lyricEditRef.current++;
-    setLyrics(sectionMatch.match.lyrics);
-    setLyricsSource(null);
-    setSectionMatch(null);
-  };
-  const saveSectionMatch = async () => {
-    if (!token || !sectionMatch || sectionMatchStale || !sectionMatch.match.revision) return;
-    const stillCurrent = captureEdits(sectionMatch.key, () => sectionMatchRef.current === sectionMatch);
-    setSectionSaving(true);
-    try {
-      await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: sectionMatch.match.lyrics, revision: sectionMatch.match.revision }, token);
-      const apply = stillCurrent();
-      if (apply) applySectionMatch();
-      showToast(apply || sourceKeyRef.current !== sectionMatch.key ? 'Lyrics saved to the dataset'
-        : 'Lyrics saved to the dataset; your later edits were kept, so they were not applied here');
-    } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
-    finally { setSectionSaving(false); }
-  };
+  /** Lyric assignment proposals for the current document; the recording only when asked for. */
+  const suggestAssignments = (useRecording: boolean) => token
+    ? yue2CoverApi.suggestAssignments({ ...(useRecording ? sectionSource() : {}), prepare: prep.doc, useRecording }, token)
+    : Promise.reject(new Error('Sign in first.'));
 
   // The score's tempo and key, offered for a dataset song whose .txt differs.
   const scoreBpm = Math.round(Number(sheetAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1]) || 0);
@@ -1203,6 +1079,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   // ── Generation ──
+  // A YuE2 render sends the Prepare document's confirmed pair: the score and the
+  // lyrics tagged in its order. Instrumental mode comes from the document too
+  // (every section marked Instrumental); the server refuses a mismatch.
+  const preparedResult = yue2Mode ? exportPrepare(prep.doc) : null;
+  const confirmedPair = preparedResult && !('error' in preparedResult) ? preparedResult : null;
+  const prepareBlock = preparedResult && 'error' in preparedResult ? preparedResult.error : '';
+  const renderInstrumental = yue2Mode ? !!confirmedPair?.instrumental : instrumental;
+  const renderLyrics = yue2Mode ? confirmedPair?.lyrics ?? '' : lyrics;
+  // The dataset sidecar's lyrics are marked as such only while the pair still sends them as they are.
+  const renderLyricsSource = !yue2Mode || (confirmedPair && confirmedPair.lyrics === normalizeAbc(lyrics)) ? lyricsSource : null;
   const resolvedCaption = artistCaption.trim();
   const selectCaptionSource = (mode: string) => {
     setCaptionMode(mode);
@@ -1246,8 +1132,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       expectedBackend: backend, engineParams,
       title: songTitle, artistName: songArtist,
       targetArtistName: yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
-      lyrics, caption: artistCaption,
-      instrumental, lyricsSource, scoreSource: sheetScoreSource, analysis,
+      lyrics: renderLyrics, caption: artistCaption,
+      instrumental: renderInstrumental, lyricsSource: renderLyricsSource, scoreSource: sheetScoreSource, analysis,
+      ...(yue2Mode ? { prepare: prep.doc } : {}),
       settings: { coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
         parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
         parallelCoverArt: settings.parallelCoverArt },
@@ -1309,11 +1196,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // The approved score is part of the source: a MusicXML import has no other identity.
   const buildLyricsSource = JSON.stringify([sourceMode, sourceAudioUrl, sourceSongId, sourceAssetId, approvedSheet?.abc ?? '']);
-  const buildLyrics = instrumental ? null : draftText(buildLyricsDraft, buildLyricsSource);
+  // A build starts from the confirmed pair, so a lyrics draft written before its first session has nowhere to go
+  // (the server refuses lyrics that differ from the confirmed ones); the session's own lyrics are edited after it starts.
+  const buildLyrics = renderInstrumental || yue2Mode ? null : draftText(buildLyricsDraft, buildLyricsSource);
   const build = useYue2Build(token, buildSessionId, setBuildSessionId, { text: buildLyrics,
     set: text => setBuildLyricsDraft(text === null || text === lyrics ? null : { source: buildLyricsSource, text }) });
   const buildSession = build.session && build.session.id === buildSessionId ? build.session : null;
   const nextBuild = buildNext(buildSession);
+  /** Build-page lyric edits go to the session; before one exists the build follows the confirmed pair. */
+  const applyBuildLyrics = async (text: string) => {
+    if (!buildSession && !build.loading) { showToast('Start the build first, then edit its lyrics. Until then it uses the lyrics confirmed on the Prepare page.'); return false; }
+    return build.applyLyrics(text);
+  };
   /** The params a build starts from: the session's own, or the Prepare page's before there is one. */
   const buildParams = (): Record<string, unknown> | null => {
     if (buildSession) return buildSession.params;
@@ -1378,8 +1272,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const sections = buildSession?.sections ?? scoreSections.map(x => ({ label: x.label, startBar: x.startBar }));
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
-      lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : buildLyrics ?? lyrics}
-      prepareLyrics={lyrics} onApplyLyrics={build.applyLyrics} loading={build.loading}
+      lyrics={buildSession ? String(buildSession.params.lyrics ?? '') : buildLyrics ?? renderLyrics}
+      prepareLyrics={renderLyrics} onApplyLyrics={applyBuildLyrics} loading={build.loading}
       settings={buildSession ? buildSettingsOf(buildSession.params) : { voices: coverVoices,
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale, arStrength: coverArStrength }}
       onSettings={s => void applyBuildSettings(s)} keyLabel={coverScoreKeyLabel(abc)}
@@ -1396,8 +1290,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   /** The /api/generate params for a YuE2 cover of the approved score, as the
    *  one-shot render and Build by section both submit them, or why not. */
   const yue2CoverParams = (): { params: Record<string, unknown>; title: string } | string => {
-    if (!approvedSheet || approvedSheet.key !== sourceKey) return 'Review and approve the score first';
-    const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics, instrumental });
+    if (!confirmedPair) return prepareBlock || 'Confirm the score structure and lyrics first';
+    if (!approvedSheet || approvedSheet.key !== sourceKey || structureHash(approvedSheet.abc) !== confirmedPair.structureHash)
+      return 'Approve the confirmed score first';
+    const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics: renderLyrics, instrumental: renderInstrumental });
     if (missing) return missing;
   // Take the whole request at click time; the serial queue may start it much later.
   const engineParams = gp.getGlobalParams() as Record<string, unknown>;
@@ -1438,15 +1334,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale }) };
   const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
     yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
-    title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: instrumental ? '' : lyrics,
-    ...(lyricsSource ? { lyricsSource } : {}),
+    title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: renderInstrumental ? '' : renderLyrics,
+    ...(renderLyricsSource ? { lyricsSource: renderLyricsSource } : {}),
     ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
-    instrumental, source: 'cover-studio',
+    instrumental: renderInstrumental, source: 'cover-studio',
     ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
     yue2Cover: sourceMode === 'audio'
       ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
       : { sourceKind: 'musicxml', ...coverChoices },
-    yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
+    yue2Abc: approvedSheet.abc, yue2Prepare: prep.doc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
     return { params, title };
   };
 
@@ -1455,13 +1351,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (sourceMode === 'audio' && sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
       showToast('Source is still being prepared'); return;
     }
-    if (!instrumental && !lyrics.trim()) { showToast('Enter lyrics or enable Instrumental mode'); return; }
+    if (yue2Mode && !confirmedPair) { showToast(prepareBlock || 'Confirm the score structure and lyrics first'); return; }
+    if (!yue2Mode && !instrumental && !lyrics.trim()) { showToast('Enter lyrics or enable Instrumental mode'); return; }
     if (yue2Mode && renderMode !== 'base' && (!activeYue2Ar || !activeYue2Nar)) {
       showToast('Choose both YuE2 adapter halves'); return;
     }
     if (sourceMode === 'audio' && sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
       if (yue2Mode && (!approvedSheet || approvedSheet.key !== sourceKey)) {
-        showToast('Review and approve the score first'); return;
+        showToast('Approve the confirmed score first'); return;
       }
       submitCoverWorkflow();
       return;
@@ -1708,8 +1605,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (mode === sourceMode) return;
     handleClearSource();
     sheetRequestRef.current++;
-    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null);
-    setSectionMatch(null); setScoreCuts([]); setSheetAudioUrl(''); setSheetError('');
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]);
+    setSheetAudioUrl(''); setSheetError('');
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId(''); setSheetJob(null); setSheetPreparing(false);
     setSourceMode(mode);
@@ -1725,7 +1622,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // Always allow queuing another cover — covers stack and run one at a time (#62).
   const canGenerate = (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
-    && (!!lyrics.trim() || instrumental)
+    && (yue2Mode ? !!confirmedPair : (!!lyrics.trim() || instrumental))
     && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (renderMode === 'base' || (!!activeYue2Ar && !!activeYue2Nar))));
 
   // ── SuperSep handlers ──
@@ -1781,7 +1678,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           </div>
           {sourceMode === 'musicxml' && <MusicXmlImport key={sourceKey} abc={sheetAbc} disabled={sheetPreparing}
             onAbcChange={(value, imported) => { sheetRequestRef.current++; setSheetAbc(value); setApprovedSheet(null);
-              setScoreSections([]); setSectionLint(null); setSheetScoreSource(null);
+              setScoreSections([]); setSheetScoreSource(null);
               if (!songTitle.trim()) setSongTitle(imported?.title ?? '');
               if (imported?.lyrics && !lyrics.trim()) setLyrics(imported.lyrics);
               // A score with lyrics is a vocal cover: Instrumental left on from an earlier
@@ -1855,122 +1752,63 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               </button>
             </div>
           </div>
-          <div className="flex-1 min-h-0 p-4 flex flex-col gap-1">
+          {!yue2Mode && <div className="flex-1 min-h-0 p-4 flex flex-col gap-1">
             {lyricsSource && <span className="text-[10px] text-cyan-600 dark:text-cyan-300">Lyrics from dataset · editable</span>}
             <LyricsSectionHighlight value={lyrics} onChange={value => { lyricEditRef.current++; setLyrics(value); setLyricsSource(null); }}
-              placeholder={t('cover.lyricsPlaceholder')} highlight={lyricHighlight} />
-          </div>
-          {yue2Mode && !!sheetAbc && <div className="flex-shrink-0 px-4 pb-3 space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
-              <span className="flex gap-3"><button type="button" onClick={() => void handleMatchSections()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || musicRemoved}
-                title={musicRemoved ? 'Off while sections are cut: the score no longer follows the source audio.'
-                  : "Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."}
-                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-                {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match lyrics to score'}</button>
-              <button type="button" onClick={() => void handlePlanScore()}
-                disabled={sourceMode === 'musicxml' || !scoreSections.length || !lyrics.trim() || instrumental || sectionMatching || musicRemoved}
-                title={musicRemoved ? 'Off while sections are cut: the score no longer follows the source audio.'
-                  : "Set the score's sections from where the source vocal sings each lyric block, and retag the lyrics to match. Shows the changes before applying."}
-                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Match score to lyrics</button></span>
-            </div>
-            {scorePlan && scorePlan.key === sourceKey && <ScorePlanReview beforeSections={scorePlan.sections}
-              beforeLyrics={scorePlan.lyrics} plan={scorePlan.plan} stale={scorePlanStale} saving={sectionSaving}
-              onApply={applyScorePlan} onSave={() => setPlanSaveConfirm(true)} onDiscard={() => setScorePlan(null)} />}
-            {sectionMatch && sectionMatch.key === sourceKey && <SectionMatchReview before={sectionMatch.before} match={sectionMatch.match} stale={sectionMatchStale}
-              saving={sectionSaving} onApply={applySectionMatch} onSave={() => setSectionSaveConfirm(true)} onDiscard={() => setSectionMatch(null)} />}
-            {/* In-page, not window.confirm: a native dialog stalls browser automation. */}
-            <ConfirmDialog isOpen={sectionSaveConfirm} title="Save lyrics to dataset"
-              message="Write these lyrics into the dataset song’s .txt? The current file is kept as a backup."
-              confirmLabel="Save" onCancel={() => setSectionSaveConfirm(false)}
-              onConfirm={() => { setSectionSaveConfirm(false); void saveSectionMatch(); }} />
-            <ConfirmDialog isOpen={planSaveConfirm} title="Save lyrics and score to dataset"
-              message="Write the retagged lyrics into the dataset song’s .txt and the revised score into its .abc? Both current files are kept as backups."
-              confirmLabel="Save" onCancel={() => setPlanSaveConfirm(false)}
-              onConfirm={() => { setPlanSaveConfirm(false); void saveScorePlan(); }} />
-            <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
-              message={`Replace the dataset song’s tempo and key with the score’s (${scaledScoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
-              confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
-              onConfirm={() => { setScoreDetailsConfirm(false); void saveScoreDetails(); }} />
-            {scoreSections.length > 0
-              // Coloured as the lead sheet colours each section's notes; a
-              // click plays the lead sheet from that section.
-              ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
-                <span key={`${index}-${section.startBar}`} style={{ borderColor: sectionChipColours[index], backgroundColor: `${sectionChipColours[index]}1f` }}
-                  className="inline-flex rounded border-l-4 text-[11px] text-zinc-800 dark:text-zinc-100">
-                  <button type="button" onClick={() => setSeekSection({ index })} title={`Play the lead sheet from ${section.label}`}
-                    className="pl-2 pr-1 py-0.5 hover:brightness-125">▶ {section.label} · bar {section.startBar}</button>
-                  <button type="button" onClick={() => handleCutSection(index)} aria-label={`Cut ${section.label} at bar ${section.startBar}`}
-                    title={`Cut ${section.label} from this cover's score and lyrics (the dataset files are not changed)`}
-                    className="px-1 text-zinc-500 hover:text-red-500">✕</button>
-                  {([['merge', '⤵', `Merge ${section.label} with the next section`, index < scoreSections.length - 1],
-                    ['relabel', '✎', `Rename ${section.label}`, true],
-                    ['split', '✂', `Split ${section.label} in two`, true]] as const).map(([kind, icon, title, shown]) => shown &&
-                    <button key={kind} type="button" aria-label={title} title={title}
-                      onClick={() => { setSectionEditError(''); setSectionEditor(open => open?.index === index && open.kind === kind ? null : {
-                        index, kind, label: kind === 'merge' ? 'first' : kind === 'relabel' ? section.label : '',
-                        bar: String(section.startBar + 1), line: '0', abc: sheetAbc, key: sourceKey }); }}
-                      className="px-1 text-zinc-500 hover:text-cyan-500">{icon}</button>)}
-                </span>)}</div>
-              : <p className="text-xs text-zinc-500">No score section labels found.</p>}
-            {sectionEditor && scoreSections[sectionEditor.index] && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/30 p-2 text-xs text-zinc-700 dark:text-zinc-200">
-              {sectionEditor.kind === 'merge' && <>
-                <span>Merge {scoreSections[sectionEditor.index].label} with {scoreSections[sectionEditor.index + 1]?.label}, keeping the label:</span>
-                <StyledSelect accent="cyan" value={sectionEditor.label} onChange={label => setSectionEditor({ ...sectionEditor, label })}
-                  options={[{ value: 'first', label: scoreSections[sectionEditor.index].label },
-                    { value: 'second', label: scoreSections[sectionEditor.index + 1]?.label ?? '' }]} className="w-32" /></>}
-              {sectionEditor.kind !== 'merge' && <div className="flex items-center gap-1"><ParamLabel label={sectionEditor.kind === 'split' ? 'New section label' : 'Label'}
-                  info={sectionEditor.kind === 'split' ? 'The tag for the second half. It is written to the score marker and to the lyrics tag.' : 'The new name. It is written to the score marker and to the lyrics tag.'} />
-                <input value={sectionEditor.label} onChange={e => setSectionEditor({ ...sectionEditor, label: e.target.value })}
-                  className="w-28 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div>}
-              {sectionEditor.kind === 'split' && <>
-                <div className="flex items-center gap-1"><ParamLabel label="Starts at bar"
-                  info="The score bar where the new section begins. A bar the score cannot split at is refused with the reason." />
-                  <input value={sectionEditor.bar} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, bar: e.target.value })}
-                    className="w-14 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div>
-                <div className="flex items-center gap-1"><ParamLabel label={`Lyric line (0–${lyricBlockLines(lyrics, sectionEditor.index).length})`}
-                  info="How many of this section's non-blank lyric lines stay in the first half. 0 moves all of them to the new section; N leaves the first N lines behind." />
-                  <input value={sectionEditor.line} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, line: e.target.value })}
-                    className="w-12 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div></>}
-              <button type="button" onClick={submitSectionEditor} className="text-cyan-700 dark:text-cyan-300">Apply</button>
-              <button type="button" onClick={() => { setSectionEditor(null); setSectionEditError(''); }} className="text-zinc-500">Cancel</button>
-            </div>}
-            {sectionEditError && <p role="alert" className="text-xs text-red-500">{sectionEditError}</p>}
-            {scoreCuts.length > 0 && <p className="text-xs text-zinc-500">
-              {scoreCuts.length} section edit{scoreCuts.length > 1 ? 's' : ''} made to this cover; the dataset's score and lyrics are unchanged.
-              {lastCut && lastCut.after === sheetAbc && lastCut.afterLyrics === lyrics &&
-                <button type="button" onClick={undoCut} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo edit</button>}
-            </p>}
-            {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
-              <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
-                title="Rewrite the score in 4/4 by pairing its 2/4 bars. Every note keeps its pitch and timing. Shows a preview before applying."
-                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Convert 2/4 to 4/4</button>}
-            {remeterOpen && <div className="space-y-2 rounded-lg border border-cyan-500/30 p-2">
-              <Toggle size="sm" accent="cyan" checked={remeterOpen.pickup} label="First bar is a pickup"
-                info="Keep bar 1 as a 2/4 bar and pair the bars from bar 2. Turn it on when the preview puts the downbeats in the middle of the 4/4 bars."
-                onChange={pickup => void previewRemeter(pickup)} />
-              {remeterOpen.error ? <p role="alert" className="text-xs text-red-500">This score cannot be converted: {remeterOpen.error}</p>
-                : !remeterOpen.abc ? <p className="text-xs text-zinc-500">Converting…</p>
-                : <>
-                  <p className="text-xs text-zinc-500">
-                    {remeterOpen.twoFourBars
-                      ? `${remeterOpen.twoFourBars} bar${remeterOpen.twoFourBars > 1 ? 's stay' : ' stays'} in 2/4: a pickup, a bar before a new section or meter, or the last bar. `
-                      : ''}
-                    Applying replaces this cover's score (the dataset files are not changed), and the score then needs approving again.</p>
-                  <AbcChart abc={remeterOpen.abc} disabled height={240} playingBar={null} onAbcChange={() => {}} />
-                </>}
-              <div className="flex gap-3">
-                <button type="button" onClick={applyRemeter} disabled={!remeterOpen.abc}
-                  className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Apply 4/4</button>
-                <button type="button" onClick={() => setRemeter(null)} className="text-xs text-zinc-500">Cancel</button>
-              </div>
-            </div>}
-            {remeterUndo?.after === sheetAbc && <p className="text-xs text-zinc-500">Score converted to 4/4; approve it again before rendering.
-              <button type="button" onClick={undoRemeter} className="ml-2 text-cyan-700 dark:text-cyan-300">Undo conversion</button></p>}
-            {!instrumental && sectionLint && !sectionLint.ok &&
-              <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
+              placeholder={t('cover.lyricsPlaceholder')} highlight={null} />
           </div>}
+          {yue2Mode && <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+            {lyricsSource && <span className="text-[10px] text-cyan-600 dark:text-cyan-300">Lyrics from dataset · editable</span>}
+            <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t('cover.prepare.steps')}>
+              {([['structure', t('cover.prepare.step.structure'), true],
+                ['lyrics', t('cover.prepare.step.lyrics'), !prep.editingStructure && !!prep.doc.confirmed.structure && structureHash(prep.doc.abc) === prep.doc.confirmed.structure.structureHash],
+                ['ready', t('cover.prepare.step.ready'), !!confirmedPair]] as const).map(([step, label, enabled]) =>
+                <button key={step} type="button" aria-pressed={prep.step === step} disabled={!enabled} onClick={() => prep.showStep(step)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold disabled:opacity-40 ${prep.step === step
+                    ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-600 dark:text-zinc-400'}`}>{label}</button>)}
+              {prep.doc.confirmed.structure && !prep.editingStructure && !(approvedSheet && approvedSheet.key === sourceKey) &&
+                <button type="button" onClick={() => void handleApproveSheet()} disabled={sheetPreparing || !sheetAbc.trim()}
+                  title={t('cover.prepare.approveInfo')} className="ml-2 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{t('cover.prepare.approve')}</button>}
+            </div>
+            {prep.step === 'structure'
+              ? <PrepareStructure prep={prep} sourceAudioUrl={sourceMode === 'audio' ? sourceAudioUrl : ''} scorePlaying={scorePlaying}
+                onPlayScore={range => setScorePlay(range ? { range } : null)} onHighlight={setScoreHighlight}
+                onConfirmed={() => void handleApproveSheet()}>
+                {/^M:\s*2\/4\s*$/m.test(sheetAbc) && !remeterOpen &&
+                  <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
+                    title="Rewrite the score in 4/4 by pairing its 2/4 bars. Every note keeps its pitch and timing. Shows a preview before applying."
+                    className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Convert 2/4 to 4/4</button>}
+                {remeterOpen && <div className="space-y-2 rounded-lg border border-cyan-500/30 p-2">
+                  <Toggle size="sm" accent="cyan" checked={remeterOpen.pickup} label="First bar is a pickup"
+                    info="Keep bar 1 as a 2/4 bar and pair the bars from bar 2. Turn it on when the preview puts the downbeats in the middle of the 4/4 bars."
+                    onChange={pickup => void previewRemeter(pickup)} />
+                  {remeterOpen.error ? <p role="alert" className="text-xs text-red-500">This score cannot be converted: {remeterOpen.error}</p>
+                    : !remeterOpen.abc ? <p className="text-xs text-zinc-500">Converting…</p>
+                    : <>
+                      <p className="text-xs text-zinc-500">
+                        {remeterOpen.twoFourBars
+                          ? `${remeterOpen.twoFourBars} bar${remeterOpen.twoFourBars > 1 ? 's stay' : ' stays'} in 2/4: a pickup, a bar before a new section or meter, or the last bar. `
+                          : ''}
+                        Applying replaces this cover's score (the dataset files are not changed) and can be undone above; the structure then needs confirming again.</p>
+                      <AbcChart abc={remeterOpen.abc} disabled height={240} playingBar={null} onAbcChange={() => {}} />
+                    </>}
+                  <div className="flex gap-3">
+                    <button type="button" onClick={applyRemeter} disabled={!remeterOpen.abc}
+                      className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Apply 4/4</button>
+                    <button type="button" onClick={() => setRemeter(null)} className="text-xs text-zinc-500">Cancel</button>
+                  </div>
+                </div>}
+              </PrepareStructure>
+              : <PrepareLyrics prep={prep} lyrics={lyrics} wide={scoreWidth > 560}
+                onLyricsText={value => { lyricEditRef.current++; setLyrics(value); setLyricsSource(null); }}
+                suggest={suggestAssignments} scorePlaying={scorePlaying} activeSection={activeSection}
+                onPlayScore={range => setScorePlay(range ? { range } : null)} />}
+          </div>}
+          {/* In-page, not window.confirm: a native dialog stalls browser automation. */}
+          <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
+            message={`Replace the dataset song’s tempo and key with the score’s (${scaledScoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
+            confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
+            onConfirm={() => { setScoreDetailsConfirm(false); void saveScoreDetails(); }} />
           {yue2Mode && <CoverResizeHandle label="Resize lyrics and lead sheet" direction="vertical" onMouseDown={startScoreResize} />}
           {yue2Mode && <Yue2CoverScore
             height={scoreHeight}
@@ -1978,10 +1816,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             sourceReady={(sourceMode === 'musicxml' ? !!sheetAbc.trim() : !!sourceAudioUrl) && !isUploading}
             sourceMode={sourceMode}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
-            abc={sheetAbc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
-            onAbcChange={changeSheetAbc}
-            scoreSource={sheetScoreSource} seekSection={seekSection} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
-            onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
+            abc={prep.doc.abc} sourceKey={sourceKey} approved={!!approvedSheet && approvedSheet.key === sourceKey}
+            onAbcChange={value => { prep.applyStructuralOp({ kind: 'replace', abc: value }); }}
+            readOnly={!(prep.editingStructure && prep.step === 'structure')}
+            onMoveSection={(index, bar) => { prep.applyStructuralOp({ kind: 'move', index, bar }); }}
+            highlightBars={prep.step === 'structure' ? scoreHighlight : null}
+            play={scorePlay} onPlaying={setScorePlaying}
+            scoreSource={sheetScoreSource} onSection={index => setActiveSectionOf({ abc: sheetAbc, index })}
+            onTranscribe={handleTranscribe} onCancel={handleCancelSheet}
           />}
 
           {showMixer && sepStems && sepJobId && (
@@ -2006,7 +1848,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onOpenBuild={() => setBuildMode(true)}
           buildStatus={buildSession ? `Build in progress: ${Math.min(nextBuild, buildSession.sections.length)} of ${buildSession.sections.length} sections` : ''}
           onStartOverBuild={buildSession ? build.startOver : undefined}
-          instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
+          instrumental={renderInstrumental} onInstrumentalChange={() => showToast('Instrumental follows the lyrics: mark every section Instrumental in Assign lyrics, or give a section words.')}
           renderMode={renderMode} onRenderMode={setRenderMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
