@@ -62,7 +62,7 @@ const LYRIC_TAG = /^\s*\[([^\]\n]+)\]/;
 const linesOf = (lyrics: string) => lyrics.split(/\r?\n/);
 const joinLike = (lyrics: string, lines: string[]) => lines.join(lyrics.includes('\r\n') ? '\r\n' : '\n');
 const tagText = (line: string) => LYRIC_TAG.exec(line)![1].trim();
-const retag = (line: string, label: string) => line.replace(/\[[^\]\n]+\]/, `[${label}]`);
+const retag = (line: string, label: string) => line.replace(/\[[^\]\n]+\]/, () => `[${label}]`);
 
 /** The line index of each `[Tag]` line, or an error when a tag shares its
  *  line with words: the lint counts that tag and the planner does not. */
@@ -87,6 +87,9 @@ export function sectionPairingError(labels: string[], lyrics: string): string | 
   const lines = linesOf(lyrics);
   const tags = lyricTagLines(lines);
   if (typeof tags === 'string') return tags;
+  // The planner sings words above the first tag as a block of their own.
+  if (lines.slice(0, tags[0] ?? lines.length).some(line => line.trim()))
+    return 'The lyrics have words above their first tag; tag them or remove them first.';
   if (tags.length !== labels.length)
     return `The score has ${labels.length} sections but the lyrics have ${tags.length} tags; match them first.`;
   const i = labels.findIndex((label, k) => label.trim().toLowerCase() !== tagText(lines[tags[k]]).toLowerCase());

@@ -135,7 +135,7 @@ export function moveSectionStart(abc: string, index: number, bar: number): { abc
   const prev = index > 0 ? startOf(markers[index - 1]) : 0;
   const next = index + 1 < markers.length ? startOf(markers[index + 1]) : Infinity;
   const total = groups.reduce((sum, group) => sum + group.bars, 0);
-  if (bar <= prev || bar >= next || bar < 1 || bar > total)
+  if (!Number.isInteger(bar) || bar <= prev || bar >= next || bar < 1 || bar > total)
     return { error: `${moving.text.trim().slice(1).trim()} can only move between bar ${prev + 1} and bar ${Math.min(next, total + 1) - 1}.` };
   if (bar === startOf(moving)) return { abc };
 
@@ -301,9 +301,12 @@ function editable(abc: string, lyrics: string, index: number, span: number)
   const parsed = parseScore(text);
   if (typeof parsed === 'string') return { error: parsed };
   const labels = abcSectionMarks(text).map(mark => mark.label);
-  // The server counts a marker above K: too; this file only edits the body.
+  // The server counts a marker above K: too, and a `%%` directive line as a
+  // section; this file only edits markers in the body.
   if (labels.length !== parsed.items.filter(item => item.kind === 'marker').length)
     return { error: 'The score has a section marker above its K: line; edit the sections in the ABC text.' };
+  if (text.split('\n').some(line => line.trim().startsWith('%%') && line.trim().slice(1).trim()))
+    return { error: 'The score has a %% directive line, which the section check counts as a section; remove it in the ABC text first.' };
   if (!Number.isInteger(index) || index < 0 || index + span > labels.length) return { error: 'That section is not in the score.' };
   const paired = hasLyricTags(lyrics);
   const mismatch = paired ? sectionPairingError(labels, lyrics) : null;

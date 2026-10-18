@@ -113,6 +113,29 @@ test('edits refuse bad indexes, bars, lyric lines and names', () => {
   ]) assert.ok('error' in edit, JSON.stringify(edit));
 });
 
+test('a split refuses a bar that is not a whole bar number', () => {
+  for (const bar of [7.5, NaN, Infinity, -Infinity])
+    assert.ok('error' in splitSection(ABC, LYRICS, 1, bar, 1, 'x'), String(bar));
+});
+
+test('a name with $ sequences is written literally', () => {
+  const edit = ok(relabelSection(ABC, LYRICS, 1, "$& $1 $$ $'"));
+  assert.match(edit.lyrics, /^\[\$& \$1 \$\$ \$'\]$/m);
+  assert.match(edit.abc, /^% \$& \$1 \$\$ \$'$/m);
+  const merged = ok(mergeSections(edit.abc, edit.lyrics, 0, 'second'));
+  assert.match(merged.lyrics, /^\[\$& \$1 \$\$ \$'\]$/m);
+  assert.equal(merged.lyrics.match(/^\[/gm)?.length, 2);
+});
+
+test('edits refuse a %% directive the lint counts, and words above the first tag', () => {
+  const midi = ABC.replace('% intro', '%%MIDI program 1\n% intro');
+  assert.ok('error' in relabelSection(midi, LYRICS, 0, 'x'));
+  for (const lyrics of ['stray words\n' + LYRICS, '\nstray words\n\n' + LYRICS])
+    assert.ok('error' in mergeSections(ABC, lyrics, 1, 'first'), lyrics);
+  // Blank lines above the first tag are fine.
+  ok(mergeSections(ABC, '\n\n' + LYRICS, 1, 'first'));
+});
+
 test('lyrics with no tags at all are left alone and only the score changes', () => {
   const edit = mergeSections(ABC, 'la la la', 1, 'first');
   assert.ok(!('error' in edit));
