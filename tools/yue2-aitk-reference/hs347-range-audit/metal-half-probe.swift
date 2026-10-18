@@ -150,11 +150,12 @@ func probe(_ label: String, _ options: MTLCompileOptions) {
     // 3. half vs bfloat vs per-block mixed simdgroup products, values exact in both types.
     func value(_ kind: Int) -> Float {
         let sign: Float = rng.int(0, 1) == 0 ? 1 : -1
-        if kind == 2 && rng.int(0, 3) == 0 { return sign * Float(rng.int(1, 255)) * 0x1p-24 } // exact half subnormal, exact bf16
+        if (kind == 2 && rng.int(0, 3) == 0) || kind == 3 { return sign * Float(rng.int(1, 255)) * 0x1p-24 } // exact half subnormal, exact bf16
         let e = kind == 0 ? rng.int(-4, 4) : rng.int(-14, 15)
         return sign * (1 + Float(rng.int(0, 127)) / 128) * Float(sign: .plus, exponent: e, significand: 1)
     }
-    for (kind, name) in [(0, "narrow 2^-4..2^4"), (1, "wide 2^-14..2^15"), (2, "with half subnormals")] {
+    // kind 3: A is all half subnormals against narrow B, so a flush would zero the outputs.
+    for (kind, name) in [(0, "narrow 2^-4..2^4"), (1, "wide 2^-14..2^15"), (2, "with half subnormals"), (3, "subnormal A x narrow B")] {
         for K in [256, 2048] {
             let groups = K == 256 ? 4096 : 512
             let A = (0..<(groups * 8 * K)).map { _ in value(kind) }, B = (0..<(groups * 8 * K)).map { _ in value(kind) }
@@ -165,7 +166,7 @@ func probe(_ label: String, _ options: MTLCompileOptions) {
                 run(lib, "mac", [ba, bb, c], [UInt32(K), UInt32(mode)], groups: groups, threads: 32)
                 out.append(read(c, groups * 64, Float.self))
             }
-            var hb = 0, mb = 0, maxRel: Double = 0
+            var hb = 0, mb = 0, maxRel: Double = 0, zeros = 0
             for i in 0..<(groups * 64) {
                 if out[0][i].bitPattern != out[1][i].bitPattern {
                     hb += 1
@@ -173,8 +174,9 @@ func probe(_ label: String, _ options: MTLCompileOptions) {
                     maxRel = max(maxRel, d)
                 }
                 if out[2][i].bitPattern != out[1][i].bitPattern { mb += 1 }
+                if out[0][i] == 0 { zeros += 1 }
             }
-            print("mac \(name), K \(K), \(groups * 64) outputs: half!=bfloat \(hb) (max rel \(maxRel)), mixed!=bfloat \(mb)")
+            print("mac \(name), K \(K), \(groups * 64) outputs: half!=bfloat \(hb) (max rel \(maxRel)), mixed!=bfloat \(mb), zero outputs (half) \(zeros)")
         }
     }
 }

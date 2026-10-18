@@ -56,9 +56,14 @@ struct Counts {
     uint64_t changed() const { return sub_rounded + flushed + rounded_normal + overflow; }
 };
 
+// Tile steps: one threadgroup's 32-wide K block, staging a 64-row src0 tile and a
+// 32-row src1 tile (kernel_mul_mm, NR0 = 64, NR1 = 32, NK = 32). A guard that
+// stays bit-exact must fall back to bfloat for a step if either tile holds a
+// value that half cannot represent exactly.
 struct Family {
     uint64_t mm_nodes = 0, mv_nodes = 0, src0_scans = 0;
     double flops = 0, worst_node_changed_frac = 0;
+    double steps = 0, steps_bad_any = 0, steps_bad_src0 = 0, steps_bad_src1 = 0;
     Counts src0, src1;
     std::vector<std::string> outliers;
 };
@@ -66,7 +71,9 @@ struct Family {
 struct State {
     std::mutex mu;
     std::map<std::string, Family> families;
-    std::set<std::tuple<const void *, size_t, int64_t, int64_t>> seen_src0;
+    struct Tiles { std::vector<uint32_t> bad_per_k; int64_t row_blocks = 0; };
+    // Frozen weights (and their transposed copies) by root, view, orientation and shape.
+    std::map<std::tuple<const void *, const void *, bool, int64_t, int64_t>, Tiles> src0_tiles;
     uint64_t calls = 0, metal_calls = 0, chunks = 0, audited = 0, skipped = 0;
     std::chrono::steady_clock::time_point last_dump = std::chrono::steady_clock::now();
 };
@@ -83,7 +90,8 @@ inline float bf16_rne(float x) {
     return from_bits(u & 0xffff0000u);
 }
 
-inline void classify(float x, bool round_to_bf16, Counts & c) {
+// Returns true when the staged value is not exactly representable in half.
+inline bool classify(float x, bool round_to_bf16, Counts & c) {
     ++c.elems;
     float v = x;
     if (round_to_bf16) {
@@ -91,23 +99,26 @@ inline void classify(float x, bool round_to_bf16, Counts & c) {
         if (std::isfinite(x) && bits(v) != bits(x)) ++c.not_bf16;
         if (std::isfinite(x) && std::isinf(v)) ++c.bf16_inf;
     }
-    if (!std::isfinite(v)) { ++c.nonfinite; return; }
+    if (!std::isfinite(v)) { ++c.nonfinite; return true; }
     ++c.hist[(bits(v) >> 23) & 0xffu];
-    if (v == 0.0f) { ++c.zero; return; }
+    if (v == 0.0f) { ++c.zero; return false; }
     const double a = std::fabs(v);
     c.max_abs = std::max(c.max_abs, a); c.min_nonzero = std::min(c.min_nonzero, a); c.sum_abs += a;
     const float back = static_cast<float>(static_cast<_Float16>(v));
-    if (std::isinf(back)) { ++c.overflow; return; }
-    if (back == v) { a >= 0x1p-14 ? ++c.normal : ++c.sub_exact; return; }
+    if (std::isinf(back)) { ++c.overflow; return true; }
+    if (back == v) { a >= 0x1p-14 ? ++c.normal : ++c.sub_exact; return false; }
     const double d = std::fabs(double(back) - double(v));
     c.max_delta = std::max(c.max_delta, d); c.sum_delta += d;
     if (back == 0.0f) ++c.flushed;
     else if (a < 0x1p-14 || std::fabs(back) < 0x1p-14f) ++c.sub_rounded;
     else ++c.rounded_normal;
+    return true;
 }
 
-// Rows of ne0 contiguous elements, walked by stride, split across threads.
-inline bool scan(const ggml_tensor * t, bool round_to_bf16, Counts & out) {
+// Rows of ne0 contiguous elements, walked by stride; threads take blocks of
+// tile_rows rows (per ne2/ne3 batch). tiles->bad_per_k[kb] counts the row blocks
+// whose 32-wide K block kb holds at least one inexact value.
+inline bool scan(const ggml_tensor * t, bool round_to_bf16, Counts & out, int64_t tile_rows, State::Tiles * tiles) {
     if (t->type != GGML_TYPE_F32 && t->type != GGML_TYPE_BF16) return false;
     if (t->nb[0] != ggml_type_size(t->type)) return false;
     const size_t span = ggml_nbytes(t);
@@ -118,25 +129,37 @@ inline bool scan(const ggml_tensor * t, bool round_to_bf16, Counts & out) {
         ggml_backend_tensor_get(const_cast<ggml_tensor *>(t), copy.data(), 0, span);
         base = copy.data();
     }
-    const int64_t rows = t->ne[1] * t->ne[2] * t->ne[3];
-    const int nt = std::max(1, std::min<int>(int(std::thread::hardware_concurrency()), int(std::max<int64_t>(1, rows / 16))));
+    const int64_t nk = (t->ne[0] + 31) / 32, rb1 = (t->ne[1] + tile_rows - 1) / tile_rows;
+    const int64_t blocks = rb1 * t->ne[2] * t->ne[3];
+    const int nt = std::max(1, std::min<int>(int(std::thread::hardware_concurrency()), int(blocks)));
     std::vector<Counts> part(nt);
+    std::vector<std::vector<uint32_t>> bad(nt, std::vector<uint32_t>(nk, 0));
     std::vector<std::thread> pool;
     for (int w = 0; w < nt; ++w) pool.emplace_back([&, w] {
-        for (int64_t r = w; r < rows; r += nt) {
-            const int64_t i1 = r % t->ne[1], i2 = (r / t->ne[1]) % t->ne[2], i3 = r / (t->ne[1] * t->ne[2]);
-            const char * row = base + i1 * t->nb[1] + i2 * t->nb[2] + i3 * t->nb[3];
-            if (t->type == GGML_TYPE_F32) {
-                const float * p = reinterpret_cast<const float *>(row);
-                for (int64_t i = 0; i < t->ne[0]; ++i) classify(p[i], round_to_bf16, part[w]);
-            } else {
-                const uint16_t * p = reinterpret_cast<const uint16_t *>(row);
-                for (int64_t i = 0; i < t->ne[0]; ++i) classify(from_bits(uint32_t(p[i]) << 16), false, part[w]);
+        std::vector<char> flag(nk);
+        for (int64_t b = w; b < blocks; b += nt) {
+            std::fill(flag.begin(), flag.end(), 0);
+            const int64_t ib = b % rb1, i2 = (b / rb1) % t->ne[2], i3 = b / (rb1 * t->ne[2]);
+            for (int64_t i1 = ib * tile_rows; i1 < std::min(t->ne[1], (ib + 1) * tile_rows); ++i1) {
+                const char * row = base + i1 * t->nb[1] + i2 * t->nb[2] + i3 * t->nb[3];
+                if (t->type == GGML_TYPE_F32) {
+                    const float * p = reinterpret_cast<const float *>(row);
+                    for (int64_t i = 0; i < t->ne[0]; ++i) if (classify(p[i], round_to_bf16, part[w])) flag[i / 32] = 1;
+                } else {
+                    const uint16_t * p = reinterpret_cast<const uint16_t *>(row);
+                    for (int64_t i = 0; i < t->ne[0]; ++i) if (classify(from_bits(uint32_t(p[i]) << 16), false, part[w])) flag[i / 32] = 1;
+                }
             }
+            for (int64_t k = 0; k < nk; ++k) bad[w][k] += flag[k];
         }
     });
     for (auto & th : pool) th.join();
     for (auto & p : part) out.add(p);
+    if (tiles) {
+        tiles->row_blocks = blocks;
+        tiles->bad_per_k.assign(nk, 0);
+        for (int w = 0; w < nt; ++w) for (int64_t k = 0; k < nk; ++k) tiles->bad_per_k[k] += bad[w][k];
+    }
     return true;
 }
 
@@ -157,36 +180,60 @@ inline bool metal_use_mm(const ggml_tensor * n) {
 inline void audit(const ggml_tensor * n, bool train_graph, uint64_t call) {
     const ggml_tensor * s0 = n->src[0], * s1 = n->src[1];
     const ggml_tensor * root = s0;
+    const void * view = nullptr;
     bool transposed = false;
     while (root->src[0] && (root->op == GGML_OP_VIEW || root->op == GGML_OP_RESHAPE || root->op == GGML_OP_PERMUTE ||
                             root->op == GGML_OP_TRANSPOSE || root->op == GGML_OP_CONT || root->op == GGML_OP_CPY)) {
         transposed |= root->op == GGML_OP_TRANSPOSE;
+        if (root->op == GGML_OP_VIEW) view = root->data;
         root = root->src[0];
     }
     const bool frozen = root->op == GGML_OP_NONE && !(root->flags & GGML_TENSOR_FLAG_PARAM);
     const bool bf16 = s0->type == GGML_TYPE_BF16;
-    const std::string key = std::string(bf16 ? "bf16" : "f32") + "|" + (transposed ? "dX" : "fwd") + "|" +
-                            normalize(root->name) + (frozen ? "" : " (trainable)") + "|" + (train_graph ? "grads" : "no-grads");
+    std::string name = normalize(root->name);
+    if (name == "(unnamed)" || name.rfind("leaf_", 0) == 0 || name.rfind("node_", 0) == 0)
+        name = "unnamed [" + std::to_string(root->ne[0]) + "," + std::to_string(root->ne[1]) + "]";
+    const std::string key = std::string(bf16 ? "bf16" : "f32") + "|" + (transposed ? "dX" : "fwd") + "|" + name +
+                            (frozen ? "" : " (trainable)") + "|" + (train_graph ? "grads" : "no-grads");
     const bool mm = metal_use_mm(n);
     Counts c0, c1;
-    bool scan0 = false;
+    State::Tiles t0, t1;
+    bool counted0 = false;
     if (mm) {
-        // A transposed copy holds the same values as its forward weight: scan the forward once.
-        if (!transposed) {
+        // Frozen weights: element counts once (a transposed copy holds the same values),
+        // tile counts once per orientation and view.
+        const auto tkey = std::make_tuple(static_cast<const void *>(root->data), view, transposed, s0->ne[0], s0->ne[1]);
+        bool scan0 = true;
+        {
             auto & st = state();
             std::lock_guard<std::mutex> lock(st.mu);
-            scan0 = !frozen || st.seen_src0.insert({s0->data, ggml_nbytes(s0), s0->ne[0], s0->ne[1]}).second;
+            auto it = frozen ? st.src0_tiles.find(tkey) : st.src0_tiles.end();
+            if (it != st.src0_tiles.end()) { t0 = it->second; scan0 = false; }
         }
-        if (scan0 && !scan(s0, false, c0)) scan0 = false;
-        if (!scan(s1, bf16, c1)) { std::lock_guard<std::mutex> lock(state().mu); ++state().skipped; return; }
+        if (scan0) {
+            if (!scan(s0, false, c0, 64, &t0)) { std::lock_guard<std::mutex> lock(state().mu); ++state().skipped; return; }
+            counted0 = !transposed;
+            if (frozen) { std::lock_guard<std::mutex> lock(state().mu); state().src0_tiles[tkey] = t0; }
+        }
+        if (!scan(s1, bf16, c1, 32, &t1)) { std::lock_guard<std::mutex> lock(state().mu); ++state().skipped; return; }
     }
     auto & st = state();
     std::lock_guard<std::mutex> lock(st.mu);
     Family & f = st.families[key];
     if (!mm) { ++f.mv_nodes; return; }
     ++st.audited; ++f.mm_nodes;
+    if (t0.bad_per_k.size() == t1.bad_per_k.size()) {
+        const double n0 = double(t0.row_blocks), n1 = double(t1.row_blocks);
+        for (size_t k = 0; k < t0.bad_per_k.size(); ++k) {
+            const double a = t0.bad_per_k[k], b = t1.bad_per_k[k];
+            f.steps += n0 * n1;
+            f.steps_bad_any += n0 * n1 - (n0 - a) * (n1 - b);
+            f.steps_bad_src0 += a * n1;
+            f.steps_bad_src1 += b * n0;
+        }
+    } else ++st.skipped;
     f.flops += 2.0 * double(s0->ne[0]) * double(s0->ne[1]) * double(s1->ne[1]) * double(s1->ne[2]) * double(s1->ne[3]);
-    if (scan0) { ++f.src0_scans; f.src0.add(c0); }
+    if (counted0) { ++f.src0_scans; f.src0.add(c0); }
     f.src1.add(c1);
     const double frac = c1.elems ? double(c1.changed()) / double(c1.elems) : 0.0;
     f.worst_node_changed_frac = std::max(f.worst_node_changed_frac, frac);
@@ -232,9 +279,11 @@ inline void dump() {
                  (unsigned long long) st.audited, (unsigned long long) st.skipped);
     bool first = true;
     for (const auto & [key, f] : st.families) {
-        std::fprintf(o, "%s\n\"%s\":{\"mm_nodes\":%llu,\"mv_nodes\":%llu,\"src0_scans\":%llu,\"flops\":%.6g,\"worst_node_changed_frac\":%.9g,\"src0\":",
+        std::fprintf(o, "%s\n\"%s\":{\"mm_nodes\":%llu,\"mv_nodes\":%llu,\"src0_scans\":%llu,\"flops\":%.6g,\"worst_node_changed_frac\":%.9g,"
+                        "\"steps\":%.6g,\"steps_bad_any\":%.6g,\"steps_bad_src0\":%.6g,\"steps_bad_src1\":%.6g,\"src0\":",
                      first ? "" : ",", key.c_str(), (unsigned long long) f.mm_nodes, (unsigned long long) f.mv_nodes,
-                     (unsigned long long) f.src0_scans, f.flops, f.worst_node_changed_frac);
+                     (unsigned long long) f.src0_scans, f.flops, f.worst_node_changed_frac,
+                     f.steps, f.steps_bad_any, f.steps_bad_src0, f.steps_bad_src1);
         write_counts(o, f.src0);
         std::fprintf(o, ",\"src1\":");
         write_counts(o, f.src1);
