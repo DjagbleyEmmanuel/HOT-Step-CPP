@@ -163,6 +163,8 @@ test('session cap evicts the oldest ended session; idle and ended sessions expir
   try {
     const a = sessions.open('storm', { streamId: 'a' })!;
     a.record('start'); a.chunk(fixture(0.05, 120)); a.end();
+    const until = async (done: () => boolean) => { for (const end = Date.now() + 2000; !done() && Date.now() < end;) await new Promise(r => setTimeout(r, 10)); };
+    await until(() => fs.readdirSync(dir).length > 0); // recording must exist before eviction
     clock.t = 1;
     const b = sessions.open('storm', { streamId: 'b' })!;
     clock.t = 2;
@@ -171,7 +173,7 @@ test('session cap evicts the oldest ended session; idle and ended sessions expir
     assert.throws(() => sessions.get(a.id), /not found/);
     assert.equal(sessions.open('storm', { streamId: 'd' }), null, 'all live: no session, stream still plays');
     // dispose() deletes fire-and-forget behind pending writes: poll, don't guess
-    for (const end = Date.now() + 2000; fs.readdirSync(dir).length && Date.now() < end;) await new Promise(r => setTimeout(r, 10));
+    await until(() => fs.readdirSync(dir).length === 0);
     assert.deepEqual(fs.readdirSync(dir), [], 'evicted recording deleted');
 
     clock.t = 5003;
