@@ -62,8 +62,9 @@ export interface Arrangement {
   sections: SourceSection[];
   plan: Occurrence[];
   nextOccurrence: number;
-  /** The plan ends the song. Until then the last planned occurrence cannot
-   *  be composed: its prompt would end there, and the model writes an ending. */
+  /** The plan ends the song. Until then a take's prompt runs on into the
+   *  source section after the last planned one (lookaheadSection), so the
+   *  model composes a seam there instead of an ending. */
   finished: boolean;
 }
 
@@ -262,6 +263,17 @@ export function planSections(arrangement: Arrangement): number[] {
   return arrangement.plan.map(o => arrangement.sections.findIndex(s => s.id === o.section));
 }
 
+/** The source section a take's prompt adds after the last planned occurrence
+ *  while the plan is open: the one that follows it in the score. The take
+ *  stops a few seconds into it, so the seam has something to run into
+ *  without the user choosing what comes next. None after the score's last
+ *  section (that take composes an ending) or once the plan is finished. */
+export function lookaheadSection(arrangement: Arrangement): number | null {
+  if (arrangement.finished || !arrangement.plan.length) return null;
+  const last = planSections(arrangement).at(-1)!;
+  return last + 1 < arrangement.sections.length ? last + 1 : null;
+}
+
 /** Plan index of the next occurrence to build: the one after the spine's last. */
 export function nextOccurrence(session: Pick<ArrangedSession, 'takes' | 'kept'>): number {
   const spine = session.takes.find(t => t.id === session.kept.at(-1));
@@ -270,9 +282,8 @@ export function nextOccurrence(session: Pick<ArrangedSession, 'takes' | 'kept'>)
 
 /** Why takes of occurrences [next, to] cannot be generated now, or null. */
 export function generateRefusal(session: ArrangedSession, to: number): string | null {
-  const from = nextOccurrence(session), { plan, finished } = session.arrangement;
+  const from = nextOccurrence(session), { plan } = session.arrangement;
   if (!Number.isInteger(to) || to < from || to >= plan.length) return 'Pick an occurrence from the next one to build onward.';
-  if (to === plan.length - 1 && !finished) return 'Add what comes next, or finish the arrangement, before building its last section.';
   return null;
 }
 

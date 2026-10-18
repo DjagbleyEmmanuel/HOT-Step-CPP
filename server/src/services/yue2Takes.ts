@@ -34,7 +34,7 @@ import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import {
-  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, migrateLegacySession, nextOccurrence,
+  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence,
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
 import { buildYue2LyricSchedule } from './backends/yue2/lyricSchedule.js';
@@ -162,9 +162,12 @@ type Spans = Array<[number, number] | null>;
  *  the stored text unchanged, so sessions from before arrangements render as
  *  they did. A lyric schedule is rebuilt from the composed text, or dropped
  *  when that text would pair a block with the wrong occurrence. */
-function arranged(stored: Pick<Stored, 'request' | 'arrangement'>): { request: Yue2SynthRequest; lyrics: string; spans: Spans; clock: number[] } {
+function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = false): { request: Yue2SynthRequest; lyrics: string; spans: Spans; clock: number[] } {
   const abc = stored.request.abc ?? '', lyrics = stored.request.lyrics ?? '';
   const plan = planSections(stored.arrangement);
+  // A take of an open plan runs on into the section after it (lookaheadSection).
+  const extra = lookahead ? lookaheadSection(stored.arrangement) : null;
+  if (extra !== null) plan.push(extra);
   const composed = composeArrangement(abc, lyrics, plan);
   const request = { ...stored.request };
   if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i)) {
@@ -367,7 +370,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
     throw new TakesError('The kept take does not reach the next section. Undo the keep and try another take.');
   }
   const prefix = spine ? (JSON.parse(fs.readFileSync(codesFile(id, spine.id), 'utf8')) as number[]).slice(0, start) : [];
-  const { request, lyrics, spans, clock } = arranged(stored);
+  const { request, lyrics, spans, clock } = arranged(stored, true);
   // prompt is the first caption field a render reads (generate.ts), so it wins.
   if (own) request.style = toStyle!({ ...stored.params, prompt: own });
   const occurrences = spans.length;

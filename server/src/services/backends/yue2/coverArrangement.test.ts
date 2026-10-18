@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  composeArrangement, editPlan, generateRefusal, keepRefusal, migrateLegacySession, revisionRefusal,
+  composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, revisionRefusal,
   sourceSections, takeIdentity, type ArrangedSession, type LegacySession,
 } from './coverArrangement.js';
 import { scoreSections } from './scoreSections.js';
@@ -210,9 +210,13 @@ test('plan edits keep built occurrences, give new ones fresh ids, and retire old
   assert.equal(revisionRefusal(edited, 1), null);
   assert.match(keepRefusal(edited, edited.takes[1])!, /before the last change/);
   assert.match(keepRefusal(edited, { ...edited.takes[1], revision: 1 })!, /different arrangement/);
-  // The last planned occurrence waits for the plan to be finished.
-  assert.match(generateRefusal(edited, 4)!, /finish the arrangement/);
-  assert.equal(generateRefusal(edited, 3), null);
+  // An open plan builds its last occurrence too, running on into the source
+  // section after it; a finished one, or one ending on the score's last, adds none.
+  assert.equal(generateRefusal(edited, 4), null);
+  assert.match(generateRefusal(edited, 5)!, /Pick an occurrence/);
+  assert.equal(lookaheadSection(edited.arrangement), 3);
+  assert.equal(lookaheadSection({ ...edited.arrangement, finished: true }), null);
+  assert.equal(lookaheadSection(editPlan(s, ['s4'], false)), null);
   assert.deepEqual(takeIdentity(edited, 3), { revision: 1, parent: 'a', occurrences: ['o5', 'o3'] });
 });
 
