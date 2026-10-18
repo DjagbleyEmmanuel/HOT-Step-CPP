@@ -277,8 +277,7 @@ Dials that change the song itself, roughly strongest first:
 
 Tips from listening tests:
 
-- Top-K 0 (unlimited) with temperature above 1.0 can break the render; the server clamps
-  temperature to 1.0 for that combination.
+- Top-K 0 (unlimited) with temperature above 1.0 can break the render.
 - Temperature works in both directions: around 0.7 and around 1.3 are both usable.
 - Higher CFG follows the style more closely but costs some high-end air.
 - Words like "choir" or "reverb" in the style add heavy reverb.
