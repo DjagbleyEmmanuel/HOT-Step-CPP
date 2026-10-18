@@ -22,6 +22,7 @@ submodule at configure time.
 | metal-out-prod-smem | Metal tiled `OUT_PROD` store scratch aliases its input tiles, so two threadgroups share a core; same arithmetic | — |
 | metal-cpy-transpose | Same-type F32/BF16 transposed row views copy through a padded 32 by 32 integer tile, preserving all bits; other layouts keep the generic copy. `GGML_METAL_CPY_TRANSPOSE=0` keeps the generic path | — |
 | metal-bf16-round-producer | Metal skips an in-place `BF16_ROUND` of an already-rounded value, and the simdgroup `mul_mm`, an unfused `RMS_NORM` and `SILU` store a following single-consumer `BF16_ROUND` themselves. Bit-identical; `GGML_METAL_NO_BF16_ROUND_PRODUCER=1` turns it off | — |
+| metal-mul-mm-half-prepass | In training graphs on Apple8, a base-forward BF16 `mul_mm` runs on half copies of its operands for every 32-wide K step whose values are all exact in half, and on bfloat otherwise. Bit-identical; `GGML_METAL_HALF_PREPASS_DISABLE=1` turns it off | — |
 | mm-backward | `GGML_BACKWARD_MM=1` mul_mat formulation of the activation gradient; on Windows the latch reads the process environment, so a static-CRT build sees the trainer's `_putenv` | 8 |
 | quant-cpy-kquant | quant → F32 `CPY` for every type the dequantizers cover | 10 |
 | sched-unplaced-log | name the node no backend accepts | — |
@@ -171,6 +172,41 @@ AR CE, NAR MSE, KL and gradient norm against the predecessor and the original
 Metal baseline, and so do the switched-off control and this change alone on the
 original fork. Raw evidence lives under `.scratch/hs345/` on the development
 checkout and `.probe-logs/hs345/` on the measurement mirror (HOTSTEP-345).
+
+## Metal half pre-pass for base-forward GEMMs
+
+On Apple8 the half MAC is about 22% faster than the bfloat one, and a half product
+equals the bfloat product whenever both inputs are exact in half, also with the type
+mixed per K step (HOTSTEP-347). Converting inside the GEMM cost as much as it saved
+(HOTSTEP-348). `metal-mul-mm-half-prepass` converts first instead:
+
+- `kernel_mul_mm_hp_cvt_w` writes a half copy of the BF16 weights, and
+  `kernel_mul_mm_hp_cvt_a` writes bfloat and half copies of the BF16-rounded F32
+  activations. Both set one flag per 8-wide K block of each tile (64 weight rows,
+  32 activation rows) when every value in it is exact in half.
+- `kernel_mul_mm_bf16_f32_hp` runs a 32-wide K step on the half MAC when all of
+  the step's flags are set and on the bfloat MAC otherwise. Staging is a 16-bit
+  copy from whichever copy the step picks; accumulation and the store, BF16_ROUND
+  epilogue included, are `kernel_mul_mm`'s.
+
+It applies only in graphs built with grads, on Apple8 without the tensor API, to
+2-D contiguous BF16-by-F32 GEMMs with `K % 32 == 0` whose weight reaches a frozen
+leaf without a transpose. dX GEMMs, BF16 casts of trainable LoRA factors, graphs
+without grads and inference keep the existing kernel. The copies share one private
+scratch buffer grown on demand; the op puts barriers around its pre-pass, and a
+replaced buffer is leaked because it may still be in flight.
+`GGML_METAL_HALF_PREPASS_DISABLE=1` turns it off.
+
+Measured on an M2 Max. Microbenchmark on the base-forward shapes with the audit's
+fallback mix: 0.903 of the existing kernel's time with both pre-passes, FLOP-weighted
+(F16 weights would be 0.78), bit-identical on every shape and mix. Three paired
+fresh-state warm-song updates took 31.765/32.259/32.032 s for the predecessor and
+31.146/31.173/31.402 s with it; median paired saving 0.629 s (1.97%), and 7.35 s over
+the seven updates. Peak process footprint rose 0.53 GB at the median. All seven
+matched updates log bit-identical AR CE, NAR MSE, KL and gradient norm against the
+original Metal baseline, with equal exported adapter hashes, and so does the
+switched-off control. Report: `tools/yue2-aitk-reference/hs353-half-prepass/REPORT.md`
+(HOTSTEP-353).
 
 ## Why each change exists
 
