@@ -160,10 +160,11 @@ inline bool keep_attention(ggml_backend_t backend) {
     static const bool recompute = std::getenv("YUE2_AITK_ATTENTION_RECOMPUTE") != nullptr;
     return !recompute && yue2_aitk_is_metal(backend) && !yue2_aitk_graph::math_attention();
 }
-// ponytail: fixed 8 GiB reserve, a guess until the Mac peak-memory run sets it;
+// 16 GiB covers the whole step: the largest peak footprint measured on an M2 Max
+// (whole-song AR, S = 7,668) was 16.42 GB, retention included (HOTSTEP-346).
 // YUE2_AITK_ATTENTION_RESERVE_MB overrides it (a huge value tests the fallback).
 inline size_t attention_reserve() {
-    static const size_t mb = [] { const char * v = std::getenv("YUE2_AITK_ATTENTION_RESERVE_MB"); return v && *v ? size_t(std::strtoull(v, nullptr, 10)) : size_t(8192); }();
+    static const size_t mb = [] { const char * v = std::getenv("YUE2_AITK_ATTENTION_RESERVE_MB"); return v && *v ? size_t(std::strtoull(v, nullptr, 10)) : size_t(16384); }();
     return mb << 20;
 }
 inline void make_attention_tape(ggml_backend_t backend, const Yue2AitkGraphConfig & c,

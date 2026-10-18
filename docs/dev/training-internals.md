@@ -82,7 +82,8 @@ fused path does not). On Metal the backward recompute copies each layer's
 attention O+LSE kept from the adapted forward instead of running the attention
 forward again (`keep_attention` in `yue2-aitk-stack.h`; about 63 MB a layer at
 S = 7,668). It is kept only if the device still has
-`YUE2_AITK_ATTENTION_RESERVE_MB` (default 8192) free on top, otherwise the
+`YUE2_AITK_ATTENTION_RESERVE_MB` (default 16384, above the largest measured
+step footprint) free on top, otherwise the
 trainer warns and recomputes, and it is freed as that backward returns.
 `YUE2_AITK_ATTENTION_RECOMPUTE=1` restores the recompute; CUDA, CPU and Vulkan
 always recompute. ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
