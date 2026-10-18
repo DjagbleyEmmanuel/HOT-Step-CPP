@@ -41,9 +41,36 @@ let suspended = false;
 let respawnTimer: NodeJS.Timeout | null = null;
 let lifecycleEpoch = 0;
 
+/**
+ * While the engine waits on an empty models folder, a model copied in by hand
+ * (not through the Model Manager) must start it too. The engine scans only
+ * top-level *.gguf, so look for one that has stopped growing (mtime older than
+ * 3 s, so a copy in progress does not trigger an early start).
+ */
+const MODELS_WATCH_MS = 5_000;
+let modelsWatch: NodeJS.Timeout | null = null;
+
+function stopWatchingForModels(): void {
+  if (modelsWatch) { clearInterval(modelsWatch); modelsWatch = null; }
+}
+
+function watchForModels(): void {
+  stopWatchingForModels();
+  modelsWatch = setInterval(() => {
+    try {
+      const dir = config.aceServer.models;
+      const found = fs.readdirSync(dir).some(n => n.toLowerCase().endsWith('.gguf')
+        && Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > 3000);
+      if (found) retryIfGaveUp();
+    } catch { /* folder missing or unreadable: keep waiting */ }
+  }, MODELS_WATCH_MS);
+  modelsWatch.unref();
+}
+
 /** Cancel any pending crash-respawn and invalidate one already in flight. */
 function cancelPendingRespawn(): void {
   lifecycleEpoch++;
+  stopWatchingForModels();
   if (respawnTimer) {
     clearTimeout(respawnTimer);
     respawnTimer = null;
@@ -230,9 +257,11 @@ export function startAceServer(): ChildProcess | null {
   });
 
   child.stderr?.on('data', (data: Buffer) => {
+    // Chunks are not lines: match on a rolling tail so a split marker still counts.
+    errTail = (errTail + data.toString()).slice(-256);
+    if (errTail.includes(NO_MODELS_LINE)) sawNoModels = true;
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
-      if (line.includes(NO_MODELS_LINE)) sawNoModels = true;
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
       pushLog(line, 'engine');
@@ -241,9 +270,24 @@ export function startAceServer(): ChildProcess | null {
 
   const spawnEpoch = lifecycleEpoch;
   let sawNoModels = false;
+  let errTail = '';
 
   child.on('exit', (code, signal) => {
     if (aceProcess === child) aceProcess = null;   // never hand out a dead child
+    // 'exit' can precede the last stderr chunk; classify only after it drains.
+    const err = child.stderr;
+    if (err && err.readableEnded === false && !err.destroyed) {
+      let done = false;
+      const go = () => { if (done) return; done = true; clearTimeout(t); onExited(code, signal); };
+      const t = setTimeout(go, 500);
+      err.once('close', go);
+      err.once('end', go);
+    } else {
+      onExited(code, signal);
+    }
+  });
+
+  const onExited = (code: number | null, signal: NodeJS.Signals | null) => {
     if (suspended) return;   // deliberate stop — never respawn
     if (spawnEpoch !== lifecycleEpoch) return;     // superseded by a stop/restart
     if (sawNoModels && code === 1) {
@@ -253,6 +297,7 @@ export function startAceServer(): ChildProcess | null {
       setEngineNoModels(true);
       setEngineReady(false, 'No models installed — download one in the Model Manager');
       gaveUp = true;
+      watchForModels();
       return;
     }
     if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
@@ -286,7 +331,7 @@ export function startAceServer(): ChildProcess | null {
         startAceServer();
       }, 3000);
     }
-  });
+  };
 
   child.on('error', (err) => {
     console.error(`[ace-server] Failed to start: ${err.message}`);

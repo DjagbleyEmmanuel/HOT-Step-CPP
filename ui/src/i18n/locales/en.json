@@ -1,5 +1,7 @@
 {
   "translation": {
+    "noModels.message": "No models installed yet. Download one in the Model Manager and the engine starts by itself.",
+    "noModels.open": "Open Model Manager",
     "trainingStudio.yue2.stat.loss": "Decoder loss",
     "trainingStudio.yue2.stat.gradNorm": "Grad norm",
     "trainingStudio.yue2.stat.stepTime": "Step time",

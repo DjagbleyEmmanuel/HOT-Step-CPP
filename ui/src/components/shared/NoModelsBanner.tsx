@@ -3,42 +3,39 @@
  *
  * The engine exits at its model scan when nothing is installed. That is not a
  * crash and not a missing DLL, so say what is actually needed and open the Model
- * Manager. The server restarts the engine by itself when a download finishes;
- * this banner polls /api/health and disappears once the engine reports ready.
+ * Manager. The server restarts the engine by itself when a download finishes or a
+ * model file appears in the models folder. The shared health query is polled
+ * (Query owns the timer and its cancellation) until the engine reports ready.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { PackageOpen } from 'lucide-react';
-import { healthApi } from '../../services/api';
+import { pollWhile } from '../../queries/contract';
+import type { HealthResponse } from '../../../../server/src/contracts/health';
+import { healthOptions } from '../../queries/shell-queue/settings';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 
 const POLL_MS = 5000;
 
 export const NoModelsBanner: React.FC = () => {
-  const [noModels, setNoModels] = useState(false);
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    ...healthOptions(),
+    // Poll only until the engine is up; an unreachable server keeps the last data.
+    refetchInterval: pollWhile<HealthResponse>(d => d?.engine?.ready !== true, POLL_MS),
+  });
 
-  useEffect(() => {
-    let alive = true;
-    const poll = async () => {
-      try {
-        const h = await healthApi.check();
-        if (alive) setNoModels(h.engine?.noModels === true);
-      } catch { /* server restarting: keep the last state */ }
-    };
-    void poll();
-    const t = setInterval(poll, POLL_MS);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
-
-  if (!noModels) return null;
+  if (data?.engine?.noModels !== true) return null;
 
   return (
     <>
       <div className="flex items-center gap-3 px-4 py-2 border-b border-amber-500/30 bg-amber-500/10">
         <PackageOpen size={18} className="flex-shrink-0 text-amber-400" />
         <div className="min-w-0 flex-1 text-sm text-zinc-800 dark:text-zinc-100">
-          No models installed yet. Download one in the Model Manager and the engine starts by itself.
+          {t('noModels.message')}
         </div>
         <button
           type="button"
@@ -46,7 +43,7 @@ export const NoModelsBanner: React.FC = () => {
           className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold
                      bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
         >
-          Open Model Manager
+          {t('noModels.open')}
         </button>
       </div>
       {open && <ModelManagerModal onClose={() => setOpen(false)} />}

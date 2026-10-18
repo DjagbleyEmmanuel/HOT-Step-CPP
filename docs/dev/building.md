@@ -218,6 +218,12 @@ The Node server respawns `ace-server` whenever it exits abnormally. If you run
 `ace-server.exe`, and anything that kills it makes Node start it again. The result is a
 respawn and file-lock loop.
 
+One abnormal exit is not counted as a crash: an empty models folder. `ace-server` prints
+`ERROR: no models found` and exits 1; the server matches that stderr line (after stderr drains),
+spends none of the three-strike budget, and reports `engine.noModels` on `/api/health`. The UI
+shows a banner pointing at the Model Manager. The engine starts by itself when a download queue
+drains, or when a `.gguf` appears in the models folder (checked every 5 s).
+
 - **Rebuild with `dev-rebuild.bat` at the repo root, not `engine\build.cmd`.** It posts to
   `http://localhost:3001/api/shutdown` so Node stops the engine, Vite and itself; waits for
   `ace-server.exe` to exit, force-killing it after 10 seconds and giving up after 15; then

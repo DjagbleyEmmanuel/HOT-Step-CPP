@@ -55,3 +55,67 @@ test('no-models exit is classified, spends no crash budget and does not respawn'
     await proc.stopAceServer('test over', 100).catch(() => {});
   }
 });
+
+test('no-models marker split across stderr chunks, with exit before stream end', async () => {
+  const proc = await import('./aceEngineProcess.js');
+  const state = await import('../engineState.js');
+  const kids: any[] = [];
+  proc.testHooks.spawn = (() => { const c = fakeChild(); kids.push(c); return c; }) as any;
+  proc.testHooks.restartHealthTimeoutMs = 100;
+  await proc.restartAceServer();                   // clear suspended/gaveUp left by the previous test
+  for (const k of kids) k.exitCode = 0;
+  kids.length = 0;
+  try {
+    proc.startAceServer();
+    const k = kids[0];
+    const seq = proc.engineCrashSeq();
+    k.stderr.readableEnded = false;                  // stream still open when 'exit' fires
+    k.stderr.emit('data', Buffer.from('[Server] ERROR: no mod'));
+    k.exitCode = 1;
+    k.emit('exit', 1, null);
+    k.stderr.emit('data', Buffer.from('els found in X\n'));
+    k.stderr.emit('close');
+    assert.equal(state.engineNoModels, true);
+    assert.equal(proc.engineCrashSeq(), seq);
+  } finally {
+    for (const k of kids) k.exitCode = 0;
+    await proc.stopAceServer('test over', 100).catch(() => {});
+  }
+});
+
+test('a model copied into the folder restarts a waiting engine', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { config } = await import('../config.js');
+  const proc = await import('./aceEngineProcess.js');
+  const kids: any[] = [];
+  proc.testHooks.spawn = (() => { const c = fakeChild(); kids.push(c); return c; }) as any;
+
+  proc.testHooks.restartHealthTimeoutMs = 100;
+  await proc.restartAceServer();                   // clear suspended/gaveUp left by the previous test
+  for (const k of kids) k.exitCode = 0;
+  kids.length = 0;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hs-models-'));
+  const prev = config.aceServer.models;
+  config.aceServer.models = dir;
+  try {
+    proc.startAceServer();
+    const k = kids[0];
+    k.stderr.emit('data', Buffer.from('ERROR: no models found\n'));
+    k.exitCode = 1;
+    k.emit('exit', 1, null);
+    const f = path.join(dir, 'm.gguf');
+    fs.writeFileSync(f, 'x');
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(f, old, old);
+    const until = Date.now() + 9000;
+    while (kids.length < 2 && Date.now() < until) await new Promise(r => setTimeout(r, 100));
+    assert.equal(kids.length, 2, 'engine respawned after a model appeared');
+  } finally {
+    config.aceServer.models = prev;
+    for (const k of kids) k.exitCode = 0;
+    await proc.stopAceServer('test over', 100).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
