@@ -3,7 +3,7 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Pencil, Play, RotateCcw, Scissors, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Play, RotateCcw, Scissors, Square, Trash2, X } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -37,10 +37,11 @@ export function finishSavedBuild(id: string): boolean {
   return true;
 }
 
-/** Storage only remembers the field between visits; what is sent is what the page shows. */
-const TAKE_CAPTION = 'buildTakeCaption', TAKE_CAPTION_ON = 'buildTakeCaptionOn';
-/** The caption a Generate sends: none when Take caption is off (as before the field existed). */
-export const submittedCaption = (on: boolean, text: string) => (on ? text.trim() : '');
+/** The build's own caption, read from its params the way a render reads it (yue2/generate.ts). */
+export const buildCaption = (params: Record<string, unknown> | undefined) =>
+  String(params?.prompt || params?.songDescription || params?.caption || params?.style || '');
+/** The caption a Generate sends: none while the field still shows the build's, so the takes inherit it. */
+export const submittedCaption = (shown: string, original: string) => (shown.trim() === original.trim() ? '' : shown.trim());
 
 /** The cover settings the Build page's row edits: params.yue2Cover's voices,
  *  tempo, keyShift and cfgScale, and the Cover AR strength. */
@@ -52,15 +53,17 @@ export function buildNext(session: Yue2BuildSession | null): number {
   return spine ? spine.to + 1 : 0;
 }
 
-/** One occurrence of the output: a score section placed in the song. Kept ones are built and locked. */
-export interface PlanItem { id: string; section: number; kept: boolean }
+/** One occurrence of the output: a score section placed in the song. Kept ones are built and locked.
+ *  `lyrics` is its own sung lines, when it has been given some. */
+export interface PlanItem { id: string; section: number; kept: boolean; lyrics?: string }
 
-/** The output in order. Before a session exists it is the score in its own order. */
-export function planItems(session: Yue2BuildSession | null, sectionCount: number): PlanItem[] {
+/** The output in order. Before a session exists it is empty: the song is built up from the source bar. */
+export function planItems(session: Yue2BuildSession | null): PlanItem[] {
   const built = buildNext(session);
-  if (!session) return Array.from({ length: sectionCount }, (_, i) => ({ id: `o${i}`, section: i, kept: false }));
+  if (!session) return [];
   const { sections, plan } = session.arrangement;
-  return plan.map((o, i) => ({ id: o.id, section: sections.findIndex(s => s.id === o.section), kept: i < built }));
+  return plan.map((o, i) => ({ id: o.id, section: sections.findIndex(s => s.id === o.section), kept: i < built,
+    ...(o.lyrics === undefined ? {} : { lyrics: o.lyrics }) }));
 }
 
 /** The ids `POST /build/:id/plan` takes for the unbuilt part of the output after `edit`. */
@@ -82,6 +85,18 @@ export function occurrenceLyrics(lyrics: string, session: Yue2BuildSession | nul
   const sung = ranges.filter(r => lyrics.slice(r.start, r.end).replace(/^[^\n]*/, '').trim());
   const r = sung[session.arrangement.sections[item.section]?.lyricBlock ?? -1];
   return r ? lyrics.slice(r.start, r.end).trim() : '';
+}
+
+/** The lines an occurrence sings, without its tag: its own, else its block's. Null for an unsung section. */
+export function occurrenceLines(lyrics: string, session: Yue2BuildSession | null, item: PlanItem): string | null {
+  const block = occurrenceLyrics(lyrics, session, item);
+  if (!block) return null;
+  return item.lyrics ?? (/^\[[^\]\n]*\]/.test(block) ? block.replace(/^[^\n]*\n?/, '') : block).trim();
+}
+
+/** The lyric edits a Generate applies first: the drafts that differ from what their occurrence sings now. */
+export function pendingLyrics(drafts: Record<string, string>, current: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(Object.entries(drafts).filter(([id, text]) => id in current && current[id] !== null && text.trim() !== current[id]!.trim()));
 }
 
 /** Whether a take can be kept now: it resumed the kept build, at the current revision, and composed the planned occurrences. */
@@ -137,12 +152,15 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   return {
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. A non-empty
-     *  `caption` is these takes' own. */
-    generate: (params: Record<string, unknown>, to: number, count: number, caption: string) => call(async () => {
+     *  `caption` is these takes' own; `lyrics` (occurrence id to lines) is applied first. */
+    generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}) => call(async () => {
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
+      if (Object.keys(lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, lyrics, token!);
       return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, caption || undefined);
     }),
+    /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
+    occurrenceLyrics: (edits: Record<string, string | null>) => call(() => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, edits, token!)),
     /** Applies new cover settings to the session (before its first keep). */
     settings: (settings: Record<string, unknown>) => call(() => yue2CoverApi.buildSettings(live!.id, live!.revision, settings, token!)),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
@@ -267,8 +285,12 @@ interface PageProps {
   blocked: string;
   busy: boolean;
   error: string;
-  /** `caption`, when non-empty, is these takes' own. */
-  onGenerate: (to: number, count: number, caption: string) => void;
+  /** The build's caption, which the caption field starts from for each section. */
+  caption: string;
+  /** `caption`, when non-empty, is these takes' own; `lyrics` (occurrence id to lines) is applied first. True once queued. */
+  onGenerate: (to: number, count: number, caption: string, lyrics: Record<string, string>) => Promise<boolean>;
+  /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
+  onOccurrenceLyrics: (edits: Record<string, string | null>) => void;
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
   onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
@@ -293,37 +315,35 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [target, setTarget] = useState<string | null>(null);
   const [count, setCount] = useState(3);
   const [menu, setMenu] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [cropping, setCropping] = useState(false);
   const [cutAt, setCutAt] = useState<number | null>(null);
   const [cropMode, setCropMode] = useState<'regenerate' | 'advance' | null>(null);
-  const [captionOn, setCaptionOn] = useState(() => restore<boolean>(TAKE_CAPTION_ON, true));
-  const [caption, setCaption] = useState(() => restore<string>(TAKE_CAPTION, ''));
+  const [caption, setCaption] = useState(p.caption);
   const dragging = useRef(false);
   const s = p.session;
   const next = buildNext(s);
   const spine = s?.takes.find(t => t.id === s.kept.at(-1)) ?? null;
   const colours = sectionColours(p.sections.map(x => x.label));
-  const items = planItems(s, p.sections.length);
-  const finished = s?.arrangement.finished ?? true;
+  const items = planItems(s);
+  const finished = s?.arrangement.finished ?? false;
   const targetAt = items.findIndex(i => i.id === target);
   const range = targetAt >= next ? targetAt : null;
   const candidates = s?.takes.filter(t => t.from === next && t.parent === (spine?.id ?? null)) ?? [];
   const waiting = s?.pending.reduce((n, x) => n + x.count, 0) ?? 0;
   const chunk = s?.pending[0];
   const chunkStage = ({ starting: 'Starting', semantic: 'Composing', plan: 'Planning', nar: 'Rendering', vae: 'Decoding audio', aligning: 'Aligning lyrics' } as Record<string, string>)[chunk?.phase ?? ''] ?? 'Rendering';
-  const done = next >= items.length;
-  const lastOpen = range !== null && range === items.length - 1 && !finished;
+  const done = !!items.length && next >= items.length;
   const editable = !p.busy && waiting === 0 && !p.loading;
   const nameOf = (i: PlanItem) => p.sections[i.section]?.label ?? '?';
 
-  useEffect(() => { setTarget(null); }, [next]);
+  // Each section starts from the build's caption.
+  useEffect(() => { setTarget(null); setCaption(p.caption); }, [next, s?.id, p.caption]);
   // A cut belongs to the kept take it was set on; the choice belongs to the cut.
   useEffect(() => { setCutAt(null); setCropMode(null); }, [spine?.id]);
   useEffect(() => { setCropMode(null); }, [cutAt]);
-  // An open editor belongs to the build it was opened on.
-  useEffect(() => { setEditing(null); }, [s?.id]);
-  const apply = async (text: string) => { if (await p.onApplyLyrics(text)) setEditing(null); };
+  // Lyric drafts belong to the build they were typed in.
+  useEffect(() => { setDrafts({}); }, [s?.id]);
   useEffect(() => {
     const up = () => { dragging.current = false; };
     window.addEventListener('pointerup', up);
@@ -379,7 +399,12 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   };
 
   // Lyrics of the chosen sections (block i pairs with section i).
-  const shown = done ? [] : items.slice(next, (range ?? next) + 1).map(i => ({ id: i.id, text: occurrenceLyrics(p.lyrics, s, i) }));
+  const shown = done ? [] : items.slice(next, (range ?? next) + 1).map(i => ({ item: i, lines: occurrenceLines(p.lyrics, s, i) }));
+  const current = Object.fromEntries(shown.map(x => [x.item.id, x.lines]));
+  const generate = async () => {
+    if (range === null) return;
+    if (await p.onGenerate(range, count, submittedCaption(caption, p.caption), pendingLyrics(drafts, current))) setDrafts({});
+  };
   const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
   const rangeLabel = range === null ? '' : `${nameOf(items[next])}${range > next ? ` → ${nameOf(items[range])}` : ''}`;
   const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => p.onPlan(editedPlan(items, next, change), ends);
@@ -417,13 +442,13 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             onMouseLeave={() => setMenu(false)}>
             <button type="button" disabled={!s.kept.length} onClick={() => { setMenu(false); undo(); }}
               className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Undo last keep</button>
+            <button type="button" disabled={!s.kept.length} onClick={() => { setMenu(false); p.onSave(); }}
+              title="Render everything kept so far as a library song; this ends the build"
+              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Render the song so far</button>
             <button type="button" onClick={() => { setMenu(false); p.onStartOver(); }}
               className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-zinc-100 dark:hover:bg-white/5">Start over</button>
           </div>}
         </div>
-        <button type="button" onClick={p.onSave} disabled={!s?.kept.length}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-          title="Render everything kept so far as a library song">Save song</button>
       </div>
 
       <SettingsRow value={p.settings} onApply={p.onSettings} build={!!s} kept={!!s?.kept.length} disabled={!editable}
@@ -454,9 +479,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
             {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
           <Toggle size="sm" accent="cyan" checked={finished} disabled={!editable} label="Ends the song"
-            info="The song stops after its last section. Turn it off to keep adding sections: the last one cannot be built until something follows it."
+            info="Tick it before building the last section: that take composes an ending. Until then each take runs a few seconds into the section that follows it in the source, so the next one has a seam to start from."
             onChange={ends => p.onPlan(items.slice(next).map(i => i.id), ends)} />
-          <span className="ml-auto">{done ? 'Every section is built.' : `Click a section to build up to it, starting from ${nameOf(items[next])}.`}</span>
+          <span className="ml-auto">{!items.length ? 'Add sections from the source bar above.' : done ? 'Every section is built.' : `Click a section to build up to it, starting from ${nameOf(items[next])}.`}</span>
         </div>
         <div className="flex gap-1 select-none" aria-label="Song sections">
           {items.map((item, i) => {
@@ -516,7 +541,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             <span>
               {cutAt === null ? `Between ${clock(takePrefix(cropBase) / FPS)} and ${clock(cropBase.frames / FPS)}.`
                 : !cut ? `Outside the part this take composed (${clock(takePrefix(cropBase) / FPS)} to ${clock(cropBase.frames / FPS)}).`
-                : cut.occurrence > cropBase.to ? 'After the next section starts: only the tail that Save song renders is cut.'
+                : cut.occurrence > cropBase.to ? 'After the next section starts: only the tail the final render plays is cut.'
                 : `${cut.inside ? 'Inside' : 'At the start of'} ${cutItem ? nameOf(cutItem) : 'a section'}${cutBar}.`}
             </span>
           </div>
@@ -538,33 +563,30 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <div className="min-h-0 overflow-y-auto border-r border-zinc-200 dark:border-white/10 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              {done ? 'Done' : `Building: ${rangeLabel || nameOf(items[next])}`}</p>
-            {editing === null && <>
-              {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void apply(p.prepareLyrics)} disabled={p.busy || p.loading || waiting > 0}
-                title="Replace this build's lyrics with the Prepare page's"
-                className="text-xs text-zinc-500 hover:text-cyan-600 disabled:opacity-40">Use Prepare lyrics</button>}
-              <button type="button" onClick={() => setEditing(p.lyrics)} disabled={p.busy || p.loading || waiting > 0}
-                title={waiting > 0 ? 'Wait for the pending takes, or cancel them, to edit the lyrics' : 'Edit the lyrics for this build only'}
-                className="flex items-center gap-1 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Pencil className="w-3 h-3" />Edit lyrics</button>
-            </>}
+              {done ? 'Done' : items.length ? `Building: ${rangeLabel || nameOf(items[next])}` : 'Nothing to build yet'}</p>
+            {p.lyrics !== p.prepareLyrics && <button type="button" onClick={() => void p.onApplyLyrics(p.prepareLyrics)} disabled={!editable}
+              title="Replace this build's lyrics with the Prepare page's, for every section not yet built"
+              className="text-xs text-zinc-500 hover:text-cyan-600 disabled:opacity-40">Use Prepare lyrics</button>}
           </div>
-          {editing !== null ? <div className="space-y-2">
-            <textarea value={editing} onChange={e => setEditing(e.target.value)} maxLength={20000} rows={16} spellCheck={false}
-              aria-label="Build lyrics"
-              className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 p-2 font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200" />
-            <p className="text-xs text-zinc-500">
-              For this build only: the Prepare page and the dataset keep theirs.
-              {s?.kept.length ? ' Lyrics of built sections are locked.' : ''}
-              {candidates.length ? ' Takes made with the old lyrics can no longer be kept.' : ''}
-            </p>
-            {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
-            <div className="flex gap-2">
-              <button type="button" onClick={() => void apply(editing)} disabled={p.busy || waiting > 0 || !editing.trim() || editing === p.lyrics}
-                className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Apply</button>
-              <button type="button" onClick={() => setEditing(null)} className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
+          {shown.map(({ item, lines }) => <div key={item.id} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-xs font-semibold text-zinc-700 dark:text-zinc-200">{nameOf(item)}</p>
+              {lines !== null && (item.lyrics !== undefined || item.id in drafts) && <button type="button" disabled={!editable}
+                onClick={() => { setDrafts(d => Object.fromEntries(Object.entries(d).filter(([id]) => id !== item.id))); if (item.lyrics !== undefined) p.onOccurrenceLyrics({ [item.id]: null }); }}
+                title="Sing this build's lyrics for this section again"
+                className="flex items-center gap-1 text-xs text-zinc-500 hover:text-cyan-600 disabled:opacity-40"><RotateCcw className="w-3 h-3" />Reset</button>}
             </div>
-          </div> : shown.length ? shown.map(x => <pre key={x.id} className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{x.text || 'No lyrics for this section.'}</pre>)
-            : !done && <p className="text-xs text-zinc-500">No lyrics for this section.</p>}
+            {lines === null ? <p className="text-xs text-zinc-500">Instrumental: no lyrics for this section.</p>
+              : <textarea value={drafts[item.id] ?? lines} disabled={!editable} maxLength={20000} spellCheck={false}
+                rows={Math.min(14, Math.max(3, (drafts[item.id] ?? lines).split('\n').length + 1))}
+                aria-label={`Lyrics for ${nameOf(item)}`}
+                onChange={e => { const text = e.target.value; setDrafts(d => ({ ...d, [item.id]: text })); }}
+                className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 p-2 font-mono text-sm leading-relaxed text-zinc-800 dark:text-zinc-200" />}
+          </div>)}
+          {shown.length > 0 && <p className="text-xs text-zinc-500">
+            Edits apply to this section only, when you generate. The Prepare page, the dataset and other copies of the section keep theirs.
+            {candidates.length && Object.keys(pendingLyrics(drafts, current)).length ? ' Takes made with the old lyrics can no longer be kept.' : ''}
+          </p>}
         </div>
         <div className="min-h-0 flex flex-col p-4 gap-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Takes</p>
@@ -598,35 +620,34 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               <button type="button" onClick={p.onCancel} disabled={p.busy}
                 className="rounded px-2 py-1 font-semibold hover:bg-amber-500/10 disabled:opacity-40">Cancel</button>
             </div>}
-            {!candidates.length && !waiting && !done && <p className="text-xs text-zinc-500">No takes yet. Choose sections on the song bar, then generate.</p>}
+            {!candidates.length && !waiting && !done && <p className="text-xs text-zinc-500">{items.length ? 'No takes yet. Choose sections on the song bar, then generate.' : 'No takes yet. Add the sections you want from the source bar, then generate.'}</p>}
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
           {!done && <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <Toggle size="sm" accent="pink" checked={captionOn} label="Take caption"
-                info="Off hides the field and sends no take caption, so takes use the build's caption as before."
-                onChange={on => { setCaptionOn(on); persist(TAKE_CAPTION_ON, on); }} />
-              {captionOn && <>
-                <ParamLabel label="Caption" className="text-xs text-zinc-500"
-                  info="A caption for the next takes only; empty uses the build's. It changes what is composed (the AR), and the adapter trigger is still added. The sound of the whole song is still rendered (the NAR) with one caption: a take's preview uses its own caption for everything it plays, kept sections included, and Save song uses the build's caption for the whole song. So a section can be written differently, but its timbre follows the one caption. Hover a take's name to see the prompt it was sent; ✎ marks a take with its own caption." />
-                <input type="text" value={caption} maxLength={4000} placeholder="Empty: the build's caption" aria-label="Caption for the next takes"
-                  onChange={e => { setCaption(e.target.value); persist(TAKE_CAPTION, e.target.value); }}
-                  className="min-w-0 flex-1 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 text-xs text-zinc-800 dark:text-zinc-200" />
-              </>}
+              <ParamLabel label="Caption" className="text-xs text-zinc-500"
+                info="The caption for this section's takes, starting from the build's. Edit it to steer this section only; the next section starts from the build's again. It changes what is composed (the AR), and the adapter trigger is still added. The sound of the whole song is rendered (the NAR) with one caption: a take's preview uses its own for everything it plays, and Render Final Song uses the build's for the whole song. Hover a take's name to see the prompt it was sent; ✎ marks a take with its own caption." />
+              <input type="text" value={caption} maxLength={4000} placeholder="The build's caption" aria-label="Caption for this section's takes"
+                onChange={e => setCaption(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 text-xs text-zinc-800 dark:text-zinc-200" />
+              {caption !== p.caption && <button type="button" onClick={() => setCaption(p.caption)} title="Back to the build's caption"
+                aria-label="Back to the build's caption" className="rounded p-1 text-zinc-500 hover:text-cyan-600"><RotateCcw className="w-3 h-3" /></button>}
             </div>
             <div className="flex items-center gap-2">
               <div className="w-20 flex-shrink-0" title="Takes per run">
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}
                   options={Array.from({ length: 10 }, (_, k) => ({ value: k + 1, label: String(k + 1) }))} />
               </div>
-              <button type="button" onClick={() => { if (range !== null) p.onGenerate(range, count, submittedCaption(captionOn, caption)); }} disabled={range === null || p.busy || waiting > 0 || !!p.blocked || lastOpen}
+              <button type="button" onClick={() => void generate()} disabled={range === null || p.busy || waiting > 0 || !!p.blocked}
                 className="flex-1 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-2.5 text-sm font-bold text-white disabled:opacity-40">
                 {range === null ? 'Choose sections on the song bar' : `Generate ${count} take${count > 1 ? 's' : ''} of ${rangeLabel}`}</button>
             </div>
             {p.blocked && <p className="text-xs text-amber-600">{p.blocked}</p>}
-            {lastOpen && <p className="text-xs text-amber-600">Add what comes next, or tick Ends the song, before building the last section.</p>}
             {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
           </div>}
+          {done && <button type="button" onClick={p.onSave} disabled={p.busy}
+            title="Render every kept section as one library song, with the usual post-processing"
+            className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 py-4 text-base font-bold text-white disabled:opacity-40">Render Final Song</button>}
         </div>
       </div>
     </div>

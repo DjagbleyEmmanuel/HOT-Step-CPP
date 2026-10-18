@@ -328,18 +328,22 @@ It opens the **Build** tab, using the approved score, lyrics and settings from
 Prepare. Finish preparing those before generating the first takes.
 
 1. Two bars show the song. The **Source** bar is the score as it is, and never
-   changes. The **Song** bar is the output you are building: built sections have
-   ticks and start times, the next one has an arrow, and the rest are planned.
-   Click a source section to add it to the end of the song; click it again to repeat
-   it (a repeated chorus is its own entry on the Song bar). Hover a planned section
-   to move it earlier or later, or remove it. Built sections are locked until you
-   undo back to them. Click a planned section to build up to it; its lyrics, and the
-   lyrics of the planned sections before it, appear beside the takes, one block per
-   entry. **Ends the song** (on by default) marks the last section as the ending; turn
-   it off to keep adding sections, since the last section cannot be built until
-   something follows it or it is marked as the end. Editing the plan is refused while
-   takes render, and takes made for an earlier plan can no longer be kept. The plan
-   is saved with the build, so it survives a reload and is what **Save song** renders.
+   changes. The **Song** bar is the output you are building. It starts empty:
+   click a source section to add it to the end of the song, and click it again to
+   repeat it (a repeated chorus is its own entry on the Song bar). Built sections
+   have ticks and start times, the next one has an arrow, and the rest are planned.
+   Hover a planned section to move it earlier or later, or remove it. Built
+   sections are locked until you undo back to them. Click a planned section to
+   build up to it; its lyrics, and those of the planned sections before it, appear
+   beside the takes. You don't have to decide what follows: until the song is
+   marked as ending, each take runs a few seconds into the section that follows
+   its last one in the source, so the next take has a seam to start from, and
+   that section is not added to your song. Tick **Ends the song** before building
+   the last section so its take composes an ending instead. A take of the score's
+   own last section ends there either way. Editing the plan is refused while
+   takes render, and takes made for an earlier plan can no longer be kept. The
+   plan is saved with the build, so it survives a reload and is what **Render
+   Final Song** renders.
 2. Choose 1 to 10 takes, then press **Generate N takes of A → B**, with the
    count and section names shown for your selection. Each take uses a fresh seed,
    continues everything kept so far, and stops a little beyond the chosen range.
@@ -353,30 +357,29 @@ Prepare. Finish preparing those before generating the first takes.
    group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.
 
-   **Caption** (above the Generate button) gives the next takes their own
-   caption, for example to ask for a busier chorus. Leave it empty to use the
-   build's caption, exactly as before. It is a trial: it changes what the
-   composer writes (the AR) for those takes, and an adapter's trigger is still
-   added. The sound is still rendered (the NAR) from the whole song under one
-   caption, so a take's preview plays everything, kept sections included,
-   under its own caption, and **Save song** renders the whole song under the
-   build's caption. A section can be written differently, but its timbre follows
-   that one caption, and joins between sections composed under different
-   captions may be audible. Hover a take's name to see the prompt it was sent;
-   ✎ marks a take with its own caption. Turn **Take caption** off to hide the
-   field and send none.
+   **Caption** (above the Generate button) starts as the build's caption for
+   each section. Edit it to steer this section's takes, for example "quiet,
+   acoustic guitar, whispers" for a breakdown; the next section starts from the
+   build's caption again, and the reset button beside the field puts it back. It
+   changes what the composer writes (the AR) for those takes, and an adapter's
+   trigger is still added. The sound is rendered (the NAR) from the whole song
+   under one caption, so a take's preview plays everything, kept sections
+   included, under its own caption, and **Render Final Song** renders the whole
+   song under the build's caption. So a section can be written differently, but its
+   timbre leans on that one caption, and joins between sections composed under
+   different captions may be audible. Hover a take's
+   name to see the prompt it was sent; ✎ marks a take with its own caption.
 
-   **Edit lyrics** (beside the takes) changes the lyrics for this build only.
-   The Prepare page and the dataset's lyrics file are not touched, and you can
-   edit before the first take exists. Each tag must be a line like `[verse]`, with
-   no text above the first tag, and the text can be up to 20,000 characters.
-   **Apply** saves them with the build, so they survive a reload and are what
-   the next takes and **Save song** use. It is refused while takes are rendering
-   (cancel or wait). Takes you made with the old lyrics stay listed, but their
-   **Keep** is disabled; generate them again. Lyrics of sections you have
-   already kept are locked, so kept audio stays as it was: undo back to a
-   section to change its lyrics. **Use Prepare lyrics** puts the Prepare page's
-   text back.
+   The lyrics beside the takes are editable: one box per chosen section, showing
+   the lines it sings without its tag. An instrumental section shows none. Edits
+   apply to that section only, when you press Generate, so a second chorus can
+   sing other words than the first without touching it, and neither the Prepare
+   page nor the dataset's lyrics file changes. A section's lines cannot hold a
+   tag line such as `[verse]`. **Reset** sings the build's lyrics for that
+   section again. Edits are refused while takes are rendering (cancel or wait),
+   built sections keep the lines they were built with, and takes made with the
+   old lines stay listed with **Keep** disabled. **Use Prepare lyrics** puts the
+   Prepare page's text back for every section not yet built.
 3. Play each take to compare it. Preview starts four seconds before its first new
    section, where available, so you can hear the join. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
@@ -399,7 +402,7 @@ Prepare. Finish preparing those before generating the first takes.
    timing, not an exact bar line. For a cut inside a section, choose whether the
    next take composes that section again from the cut, or moves on to the next
    section there; nothing is cropped until you choose. The next takes continue
-   from exactly the cropped audio, and **Save song** renders it. The original
+   from exactly the cropped audio, and **Render Final Song** renders it. The original
    take is kept: **Undo crop** puts it back, and a new crop always cuts the
    original, so you can move the cut later as well as earlier. Takes made
    before a crop (or after it, once you undo it) can no longer be kept until
@@ -407,11 +410,12 @@ Prepare. Finish preparing those before generating the first takes.
    If a crop reopened a section and you then change the plan or that section's
    lyrics, **Undo crop** (or a crop that reaches past the cut) is refused, since
    the original no longer matches; generate the section again instead.
-5. Click **Save song** to submit everything kept so far as an ordinary generation
-   job, even if some sections remain unbuilt. It uses the kept audio codes and
-   receives the usual post-processing, drift check and Library save. Once the
-   song is saved, the build clears so the next Build starts fresh. If the save
-   fails, is cancelled or times out, the build stays so you can save again.
+5. When every section is built, press **Render Final Song** in the Takes box.
+   It submits the kept audio codes as an ordinary generation job, with the usual
+   post-processing, drift check and Library save. To render before the song is
+   finished, open **Build actions** and choose **Render the song so far**. Once
+   the song is saved, the build clears so the next Build starts fresh. If the
+   render fails, is cancelled or times out, the build stays so you can try again.
 
 **AR strength** (0 to 10, default 0.6) is Cover Studio's own setting, shown on
 both Prepare and Build. It replaces the adapter picker's AR scale for every

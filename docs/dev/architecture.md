@@ -302,8 +302,13 @@ changing sessions.
 - **Arrangement.** `POST /api/yue2-cover/build/:id/plan` replaces the occurrences not
   yet built: `upcoming` lists source section ids (a new occurrence) or upcoming
   occurrence ids (kept identity), and `finished` says the plan ends the song. Kept
-  occurrences never move, and the last planned one can only be built once the plan is
-  finished. The session keeps its score and lyrics in source order; every take and
+  occurrences never move. While the plan is open, a take's prompt adds the source
+  section after the last planned one (`lookaheadSection`) and stops a few seconds into
+  it, so the seam is composed without the user choosing what follows. An occurrence
+  can carry its own sung lines (`POST /api/yue2-cover/build/:id/occurrence-lyrics`,
+  unbuilt occurrences only), which `composeArrangement` writes in place of its block's.
+  Pairing sections with lyric tags counts empty tags, so of two same-kind sections the
+  instrumental one keeps Prepare's empty tag. The session keeps its score and lyrics in source order; every take and
   Save song sends them written out in plan order (`composeArrangement`), with any lyric
   schedule rebuilt from that text, or dropped when re-pairing the text would give a
   block to the wrong occurrence. A take's `from`, `to` and `starts` index occurrences;

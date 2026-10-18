@@ -58,7 +58,7 @@ import { PrepareStructure } from './PrepareStructure';
 import type { ScoreRange } from './prepareView';
 import { PrepareLyrics } from './PrepareLyrics';
 import { useYue2Prepare, PREPARE_DRAFT_KEY, type PrepareCut } from './useYue2Prepare';
-import { Yue2BuildPage, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
+import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
@@ -1229,9 +1229,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (typeof built === 'string') { showToast(built); return null; }
     return built.params;
   };
-  const generateBuildTakes = (to: number, count: number, caption: string) => {
+  const generateBuildTakes = (to: number, count: number, caption: string, lyrics: Record<string, string>) => {
     const params = buildParams();
-    if (params) void build.generate(params, to, count, caption);
+    return params ? build.generate(params, to, count, caption, lyrics).then(Boolean) : Promise.resolve(false);
   };
   const setPrepareSettings = (s: BuildSettings) => {
     setCoverVoices(s.voices);
@@ -1294,7 +1294,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       sourceBpm={Number(abc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120)}
       title={String(params?.title ?? (songTitle || 'Cover'))}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
-      busy={build.busy} error={build.error}
+      busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
+      onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}
       onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
       onCrop={(take, frame, mode) => void build.crop(take, frame, mode)}

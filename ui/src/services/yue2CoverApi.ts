@@ -165,8 +165,9 @@ export interface Yue2SourceSection { id: string; label: string; startBar: number
 /** The output: which source section each occurrence (o0, o1, ...) sings. Kept ones come first. */
 export interface Yue2Arrangement {
   sections: Yue2SourceSection[];
-  plan: Array<{ id: string; section: string }>;
-  /** The plan ends the song; until then its last occurrence cannot be built. */
+  /** `lyrics`: the occurrence's own sung lines, when it has been given some. */
+  plan: Array<{ id: string; section: string; lyrics?: string }>;
+  /** The plan ends the song; until then a take runs a few seconds into the source section after the last one. */
   finished: boolean;
 }
 export interface Yue2BuildSession {
@@ -218,6 +219,9 @@ export const yue2CoverApi = {
     request<{ ok: true }>('/build/lyrics-check', token, { method: 'POST', body: JSON.stringify({ lyrics }) }),
   buildLyrics: (id: string, revision: number, lyrics: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/lyrics`, token, { method: 'POST', body: JSON.stringify({ revision, lyrics }) }),
+  /** Unbuilt occurrences' own lines (occurrence id to text), or null to sing the build's again. */
+  buildOccurrenceLyrics: (id: string, revision: number, edits: Record<string, string | null>, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/occurrence-lyrics`, token, { method: 'POST', body: JSON.stringify({ revision, edits }) }),
   /** Before the first keep: the cover's voices, tempo, key, keyShift and cfgScale (as
    *  params.yue2Cover carries them) and AR strength. Takes made before it cannot be kept. */
   buildSettings: (id: string, revision: number, settings: Record<string, unknown>, token: string) =>
