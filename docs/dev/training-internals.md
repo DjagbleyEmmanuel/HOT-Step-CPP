@@ -417,6 +417,56 @@ per-checkpoint fields), and removes the empty `_remote` tree. It is idempotent.
 `startYue2Mirror()` awaits it before the first pass, so no pass writes into a folder about
 to move. The first mirror pass then fills in the rung weights the worker still holds.
 
+## YuE2 NAR audio-domain loss
+
+`ace-train yue2-nar-train --audio-loss <w>` adds `w * aux` to the flow MSE on steps
+whose `t <= --audio-tmax` (default 0.4). The clean-latent estimate
+`x0_hat = x_t - t * v_pred` is decoded through the frozen VAE over `--audio-frames`
+(150) frames plus `--audio-margin` (25) each side, at a random place in the clip,
+and the scored span is compared with the source recording. `aux` is the
+`spec_loss` of the joint_v6 trainer that produced the companion adapter: L1 of
+log-mel (128 HTK mels over |STFT 2048|), plus 0.5 times the multi-resolution STFT
+(spectral convergence and log-magnitude L1 at 512, 1024 and 2048, hop N/4), plus 0.5
+times the difference in side-to-mid energy, all on mono except the width term.
+Frames are not centre-padded and the mel hop is 512, not 480.
+
+The reference is the source decoded the way `yue2-preprocess` decoded it (WAV/MP3
+natively, anything else through `--ffmpeg`) and scaled by the source's
+`loudness_gain_db`, which is the audio the latents were encoded from. A manifest
+without that field is refused. Whole tracks are cached LRU. Once per run the trainer
+decodes the first scored clip's clean latents and reports the lag of best
+correlation against the reference; it should be 0.
+
+The inference decoder (`yue2-vae-graph.h`) cannot be backpropagated on CUDA:
+`IM2COL`'s backward has no CUDA kernel and `PAD` has no backward. So
+`train/yue2-nar-audio-loss.h` rebuilds the decoder in `[C, T]` layout from ops that
+do: a k-tap conv is k matmuls over shifted contiguous views, padding and the
+transposed conv's overlap-add are `ACC` onto a persistent zero canvas. STFT frames at
+hop N/4 split into four non-overlapping sets, each a contiguous view, so one frame
+set is one matmul against a windowed DFT basis.
+
+`--fd-check --audio-loss 1` checks the rebuilt decoder against `yue2_vae_decode`
+(1e-6 relative), self-tests the decoder and the spectral loss separately, probes
+`d(aux)/d(x0_hat)`, then runs the usual LoRA probes on the audio term alone. Pass
+`--manifest` so it uses a real clip and its audio: on N(0,1) latents the decoder is
+so rough that a central difference only turns linear at steps near 1e-6 of the
+input. Even on real latents the decoder needs steps under ~1e-5 of the input, so the
+audio gradient is correct but very local.
+
+Cost at the defaults: about 5.5 GB more VRAM and 0.22 s/it against 0.18 for the
+flow-only pilot (rank 128, 10 s clips). Near-silent references (hidden tracks,
+gaps) push `aux` to 12-18 against ~1 elsewhere, through the log terms; the global
+clip bounds the step.
+
+Pilot result (HOTSTEP-353, 2026-10-18): the broad pilot rerun with `--audio-loss 2`,
+same data, seed and draws, benched on 20 held-out tracks. Against the flow-only
+pilot's final checkpoint it held the vocal envelope (+0.027, 20/20 tracks) and the
+top two bands (+2.3 dB, closer to the source), but narrowed the bass less (+1.4 dB
+side level, 16/20). It did not beat the flow-only step-3000 checkpoint, and its
+vocal envelope stayed at the companion-only baseline. Its checkpoints varied less
+from one to the next than the flow-only ones did. On the bench alone it does not earn
+a place in the full broad run at this weight; the listening test decides.
+
 ## MiniMax-Music3 (MM3) LM adapters
 
 MM3 planner-LM adapter training is a separate pipeline from everything below
