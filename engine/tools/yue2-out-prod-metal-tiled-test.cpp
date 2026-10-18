@@ -13,6 +13,12 @@
 // general-stride path is exercised against the real (non-contiguous src1)
 // shape, not just a convenient contiguous fixture.
 //
+// The "ar-*" and "nar-*" cases are the real joint-training orientation:
+// autodiff's ggml_out_prod(x, grad) with both operands contiguous and the
+// reduction over the whole sequence (7668 AR tokens, 1502 NAR frames) at
+// rank 64. Every case also runs the tiled kernel twice and requires the two
+// results to be bit-identical.
+//
 // Usage: yue2-out-prod-metal-tiled-test [--quick]  (--quick skips the
 // largest (gate_up "B"-site, K=12288) timed case)
 
@@ -43,6 +49,7 @@ struct Case {
     const char * name;
     int64_t m, k, n; // dst = [m, n], reduction over k
     bool vs_cpu, timed;
+    bool contig = false; // src1 contiguous [n,k] (autodiff's out_prod) instead of transpose(grad)
 };
 
 const Case kCases[] = {
@@ -88,6 +95,23 @@ const Case kCases[] = {
     {"b-output-s13500-r64",   64, 2048, 13500, true,  true},
     {"b-gate-up-s13500-r64",  64,12288, 13500, true,  true},
     {"b-gate-up-s13500-r32",  32,12288, 13500, true,  true},
+    // long reductions: K tails, a tiny dst, transposed and contiguous src1
+    {"long-k257",             64,  257,   64, true,  false, true},
+    {"long-k513",             64,  513,   64, true,  false, true},
+    {"long-tiny-dst",          5, 1000,    3, true,  false, true},
+    {"long-tiny-dst-t",        5, 1000,    3, true,  false},
+    {"long-k-tail",           50, 4099,   20, true,  false, true},
+    // real joint-training shapes (dst [m,n], reduction k = sequence length)
+    {"ar-a-2048",           2048, 7668,   64, true,  true,  true},
+    {"ar-a-6144",           6144, 7668,   64, true,  true,  true},
+    {"ar-b-1024",             64, 7668, 1024, true,  true,  true},
+    {"ar-b-2048",             64, 7668, 2048, true,  true,  true},
+    {"ar-b-6144",             64, 7668, 6144, true,  true,  true},
+    {"nar-a-2048",          2048, 1502,   64, true,  true,  true},
+    {"nar-a-6144",          6144, 1502,   64, true,  true,  true},
+    {"nar-b-1024",            64, 1502, 1024, true,  true,  true},
+    {"nar-b-2048",            64, 1502, 2048, true,  true,  true},
+    {"nar-b-6144",            64, 1502, 6144, true,  true,  true},
 };
 
 std::mt19937 rng(0xC0FFEEu);
@@ -120,13 +144,22 @@ bool run(ggml_backend_t backend, const Case & c, const Fixture & f, const char *
     if (!ctx) { *err = "ggml_init"; return false; }
     ggml_tensor * a = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, c.m, c.k); // src0 [m,k]
     ggml_tensor * g = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, c.k, c.n); // grad [k,n], contiguous
-    ggml_tensor * y = ggml_out_prod(ctx, a, ggml_transpose(ctx, g));    // dst [m,n], real usage shape
+    ggml_tensor * b = c.contig ? ggml_new_tensor_2d(ctx, GGML_TYPE_F32, c.n, c.k) // [n,k], contiguous
+                               : ggml_transpose(ctx, g);
+    ggml_tensor * y = ggml_out_prod(ctx, a, b);                         // dst [m,n]
     ggml_cgraph * graph = ggml_new_graph_custom(ctx, 8, false);
     ggml_build_forward_expand(graph, y);
     ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, backend);
     if (!buf) { *err = "alloc"; ggml_free(ctx); return false; }
     ggml_backend_tensor_set(a, f.src0.data(), 0, f.src0.size()*sizeof(float));
-    ggml_backend_tensor_set(g, f.grad.data(), 0, f.grad.size()*sizeof(float));
+    if (c.contig) {
+        std::vector<float> bt((size_t) c.n*c.k); // same values as transpose(grad)
+        for (int64_t i = 0; i < c.k; ++i)
+            for (int64_t j = 0; j < c.n; ++j) bt[(size_t) i*c.n + j] = f.grad[(size_t) j*c.k + i];
+        ggml_backend_tensor_set(b, bt.data(), 0, bt.size()*sizeof(float));
+    } else {
+        ggml_backend_tensor_set(g, f.grad.data(), 0, f.grad.size()*sizeof(float));
+    }
 
     if (mode) setenv("GGML_METAL_OUT_PROD_TILED", mode, 1);
     bool ok = true;
@@ -187,13 +220,15 @@ int main(int argc, char ** argv) {
         // a-qkv/a-down cases swing between runs; more samples averages
         // out system/thermal noise for a trustworthy before/after read.
         const int iters = c.timed ? 20 : 1;
-        Result legacy, tiled, ref;
+        Result legacy, tiled, again, ref;
         std::string err;
         if (!run(gpu, c, f, "0", iters, &legacy, &err)) { std::fprintf(stderr, "[%s] legacy: %s\n", c.name, err.c_str()); all_ok = false; continue; }
         if (!run(gpu, c, f, "1", iters, &tiled, &err))  { std::fprintf(stderr, "[%s] tiled: %s\n",  c.name, err.c_str()); all_ok = false; continue; }
+        if (!run(gpu, c, f, "1", 1, &again, &err))      { std::fprintf(stderr, "[%s] repeat: %s\n", c.name, err.c_str()); all_ok = false; continue; }
 
         const Diff dt = compare(legacy.out, tiled.out, atol, rtol);
-        bool ok = dt.outside == 0;
+        const bool repeat_ok = std::memcmp(tiled.out.data(), again.out.data(), tiled.out.size()*sizeof(float)) == 0;
+        bool ok = dt.outside == 0 && repeat_ok;
 
         std::string cpu_note;
         if (c.vs_cpu && cpu) {
@@ -208,9 +243,10 @@ int main(int argc, char ** argv) {
             } else { ok = false; cpu_note = " | CPU run failed"; }
         }
 
-        std::printf("[%s] %s m=%lld k=%lld n=%lld | tiled vs legacy: outside=%zu/%zu worst_abs=%.2e worst_rel=%.2e%s\n",
+        std::printf("[%s] %s m=%lld k=%lld n=%lld | tiled vs legacy: outside=%zu/%zu worst_abs=%.2e worst_rel=%.2e | repeat %s%s\n",
                     c.name, ok ? "PASS" : "FAIL", (long long) c.m, (long long) c.k, (long long) c.n,
-                    dt.outside, legacy.out.size(), (double) dt.worst_abs, (double) dt.worst_rel, cpu_note.c_str());
+                    dt.outside, legacy.out.size(), (double) dt.worst_abs, (double) dt.worst_rel,
+                    repeat_ok ? "bit-identical" : "DIFFERS", cpu_note.c_str());
         if (c.timed) {
             std::printf("    time  legacy %.2f ms -> tiled %.2f ms (%.1fx)\n",
                         legacy.ms, tiled.ms, tiled.ms > 0 ? legacy.ms/tiled.ms : 0.0);
