@@ -96,6 +96,45 @@ old ggml's cuBLAS mul_mat and out_prod each call `cublasSetStream` per op; the p
 separate the two. To build it there, cherry-pick the commit that adds the probe (the tool and
 its `engine/CMakeLists.txt` block only) onto that checkout.
 
+## Metal transposed copies
+
+`metal-cpy-transpose` handles same-type F32 and BF16 `CPY`/`CONT` from a
+transposed row view into a contiguous tensor of the same shape. Both matrix
+dimensions must be at least 32. Source rows and batch planes may have padding,
+and source and destination may start at an element-aligned view offset. The
+dispatch checks strides, batch-plane separation and disjoint storage ranges.
+Reshapes, casts, smaller matrices, other permutations and strided destinations
+keep their existing copy path. A missing pipeline or a threadgroup limit below
+256 also keeps that path.
+
+Each 32 by 8 threadgroup loads a 32 by 32 tile along the contiguous source
+dimension, synchronizes, and writes along the contiguous destination dimension.
+The tile has a padded column to reduce bank conflicts. BF16 uses `ushort` storage
+and F32 uses `uint`, so the kernel performs no floating-point conversion or
+arithmetic. Tail guards cover both loads and stores. `GGML_METAL_CPY_TRANSPOSE=0`
+selects the original dispatch for a control run; it is read once per process.
+
+Production changes are confined to `src/ggml-metal/` in the fork. Shared ops,
+tensor ABI, graph construction and CPU, CUDA and Vulkan code are unchanged.
+
+Measured on an M2 Max: the 6144 by 2048 BF16 transpose took 0.525 ms versus
+3.933 ms on the generic path, averaged over 100 synchronized copies after
+warmup. The independent host-reference probe passes 126 cases with the feature
+enabled and disabled, including partial tiles, batches, padding, offsets,
+non-contiguous fallbacks, source preservation, destination canaries and raw
+F32/BF16 bit patterns.
+
+Three paired fresh-state warm-song updates took 33.779/33.271/32.781 s for the
+predecessor and 31.980/32.304/32.395 s with the transpose enabled. Median paired
+saving is 0.967 s, or 2.91%; the separate medians are 33.271 and 32.304 s.
+This uses the approved exact-copy exception to the default 3% kernel-change bar.
+All seven matched updates log bit-identical AR CE, NAR MSE, KL and gradient norm
+against both the predecessor and original Metal baseline. C alone on the
+original fork also matches all seven updates. The existing Metal CPY/CONT suite
+passes 285/285 cases with the feature enabled and disabled. Raw evidence lives
+under `.scratch/hs344/` on the development checkout and `.probe-logs/hs344/` on
+the measurement mirror (HOTSTEP-344).
+
 ## Why each change exists
 
 The sections below are the measurements and reasoning behind each change, kept from the
