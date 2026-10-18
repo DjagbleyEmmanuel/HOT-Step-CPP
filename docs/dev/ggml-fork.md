@@ -21,6 +21,7 @@ submodule at configure time.
 | metal-kquant-cpy | Metal K-quant (Q2_K to Q6_K) → F32/F16 `CPY`, the dequant the `mm-backward` arm needs to train on a K-quant base | — |
 | metal-out-prod-smem | Metal tiled `OUT_PROD` store scratch aliases its input tiles, so two threadgroups share a core; same arithmetic | — |
 | metal-cpy-transpose | Same-type F32/BF16 transposed row views copy through a padded 32 by 32 integer tile, preserving all bits; other layouts keep the generic copy. `GGML_METAL_CPY_TRANSPOSE=0` keeps the generic path | — |
+| metal-bf16-round-producer | Metal skips an in-place `BF16_ROUND` of an already-rounded value, and the simdgroup `mul_mm`, an unfused `RMS_NORM` and `SILU` store a following single-consumer `BF16_ROUND` themselves. Bit-identical; `GGML_METAL_NO_BF16_ROUND_PRODUCER=1` turns it off | — |
 | mm-backward | `GGML_BACKWARD_MM=1` mul_mat formulation of the activation gradient; on Windows the latch reads the process environment, so a static-CRT build sees the trainer's `_putenv` | 8 |
 | quant-cpy-kquant | quant → F32 `CPY` for every type the dequantizers cover | 10 |
 | sched-unplaced-log | name the node no backend accepts | — |
@@ -134,6 +135,42 @@ original fork also matches all seven updates. The existing Metal CPY/CONT suite
 passes 285/285 cases with the feature enabled and disabled. Raw evidence lives
 under `.scratch/hs344/` on the development checkout and `.probe-logs/hs344/` on
 the measurement mirror (HOTSTEP-344).
+
+## Metal BF16_ROUND producer epilogues
+
+The YuE2 trainer rounds most activations with `ggml_bf16_round()`. On Metal each
+round ran as its own unary pass: about 9,000 per training update and about 370 GB
+of extra memory traffic. `ADD`/`SUB`/`MUL` already store a following round
+(`rnd=1`). `metal-bf16-round-producer` covers the rest of the large producers:
+
+- A round that `ggml_bf16_round()` marked as a round of an already-rounded value
+  (`op_params[1] == 1`, built in place) encodes nothing, as on CUDA.
+- The simdgroup `mul_mm` kernel, an `RMS_NORM` that no table fusion took, and
+  `SILU` write `bf16_round_cast(result)` into the round's buffer when the next
+  node is a single-consumer F32 `BF16_ROUND` of their contiguous F32 result.
+  `mul_mm` stages its accumulators through threadgroup memory and rounds on the
+  copy out. Rounding the simdgroup matrices in registers made it about 4x slower.
+
+The F32 result and the rounding function are the standalone pass's, so the output
+is bit-identical. The tensor-API `mul_mm`, mat-vec paths, the K = 32 kernel and
+table fusions keep the separate round. `GGML_METAL_NO_BF16_ROUND_PRODUCER=1` or
+`GGML_METAL_FUSION_DISABLE=1` turns all of it off; `GGML_METAL_FUSION_DEBUG=2`
+logs each fusion and skip. Rounds of graph inputs and those after `ROPE`,
+`RMS_NORM_BACK`, `SILU_BACK` and the attention output still run standalone,
+about 2,300 per update and 54 GB.
+
+Measured on an M2 Max. A 2048 by 6144 BF16 GEMM over 7,668 rows took 26.8 ms
+with the epilogue against 27.5 ms for GEMM plus round. A probe of 27 cases
+(full and partial tiles, K tails, batches, LoRA rank, F32 weights, a second
+consumer, views, in-place chains, mat-vec and K = 32 fallbacks, `RMS_NORM` and
+`SILU` row shapes) matches the unfused graph bit for bit with the feature on, off
+and with fusion disabled. Three paired fresh-state warm-song updates took
+32.319/32.426/32.293 s for the predecessor and 30.903/30.953/30.750 s with it;
+median paired saving 1.473 s (4.6%). All seven matched updates log bit-identical
+AR CE, NAR MSE, KL and gradient norm against the predecessor and the original
+Metal baseline, and so do the switched-off control and this change alone on the
+original fork. Raw evidence lives under `.scratch/hs345/` on the development
+checkout and `.probe-logs/hs345/` on the measurement mirror (HOTSTEP-345).
 
 ## Why each change exists
 
