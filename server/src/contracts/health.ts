@@ -24,5 +24,7 @@ export interface HealthResponse {
   engine: {
     ready: boolean;
     bootStatus: string;
+    /** True while the engine is down only because no model is installed yet. */
+    noModels: boolean;
   };
 }

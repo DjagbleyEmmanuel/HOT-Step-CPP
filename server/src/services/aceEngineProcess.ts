@@ -18,7 +18,7 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { config, USER_PLUGINS_DIR } from '../config.js';
 import { logEngine } from './logger.js';
 import { pushLog } from '../routes/logs.js';
-import { setEngineReady } from '../engineState.js';
+import { setEngineReady, setEngineNoModels } from '../engineState.js';
 import { aceClient } from './aceClient.js';
 import { buildGpuEnv } from './gpuDevices.js';
 
@@ -67,6 +67,9 @@ let crashSeq = 0;
 export function engineCrashSeq(): number {
   return crashSeq;
 }
+
+/** Line ace-server prints before exiting 1 on an empty models folder (hot-step-server.cpp). */
+const NO_MODELS_LINE = "ERROR: no models found";
 
 /** How long restartAceServer() waits for /health after a respawn. */
 const RESTART_HEALTH_TIMEOUT_MS = 90_000;
@@ -229,6 +232,7 @@ export function startAceServer(): ChildProcess | null {
   child.stderr?.on('data', (data: Buffer) => {
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
+      if (line.includes(NO_MODELS_LINE)) sawNoModels = true;
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
       pushLog(line, 'engine');
@@ -236,11 +240,21 @@ export function startAceServer(): ChildProcess | null {
   });
 
   const spawnEpoch = lifecycleEpoch;
+  let sawNoModels = false;
 
   child.on('exit', (code, signal) => {
     if (aceProcess === child) aceProcess = null;   // never hand out a dead child
     if (suspended) return;   // deliberate stop — never respawn
     if (spawnEpoch !== lifecycleEpoch) return;     // superseded by a stop/restart
+    if (sawNoModels && code === 1) {
+      // Empty models folder: a first run, not a crash. No restart budget spent;
+      // retryIfGaveUp() brings the engine up once a download lands.
+      console.log('[ace-server] No models installed — waiting for a download in the Model Manager.');
+      setEngineNoModels(true);
+      setEngineReady(false, 'No models installed — download one in the Model Manager');
+      gaveUp = true;
+      return;
+    }
     if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
       console.error(`[ace-server] Process exited with code ${code}, signal ${signal}`);
       crashSeq++;
@@ -388,6 +402,7 @@ export async function restartAceServer(): Promise<boolean> {
   suspended = false;
   gaveUp = false;
   crashCount = 0;
+  setEngineNoModels(false);
   setEngineReady(false, 'Restarting engine...');
 
   if (aceProcess && aceProcess.exitCode === null && aceProcess.signalCode === null) {

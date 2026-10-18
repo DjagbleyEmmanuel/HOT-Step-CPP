@@ -22,6 +22,7 @@ import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
+import { NoModelsBanner } from './components/shared/NoModelsBanner';
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
 import { AudioQueueMigrationBanner } from './components/shared/AudioQueueMigrationBanner';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
@@ -1273,6 +1274,7 @@ const AppContent: React.FC = () => {
       {/* Asks before running a generation queue restored from a previous
           session, rather than starting it unattended (issue #100). Renders
           nothing when there is nothing waiting. */}
+      <NoModelsBanner />
       <RestoredQueueBanner />
       <AudioQueueMigrationBanner />
 

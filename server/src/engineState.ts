@@ -9,6 +9,13 @@ export let engineReady = false;
 /** Human-readable status for what the engine is doing before it's ready. */
 export let engineBootStatus = 'Initializing...';
 
+/** True when ace-server exited because the models folder is empty (a first run, not a crash). */
+export let engineNoModels = false;
+
+export function setEngineNoModels(v: boolean) {
+  engineNoModels = v;
+}
+
 /** Update the engine boot status (called from index.ts bootstrap) */
 export function setEngineReady(ready: boolean, status: string) {
   engineReady = ready;
