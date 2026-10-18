@@ -506,10 +506,14 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(requests.at(-1)!.preview_max_frames, undefined);
   });
 
-  await t.test('kept occurrences stay put; an unfinished plan cannot build its last one', async () => {
+  await t.test('kept occurrences stay put; an unfinished plan builds its last one into the next source section', async () => {
     const s = start();
     editBuildPlan(s.id, 'user', 0, ['s1', 's2'], false);
-    assert.throws(() => generateBuildTakes(s.id, 'user', 1, 1, 1), /finish the arrangement/);
+    const [open] = await take(s.id, 1, 1);
+    // The chorus runs on into the outro that follows it in the score, and stops there.
+    assert.equal(requests.at(-1)!.abc, composeArrangement(score, lyrics, [1, 2, 3]).abc);
+    assert.notEqual(requests.at(-1)!.preview_max_frames, undefined);
+    assert.equal(open.starts.length, 3);
     const [verse] = await take(s.id, 0, 1);
     keepBuildTake(s.id, 'user', verse.id, 1);
     // Upcoming chorus o5 keeps its identity; a new outro follows it.
