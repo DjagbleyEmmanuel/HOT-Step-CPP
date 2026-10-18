@@ -125,3 +125,29 @@ test('score to lyrics: a block with no timing joins the section before it', () =
   assert.deepEqual(plan.unsure, [{ block: 2, tag: 'Chorus' }]);
   assert.match(plan.lyrics, /\[verse\]\nfirst line\n\nlost line/);
 });
+
+test('score to lyrics: a kept marker before a same-label sung block folds into it', () => {
+  // The intro is marked at bar 1 but its block is sung from bar 5.
+  const raw = [
+    'X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C',
+    '% intro', 'V: Vocal', 'z6|z6|z6|z6|C6|D6|',
+    '% chorus', 'V: Vocal', 'E6|F6|', '',
+  ].join('\n');
+  const lyrics = '[Intro]\nla la\n\n[Chorus]\nhook line';
+  const plan = planScoreFromLyrics(raw, lyrics, words(lyrics, [['la la', 12.1], ['hook line', 18.1]]));
+  assert.deepEqual(plan.sections.map(s => `${s.label}@${s.bar}`), ['intro@1', 'chorus@7']);
+  assert.equal(plan.sections[0].block, 1);
+});
+
+test('score to lyrics: a double chorus stays two sections', () => {
+  const lyrics = '[Verse]\nfirst line\n\n[Chorus]\nhook one\n\n[Chorus]\nhook two';
+  const plan = planScoreFromLyrics(score, lyrics, words(lyrics, [['first', 6.2], ['hook one', 12.1], ['hook two', 24.1]]));
+  assert.deepEqual(plan.sections.map(s => `${s.label}@${s.bar}`).filter(s => s.startsWith('chorus')), ['chorus@5', 'chorus@9']);
+});
+
+test('score to lyrics: a kept marker with another label is untouched', () => {
+  const lyrics = '[Verse]\nfirst line\n\n[Chorus]\nhook line';
+  const plan = planScoreFromLyrics(score, lyrics, words(lyrics, [['first', 6.2], ['hook line', 12.1]]));
+  assert.equal(plan.sections[0].label, 'intro');
+  assert.equal(plan.sections[0].block, null);
+});

@@ -319,6 +319,17 @@ export function planScoreFromLyrics(abc: string, lyrics: string, words: Yue2Alig
     if (next && next.bar - section.startBar < 1) return false;
     return !after || (after.lastBar !== null && section.startBar > after.lastBar);
   });
+  // A kept marker right before a sung block of the same label is that block's
+  // own section (an intro marked at bar 1, sung from bar 5): one section.
+  for (const o of opened) {
+    const before = [...kept.map(k => k.startBar), ...opened.filter(x => x !== o).map(x => x.bar)]
+      .filter(bar => bar < o.bar).sort((a, b) => a - b).at(-1);
+    const i = kept.findIndex(k => k.startBar === before);
+    if (i >= 0 && kept[i].label.trim().toLowerCase() === o.label.toLowerCase()) {
+      o.bar = kept[i].startBar;
+      kept.splice(i, 1);
+    }
+  }
   const sections: Array<ScorePlanSection & { body?: string[] }> = [
     ...kept.map(section => ({ label: section.label.trim(), bar: section.startBar, block: null })),
     ...opened.map(o => ({ label: o.label, bar: o.bar, block: o.block, body: o.body })),
