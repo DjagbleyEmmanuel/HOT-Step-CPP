@@ -193,3 +193,28 @@ test('with the recording, sung time beats the pasted tag and two blocks in one s
   assert.deepEqual(result.assignments.s3, ['b3']);
   assert.deepEqual(result.uncertain, ['s1']);
 });
+
+test('with the recording, an empty tag still places by its tag', () => {
+  const blocks = [b('b1', 'intro', ''), b('b2', 'verse'), b('b3', 'chorus')];
+  const lyrics = suggestionLyrics(blocks);
+  const result = suggestSections(score, ids, blocks, words(lyrics, [['b2 words', 6.2], ['b3 words', 12.1]]));
+  assert.equal(result.recording, true);
+  assert.equal(result.assignments.s0, 'instrumental');
+  assert.deepEqual(result.assignments.s1, ['b2']);
+});
+
+test('no reuse while an unplaced chorus could belong to the section', () => {
+  const blocks = [b('b1', 'verse'), b('b2', 'chorus'), b('b3', 'chorus')];
+  const lyrics = suggestionLyrics(blocks);
+  // b2 is sung in the first chorus; b3 has no timing, so it is unplaced.
+  const result = suggestSections(score, ids, blocks, words(lyrics, [['b1 words', 6.2], ['b2 words', 12.1]]));
+  assert.deepEqual(result.unplaced, ['b3']);
+  assert.deepEqual(result.reuse, []);
+});
+
+test('untagged words skip a silent section whatever its label', () => {
+  const silentVerse = score.replace('% verse\nV: Vocal\nC6|D6|', '% verse\nV: Vocal\nz6|z6|');
+  const result = suggestSections(silentVerse, ids, [b('b1', null)]);
+  assert.equal(result.assignments.s1, 'instrumental');
+  assert.deepEqual(result.assignments.s2, ['b1']);
+});

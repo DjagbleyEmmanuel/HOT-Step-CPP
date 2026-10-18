@@ -369,7 +369,6 @@ const kindOf = (label: string) => {
   const kind = sectionKind(label);
   return REPEATS.test(kind) ? 'chorus' : KNOWN_KINDS.test(kind) ? kind : null;
 };
-const silentKind = (label: string) => /^(intro|outro|interlude|solo|instrumental|break)$/.test(kindOf(label) ?? '');
 
 /** The lyrics to align for these blocks: one tag line per block id, so the
  *  aligned words map back to blocks by position. */
@@ -381,21 +380,29 @@ export function suggestSections(abc: string, sectionIds: string[], blocks: Sugge
   let placed: Array<number | null>;
   let recording = false;
   const split = words && splitLyricBlocks(suggestionLyrics(blocks));
-  if (words && split && split.length === blocks.length) {
-    recording = true;
-    const hints = split.map((b, i) => ({ ...b, tag: blocks[i].tag }));
-    const timed = hints.map((b, i) => blocks[i].text.trim() ? firstWord(b, words) : null);
-    placed = bestFit(hints, timed, spans, songEnd, PICKUP_BARS * barSeconds);
-  } else {
-    // By tag kind, in order: the first section after the last placed one of
-    // that kind. Untagged words take the next section that is sung.
+  // By tag kind, in order: the first section after the last placed one of
+  // that kind. Untagged words take the next section that is sung.
+  const byTag = (idx: number[]) => {
     let cursor = -1;
-    placed = blocks.map(block => {
-      const kind = block.tag ? kindOf(block.tag) : null;
-      const found = spans.findIndex((span, s) => s > cursor && (kind ? kindOf(span.label) === kind : !silentKind(span.label)));
+    return idx.map(i => {
+      const kind = blocks[i].tag ? kindOf(blocks[i].tag!) : null;
+      const found = spans.findIndex((span, s) => s > cursor && (kind ? kindOf(span.label) === kind : span.sung));
       if (found >= 0) cursor = found;
       return found >= 0 ? found : null;
     });
+  };
+  const all = blocks.map((_, i) => i);
+  if (words && split && split.length === blocks.length) {
+    recording = true;
+    // Empty tags carry no words to align: they place by tag, apart from the recording.
+    const worded = all.filter(i => blocks[i].text.trim()), empty = all.filter(i => !blocks[i].text.trim());
+    const hints = worded.map(i => ({ ...split[i], tag: blocks[i].tag }));
+    const timed = hints.map(h => firstWord(h, words));
+    placed = blocks.map(() => null);
+    bestFit(hints, timed, spans, songEnd, PICKUP_BARS * barSeconds).forEach((s, k) => { placed[worded[k]] = s; });
+    byTag(empty).forEach((s, k) => { placed[empty[k]] = s; });
+  } else {
+    placed = byTag(all);
   }
 
   const assignments: SectionSuggestions['assignments'] = {};
@@ -415,12 +422,14 @@ export function suggestSections(abc: string, sectionIds: string[], blocks: Sugge
   });
 
   const reuse: SectionSuggestions['reuse'] = [];
+  // An unplaced chorus or untagged block may belong to a chorus section: no reuse then.
+  const chorusMayBelong = unplaced.some(id => { const t = blocks.find(b => b.id === id)!.tag; return !t || kindOf(t) === 'chorus'; });
   spans.forEach((span, s) => {
     const id = sectionIds[s];
     if (assignments[id]) return;
     if (!span.sung) { assignments[id] = 'instrumental'; return; }
     // Nearest earlier chorus-type block, else the first later one.
-    if (kindOf(span.label) === 'chorus' && chorusBlocks.length) {
+    if (kindOf(span.label) === 'chorus' && chorusBlocks.length && !chorusMayBelong) {
       const source = [...chorusBlocks].reverse().find(c => c.s < s) ?? chorusBlocks[0];
       reuse.push({ sectionId: id, blockId: source.id });
     }
