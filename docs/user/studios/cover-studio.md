@@ -77,7 +77,7 @@ are saved with the draft.
    Library. Detected BPM and key are shown for reference; they do not change
    the YuE2 cover request. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
    select a part when prompted, and review conversion warnings. Switching modes
-   clears the previous source and its score approval.
+   clears the previous source and its Prepare confirmations.
 2. For Source Audio, click **Transcribe full score**. SheetSage2 writes the melody and detected
    chords into ABC. The score panel shows queue and transcription
    progress, with Cancel and Retry. SheetSage2 must be registered for automatic
@@ -109,18 +109,21 @@ are saved with the draft.
    a seventh), with a warning. When the file has no chord symbols, as most piano
    scores don't, chords are inferred for each bar, or each half bar where they
    change, from the other staves and parts. The warning says so; check them
-   before approving, because the guess is a simple pitch-class match and can
+   before confirming the structure, because the guess is a simple pitch-class match and can
    misread passing notes or name a seventh that isn't there. In MusicXML mode the
    score's title fills an empty Title field and its lyrics fill an empty lyrics
    box; text you have already typed is kept. A score with lyrics also turns
    **Instrumental** off, since that would discard them.
    Importing over an existing score asks before replacing it. Neither path uses
    source audio as an inference conditioning signal after approval.
-   A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
-3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
-   the score or changing the source audio, stem mix or source mode withdraws approval. The
-   Generate button stays disabled until the current source has an approved score.
-   A score in 2/4 shows **Convert 2/4 to 4/4** under the score sections. It pairs
+   A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before confirming or generating.
+3. Prepare the score in two steps, **1. Fix structure** then **2. Assign lyrics**
+   (see [Prepare](#prepare-fix-the-structure-then-assign-lyrics)). Each step ends
+   with a confirmation, and Generate stays disabled until both are current for the
+   source. Editing the score or changing the source audio, stem mix or source mode
+   withdraws them. The raw ABC editor is still there as an advanced editor in step
+   1; a change made in it counts as a structure edit.
+   A score in 2/4 shows **Convert 2/4 to 4/4** under the score sections in step 1. It pairs
    every two 2/4 bars into one 4/4 bar, in every voice, and shows the result as a
    chart before anything changes. Each note keeps its pitch and timing: where a
    removed bar line would carry an accidental into the second half of the new
@@ -129,7 +132,7 @@ are saved with the draft.
    stays in 2/4. Turn on **First bar is a pickup** when the preview puts the
    downbeats mid-bar: bar 1 then stays in 2/4 and pairing starts at bar 2.
    **Apply 4/4** replaces this cover's score (the dataset's `.abc` is not
-   changed), so the score needs approving again; **Undo conversion** brings the
+   changed), so the structure needs confirming again; **Undo conversion** brings the
    2/4 score back. A score with repeats, endings, double bars, voice overlays,
    comments or lyric lines inside the music, or voices that disagree on their
    bars, is refused with the reason and left as it was. Transcription still
@@ -149,50 +152,11 @@ are saved with the draft.
    refuses to start without one, instrumental or not. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM. The
    chosen caption fills the editable textarea, so later edits go into the render.
-   The score's section strip shows each transcribed label and its starting bar.
-   A warning compares these sections with `[Tag]` headers in your lyrics, but
-   never blocks Generate.
-   Each section chip in the strip can be cut (✕), merged with the next section
-   (⤵, keeping either label), renamed (✎) or split (✂, asking for the bar the new
-   section starts at and the lyric line it takes). Each edit changes the score and
-   the paired lyric block together, only for this cover, and the dataset files are
-   not touched. An edit that cannot keep the score and the lyric tags paired is
-   refused with the reason shown under the strip. Every edit needs the score
-   approved again. **Undo edit** steps back through them in order while the score
-   and lyrics are as the last edit left them. The two Match buttons turn off only
-   after a cut, since merging, renaming and splitting leave the music as it was.
-   **Match sections to score** is available for Source Audio only. It separates the
-   source's vocal (once per audio file: the same bytes are never separated
-   again, even re-uploaded or after a restart; the stems are never deleted
-   automatically), finds where each lyric block
-   is sung, and retags each block with the score section it starts in. It
-   never changes a word. Tags are written exactly as the score labels them,
-   so `[Verse 1]` over a `verse` section becomes `[verse]` and the result
-   passes the section check. A
-   chorus (or refrain or hook) the lyrics wrote only once is copied into the
-   later sections of that kind. Verses are never copied: each has its own words.
-   Sections with no vocal get an empty tag such as `[interlude]`, which
-   replaces the lyrics' own empty tags. A note held over into a section's
-   first bar, such as the last word of a chorus ringing into the outro, does
-   not count as singing there. A block that starts late in a section, starts in a section
-   where the score has no vocal, or that the aligner could not place, keeps its
-   tag and position and is listed for you to check.
-   Nothing changes until you press **Apply** in the before/after view. For a
-   dataset song there is no plain Apply: **Apply and save to dataset** applies
-   the change and writes the lyrics into the song's `.txt` after a confirmation,
-   so an accepted match is never lost on reload. If you edit the lyrics or score
-   while the save runs, the save still lands but your edits are kept. The previous file is kept as `.txt.bak`.
-   If a `.txt.bak` is already there, it is left alone and the previous file
-   goes to `.txt.<date>-<time>.bak` instead, so no save loses a backup.
-   **Match score to lyrics** has the same button for a dataset song. It writes
-   the retagged lyrics to the `.txt` and the revised score to the song's `.abc`
-   (the old score kept as `.abc.bak`, or a dated one the same way). A save is
-   refused if the song's files changed since you matched, so match again. The
-   `.txt` is written first; if the `.abc` then fails, you are told the lyrics
-   were saved and the score was not. **Discard** writes nothing, uploaded
-   sources never write to a dataset, and the Build page's lyrics never do
-   either. Reopening the song brings the saved lyrics and score back without
-   matching again.
+   Section edits and lyric assignment happen on the Prepare tab, described under
+   [Prepare](#prepare-fix-the-structure-then-assign-lyrics) below. The old chip
+   editor and the **Match sections to score** and **Match score to lyrics** buttons
+   are gone; **Suggest assignments** replaces them and never rewrites the score.
+   Prepare edits only this cover's draft. Dataset files are not touched.
    When a dataset song's tempo or key differs from the score's, Analysis
    shows the score's values with **Save to dataset**. After a confirmation it
    replaces the BPM and key in the song's `.txt`, keeping a backup the same way.
@@ -222,6 +186,139 @@ are saved with the draft.
    **Generate cover** on the **Prepare** tab for a one-shot render; queued renders
    keep all five choices, selected pair, score and settings from that click
    even if the picker changes later.
+
+### Prepare: fix the structure, then assign lyrics
+
+The **Prepare** tab has two steps and a Ready state: **1. Fix structure**,
+**2. Assign lyrics**, **Ready**. The order matters. Confirming the structure
+freezes the score's sections, boundaries and labels, so pasting new words later
+can never re-section the music. Lyrics then only choose which words go in which
+section.
+
+#### Step 1: Fix structure
+
+A strip shows every section with its occurrence number, label, bar range and
+duration. Click a section to select it; Shift-click, or Shift with the arrow keys,
+adds its neighbours. The selected bars are highlighted in the chart and the
+notation. Lyrics are not needed in this step.
+
+- **Merge**: select adjacent sections and press Merge. The merged name starts as
+  the first label; you can type another. Only the boundaries go. Every note, rest,
+  chord and meter stays as it was, so three verse fragments become one verse even
+  if their bars have mixed meters.
+- **Split**: pick a bar and press **Split here**, naming the new section. The first
+  section always starts at bar 1. **Move boundary here** moves the start of a
+  section instead; a boundary cannot cross its neighbours or leave a section empty.
+- **Rename**: changes the label in the score, never the music or the words.
+  Consecutive choruses can stay separate sections.
+- **Delete section and its music** is tucked away on purpose. It warns how many
+  bars and how much time it removes, and it turns recording alignment off (see
+  below). Merging junk markers is the normal fix; deleting music is a different job.
+- **Undo** and **Redo** cover every structure edit in one history, including
+  boundary moves and bar regrouping.
+
+**Fix bar grouping** rewrites a run of bars as bars of one meter, in every voice.
+The step flags short bars inside the score (a warning, not an error: a short bar
+can be deliberate). Choose **From bar**, **To bar** and the **New meter**, press
+**Preview**, and look at the result before **Apply**. A run such as 3/4 + 4/4 + 1/4
+holds eight quarter-note beats and becomes two 4/4 bars. Notes that cross a new
+barline are split and tied, chord symbols keep their positions, and nothing
+changes in time. Simply changing the meter marking would shift the music, so that
+is never what this does. Nothing is applied automatically. It refuses, with the
+reason shown and the score untouched, when:
+
+- a section boundary would fall inside a new bar (move or merge that boundary first);
+- the run's beats do not make a whole number of bars in the new meter;
+- the voices do not line up on the same bars or meters;
+- the key or tempo changes inside the run (regroup either side of the change);
+- the run is already in that meter;
+- the score uses notation it cannot read exactly, or the check that the result
+  sounds the same as the original fails.
+
+**Hear score** plays the selection with the built-in synthesizer. **Hear
+recording (approximate)** plays the source recording from one bar before the
+selection to its end. Its position is worked out from the score's own tempo, so it
+can drift from the real recording; that is why it is labelled approximate. **Loop**
+repeats the selected bars. The recording and the score never play together.
+Recording playback is unavailable for MusicXML sources, which have no recording,
+and after any cut (**Delete section and its music**, or a cut in a draft from an
+earlier version), because the score no longer follows the recording. Score
+playback still works. Undoing every cut brings the recording back.
+
+**Confirm structure & continue** checks that the score has at least one section
+and that its section names are usable as lyric tags (no square brackets), then
+locks the structure. It does not need lyrics and does not start a transcription.
+The confirmation is tied to the exact score: any later change to the ABC
+withdraws it.
+
+#### Step 2: Assign lyrics
+
+The left side holds your pasted lyrics as blocks, one per `[Tag]` line. The tag
+is only a hint about where the words were meant to go; it never renames a section.
+The right side has one row for each section of the confirmed score, in order. Each
+row shows its words, **Instrumental**, or **Needs words**, and a **Hear** button.
+The score itself is read-only here.
+
+- Assign a block to a section from the block's **Assign to…** menu, or select a
+  block and use **Put selected block here** on the row. Putting a block on a
+  section that already has words asks whether to **Append** or **Swap**; it never
+  silently replaces words. Several blocks can fill one section, in the order you
+  set.
+- **Split before line…** cuts a block at a line, **Join with next** merges two
+  blocks. A block cannot span two sections until you split it.
+- **Exclude** keeps a block in the draft without singing it. **Instrumental**
+  marks a section as wordless.
+- **Suggest assignments** proposes placements from the tags and the order. It
+  marks doubtful ones **not sure** and lists blocks it left unplaced. Pick which
+  suggestions to take and press **Accept selected**, or **Discard**. Nothing
+  changes until you accept, and suggestions are dropped if the score or lyrics
+  change while they are being made.
+- **Use the recording to improve suggestions** is off by default. When on, the
+  studio listens to the vocal in the source recording to see where each block is
+  sung. It takes longer, and the first run may need to separate the vocals. If it
+  fails, you get the tag and order suggestions with a note. It is not offered when
+  there is no recording or after a cut. Manual assignment always works.
+- **Reuse these words for Chorus 2 and 3** appears when you pasted one chorus and
+  the score has several. It shows the previews, and accepting makes independent
+  copies: changing one later does not change the others. Words your paste repeats
+  stay separate occurrences. Nothing is repeated without your say-so.
+- **Update blocks from this text** (re-paste): edit the pasted text and apply it.
+  Blocks whose text is unchanged keep their assignment. Anything changed or
+  ambiguous, such as identical blocks that cannot be told apart, comes in
+  unassigned for review. The structure stays confirmed.
+
+The list headed **What will be sent, in score order** shows exactly the lyrics a
+render receives. **Confirm lyrics & finish** needs every section to have words or
+be Instrumental, and every block to be used or excluded. Changing any words,
+assignments or Instrumental and Excluded choices withdraws the lyrics confirmation
+only.
+
+#### Ready, and going back
+
+Ready means the structure and the lyrics are both confirmed. Generate and Build by
+section use that exact score and these exact lyrics. The server checks both
+confirmations again on submit: a render whose score or lyrics no longer match, or
+whose Instrumental switch contradicts the lyrics (all sections Instrumental, or
+none), is refused with the reason.
+
+**Edit structure** unlocks step 1, and rendering stays off while it is open. A
+rename keeps the section's words. A section whose music, label or boundary
+changed loses its assignment and is flagged for review; its words return to
+Unassigned rather than disappearing. Unchanged sections keep theirs. Confirm the
+structure again, then resolve the flags in step 2. Switching to a different source
+starts a separate preparation. If a new score replaces your preparation (for
+example a fresh transcription), a note offers **Restore the previous
+preparation**.
+
+#### Drafts from before this flow
+
+An older draft opens in the new flow without transcribing anything. Its saved
+score and lyrics carry over. When the lyric tags match the score's sections one
+for one, each block is proposed for its section (a tag with no words proposes
+Instrumental). If they do not match, every block starts Unassigned and none is
+lost. Old drafts need the two confirmations once, even if their score was approved
+before. Cuts from an earlier version are treated as cuts, so recording playback
+and recording suggestions stay off for those scores.
 
 ### Build by section
 

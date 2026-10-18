@@ -98,6 +98,27 @@ lyric `[Tag]` lines. `POST /sections/save-dataset` writes `lyrics`, or `bpm`
 with `key` (such as `"B Minor"`), into the matched dataset song's sidecar and
 marks those label fields as user-set.
 
+The YuE2 Prepare flow keeps one `yue2Prepare` document per draft (contract:
+`server/src/contracts/yue2Prepare.ts`, shared with the UI): the ABC, stable section
+ids, lyric blocks, an assignment map, `lyricRevision` and two confirmations, the
+structure hash and the structure hash with the lyric revision.
+`POST /sections/suggest` takes `{ prepare, useRecording? }` plus the source fields
+and returns tag-and-order assignment suggestions stamped with
+`{ sourceKey, structureHash, lyricRevision }`, so the UI drops a reply that arrives
+after the score or lyrics changed. With `useRecording: true` it aligns the vocal
+first and falls back to the instant suggestions with `recordingError` set. It never
+rewrites the score.
+
+Submissions are checked by one shared validator (`preparedPair` and
+`preparedParams`). The cover-render workflow input takes `input.prepare` (YuE2 only)
+and renders the lyrics the document exports. Build session start and
+`POST /api/generate` take `params.yue2Prepare` along with `yue2Abc`, `lyrics` and
+`instrumental`; the document is dropped before queueing. Each answers 409 when the
+document is malformed, a confirmation is stale, the score is not the confirmed one,
+a section or lyric block is unaccounted for, the Instrumental flag contradicts the
+lyrics, or the lyrics differ from the exported ones. Submissions without the
+document are unchanged.
+
 Cover transcription first tries with the engine running. If SheetSage2 fails to load,
 the job waits for any active render, stops the engine, retries once, and restarts the
 engine before the next render begins. Other transcription errors fail without a retry.
