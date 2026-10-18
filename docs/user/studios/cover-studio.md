@@ -302,7 +302,7 @@ whose Instrumental switch contradicts the lyrics (all sections Instrumental, or
 none), is refused with the reason.
 
 **Edit structure** unlocks step 1, and rendering stays off while it is open. A
-rename keeps the section's words. A section whose music, label or boundary
+section whose music, label (a rename included) or boundary
 changed loses its assignment and is flagged for review; its words return to
 Unassigned rather than disappearing. Unchanged sections keep theirs. Confirm the
 structure again, then resolve the flags in step 2. Switching to a different source
