@@ -207,3 +207,12 @@ test('re-plan seeds follow from the job seed, so a pinned seed replays the same 
   assert.equal(new Set(run(4242)).size, 10);
   for (const s of run(4294967295)) assert.ok(Number.isInteger(s) && s >= 0 && s < 2 ** 32);
 });
+
+test('a random seed is drawn exact (< 2^53), so a take replays under the seed it recorded', () => {
+  for (let i = 0; i < 200; i++) {
+    const seed = mapYue2Params({ caption: 'folk', lyrics: 'la', randomSeed: true }, pick).req.seed!;
+    assert.ok(Number.isSafeInteger(seed) && seed >= 0);
+    assert.equal(Number(JSON.stringify({ seed }).match(/\d+/)![0]), seed);
+  }
+  assert.equal(mapYue2Params({ caption: 'folk', lyrics: 'la', seed: 12345 }, pick).req.seed, 12345);
+});

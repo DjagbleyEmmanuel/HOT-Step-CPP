@@ -404,11 +404,12 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     );
   }
 
-  // -1 tells the engine to draw one; it echoes the resolved value back so the
-  // render stays reproducible — same convention mapMinimaxParams uses.
-  const seed: number = params.randomSeed
-    ? -1
-    : (typeof params.seed === 'number' && params.seed >= 0 ? params.seed : -1);
+  // Draw it here, not in the engine: the engine's random seed is a full uint64,
+  // which JSON.parse rounds past 2^53, so the take would record (and replay) a
+  // different seed. A 53-bit draw is exact through every Number on the way.
+  const seed: number = params.randomSeed || !(typeof params.seed === 'number' && params.seed >= 0)
+    ? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
+    : params.seed;
 
   // A previewed-and-approved lead sheet (score preview flow): the engine
   // renders this score instead of planning one. Meaningless under cot=off,
@@ -526,7 +527,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     ...(narScheduler ? { scheduler: narScheduler } : {}),
     ...(Object.keys(plugin_params).length ? { plugin_params } : {}),
     vae_variant,
-    ...(seed >= 0 ? { seed } : {}),
+    seed,
   };
 
   return { req, abcSupplied: !!abc, notes, caption, halves: styled.halves };
