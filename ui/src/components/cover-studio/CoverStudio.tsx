@@ -28,6 +28,7 @@ import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { StemMixer } from '../shared/StemMixer';
+import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { useCoverStemsStore } from '../../stores/coverStemsStore';
 import {
@@ -1026,8 +1027,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // Merge, relabel and split go through the same stack as cuts. The edit
   // functions refuse with a reason rather than guess; it shows inline.
   const [sectionEditError, setSectionEditError] = useState('');
-  const [sectionEditor, setSectionEditor] = useState<
-    { index: number; kind: 'merge' | 'relabel' | 'split'; label: string; bar: string; line: string } | null>(null);
+  // Bound to the score and source it was opened on: a changed source or score
+  // would otherwise let the index edit a different section.
+  const [editorState, setSectionEditor] = useState<
+    { index: number; kind: 'merge' | 'relabel' | 'split'; label: string; bar: string; line: string; abc: string; key: string } | null>(null);
+  const sectionEditor = editorState?.abc === sheetAbc && editorState.key === sourceKey ? editorState : null;
   const applySectionEdit = (edit: ReturnType<typeof mergeSections>) => {
     if ('error' in edit) { setSectionEditError(edit.error); return; }
     setSectionEditError(''); setSectionEditor(null);
@@ -1906,7 +1910,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                     <button key={kind} type="button" aria-label={title} title={title}
                       onClick={() => { setSectionEditError(''); setSectionEditor(open => open?.index === index && open.kind === kind ? null : {
                         index, kind, label: kind === 'merge' ? 'first' : kind === 'relabel' ? section.label : '',
-                        bar: String(section.startBar + 1), line: '0' }); }}
+                        bar: String(section.startBar + 1), line: '0', abc: sheetAbc, key: sourceKey }); }}
                       className="px-1 text-zinc-500 hover:text-cyan-500">{icon}</button>)}
                 </span>)}</div>
               : <p className="text-xs text-zinc-500">No score section labels found.</p>}
@@ -1916,16 +1920,19 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                 <StyledSelect accent="cyan" value={sectionEditor.label} onChange={label => setSectionEditor({ ...sectionEditor, label })}
                   options={[{ value: 'first', label: scoreSections[sectionEditor.index].label },
                     { value: 'second', label: scoreSections[sectionEditor.index + 1]?.label ?? '' }]} className="w-32" /></>}
-              {sectionEditor.kind !== 'merge' && <label className="flex items-center gap-1">{sectionEditor.kind === 'split' ? 'New section label' : 'Label'}
+              {sectionEditor.kind !== 'merge' && <div className="flex items-center gap-1"><ParamLabel label={sectionEditor.kind === 'split' ? 'New section label' : 'Label'}
+                  info={sectionEditor.kind === 'split' ? 'The tag for the second half. It is written to the score marker and to the lyrics tag.' : 'The new name. It is written to the score marker and to the lyrics tag.'} />
                 <input value={sectionEditor.label} onChange={e => setSectionEditor({ ...sectionEditor, label: e.target.value })}
-                  className="w-28 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label>}
+                  className="w-28 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div>}
               {sectionEditor.kind === 'split' && <>
-                <label className="flex items-center gap-1">Starts at bar
+                <div className="flex items-center gap-1"><ParamLabel label="Starts at bar"
+                  info="The score bar where the new section begins. A bar the score cannot split at is refused with the reason." />
                   <input value={sectionEditor.bar} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, bar: e.target.value })}
-                    className="w-14 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label>
-                <label className="flex items-center gap-1">Lyric line (0–{lyricBlockLines(lyrics, sectionEditor.index).length})
+                    className="w-14 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div>
+                <div className="flex items-center gap-1"><ParamLabel label={`Lyric line (0–${lyricBlockLines(lyrics, sectionEditor.index).length})`}
+                  info="How many of this section's non-blank lyric lines stay in the first half. 0 moves all of them to the new section; N leaves the first N lines behind." />
                   <input value={sectionEditor.line} inputMode="numeric" onChange={e => setSectionEditor({ ...sectionEditor, line: e.target.value })}
-                    className="w-12 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></label></>}
+                    className="w-12 rounded bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-1 py-0.5" /></div></>}
               <button type="button" onClick={submitSectionEditor} className="text-cyan-700 dark:text-cyan-300">Apply</button>
               <button type="button" onClick={() => { setSectionEditor(null); setSectionEditError(''); }} className="text-zinc-500">Cancel</button>
             </div>}
