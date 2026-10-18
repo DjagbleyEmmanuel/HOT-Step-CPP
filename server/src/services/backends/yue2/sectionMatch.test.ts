@@ -218,3 +218,12 @@ test('untagged words skip a silent section whatever its label', () => {
   assert.equal(result.assignments.s1, 'instrumental');
   assert.deepEqual(result.assignments.s2, ['b1']);
 });
+
+test('with the recording, an empty tag takes the next free section of its kind, not one a worded block holds', () => {
+  const twoVerses = score.replace('% chorus', '% verse');
+  const blocks = [b('b1', 'verse'), b('b2', 'verse', '')];
+  const result = suggestSections(twoVerses, ids, blocks, words(suggestionLyrics(blocks), [['b1 words', 6.2]]));
+  assert.equal(result.recording, true);
+  assert.deepEqual(result.assignments.s1, ['b1']);
+  assert.equal(result.assignments.s2, 'instrumental');
+});

@@ -400,7 +400,14 @@ export function suggestSections(abc: string, sectionIds: string[], blocks: Sugge
     const timed = hints.map(h => firstWord(h, words));
     placed = blocks.map(() => null);
     bestFit(hints, timed, spans, songEnd, PICKUP_BARS * barSeconds).forEach((s, k) => { placed[worded[k]] = s; });
-    byTag(empty).forEach((s, k) => { placed[empty[k]] = s; });
+    // An empty tag takes the first free section of its kind after the blocks before it.
+    for (const i of empty) {
+      const kind = blocks[i].tag ? kindOf(blocks[i].tag!) : null;
+      const cursor = Math.max(-1, ...placed.slice(0, i).map(s => s ?? -1));
+      const taken = new Set(placed);
+      const found = spans.findIndex((span, s) => s > cursor && !taken.has(s) && (kind ? kindOf(span.label) === kind : span.sung));
+      placed[i] = found >= 0 ? found : null;
+    }
   } else {
     placed = byTag(all);
   }
