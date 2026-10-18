@@ -1310,9 +1310,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
       onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}
-      onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={take => void build.keep(take)} onDelete={take => void build.remove(take)}
+      onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={(take, crop) => void build.keep(take, crop)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
-      onCrop={(take, frame, mode) => void build.crop(take, frame, mode)}
+      onCrop={(take, frame, mode) => void build.crop(take, frame, mode)} onTrim={(take, seconds) => void build.trim(take, seconds)}
       onBack={() => setBuildMode(false)} />;
   };
 

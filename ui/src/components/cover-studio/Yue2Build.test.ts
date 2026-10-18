@@ -5,7 +5,7 @@ const store = new Map<string, string>();
 (globalThis as any).localStorage = {
   getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v),
 };
-const { buildCaption, finishSavedBuild, onBuildSaved, submittedCaption } = await import('./Yue2Build');
+const { buildCaption, cropNeedsMode, finishSavedBuild, moveCropEdge, onBuildSaved, settingsSummary, submittedCaption } = await import('./Yue2Build');
 const saved = () => JSON.parse(store.get('cover-studio-buildSessionId') ?? '""');
 
 test('a Save finishing after the studio was rebuilt clears its build and tells the mounted studio', () => {
@@ -103,3 +103,28 @@ test('the lyrics pane edits lines without the tag; Generate applies only the cha
   assert.deepEqual(pendingLyrics({ o0: 'one\ntwo ', o1: 'louder', o3: 'x', o9: 'y' }, { o0: 'one\ntwo', o1: 'sing', o3: null }), { o1: 'louder' });
 });
 
+
+test('take crop: the in point only on a first-section take, a second clear of the out point, snapped to frames', () => {
+  // 10 s, first section (no prefix): the in point can move; dragging back to the top clears it.
+  const first = { id: 'a', from: 0, to: 0, frames: 250, starts: [0, 200], audioUrl: '', seed: 1, occurrences: ['o0'] } as any;
+  const none = { in: null, out: null, mode: null };
+  assert.deepEqual(moveCropEdge(first, none, 'in', 1.234), { in: 1.24, out: null, mode: null });
+  assert.equal(moveCropEdge(first, { ...none, in: 2 }, 'in', -3).in, null);
+  assert.equal(moveCropEdge(first, { ...none, out: 4 }, 'in', 3.9).in, 3, 'a second before the out point');
+  assert.equal(moveCropEdge(first, none, 'out', 99).out, null, 'dragged to the end is no crop');
+  assert.equal(moveCropEdge(first, { ...none, in: 5 }, 'out', 2).out, 6, 'a second after the in point');
+  // A later take resumes 150 frames: no in point, and the out point stays in the part it composed.
+  const later = { ...first, from: 1, to: 1, prefix: 150, starts: [0, 150, 220] };
+  assert.equal(moveCropEdge(later, none, 'in', 2).in, null);
+  assert.equal(moveCropEdge(later, none, 'out', 1).out, 6.04);
+  // Inside the section it composed needs a choice; at or past the next section's start does not.
+  assert.equal(cropNeedsMode(later, { ...none, out: 7 }), true);
+  assert.equal(cropNeedsMode(later, { ...none, out: 8.8 }), false);
+  assert.equal(cropNeedsMode(later, none), false);
+});
+
+test('locked build settings read as one line', () => {
+  assert.equal(settingsSummary({ voices: 'vocal', tempo: 'free', keyShift: 0, cfgScale: 1, arStrength: 0.6 }, 'C major'),
+    'vocal melody only, free tempo, source key, condition strength 1, AR strength 0.6');
+  assert.match(settingsSummary({ voices: 'both', tempo: 96, keyShift: 2, cfgScale: 1.2, arStrength: 0.5 }, 'C major'), /^vocal \+ instrumental line, 96 BPM, \+2 st \(D major\)/);
+});

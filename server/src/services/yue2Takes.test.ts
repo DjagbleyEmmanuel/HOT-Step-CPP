@@ -605,6 +605,29 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(requests.at(-1)!.abc, composeArrangement(abc, text, plan).abc);
   });
 
+  await t.test('trim: only a first-section take starts later, and only while a version of it is the first keep', async () => {
+    const { setBuildTrim, cropBuildTake } = await import('./yue2Takes.js');
+    const s = start();
+    const [a, other] = await take(s.id, 0, 0, 2);
+    const room = a.frames / YUE2_FPS - 1;
+    assert.throws(() => setBuildTrim(s.id, 'user', a.id, 0, room + 0.5), new RegExp(`Start between 0 and ${room.toFixed(2)} s`));
+    assert.throws(() => setBuildTrim(s.id, 'user', a.id, 0, 0), /Start between/);
+    assert.throws(() => setBuildTrim(s.id, 'user', a.id, 7, 1), /changed since/);
+    assert.equal(setBuildTrim(s.id, 'user', a.id, 0, 1.25).trim?.seconds, 1.25);
+    keepBuildTake(s.id, 'user', other.id, 0);
+    assert.equal(buildSessionRender(s.id, 'user').trimStart, undefined, 'another take is the first keep');
+    undoBuildKeep(s.id, 'user', undefined, 0);
+    keepBuildTake(s.id, 'user', a.id, 0);
+    assert.equal(buildSessionRender(s.id, 'user').trimStart, 1.25);
+    // A crop of the trimmed take keeps the trim.
+    cropBuildTake(s.id, 'user', a.id, 0, 120, 'advance');
+    assert.equal(buildSessionRender(s.id, 'user').trimStart, 1.25);
+    const [b] = await take(s.id, 1, 0);
+    assert.throws(() => setBuildTrim(s.id, 'user', b.id, 0, 1), /first section/);
+    assert.equal(setBuildTrim(s.id, 'user', '', 0, null).trim, null);
+    assert.equal(buildSessionRender(s.id, 'user').trimStart, undefined);
+  });
+
   await t.test('crop: the next take and Save song resume exactly the cut prefix, and the original comes back', async () => {
     const { cropBuildTake, deleteBuildTake } = await import('./yue2Takes.js');
     const codes = (sid: string, take: string) => JSON.parse(fs.readFileSync(path.join(config.data.audioDir, 'takes', sid, `${take}.codes.json`), 'utf8')) as number[];
@@ -735,6 +758,25 @@ test('crop plans: a cut on a frame inside the composed part, by occurrence', asy
   assert.equal(cut.readUInt32LE(40), rate * 2);
   assert.equal(cut.readUInt32LE(4), cut.length - 8);
   assert.equal(cropWav(wav, 5).length, wav.length);
+});
+
+test('a trimmed start drops the first seconds and fades in from silence', async () => {
+  const { trimWavStart } = await import('./yue2Takes.js');
+  const rate = 48000, frames = rate * 2;
+  const wav = Buffer.alloc(44 + frames * 4);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + frames * 4, 4); wav.write('WAVE', 8);
+  wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 4, 28); wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(frames * 4, 40);
+  for (let f = 0; f < frames; f++) { wav.writeInt16LE(10000, 44 + f * 4); wav.writeInt16LE(-10000, 46 + f * 4); }
+  const out = trimWavStart(wav, 0.5, 0.5);
+  assert.equal(out.readUInt32LE(40), rate * 1.5 * 4);
+  assert.equal(out.readUInt32LE(4), out.length - 8);
+  assert.equal(out.readInt16LE(44), 0, 'silent at the cut');
+  assert.equal(out.readInt16LE(46), 0);
+  assert.equal(out.readInt16LE(44 + (rate / 4) * 4), 5000, 'half way up the fade');
+  assert.equal(out.readInt16LE(46 + (rate / 4) * 4), -5000);
+  assert.equal(out.readInt16LE(44 + rate * 4), 10000, 'full level after it');
 });
 
 test('a repeated section is timed by its own copy of the lyrics', () => {

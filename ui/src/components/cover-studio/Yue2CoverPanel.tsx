@@ -65,11 +65,11 @@ interface Props {
  *  AR scale in every Cover request; the same control sits on Prepare and Build. */
 export const COVER_AR_DEFAULT = 0.6;
 export const clampCoverAr = (v: number) => Number.isFinite(v) ? Math.max(0, Math.min(10, v)) : COVER_AR_DEFAULT;
-export const CoverArStrength: React.FC<{ value: number; onChange: (v: number) => void; locked?: boolean }> = ({ value, onChange, locked }) =>
+export const CoverArStrength: React.FC<{ value: number; onChange: (v: number) => void; disabled?: boolean }> = ({ value, onChange, disabled }) =>
   <EditableSlider label="AR strength" value={value} min={0} max={10} step={0.05}
     onChange={v => onChange(clampCoverAr(v))} defaultValue={COVER_AR_DEFAULT} autoLabel=""
     tooltip="How hard the AR adapter steers the musical plan, for covers only (the adapter picker's AR scale is ignored here). Values above 0.6 hurt adherence to the score: on one seed, 1.0 matched 11% of chords against 89% at 0.6."
-    disabled={locked} disabledReason={locked ? 'This build keeps the strength it started with. Start over to change it.' : undefined} />;
+    disabled={disabled} />;
 
 /** Column width in px, padding included, above which the settings switch from
  *  one column to paired rows. */

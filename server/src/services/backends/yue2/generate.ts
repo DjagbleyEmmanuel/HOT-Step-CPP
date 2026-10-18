@@ -79,7 +79,7 @@ import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { PollWatchdogOptions } from '../../generation/pollUntilDone.js';
 import type { GenerationAttempt } from '../types.js';
-import { buildSessionRender } from '../../yue2Takes.js';
+import { buildSessionRender, TRIM_FADE_S, trimWavStart } from '../../yue2Takes.js';
 
 /** Injected so this module never imports back into routes/generate.ts at
  *  runtime, matching MinimaxGenerationDeps' own shape exactly. */
@@ -607,6 +607,8 @@ export interface Yue2PreparedJob {
   /** Cover provenance captured into the envelope at submit, undefined for an
    *  ordinary job. */
   cover?: Yue2CoverSubmission;
+  /** Seconds a built song's saved audio starts late, faded in (yue2Takes setBuildTrim). */
+  trimStart?: number;
 }
 
 /** A job's params with a cover's captured score and CFG applied, as the
@@ -642,8 +644,10 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   // them in source order). Set after the request is logged, which would
   // otherwise list every code.
   const build = job.params?.yue2Build as { session?: unknown } | undefined;
+  let trimStart: number | undefined;
   if (build?.session !== undefined) {
     const render = buildSessionRender(String(build.session), job.userId);
+    trimStart = render.trimStart;
     for (const key of ['codec_ids', 'abc', 'lyrics', 'lyric_schedule'] as const) {
       if (render[key] === undefined) delete req[key];
       else (req as unknown as Record<string, unknown>)[key] = render[key];
@@ -675,7 +679,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
     throw new Error('YuE2 needs a caption — the Style Description field is empty');
   }
 
-  return { job, req, abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover };
+  return { job, req, abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover, trimStart };
 }
 
 // ── Auto-replan ──
@@ -1264,6 +1268,10 @@ async function finishYue2Job(
     const audioUrls: string[] = [];
     const filepaths: string[] = [];
     const durations: number[] = [];
+    if (p.trimStart) {
+      log('INFO', `[YuE2] Starting the built song ${p.trimStart.toFixed(2)} s in, faded in over ${TRIM_FADE_S} s`);
+      parts = parts.map(part => trimWavStart(part, p.trimStart!, TRIM_FADE_S));
+    }
     for (let i = 0; i < parts.length; i++) {
       const filename = `${uuidv4()}.wav`;
       const filepath = path.join(config.data.audioDir, filename);

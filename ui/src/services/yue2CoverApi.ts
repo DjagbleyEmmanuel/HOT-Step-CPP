@@ -181,6 +181,8 @@ export interface Yue2BuildSession {
   error: string | null;
   params: Record<string, unknown>;
   arrangement: Yue2Arrangement;
+  /** Where Save song starts the song, faded in: seconds into a first-section take (`take` is the uncropped original). */
+  trim?: { take: string; seconds: number } | null;
 }
 
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
@@ -245,6 +247,9 @@ export const yue2CoverApi = {
    *  a section: compose it again from the cut, or move on to the next one there. */
   buildCrop: (id: string, revision: number, take: string, frame: number | null, mode: 'regenerate' | 'advance' | undefined, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/crop`, token, { method: 'POST', body: JSON.stringify({ revision, take, frame, mode }) }),
+  /** Where Save song starts the song: `seconds` into first-section take `take`, or null for the top. */
+  buildTrim: (id: string, revision: number, take: string, seconds: number | null, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/trim`, token, { method: 'POST', body: JSON.stringify({ revision, take, seconds }) }),
   buildDelete: (id: string, revision: number, take: string, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>

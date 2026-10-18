@@ -345,11 +345,15 @@ Prepare. Finish preparing those before generating the first takes.
 1. Two bars show the song. The **Source** bar is the score as it is, and never
    changes. The **Song** bar is the output you are building. It starts empty:
    click a source section to add it to the end of the song, and click it again to
-   repeat it (a repeated chorus is its own entry on the Song bar). Built sections
+   repeat it (a repeated chorus is its own entry on the Song bar). Added sections
+   arrive selected, so Generate is ready straight away; adding the score's last
+   section also ticks **Ends the song**, which you can untick. Built sections
    have ticks and start times, the next one has an arrow, and the rest are planned.
-   Hover a planned section to move it earlier or later, or remove it. Built
+   Hover a planned section to move it earlier or later, or remove it; removing the
+   only section, with nothing kept, goes back to an empty Song bar. Built
    sections are locked until you undo back to them. Click a planned section to
-   build up to it; its lyrics, and those of the planned sections before it, appear
+   build up to it, and click the last selected one again to clear the selection
+   (Generate then waits for one); its lyrics, and those of the planned sections before it, appear
    beside the takes. You don't have to decide what follows: until the song is
    marked as ending, each take runs a few seconds into the section that follows
    its last one in the source, so the next take has a seam to start from, and
@@ -359,7 +363,7 @@ Prepare. Finish preparing those before generating the first takes.
    takes render, and takes made for an earlier plan can no longer be kept. The
    plan is saved with the build, so it survives a reload and is what **Render
    Final Song** renders.
-2. Choose 1 to 10 takes, then press **Generate N takes of A → B**, with the
+2. Choose 1 to 10 takes (4 by default), then press **Generate N takes of A → B**, with the
    count and section names shown for your selection. Each take uses a fresh seed,
    continues everything kept so far, and stops a little beyond the chosen range.
    Takes render in groups of up to four, with one audio result per seed. Ten
@@ -372,8 +376,8 @@ Prepare. Finish preparing those before generating the first takes.
    group's takes are added and later groups stop. Earlier completed takes stay.
    Builds also work with **Condition strength** values other than 1.
 
-   **Caption** (above the Generate button) starts as the build's caption for
-   each section. Edit it to steer this section's takes, for example "quiet,
+   **Caption** (at the foot of the lyrics column, under the sections' lyrics)
+   starts as the build's caption for each section. Edit it to steer this section's takes, for example "quiet,
    acoustic guitar, whispers" for a breakdown; the next section starts from the
    build's caption again, and the reset button beside the field puts it back. It
    changes what the composer writes (the AR) for those takes, and an adapter's
@@ -398,33 +402,33 @@ Prepare. Finish preparing those before generating the first takes.
 3. Play each take to compare it. Preview starts four seconds before its first new
    section, where available, so you can hear the join. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
-   The play button pauses and resumes from the same spot; **Stop** resets. Click the
+   The play button pauses and resumes from the same spot. Click the
    waveform to seek within the preview, lead-in included. Playback stops when you
    keep, delete the take being played, undo, or leave the page.
    **Keep** adds that take to the build and advances to the next section. Use the
    trash button to delete an unwanted candidate.
+
+   **Crop**, left of Keep, sets where a take ends, and for a take of the first
+   section where the song starts. It adds a red out line and, on a first-section
+   take, a green in line to the waveform; drag either one. The out line stays in
+   the part that take composed, and the in line at least a second before it. An
+   out point inside a section asks whether the next take composes that section
+   again from the cut, or moves on to the next section there; **Done** waits for
+   the answer. **Done** replaces Crop while you drag; pressing it shows the take
+   as cropped (✂), and playback and the length follow. Nothing changes on the
+   server until **Keep**: the take is kept, then cut at the out point, and the in
+   point is stored with the build. The next takes continue from exactly the
+   cropped audio. The in point only changes the saved song: **Render Final Song**
+   starts there with a half-second fade in, and **Play build** starts there too.
+   The audio before it still feeds the composer, so later takes are unaffected.
+   A line under the Song bar shows a stored start or a cropped last keep, with
+   **Start from the top** and **Undo crop** to take either back. Takes made
+   before a crop can no longer be kept until the build they continued is back.
 4. Repeat for the remaining sections. **Play build** plays everything kept so far;
    clicking a built section plays from its start. To undo a keep, open **Build
    actions** and choose **Undo last keep**. A built section's undo button rolls
    back far enough to build that section again.
 
-   **Crop the last kept take** (under the Song bar) cuts the most recent keep
-   short, for when a take ran on too long or went wrong near its end. Set the
-   cut by time: click its waveform, type the seconds, or press **Cut at
-   playhead** while it plays. Only the part that take composed can be cut, on
-   the composer's 25-frames-per-second clock. A cut inside a section shows
-   which bar it is roughly at; that bar count is an estimate from the take's
-   timing, not an exact bar line. For a cut inside a section, choose whether the
-   next take composes that section again from the cut, or moves on to the next
-   section there; nothing is cropped until you choose. The next takes continue
-   from exactly the cropped audio, and **Render Final Song** renders it. The original
-   take is kept: **Undo crop** puts it back, and a new crop always cuts the
-   original, so you can move the cut later as well as earlier. Takes made
-   before a crop (or after it, once you undo it) can no longer be kept until
-   the build they continued is back. Cropping is refused while takes render.
-   If a crop reopened a section and you then change the plan or that section's
-   lyrics, **Undo crop** (or a crop that reaches past the cut) is refused, since
-   the original no longer matches; generate the section again instead.
 5. When every section is built, press **Render Final Song** in the Takes box.
    It submits the kept audio codes as an ordinary generation job, with the usual
    post-processing, drift check and Library save. To render before the song is
@@ -445,8 +449,10 @@ has its own copy: change the row, then choose **Apply**. Until the first keep,
 Apply rewrites the build's score and request with the new settings, keeps the
 planned sections, and Prepare follows. Takes made before it can no longer be
 kept. After a keep, the kept audio was composed under the old settings, so the
-button becomes **Start a fresh build with these**: it sets them on Prepare and
-leaves the current build. The row is locked while takes are rendering.
+row folds to one line saying the settings are locked and listing them. **Change**
+opens it again, and its button becomes **Start a fresh build with these**: it sets
+them on Prepare and leaves the current build. The row is locked while takes are
+rendering, AR strength included.
 
 Edits on Prepare do not change a build that exists. Choose **Start over** in
 Build actions or beside **Build in progress** on Prepare to start a new build

@@ -3,7 +3,7 @@ import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, MoreHorizontal, Pause, Play, RotateCcw, Scissors, Square, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Loader2, Lock, MoreHorizontal, Pause, Play, RotateCcw, Scissors, Trash2, X } from 'lucide-react';
 import { yue2CoverApi, type Yue2BuildSession, type Yue2BuildTake } from '../../services/yue2CoverApi';
 import { lyricBlockRanges, sectionColours } from '../../utils/abcSections';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -121,6 +121,39 @@ export function cropPoint(take: Yue2BuildTake, frame: number): { occurrence: num
   return { occurrence: k, inside: k <= take.to && take.starts[k] !== frame };
 }
 
+/** A crop set on a take before it is kept, in seconds on the song's clock. `in` (first-section takes only)
+ *  is where the saved song starts, faded in; `out` cuts the take there; null leaves that end alone.
+ *  `mode` answers cropPoint's question when `out` falls inside a section. */
+export interface TakeCrop { in: number | null; out: number | null; mode: 'regenerate' | 'advance' | null }
+
+/** The seconds a take's crop handles may reach: `in` from the top to a second before the end,
+ *  `out` inside the part the take composed. */
+export function cropLimits(take: Yue2BuildTake): { inMax: number; outMin: number; end: number } {
+  const end = take.frames / FPS;
+  return { inMax: take.from === 0 ? end - 1 : 0, outMin: (takePrefix(take) + 1) / FPS, end };
+}
+
+/** `crop` with one edge moved to `at` seconds, kept in its limits and a second clear of the other edge.
+ *  An edge dragged back to its end of the take is no crop (null). */
+export function moveCropEdge(take: Yue2BuildTake, crop: TakeCrop, edge: 'in' | 'out', at: number): TakeCrop {
+  const { inMax, outMin, end } = cropLimits(take);
+  const snap = (t: number) => Math.round(t * FPS) / FPS;
+  if (edge === 'in') {
+    if (inMax <= 0) return crop;
+    const t = snap(Math.min(inMax, (crop.out ?? end) - 1, Math.max(0, at)));
+    return { ...crop, in: t <= 0 ? null : t };
+  }
+  const t = snap(Math.max(outMin, (crop.in ?? 0) + 1, Math.min(end, at)));
+  return { ...crop, out: t >= end ? null : t, mode: null };
+}
+
+/** Whether a crop's out point falls inside a section the take composed, so it needs a mode before it can be kept. */
+export function cropNeedsMode(take: Yue2BuildTake, crop: TakeCrop): boolean {
+  if (crop.out === null) return false;
+  const point = cropPoint(take, Math.round(crop.out * FPS));
+  return point.inside && point.occurrence <= take.to;
+}
+
 /** Where an Apply goes: the loaded session, a draft when there is no session at all, or
  *  nowhere while a saved session is still loading (or failed to), so it cannot be lost to a draft. */
 export const lyricsTarget = (sessionId: string, live: unknown): 'session' | 'draft' | 'loading' =>
@@ -169,11 +202,19 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
       return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished, token!);
     }),
-    keep: (take: string) => call(() => yue2CoverApi.buildKeep(live!.id, live!.revision, take, token!)),
+    /** Keeps a take, then applies the crop set on it: the out point cuts the kept take, the in point starts the saved song later. */
+    keep: (take: string, crop?: TakeCrop) => call(async () => {
+      let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take, token!);
+      if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined, token!);
+      if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in, token!);
+      return next;
+    }),
+    /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
+    trim: (take: string, seconds: number | null) => call(() => yue2CoverApi.buildTrim(live!.id, live!.revision, take, seconds, token!)),
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
     remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take, token!)),
     cancel: () => call(() => yue2CoverApi.buildCancel(live!.id, token!)),
-    /** Cuts the last kept take at codec frame `frame`, or restores it (null). */
+    /** Cuts the last kept take at codec frame `frame`, or restores it (null). The take rows' crop goes through keep. */
     crop: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') =>
       call(() => yue2CoverApi.buildCrop(live!.id, live!.revision, take, frame, mode, token!)),
     /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
@@ -206,6 +247,48 @@ function Waveform({ peaks, progress, colour, onSeek, marker = null }: { peaks: n
   );
 }
 
+/** "vocal melody only, free tempo, source key, condition strength 1, AR strength 0.6" */
+export function settingsSummary(s: BuildSettings, keyLabel: string): string {
+  const tempo = typeof s.tempo === 'number' ? `${s.tempo} BPM` : s.tempo === 'free' ? 'free tempo' : 'source tempo';
+  const key = s.keyShift === 0 ? 'source key' : `${s.keyShift > 0 ? '+' : ''}${s.keyShift} st${keyLabel ? ` (${transposeKey(keyLabel, s.keyShift)})` : ''}`;
+  return [s.voices === 'vocal' ? 'vocal melody only' : 'vocal + instrumental line', tempo, key,
+    `condition strength ${s.cfgScale}`, `AR strength ${s.arStrength}`].join(', ');
+}
+
+/** A take's waveform with draggable in and out points; the parts cropped away are dimmed.
+ *  A press moves the nearer handle (only the out handle when the take cannot start later). */
+function CropWaveform({ peaks, from, to, crop, canIn, colour, onMove }: {
+  peaks: number[]; from: number; to: number; crop: TakeCrop; canIn: boolean; colour: string; onMove: (edge: 'in' | 'out', at: number) => void;
+}) {
+  const drag = useRef<'in' | 'out' | null>(null);
+  const span = Math.max(0.1, to - from);
+  const x = (t: number) => Math.min(100, Math.max(0, ((t - from) / span) * 100));
+  const inX = x(crop.in ?? from), outX = x(crop.out ?? to);
+  const at = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return from + Math.min(1, Math.max(0, (e.clientX - r.left) / Math.max(1, r.width))) * span;
+  };
+  const w = peaks.length ? 100 / peaks.length : 0;
+  return (
+    <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-10 flex-1 cursor-ew-resize touch-none" role="group" aria-label="Crop the take: drag the in and out points"
+      onPointerDown={e => {
+        const t = at(e);
+        drag.current = canIn && Math.abs(x(t) - inX) < Math.abs(x(t) - outX) ? 'in' : 'out';
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onMove(drag.current, t);
+      }}
+      onPointerMove={e => { if (drag.current) onMove(drag.current, at(e)); }}
+      onPointerUp={() => { drag.current = null; }}>
+      {peaks.map((p, i) => <rect key={i} x={i * w + w * 0.15} width={w * 0.7} y={20 - Math.max(0.5, p * 19)} height={Math.max(1, p * 38)}
+        fill={i * w + w / 2 >= inX && i * w + w / 2 <= outX ? colour : '#a1a1aa'} />)}
+      <rect x={0} width={inX} y={0} height={40} fill="#000" opacity={0.35} />
+      <rect x={outX} width={100 - outX} y={0} height={40} fill="#000" opacity={0.35} />
+      {canIn && <line x1={inX} x2={inX} y1={0} y2={40} stroke="#22c55e" strokeWidth={1} />}
+      <line x1={outX} x2={outX} y1={0} y2={40} stroke="#ef4444" strokeWidth={1} />
+    </svg>
+  );
+}
+
 /** The build's cover settings in one row. Before a build exists they are the
  *  Prepare page's and change at once. A build has its own: edits wait for
  *  Apply, which rebuilds the build's request before its first keep and starts
@@ -220,6 +303,17 @@ function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBp
   const set = (patch: Partial<BuildSettings>) => { const next = { ...shown, ...patch }; if (build) setDraft(next); else onApply(next); };
   const changed = build && JSON.stringify(draft) !== saved;
   const tempoMode = typeof shown.tempo === 'number' ? 'set' : shown.tempo;
+  // Once a section is kept the settings are the build's for good: changing them
+  // starts a fresh build. The row folds to a summary and opens only on request.
+  const [open, setOpen] = useState(false);
+  if (kept && !open) return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-white/10 px-4 py-2 text-xs text-zinc-500">
+      <Lock className="w-3 h-3" />
+      <span className="min-w-0 flex-1">Settings locked: the kept sections were built with {settingsSummary(value, keyLabel)}. Changing them starts a fresh build.</span>
+      <button type="button" onClick={() => setOpen(true)} disabled={disabled}
+        className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Change<ChevronDown className="w-3 h-3" /></button>
+    </div>
+  );
   return (
     <fieldset disabled={disabled} className="border-b border-zinc-200 dark:border-white/10 px-4 py-2 space-y-2">
       <div className="flex flex-wrap items-start gap-x-5 gap-y-3 [&>*]:min-w-[150px] [&>*]:flex-1" aria-label="Build settings">
@@ -243,14 +337,15 @@ function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBp
           tooltip="Moves the score up or down by whole semitones, within twelve." />
         <EditableSlider label="Condition strength" value={shown.cfgScale} min={0.1} max={2} step={0.05} defaultValue={1} disabled={disabled}
           onChange={v => set({ cfgScale: v })} tooltip="Tightens style, lyrics and score together." />
-        <CoverArStrength value={shown.arStrength} onChange={v => set({ arStrength: v })} />
+        <CoverArStrength value={shown.arStrength} onChange={v => set({ arStrength: v })} disabled={disabled} />
       </div>
       {build && (changed || kept) && <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
         <span className="flex-1">{kept
           ? 'The kept sections were built with the settings above. Changing them starts a fresh build; this one is set aside.'
           : 'Applying rebuilds this build with the new settings. Takes made before it can no longer be kept.'}</span>
+        {kept && !changed && <button type="button" onClick={() => setOpen(false)} className="rounded-lg px-3 py-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Close</button>}
         {changed && <>
-          <button type="button" onClick={() => setDraft(JSON.parse(saved))} className="rounded-lg px-3 py-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Discard</button>
+          <button type="button" onClick={() => { setDraft(JSON.parse(saved)); if (kept) setOpen(false); }} className="rounded-lg px-3 py-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Discard</button>
           <button type="button" onClick={() => onApply(draft)}
             className="rounded-lg bg-cyan-600 px-3 py-1 font-semibold text-white disabled:opacity-40">{kept ? 'Start a fresh build with these' : 'Apply'}</button>
         </>}
@@ -294,11 +389,14 @@ interface PageProps {
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
   onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
-  onKeep: (take: string) => void;
+  /** Keeps a take, with the crop set on it if any. */
+  onKeep: (take: string, crop?: TakeCrop) => void;
   onDelete: (take: string) => void;
   onUndo: (section?: number) => void;
-  /** Cuts the last kept take at a codec frame, or restores it (null). The crop row shows only when given. */
+  /** Restores the last kept take's uncropped original (frame null). */
   onCrop?: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') => void;
+  /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
+  onTrim?: (take: string, seconds: number | null) => void;
   onStartOver: () => void;
   onSave: () => void;
   onBack: () => void;
@@ -313,12 +411,12 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const [paused, setPaused] = useState(true);
   const generation = useRef(0);
   const [target, setTarget] = useState<string | null>(null);
-  const [count, setCount] = useState(3);
+  const [count, setCount] = useState(4);
   const [menu, setMenu] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [cropping, setCropping] = useState(false);
-  const [cutAt, setCutAt] = useState<number | null>(null);
-  const [cropMode, setCropMode] = useState<'regenerate' | 'advance' | null>(null);
+  // Crops set on takes not yet kept (applied by Keep), and the take whose crop is being edited.
+  const [crops, setCrops] = useState<Record<string, TakeCrop>>({});
+  const [cropEdit, setCropEdit] = useState<({ take: string } & TakeCrop) | null>(null);
   const [caption, setCaption] = useState(p.caption);
   const dragging = useRef(false);
   const s = p.session;
@@ -339,9 +437,16 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
 
   // Each section starts from the build's caption.
   useEffect(() => { setTarget(null); setCaption(p.caption); }, [next, s?.id, p.caption]);
-  // A cut belongs to the kept take it was set on; the choice belongs to the cut.
-  useEffect(() => { setCutAt(null); setCropMode(null); }, [spine?.id]);
-  useEffect(() => { setCropMode(null); }, [cutAt]);
+  // Sections just added from the source bar arrive selected, so Generate is ready.
+  const selectAdded = useRef(false);
+  const lastItem = items.at(-1)?.id;
+  useEffect(() => {
+    if (!selectAdded.current || !lastItem) return;
+    selectAdded.current = false;
+    setTarget(lastItem);
+  }, [items.length, lastItem]);
+  // Crops belong to the takes of the section being built.
+  useEffect(() => { setCrops({}); setCropEdit(null); }, [spine?.id, s?.id]);
   // Lyric drafts belong to the build they were typed in.
   useEffect(() => { setDrafts({}); }, [s?.id]);
   useEffect(() => {
@@ -390,12 +495,14 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     const audio = audioRef.current;
     return () => { release(audio); setPlaying(null); setProgress(null); };
   }, [s?.id]);
-  const keep = (take: string) => { stop(); p.onKeep(take); };
+  const keep = (take: string) => { stop(); setCropEdit(null); p.onKeep(take, crops[take]); };
   const undo = (section?: number) => { stop(); p.onUndo(section); };
   const remove = (take: string) => { if (playing?.key === take) stop(); p.onDelete(take); };
-  const takeWindow = (take: Yue2BuildTake) => {
+  /** What a take plays: from a lead-in before its new part (or its in point) to its end (or its out point). */
+  const takeWindow = (take: Yue2BuildTake, crop?: TakeCrop | null) => {
     const start = takePrefix(take) / FPS;
-    return { from: Math.max(0, start - (start ? LEAD_IN : 0)), to: take.frames / FPS, newPart: take.frames / FPS - start };
+    const from = crop?.in ?? Math.max(0, start - (start ? LEAD_IN : 0)), to = crop?.out ?? take.frames / FPS;
+    return { from, to, newPart: to - Math.max(start, crop?.in ?? 0) };
   };
 
   // Lyrics of the chosen sections (block i pairs with section i).
@@ -407,29 +514,26 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   };
   const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
   const rangeLabel = range === null ? '' : `${nameOf(items[next])}${range > next ? ` → ${nameOf(items[range])}` : ''}`;
-  const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => p.onPlan(editedPlan(items, next, change), ends);
-  // Cropping cuts the uncropped kept take, so a later cut can reach past an earlier one.
-  const cropBase = spine ? s?.takes.find(t => t.id === spine.cropOf) ?? spine : null;
-  const cropWin = cropBase ? takeWindow(cropBase) : null;
-  const cutFrame = cutAt === null ? null : Math.round(cutAt * FPS);
-  const cutValid = !!cropBase && cutFrame !== null && cutFrame > takePrefix(cropBase) && cutFrame < cropBase.frames;
-  const cut = cropBase && cutValid ? cropPoint(cropBase, cutFrame!) : null;
-  const cutItem = cut ? items[cut.occurrence] : undefined;
-  /** ", ≈ bar 3 of 8": the cut's share of the time between the occurrence's start and the next one's. */
-  const cutBar = (() => {
-    if (!cut?.inside || !cropBase || !cutItem) return '';
-    const a = cropBase.starts[cut.occurrence], b = cropBase.starts[cut.occurrence + 1];
-    if (a == null || b == null || b <= a) return '';
-    const n = bars(cutItem.section);
-    return `, ≈ bar ${Math.min(n, Math.floor((n * (cutFrame! - a)) / (b - a)) + 1)} of ${n} (approximate)`;
-  })();
-  const crop = (frame: number | null, mode?: 'regenerate' | 'advance') => { stop(); if (spine) p.onCrop?.(spine.id, frame, mode); };
+  const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => {
+    // The only section, nothing kept: the server keeps at least one, so go back to no build at all.
+    if ('remove' in change && !s?.kept.length && items.length === 1) { p.onStartOver(); return; }
+    p.onPlan(editedPlan(items, next, change), ends);
+  };
+  /** Adds source section `i` to the end of the song, selected. Adding the last one ticks Ends the song. */
+  const add = (i: number) => {
+    selectAdded.current = true;
+    edit({ add: i }, finished || i === p.sections.length - 1);
+  };
+  const crop = (frame: number | null) => { stop(); if (spine) p.onCrop?.(spine.id, frame); };
+  // The saved song's start, when the first kept take is the trimmed one.
+  const first = s?.takes.find(t => t.id === s.kept[0]);
+  const trimAt = first && s?.trim && (first.cropOf ?? first.id) === s.trim.take ? s.trim.seconds : null;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       <audio ref={audioRef} className="hidden" onEnded={() => { setPlaying(null); setProgress(null); }}
         onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
-        onTimeUpdate={e => { if (playing) setProgress(Math.min(1, Math.max(0, (e.currentTarget.currentTime - playing.from) / Math.max(0.1, playing.to - playing.from)))); }} />
+        onTimeUpdate={e => { if (playing && e.currentTarget.currentTime >= playing.to) { stop(); return; } if (playing) setProgress(Math.min(1, Math.max(0, (e.currentTarget.currentTime - playing.from) / Math.max(0.1, playing.to - playing.from)))); }} />
       {/* Top bar: what is being built and how. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-white/10 px-4 py-2">
         <button type="button" onClick={p.onBack} className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300 hover:text-cyan-600">
@@ -465,8 +569,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             const uses = items.filter(x => x.section === i).length;
             return <button type="button" key={i} disabled={!editable}
               style={{ flexGrow: Math.max(1, bars(i)), flexBasis: 0, borderColor: colours[i], backgroundColor: `${colours[i]}22` }}
-              onClick={() => p.onPlan(editedPlan(items, next, { add: i }), finished)}
-              title={`Add ${section.label} to the end of the song`}
+              onClick={() => add(i)}
+              title={`Add ${section.label} to the end of the song${i === p.sections.length - 1 ? '; it is the last section, so this also ticks Ends the song' : ''}`}
               className="min-w-0 rounded-md border-t-4 px-1.5 py-1 text-left disabled:opacity-40">
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">{section.label}</p>
               <p className="truncate text-[10px] text-zinc-500">{bars(i)} bars{uses > 1 ? ` · used ${uses}×` : ''}</p>
@@ -475,7 +579,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-semibold uppercase tracking-wide">Song</span>
-          <button type="button" disabled={!spine} onClick={() => spine && toggle('build', spine.audioUrl, 0, spine.frames / FPS)}
+          <button type="button" disabled={!spine} onClick={() => spine && toggle('build', spine.audioUrl, trimAt ?? 0, spine.frames / FPS)}
             className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
             {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
           <Toggle size="sm" accent="cyan" checked={finished} disabled={!editable} label="Ends the song"
@@ -489,8 +593,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             const start = spine?.starts[i];
             return <div key={item.id} style={{ flexGrow: Math.max(1, bars(item.section)), flexBasis: 0, borderColor: colours[item.section],
               backgroundColor: item.kept ? `${colours[item.section]}55` : picked ? `${colours[item.section]}33` : `${colours[item.section]}12` }}
-              onClick={() => { if (item.kept) { if (spine && start != null) toggle(`s${item.id}`, spine.audioUrl, start / FPS, spine.frames / FPS); } else setTarget(item.id); }}
-              title={item.kept ? `Play the build from ${nameOf(item)}` : `Build up to ${nameOf(item)}`}
+              onClick={() => { if (item.kept) { if (spine && start != null) toggle(`s${item.id}`, spine.audioUrl, start / FPS, spine.frames / FPS); } else setTarget(t => t === item.id ? null : item.id); }}
+              title={item.kept ? `Play the build from ${nameOf(item)}` : item.id === target ? 'Click again to clear the selection' : `Build up to ${nameOf(item)}`}
               className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${!item.kept && i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
                 {item.kept ? '✓ ' : i === next ? '→ ' : ''}{nameOf(item)}</p>
@@ -503,64 +607,31 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                   aria-label={`Move ${nameOf(item)} earlier`} className="rounded p-0.5 text-zinc-500 hover:text-pink-500 disabled:opacity-30"><ChevronLeft className="w-3 h-3" /></button>
                 <button type="button" disabled={!editable || i === items.length - 1} onClick={e => { e.stopPropagation(); edit({ move: item.id, by: 1 }); }}
                   aria-label={`Move ${nameOf(item)} later`} className="rounded p-0.5 text-zinc-500 hover:text-pink-500 disabled:opacity-30"><ChevronRight className="w-3 h-3" /></button>
-                <button type="button" disabled={!editable || items.length - next < 2} onClick={e => { e.stopPropagation(); edit({ remove: item.id }); }}
+                <button type="button" disabled={!editable} onClick={e => { e.stopPropagation(); edit({ remove: item.id }); }}
                   aria-label={`Remove ${nameOf(item)} from the song`} className="rounded p-0.5 text-zinc-500 hover:text-red-500 disabled:opacity-30"><X className="w-3 h-3" /></button>
               </div>}
             </div>;
           })}
         </div>
-        {spine && p.onCrop && <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <button type="button" onClick={() => setCropping(c => !c)} disabled={!editable}
-            className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Scissors className="w-3 h-3" />
-            {cropping ? 'Close crop' : 'Crop the last kept take'}</button>
-          {spine.cropOf && <>
-            <span>Cropped at {clock(spine.frames / FPS)}.</span>
+        {spine && (spine.cropOf || trimAt !== null) && <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <Scissors className="w-3 h-3" />
+          {trimAt !== null && <>
+            <span>The saved song starts at {clock(trimAt)}, faded in.</span>
+            {p.onTrim && <button type="button" onClick={() => first && p.onTrim?.(first.id, null)} disabled={!editable}
+              className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Start from the top</button>}
+          </>}
+          {spine.cropOf && p.onCrop && <>
+            <span>The last kept take is cropped at {clock(spine.frames / FPS)}.</span>
             <button type="button" onClick={() => crop(null)} disabled={!editable}
               className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Undo crop</button>
           </>}
-        </div>}
-        {p.onCrop && cropping && cropBase && cropWin && <div className="space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 p-2 text-xs text-zinc-500">
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => toggle('crop', cropBase.audioUrl, cropWin.from, cropWin.to)}
-              aria-label={playing?.key === 'crop' && !paused ? 'Pause the kept take' : 'Play the kept take'}
-              className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
-              {playing?.key === 'crop' && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
-            <Waveform peaks={cropBase.peaks ?? []} progress={playing?.key === 'crop' ? progress : null} colour="#06b6d4"
-              marker={cutAt === null ? null : Math.min(1, Math.max(0, (cutAt - cropWin.from) / Math.max(0.1, cropWin.to - cropWin.from)))}
-              onSeek={f => setCutAt(Math.round((cropWin.from + f * (cropWin.to - cropWin.from)) * FPS) / FPS)} />
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ParamLabel label="Cut at (s)" className="text-xs text-zinc-500"
-              info="Where the build stops, in seconds from the start of the song, on the composer's clock of 25 frames per second. Only the part this take composed can be cut. Click the waveform, or use Cut at playhead while it plays. The original stays: Undo crop puts it back." />
-            <input type="number" step={0.04} min={0} value={cutAt ?? ''} aria-label="Cut at, seconds"
-              onChange={e => setCutAt(e.target.value === '' ? null : Number(e.target.value))}
-              className="w-24 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 font-mono text-xs text-zinc-800 dark:text-zinc-200" />
-            <button type="button" disabled={playing?.key !== 'crop'}
-              onClick={() => { const t = audioRef.current?.currentTime; if (t !== undefined) setCutAt(Math.round(t * FPS) / FPS); }}
-              className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Cut at playhead</button>
-            <span>
-              {cutAt === null ? `Between ${clock(takePrefix(cropBase) / FPS)} and ${clock(cropBase.frames / FPS)}.`
-                : !cut ? `Outside the part this take composed (${clock(takePrefix(cropBase) / FPS)} to ${clock(cropBase.frames / FPS)}).`
-                : cut.occurrence > cropBase.to ? 'After the next section starts: only the tail the final render plays is cut.'
-                : `${cut.inside ? 'Inside' : 'At the start of'} ${cutItem ? nameOf(cutItem) : 'a section'}${cutBar}.`}
-            </span>
-          </div>
-          {cut?.inside && cutItem && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
-            <span>The next take:</span>
-            {([['regenerate', `composes ${nameOf(cutItem)} again from the cut`],
-              ['advance', items[cut.occurrence + 1] ? `moves on to ${nameOf(items[cut.occurrence + 1])}` : `keeps ${nameOf(cutItem)} cut short and ends the song`]] as const)
-              .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={cropMode === mode} onClick={() => setCropMode(mode)}
-                className={`rounded-lg border px-2 py-1 ${cropMode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
-          </div>}
-          <button type="button" disabled={!editable || !cut || (cut.inside && !cropMode)}
-            onClick={() => cutFrame !== null && crop(cutFrame, cut?.inside ? cropMode ?? undefined : undefined)}
-            className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Crop</button>
         </div>}
       </div>
 
       {/* The next sections: their lyrics, and their takes. */}
       <div className="flex-1 min-h-0 grid grid-cols-[minmax(240px,1fr)_minmax(320px,1.4fr)] overflow-hidden">
-        <div className="min-h-0 overflow-y-auto border-r border-zinc-200 dark:border-white/10 p-4 space-y-3">
+        <div className="min-h-0 flex flex-col border-r border-zinc-200 dark:border-white/10">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           <div className="flex items-center gap-2">
             <p className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {done ? 'Done' : items.length ? `Building: ${rangeLabel || nameOf(items[next])}` : 'Nothing to build yet'}</p>
@@ -588,27 +659,81 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             {candidates.length && Object.keys(pendingLyrics(drafts, current)).length ? ' Takes made with the old lyrics can no longer be kept.' : ''}
           </p>}
         </div>
+        {/* This section's caption, under its lyrics at the foot of the column. */}
+        {!done && <div className="space-y-1 border-t border-zinc-200 dark:border-white/10 p-4">
+          <div className="flex items-center gap-2">
+            <ParamLabel label="Caption" className="flex-1 text-xs text-zinc-500"
+              info="The caption for this section's takes, starting from the build's. Edit it to steer this section only; the next section starts from the build's again. It changes what is composed (the AR), and the adapter trigger is still added. The sound of the whole song is rendered (the NAR) with one caption: a take's preview uses its own for everything it plays, and Render Final Song uses the build's for the whole song. Hover a take's name to see the prompt it was sent; ✎ marks a take with its own caption." />
+            {caption !== p.caption && <button type="button" onClick={() => setCaption(p.caption)} title="Back to the build's caption"
+              aria-label="Back to the build's caption" className="rounded p-1 text-zinc-500 hover:text-cyan-600"><RotateCcw className="w-3 h-3" /></button>}
+          </div>
+          <textarea value={caption} maxLength={4000} rows={4} placeholder="The build's caption" aria-label="Caption for this section's takes"
+            onChange={e => setCaption(e.target.value)}
+            className="block w-full min-h-[5.5rem] resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 p-2 text-xs text-zinc-800 dark:text-zinc-200" />
+        </div>}
+        </div>
         <div className="min-h-0 flex flex-col p-4 gap-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Takes</p>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
             {candidates.map((take, i) => {
-              const win = takeWindow(take);
+              const editing = cropEdit?.take === take.id ? cropEdit : null;
+              const set = crops[take.id] ?? null;
+              const full = takeWindow(take);
+              const win = takeWindow(take, editing ? null : set);
               const colour = colours[items[take.from]?.section ?? -1] ?? '#ec4899';
-              return <div key={take.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
-                <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.style ? `Sent: ${take.style}` : take.cropOf ? 'A cropped copy of a take' : undefined}>
-                  Take {i + 1}{take.cropOf ? ' ✂' : ''}{take.caption ? ' ✎' : ''}</span>
-                <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
-                  className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
-                  {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
-                {playing?.key === take.id && <button type="button" onClick={stop} aria-label={`Stop take ${i + 1}`}
-                  className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500"><Square className="w-3.5 h-3.5" /></button>}
-                <Waveform peaks={take.peaks ?? []} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />
-                <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
-                <button type="button" onClick={() => keep(take.id)} disabled={p.busy || !s || !keepable(s, take)}
-                  title={s && !keepable(s, take) ? 'Made before the lyrics or the arrangement changed; generate it again' : undefined}
-                  className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Keep</button>
-                <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
-                  className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
+              // A set crop shows only the part that stays.
+              const peaks = take.peaks ?? [];
+              const span = Math.max(0.1, full.to - full.from);
+              const shown = set && !editing ? peaks.slice(Math.floor(((win.from - full.from) / span) * peaks.length), Math.ceil(((win.to - full.from) / span) * peaks.length)) : peaks;
+              const point = editing?.out != null ? cropPoint(take, Math.round(editing.out * FPS)) : null;
+              const needsMode = !!editing && cropNeedsMode(take, editing);
+              const pointItem = point ? items[point.occurrence] : undefined;
+              const done = () => {
+                if (!editing) return;
+                const { take: id, ...next } = editing;
+                setCrops(c => { const rest = { ...c }; delete rest[id]; return next.in === null && next.out === null ? rest : { ...rest, [id]: next }; });
+                setCropEdit(null);
+              };
+              return <div key={take.id} className="space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-black/20 px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.style ? `Sent: ${take.style}` : take.cropOf ? 'A cropped copy of a take' : undefined}>
+                    Take {i + 1}{take.cropOf || set ? ' ✂' : ''}{take.caption ? ' ✎' : ''}</span>
+                  <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
+                    className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
+                    {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
+                  {editing
+                    ? <CropWaveform peaks={peaks} from={full.from} to={full.to} crop={editing} canIn={cropLimits(take).inMax > 0} colour={colour}
+                      onMove={(edge, at) => setCropEdit(e => e && { ...e, ...moveCropEdge(take, e, edge, at) })} />
+                    : <Waveform peaks={shown} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />}
+                  <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
+                  {editing
+                    ? <button type="button" onClick={done} disabled={needsMode && !editing.mode}
+                      title={needsMode && !editing.mode ? 'Choose what the next take does first' : 'Finish cropping'}
+                      className="rounded-lg border border-cyan-500 px-3 py-1 text-xs font-semibold text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Done</button>
+                    : <button type="button" onClick={() => setCropEdit({ take: take.id, ...(set ?? { in: null, out: null, mode: null }) })} disabled={p.busy || !s}
+                      title={take.from === 0 ? 'Drag where the song starts and where this take ends' : 'Drag where this take ends'}
+                      className="flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-white/10 px-3 py-1 text-xs text-zinc-700 dark:text-zinc-200 hover:border-cyan-500 disabled:opacity-40">
+                      <Scissors className="w-3 h-3" />Crop</button>}
+                  <button type="button" onClick={() => keep(take.id)} disabled={p.busy || !s || !keepable(s, take) || !!editing}
+                    title={s && !keepable(s, take) ? 'Made before the lyrics or the arrangement changed; generate it again' : editing ? 'Press Done first' : undefined}
+                    className="rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white disabled:opacity-40">Keep</button>
+                  <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
+                    className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
+                </div>
+                {editing && <div className="space-y-1 text-xs text-zinc-500">
+                  <p>
+                    {cropLimits(take).inMax > 0 && <>Starts at {clock(editing.in ?? 0)} (green){editing.in !== null ? ', faded in over half a second in the saved song' : ''}. </>}
+                    Ends at {clock(editing.out ?? cropLimits(take).end)} (red){point && pointItem ? `, ${point.inside ? 'inside' : 'at the start of'} ${nameOf(pointItem)}` : ''}.
+                    {' '}Drag either line; Done keeps the crop for when you press Keep.
+                  </p>
+                  {needsMode && pointItem && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
+                    <span>The next take:</span>
+                    {([['regenerate', `composes ${nameOf(pointItem)} again from the cut`],
+                      ['advance', items[point!.occurrence + 1] ? `moves on to ${nameOf(items[point!.occurrence + 1])}` : `keeps ${nameOf(pointItem)} cut short and ends the song`]] as const)
+                      .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={editing.mode === mode} onClick={() => setCropEdit(e => e && { ...e, mode })}
+                        className={`rounded-lg border px-2 py-1 ${editing.mode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
+                  </div>}
+                </div>}
               </div>;
             })}
             {waiting > 0 && <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 px-3 py-3 text-xs text-amber-600">
@@ -624,15 +749,6 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
           {!done && <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <ParamLabel label="Caption" className="text-xs text-zinc-500"
-                info="The caption for this section's takes, starting from the build's. Edit it to steer this section only; the next section starts from the build's again. It changes what is composed (the AR), and the adapter trigger is still added. The sound of the whole song is rendered (the NAR) with one caption: a take's preview uses its own for everything it plays, and Render Final Song uses the build's for the whole song. Hover a take's name to see the prompt it was sent; ✎ marks a take with its own caption." />
-              <input type="text" value={caption} maxLength={4000} placeholder="The build's caption" aria-label="Caption for this section's takes"
-                onChange={e => setCaption(e.target.value)}
-                className="min-w-0 flex-1 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/30 px-2 py-0.5 text-xs text-zinc-800 dark:text-zinc-200" />
-              {caption !== p.caption && <button type="button" onClick={() => setCaption(p.caption)} title="Back to the build's caption"
-                aria-label="Back to the build's caption" className="rounded p-1 text-zinc-500 hover:text-cyan-600"><RotateCcw className="w-3 h-3" /></button>}
-            </div>
             <div className="flex items-center gap-2">
               <div className="w-20 flex-shrink-0" title="Takes per run">
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}

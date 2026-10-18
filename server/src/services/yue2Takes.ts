@@ -104,6 +104,11 @@ export interface Yue2BuildSession extends ArrangedSession {
   /** The Prepare confirmations the session started from, when it started
    *  from a Prepare document (contracts/yue2Prepare.ts). */
   prepared?: { structureHash: string; lyricRevision: number };
+  /** Where Save song starts the song, in seconds, with a short fade in: set on
+   *  a first-section take (`take` names the uncropped original) and applied
+   *  only while a version of that take is the first kept one. The codec stream
+   *  is not cut, so later takes still continue from all of it. */
+  trim?: { take: string; seconds: number } | null;
 }
 
 /** `request` holds the score and lyrics in source order; arranged() writes them out in plan order. */
@@ -568,6 +573,63 @@ export function cropWav(wav: Buffer, seconds: number): Buffer {
   throw new TakesError('The take\'s audio has no data chunk.', 409);
 }
 
+/** A 16-bit PCM WAV without its first `seconds`, faded in over `fade` seconds so it does not start on a click. */
+export function trimWavStart(wav: Buffer, seconds: number, fade: number): Buffer {
+  let off = 12, frameBytes = 4, rate = 48000;
+  while (off + 8 <= wav.length) {
+    const id = wav.toString('ascii', off, off + 4), len = wav.readUInt32LE(off + 4);
+    if (id === 'fmt ') { frameBytes = 2 * wav.readUInt16LE(off + 10); rate = wav.readUInt32LE(off + 12); }
+    if (id === 'data') {
+      const total = Math.floor(Math.min(len, wav.length - off - 8) / frameBytes);
+      const skip = Math.min(total, Math.max(0, Math.round(seconds * rate)));
+      const data = Buffer.from(wav.subarray(off + 8 + skip * frameBytes, off + 8 + total * frameBytes));
+      const ramp = Math.min(total - skip, Math.round(fade * rate));
+      for (let f = 0; f < ramp; f++) for (let b = 0; b < frameBytes; b += 2) {
+        data.writeInt16LE(Math.round(data.readInt16LE(f * frameBytes + b) * f / ramp), f * frameBytes + b);
+      }
+      const head = Buffer.from(wav.subarray(0, off + 8));
+      head.writeUInt32LE(data.length, off + 4);
+      const out = Buffer.concat([head, data]);
+      out.writeUInt32LE(out.length - 8, 4);
+      return out;
+    }
+    off += 8 + len + (len % 2);
+  }
+  throw new TakesError('The audio has no data chunk.', 409);
+}
+
+/** The fade in at a trimmed start. */
+export const TRIM_FADE_S = 0.5;
+
+/** Sets where Save song starts the song (null: from the top). Only a take of
+ *  the first section can carry it, and at least a second of it must remain.
+ *  It leaves the revision: nothing a take is sent changes. */
+export function setBuildTrim(id: string, userId: string, takeId: string, revision: unknown, seconds: unknown): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (seconds === null) {
+    if (!stored.trim) return view(stored);
+    stored.trim = null;
+  } else {
+    const take = stored.takes.find(t => t.id === takeId);
+    if (!take) throw new TakesError('No such take.');
+    if (take.from !== 0 || take.parent != null) throw new TakesError('Only a take of the first section can start later.', 409);
+    const length = take.frames / YUE2_FPS;
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0 || seconds > length - 1) {
+      throw new TakesError(`Start between 0 and ${(length - 1).toFixed(2)} s.`);
+    }
+    stored.trim = { take: take.cropOf ?? take.id, seconds: Math.round(seconds * 1000) / 1000 };
+  }
+  save(stored);
+  return view(stored);
+}
+
+/** Seconds Save song cuts from the start, when a version of the trimmed take is the first kept one. */
+function trimStart(stored: Stored): number | undefined {
+  const first = stored.takes.find(t => t.id === stored.kept[0]);
+  return first && stored.trim && (first.cropOf ?? first.id) === stored.trim.take ? stored.trim.seconds : undefined;
+}
+
 type CropMode = 'regenerate' | 'advance';
 
 /** What a take cut at codec frame `frame` covers. The cut lies in the part the
@@ -658,13 +720,13 @@ export function cropBuildTake(id: string, userId: string, takeId: string, revisi
  *  lyrics: the spine's whole codec stream under the arranged prompt it was
  *  composed with. */
 export function buildSessionRender(id: string, userId: string):
-  Pick<Yue2SynthRequest, 'codec_ids' | 'abc' | 'lyrics' | 'lyric_schedule'> {
+  Pick<Yue2SynthRequest, 'codec_ids' | 'abc' | 'lyrics' | 'lyric_schedule'> & { trimStart?: number } {
   const stored = load(id, userId);
   const spine = stored.kept.at(-1);
   if (!spine) throw new TakesError('Keep a take before saving the song.');
   const { request } = arranged(stored);
   return { codec_ids: JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[],
-    abc: request.abc, lyrics: request.lyrics, lyric_schedule: request.lyric_schedule };
+    abc: request.abc, lyrics: request.lyrics, lyric_schedule: request.lyric_schedule, trimStart: trimStart(stored) };
 }
 
 const MAX_OCCURRENCES = 100;
