@@ -583,7 +583,7 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
 
 
 type Yue2Log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
-type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }>; accepted: boolean;
+type Yue2AutoReplan = { attempts: Array<{ seed: Yue2Seed; verdict: string; reason: string; flags?: string[] }>; accepted: boolean;
   /** The rendered plan passed the judge with no legibility flags (only set
    *  when flag re-plans are on). false = the least-flagged was rendered. */
   clean?: boolean };
@@ -591,7 +591,7 @@ type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason:
 /** A job mapped, logged and (when on) auto-replanned: everything that happens
  *  before its request goes to the engine. Several of these can share one
  *  engine call (see runYue2Generation). */
-interface Yue2PreparedJob {
+export interface Yue2PreparedJob {
   job: GenerationJob;
   req: Yue2SynthRequest;
   abcSupplied: boolean;
@@ -720,11 +720,14 @@ export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'a
 
 /** Plan attempt k's seed (k from 1): the base itself, then fixed steps from it
  *  (the engine's compose retries step the same way), within uint32. */
-export function yue2ReplanSeed(base: Yue2Seed, k: number): number {
-  return Number((BigInt(base) + 1000003n * BigInt(k - 1)) % 4294967296n);
+export function yue2ReplanSeed(base: Yue2Seed, k: number): Yue2Seed {
+  const b = BigInt(base), next = b + 1000003n * BigInt(k - 1);
+  // A uint32 base keeps the uint32 walk; a wider pinned seed steps within uint64, exactly.
+  return yue2Seed((b < 4294967296n ? next % 4294967296n : next % 18446744073709551616n).toString())!;
 }
 
-async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
+/** @internal exported for tests */
+export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
     once: boolean; sheets: string[]; done: boolean; seedBase?: Yue2Seed;

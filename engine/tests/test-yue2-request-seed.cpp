@@ -23,6 +23,10 @@ int main() {
     assert(ok && r.seed == 12345);
     r = parse(R"({"style":"folk","seed":"18446744073709551616"})", &ok, &err); // past uint64
     assert(!ok);
+    r = parse(R"({"style":"folk","seed":18446744073709551616})", &ok, &err);   // numeric overflow
+    assert(!ok);
+    r = parse(R"({"style":"folk","seed":1e100})", &ok, &err);
+    assert(!ok);
     r = parse(R"({"style":"folk","seed":"12x"})", &ok, &err);
     assert(!ok);
     r = parse(R"({"style":"folk","seed":-1})", &ok, &err);

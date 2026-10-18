@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobCover, mapYue2Params, yue2PlanMode } from './generate.js';
+import { jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, type Yue2PreparedJob } from './generate.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -206,7 +206,9 @@ test('re-plan seeds follow from the job seed, so a pinned seed replays the same 
   const run = (base: number) => Array.from({ length: 10 }, (_, i) => yue2ReplanSeed(base, i + 1));
   assert.deepEqual(run(4242), run(4242));
   assert.equal(new Set(run(4242)).size, 10);
-  for (const s of run(4294967295)) assert.ok(Number.isInteger(s) && s >= 0 && s < 2 ** 32);
+  for (const s of run(4294967295)) assert.ok(Number.isInteger(s) && Number(s) >= 0 && Number(s) < 2 ** 32);
+  assert.equal(yue2ReplanSeed('15213961153666092475', 1), '15213961153666092475');
+  assert.equal(yue2ReplanSeed('15213961153666092475', 2), '15213961153667092478');
 });
 
 test('a random seed is drawn exact (32 bits), so a take replays under the seed it recorded', () => {
@@ -240,4 +242,28 @@ test('a seed above 2^53 reaches the engine request as its exact decimal string',
   assert.equal(yue2Seed('42'), 42);        // a safe value stays a plain number
   assert.equal(yue2Seed(123456789), 123456789); // legacy numeric sessions
   assert.equal(yue2Seed('18446744073709551616'), undefined); // past uint64
+});
+
+test('planning keeps a pinned uint64 seed: engine plan request, then the render request', async t => {
+  const big = '15213961153666092475';
+  const abc = ['X:1', 'T:', 'M:4/4', 'L:1/32', 'Q:1/4=90', 'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"',
+    'V: Ins clef=treble name="Ins Melody" snm="Inst."', 'K:C', '% verse', 'V: Vocal', '"C"c16"G"d16|', 'V: Ins', 'Z|', ''].join('\n');
+  const sent: Array<Record<string, any>> = [];
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 1 });
+    if (url.pathname === '/yue2/synth') { sent.push(JSON.parse(String(init?.body))); return Response.json({ id: 'p1' }); }
+    assert.equal(url.pathname, '/job');
+    const songs = sent[sent.length - 1].songs as Array<{ seed: string }>;
+    return Response.json({ status: 'done', tracks: songs.map((s, song) => ({ song, seed: s.seed, noise_seed: s.seed, variation: 0, abc, end_reason: 'completed' })) });
+  });
+  for (const yue2AutoReplan of [true, false]) {
+    sent.length = 0;
+    const { req } = mapYue2Params({ caption: 'folk', lyrics: 'la', seed: big, instrumental: !yue2AutoReplan, yue2AutoReplan, yue2ReplanAttempts: 1 }, pick);
+    assert.equal(req.seed, big);
+    const m = { job: { ...fakeJob(undefined, { instrumental: !yue2AutoReplan, yue2AutoReplan, yue2ReplanAttempts: 1 }), envelope: { backendId: 'yue2', models: {}, options: {} }, status: 'queued' }, req, log: () => {} } as unknown as Yue2PreparedJob;
+    await planYue2Jobs([m]);
+    assert.equal(sent[0].songs[0].seed, big, `plan request, autoReplan ${yue2AutoReplan}`);
+    assert.equal(m.req.seed, big, `render request, autoReplan ${yue2AutoReplan}`);
+  }
 });

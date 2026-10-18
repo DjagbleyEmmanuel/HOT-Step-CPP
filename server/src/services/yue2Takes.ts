@@ -28,7 +28,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
 import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
-import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed } from './backends/yue2/client.js';
+import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed } from './backends/yue2/client.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
@@ -482,14 +482,14 @@ export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts:
   for (let i = 0; i < tracks.length; i++) {
     const track = tracks[i];
     if (!Number.isInteger(track.song) || track.song < 0 || track.song >= seeds.length || mapped[track.song]
-      || track.seed !== seeds[track.song] || track.variation !== 0) {
+      || yue2Seed(track.seed) !== seeds[track.song] || track.variation !== 0) {
       throw new Error(`YuE2 take chunk has a missing, duplicate or mismatched song/seed at track ${i}. No takes saved.`);
     }
     if (!track.semantic_ids?.length || parts[i].length < 44
       || parts[i].toString('ascii', 0, 4) !== 'RIFF' || parts[i].toString('ascii', 8, 12) !== 'WAVE') {
       throw new Error(`YuE2 take chunk song ${track.song} has no codec stream or valid WAV audio. No takes saved.`);
     }
-    mapped[track.song] = { seed: track.seed, ids: track.semantic_ids, wav: parts[i] };
+    mapped[track.song] = { seed: yue2Seed(track.seed)!, ids: track.semantic_ids, wav: parts[i] };
   }
   return mapped;
 }

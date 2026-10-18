@@ -263,7 +263,7 @@ static bool yue2_req_seed(yyjson_val * root, const char * key, uint64_t * out, b
         *out = n;
     } else {
         double d = 0.0;
-        if (!yyjson_is_num(v) || (d = yyjson_get_num(v)) < 0.0 || d != std::floor(d)) {
+        if (!yyjson_is_num(v) || (d = yyjson_get_num(v)) < 0.0 || d >= 18446744073709551616.0 || d != std::floor(d)) {
             if (err) {
                 *err = std::string("\"") + key + "\" must be a non-negative integer or decimal string";
             }
