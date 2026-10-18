@@ -34,7 +34,7 @@ import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import {
-  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence,
+  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
 import { buildYue2LyricSchedule } from './backends/yue2/lyricSchedule.js';
@@ -168,9 +168,10 @@ function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = f
   // A take of an open plan runs on into the section after it (lookaheadSection).
   const extra = lookahead ? lookaheadSection(stored.arrangement) : null;
   if (extra !== null) plan.push(extra);
-  const composed = composeArrangement(abc, lyrics, plan);
+  const own = planLyrics(stored.arrangement);
+  const composed = composeArrangement(abc, lyrics, plan, own);
   const request = { ...stored.request };
-  if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i)) {
+  if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i) || own.some(text => text !== undefined)) {
     request.abc = composed.abc;
     if (request.lyrics) request.lyrics = composed.lyrics;
     const schedule = request.lyric_schedule;
@@ -718,8 +719,8 @@ function builtLyricsRefusal(stored: Stored, lyrics: string): string | null {
   const abc = stored.request.abc ?? '', old = stored.request.lyrics ?? '';
   try {
     // The kept occurrences, in plan order: same text and same lyric spans.
-    const plan = planSections(stored.arrangement).slice(0, built);
-    const kept = (text: string) => { const c = composeArrangement(abc, text, plan); return JSON.stringify([c.lyrics, c.occurrences.map(o => o.lyric)]); };
+    const plan = planSections(stored.arrangement).slice(0, built), own = planLyrics(stored.arrangement).slice(0, built);
+    const kept = (text: string) => { const c = composeArrangement(abc, text, plan, own); return JSON.stringify([c.lyrics, c.occurrences.map(o => o.lyric)]); };
     const same = kept(old) === kept(lyrics);
     return same ? null : 'The lyrics of built sections are locked; undo back to a section to change its lyrics.';
   } catch { return 'These lyrics do not fit the score; keep the section tags the score expects.'; }
@@ -748,7 +749,47 @@ export function applyBuildLyrics(id: string, userId: string, revision: unknown, 
   stored.params = params;
   stored.request = request;
   stored.revision++;
-  stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? '') };
+  // New lyrics for the whole build replace the unbuilt occurrences' own too.
+  const built = nextOccurrence(stored);
+  stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? ''),
+    plan: stored.arrangement.plan.map((o, i) => (i < built ? o : { id: o.id, section: o.section })) };
+  save(stored);
+  return view(stored);
+}
+
+/** Gives unbuilt occurrences their own sung lines: `edits` maps occurrence
+ *  ids to the lines (the block's tag stays) or null to sing the build's
+ *  lyrics again. A repeated section can then sing other words than an
+ *  earlier, built copy. Every take not yet kept becomes ineligible through
+ *  the revision; nothing changes, nothing moves. */
+export function setOccurrenceLyrics(id: string, userId: string, revision: unknown, edits: unknown): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (stored.params.instrumental === true) throw new TakesError('An instrumental build has no lyrics.');
+  if (!edits || typeof edits !== 'object' || Array.isArray(edits)) throw new TakesError('edits must map occurrence ids to lyrics.');
+  const built = nextOccurrence(stored);
+  const plan = stored.arrangement.plan.map(o => ({ ...o }));
+  for (const [occurrence, value] of Object.entries(edits as Record<string, unknown>)) {
+    const at = plan.findIndex(o => o.id === occurrence);
+    if (at < 0) throw new TakesError(`No such occurrence: ${occurrence}`);
+    const name = stored.arrangement.sections.find(x => x.id === plan[at].section);
+    if (at < built) throw new TakesError(`${name?.label ?? 'That section'} is built; undo back to it to change its lyrics.`, 409);
+    if (value === null) { delete plan[at].lyrics; continue; }
+    if (typeof value !== 'string') throw new TakesError('Lyrics must be text.');
+    if (name?.lyricBlock === null || name?.lyricBlock === undefined) throw new TakesError(`${name?.label ?? 'That section'} is instrumental here; it has no lyrics to change.`);
+    const text = value.replace(/\r\n?/g, '\n').trim();
+    if (!text) throw new TakesError(`${name.label} needs words; reset it to sing the build's.`);
+    if (text.length > MAX_LYRICS) throw new TakesError(`Lyrics are limited to ${MAX_LYRICS.toLocaleString('en-US')} characters.`);
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new TakesError('Lyrics contain control characters.');
+    if (text.split('\n').some(line => line.trim().startsWith('['))) throw new TakesError(`${name.label}'s lyrics cannot hold a section tag; edit one section at a time.`);
+    plan[at].lyrics = text;
+  }
+  if (JSON.stringify(plan) === JSON.stringify(stored.arrangement.plan)) return view(stored);
+  const arrangement = { ...stored.arrangement, plan };
+  arranged({ request: stored.request, arrangement });
+  stored.arrangement = arrangement;
+  stored.revision++;
   save(stored);
   return view(stored);
 }

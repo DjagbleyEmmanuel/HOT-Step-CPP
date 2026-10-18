@@ -56,7 +56,9 @@ export interface SourceSection {
   lyricBlock: number | null;
 }
 
-export interface Occurrence { id: string; section: string }
+/** `lyrics`, when set, is this occurrence's own sung text (the block's lines,
+ *  without its tag), so a repeated chorus can sing other words than the first. */
+export interface Occurrence { id: string; section: string; lyrics?: string }
 
 export interface Arrangement {
   sections: SourceSection[];
@@ -146,8 +148,10 @@ export interface Composed {
 
 /** Writes the score and lyrics out in the order of `plan` (source section
  *  indexes; repeats allowed). The source order gives the source text back
- *  (lyrics gain a final newline if they lack one). */
-export function composeArrangement(abc: string, lyrics: string, plan: number[]): Composed {
+ *  (lyrics gain a final newline if they lack one). `sing[k]`, when set, is
+ *  sung by occurrence k in place of its block's lines; an unsung section has
+ *  none to replace. */
+export function composeArrangement(abc: string, lyrics: string, plan: number[], sing: Array<string | undefined> = []): Composed {
   abc = abc.replace(/\r\n?/g, '\n');
   lyrics = lyrics.replace(/\r\n?/g, '\n');
   const lines = abc.split('\n');
@@ -210,7 +214,7 @@ export function composeArrangement(abc: string, lyrics: string, plan: number[]):
   const occurrences: ComposedOccurrence[] = [];
   let state = header, bar = 1, lyricAt = 0;
   const sections = sourceSections(abc, lyrics);
-  for (const s of plan) {
+  for (const [k, s] of plan.entries()) {
     const want = entry[s];
     // ponytail: restates changed fields in every voice the section uses, which
     // is how the transcriber writes meter changes; a voice absent from the
@@ -236,10 +240,22 @@ export function composeArrangement(abc: string, lyrics: string, plan: number[]):
     if (!voices.size && changed.length) out.push(...changed);
     state = walk(want, chunks[s]);
     const at = pairs[s];
-    const lyric: [number, number] | null = at === null ? null
+    let slice = slices[s];
+    let lyric: [number, number] | null = at === null ? null
       : [lyricAt + blocks[at].start - cuts[s], lyricAt + Math.min(blocks[at].end, cuts[s + 1]) - cuts[s]];
-    lyricParts.push(slices[s]);
-    lyricAt += Array.from(slices[s]).length;
+    if (at !== null && sing[k] !== undefined) {
+      // The block's tag line and trailing blank lines stay; its lines change.
+      const end = Math.min(blocks[at].end, cuts[s + 1]);
+      const block = chars.slice(blocks[at].start, end).join('');
+      const tag = block.slice(0, block.indexOf('\n') + 1 || block.length);
+      const text = `${tag}${tag.endsWith('\n') ? '' : '\n'}${sing[k]!.trim()}${/\s*$/.exec(block)![0] || '\n'}`;
+      const pre = chars.slice(cuts[s], blocks[at].start).join('');
+      slice = pre + text + Array.from(slice).slice(end - cuts[s]).join('');
+      const from = lyricAt + Array.from(pre).length;
+      lyric = [from, from + Array.from(text).length];
+    }
+    lyricParts.push(slice);
+    lyricAt += Array.from(slice).length;
     occurrences.push({ section: s, startBar: bar, bars: sections[s].bars, abcStart, lyric });
     bar += sections[s].bars;
   }
@@ -262,6 +278,9 @@ export function composeArrangement(abc: string, lyrics: string, plan: number[]):
 export function planSections(arrangement: Arrangement): number[] {
   return arrangement.plan.map(o => arrangement.sections.findIndex(s => s.id === o.section));
 }
+
+/** The plan's own lyrics per occurrence, for composeArrangement. */
+export const planLyrics = (arrangement: Arrangement): Array<string | undefined> => arrangement.plan.map(o => o.lyrics);
 
 /** The source section a take's prompt adds after the last planned occurrence
  *  while the plan is open: the one that follows it in the score. The take

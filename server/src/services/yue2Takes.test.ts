@@ -527,6 +527,28 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.deepEqual(getBuildSession(s.id, 'user').arrangement.plan[0].id, 'o4');
   });
 
+  await t.test('an unbuilt repeat sings its own lines; built ones and tags are refused', async () => {
+    const { setOccurrenceLyrics } = await import('./yue2Takes.js');
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2'], true);
+    const [verse] = await take(s.id, 0, 1);
+    keepBuildTake(s.id, 'user', verse.id, 1);
+    const [, , second] = getBuildSession(s.id, 'user').arrangement.plan;
+    const edited = setOccurrenceLyrics(s.id, 'user', 1, { [second.id]: 'a new chorus\r\nline two' });
+    assert.equal(edited.revision, 2);
+    assert.equal(edited.arrangement.plan[2].lyrics, 'a new chorus\nline two');
+    await take(s.id, 2, 2);
+    const sent = requests.at(-1)!.lyrics!;
+    assert.ok(sent.includes('a new chorus\nline two'));
+    // The first chorus still sings the build's words.
+    assert.equal(sent.split('hook line now').length, 2);
+    assert.throws(() => setOccurrenceLyrics(s.id, 'user', 2, { [verse.occurrences[0]]: 'x' }), /is built/);
+    assert.throws(() => setOccurrenceLyrics(s.id, 'user', 2, { [second.id]: 'x\n[Bridge]\ny' }), /section tag/);
+    assert.throws(() => setOccurrenceLyrics(s.id, 'user', 2, { [second.id]: '  ' }), /needs words/);
+    assert.throws(() => setOccurrenceLyrics(s.id, 'user', 1, { [second.id]: null }), /changed/);
+    assert.equal(setOccurrenceLyrics(s.id, 'user', 2, { [second.id]: null }).arrangement.plan[2].lyrics, undefined);
+  });
+
   await t.test('stale revisions, stale candidates and stale parents are refused', async () => {
     const s = start();
     const [a, b] = await take(s.id, 0, 0, 2);

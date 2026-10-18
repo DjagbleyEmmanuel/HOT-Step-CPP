@@ -15,7 +15,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, setOccurrenceLyrics, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -246,6 +246,10 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     return takes(res, () => applyBuildLyrics(String(req.params.id), userId, req.body?.revision, req.body?.lyrics,
       params => buildRequest(params, userId)));
   });
+  // Unbuilt occurrences' own sung lines: `edits` maps occurrence ids
+  // (o3...) to text, or null to sing the build's lyrics again.
+  router.post('/build/:id/occurrence-lyrics', (req: Request, res: Response) =>
+    takes(res, () => setOccurrenceLyrics(String(req.params.id), authenticate(req)!, req.body?.revision, req.body?.edits)));
   // Before the first keep: `settings` holds the cover's voices, tempo, key,
   // keyShift and cfgScale (as params.yue2Cover carries them) and arStrength.
   router.post('/build/:id/settings', (req: Request, res: Response) => {

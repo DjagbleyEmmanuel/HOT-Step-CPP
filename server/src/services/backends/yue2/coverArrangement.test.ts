@@ -135,6 +135,22 @@ test('kept text and offsets survive leaving the source order, with odd whitespac
   }
 });
 
+test('an occurrence sings its own lines in place of its block, keeping the tag and the rest', () => {
+  const plan = [INTRO, VERSE, CHORUS, CHORUS, OUTRO];
+  const plain = composeArrangement(score, lyrics, plan);
+  const out = composeArrangement(score, lyrics, plan, [undefined, undefined, undefined, 'sing it again\nlouder', undefined]);
+  const chars = Array.from(out.lyrics);
+  assert.deepEqual(out.occurrences.map(o => (o.lyric ? chars.slice(...o.lyric).join('').trim() : null)), [
+    null, '[Verse]\nwalking down the line', '[Chorus]\nsing it out', '[Chorus]\nsing it again\nlouder', null,
+  ]);
+  // The first chorus, and everything before the second, are untouched.
+  const cut = plain.occurrences[3].lyric![0];
+  assert.equal(chars.slice(0, cut).join(''), Array.from(plain.lyrics).slice(0, cut).join(''));
+  assert.equal(out.textPairingMatches, true);
+  // An unsung section has no lines to replace.
+  assert.equal(composeArrangement(score, lyrics, plan, ['words']).lyrics, plain.lyrics);
+});
+
 test('two sections of one kind pair with their own tags, the empty one included', () => {
   // Prepare writes an empty tag for an instrumental section: the first intro
   // is that one, the second intro sings.
