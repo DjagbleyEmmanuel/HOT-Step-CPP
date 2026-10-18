@@ -7,6 +7,7 @@
 // and the confirmation (useYue2Prepare.ts, utils/yue2Prepare.ts).
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Redo2, Square, Undo2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { previewRegroup, type RegroupResult } from '../../utils/abcRebar';
@@ -65,9 +66,15 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
   // The section last clicked: hovering it (and only it) brings back its playback popup.
   const [anchor, setAnchor] = useState('');
   const [popup, setPopup] = useState<{ id: string; left: number; top: number } | null>(null);
+  // Leaving the section or the popup closes it after a moment, so the pointer can cross between them.
+  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepPopup = () => { if (closing.current) clearTimeout(closing.current); closing.current = null; };
+  const closePopup = () => { keepPopup(); closing.current = setTimeout(() => setPopup(null), 200); };
+  useEffect(() => keepPopup, []);
   const openPopup = (id: string, el: HTMLElement) => {
+    keepPopup();
     const r = el.getBoundingClientRect();
-    setPopup({ id, left: r.left, top: r.bottom });
+    setPopup({ id, left: Math.max(8, Math.min(r.left, window.innerWidth - 264)), top: r.bottom });
   };
   const select = (i: number, extend: boolean) => {
     if (!extend || !range) { setSelected([list[i].id]); return; }
@@ -225,7 +232,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
           const name = picked.length === 1 ? spanName(picked[0]) : t('cover.prepare.structure.selection', { count: picked.length });
           return <div key={s.id} className="flex" style={{ flex: `${length} 0 ${Math.max(96, length * 10)}px` }}
             onMouseEnter={e => { if (s.id === anchor && on) openPopup(s.id, e.currentTarget); }}
-            onMouseLeave={() => setPopup(p => p?.id === s.id ? null : p)}>
+            onMouseLeave={() => { if (popup?.id === s.id) closePopup(); }}>
             <button type="button" aria-pressed={on} aria-haspopup="dialog" onKeyDown={e => onKey(e, i)}
               onClick={e => { select(i, e.shiftKey); setAnchor(s.id); openPopup(s.id, e.currentTarget.parentElement!); }}
               style={{ borderColor: colours[i], backgroundColor: on ? `${colours[i]}40` : `${colours[i]}14` }}
@@ -233,8 +240,9 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
               <span className="block truncate font-semibold">{s.label}{s.repeats > 1 && <span className="ml-1 rounded bg-zinc-500/20 px-1 text-[10px] font-normal">{s.occurrence}/{s.repeats}</span>}</span>
               <span className="block truncate text-[10px] text-zinc-500">{t('cover.prepare.structure.bars', { bars: spanBars(s) })}{seconds !== null && ` · ${clock(seconds)}`}</span>
             </button>
-            {/* Fixed, so the scrolling strip cannot clip it; inside the wrapper, so moving onto it keeps it open. */}
-            {popup?.id === s.id && range && <div role="dialog" aria-label={name} className="fixed z-30 pt-1" style={{ left: popup.left, top: popup.top }}>
+            {/* In a portal on the body: an ancestor's transform would otherwise move a fixed box off the section. */}
+            {popup?.id === s.id && range && createPortal(<div role="dialog" aria-label={name} className="fixed z-50 pt-1 text-xs text-zinc-700 dark:text-zinc-200"
+              style={{ left: popup.left, top: popup.top }} onMouseEnter={keepPopup} onMouseLeave={closePopup}>
               <div className="w-64 space-y-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900 p-2 shadow-xl">
                 <p className="font-medium">{name}</p>
                 <div className="flex flex-wrap items-center gap-2">
@@ -247,7 +255,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
                 </div>
                 <p className="text-[11px] text-zinc-500">{t('cover.prepare.structure.approx')}</p>
               </div>
-            </div>}
+            </div>, document.body)}
           </div>;
         })}
       </div>}
