@@ -1312,7 +1312,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}
       onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={(take, crop) => void build.keep(take, crop)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onSave={saveBuild}
-      onCrop={(take, frame, mode) => void build.crop(take, frame, mode)} onTrim={(take, seconds) => void build.trim(take, seconds)}
+      onCrop={(take, frame, mode) => void build.crop(take, frame, mode)} onTrim={(take, seconds) => void build.trim(take, seconds)} onPreview={() => void build.preview()}
       onBack={() => setBuildMode(false)} />;
   };
 

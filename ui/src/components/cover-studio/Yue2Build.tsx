@@ -170,7 +170,7 @@ export interface BuildLyricsDraft { text: string | null; set: (text: string | nu
  *  Every change names the revision the page saw, so a stale page is refused. */
 export function useYue2Build(token: string | null, sessionId: string, setSessionId: (id: string) => void, draft: BuildLyricsDraft) {
   const options = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${sessionId}`, token ?? undefined);
-  const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0) });
+  const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0 || s.preview?.status === 'rendering') });
   const session = sessionId ? snapshot.data ?? null : null;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -209,6 +209,8 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in, token!);
       return next;
     }),
+    /** Renders everything kept so far once, for Play build. */
+    preview: () => call(() => yue2CoverApi.buildPreview(live!.id, token!)),
     /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
     trim: (take: string, seconds: number | null) => call(() => yue2CoverApi.buildTrim(live!.id, live!.revision, take, seconds, token!)),
     undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
@@ -395,6 +397,8 @@ interface PageProps {
   onUndo: (section?: number) => void;
   /** Restores the last kept take's uncropped original (frame null). */
   onCrop?: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') => void;
+  /** Renders everything kept so far once, so Play build can play it. */
+  onPreview: () => void;
   /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
   onTrim?: (take: string, seconds: number | null) => void;
   onStartOver: () => void;
@@ -406,7 +410,7 @@ interface PageProps {
  *  takes to compare, keep or delete. */
 export const Yue2BuildPage: React.FC<PageProps> = p => {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState<{ key: string; from: number; to: number } | null>(null);
+  const [playing, setPlaying] = useState<{ key: string; from: number; to: number; offset: number } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [paused, setPaused] = useState(true);
   const generation = useRef(0);
@@ -461,32 +465,33 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
   };
   const stop = () => { release(audioRef.current); setPlaying(null); setProgress(null); };
-  /** Plays `url` from `at` seconds; the playhead covers [from, to]. */
-  const start = (key: string, url: string, from: number, to: number, at = from) => {
+  /** Plays `url` from `at` seconds on the song's clock; the playhead covers [from, to].
+   *  The file starts `offset` seconds into the song (a take holds only its own part). */
+  const start = (key: string, url: string, from: number, to: number, at = from, offset = 0) => {
     const audio = audioRef.current;
     if (!audio) return;
     const mine = ++generation.current;
     audio.src = url;
-    audio.currentTime = Math.max(0, at);
-    setPlaying({ key, from, to });
+    audio.currentTime = Math.max(0, at - offset);
+    setPlaying({ key, from, to, offset });
     setProgress(Math.min(1, Math.max(0, (at - from) / Math.max(0.1, to - from))));
     audio.play().catch(() => { if (generation.current === mine) stop(); });
   };
   /** Play, pause and resume for `key`; a different `key` starts it from the top. */
-  const toggle = (key: string, url: string, from: number, to: number) => {
+  const toggle = (key: string, url: string, from: number, to: number, offset = 0) => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playing?.key !== key) return start(key, url, from, to);
+    if (playing?.key !== key) return start(key, url, from, to, from, offset);
     if (!audio.paused) { generation.current++; audio.pause(); return; }
     const mine = ++generation.current;
     audio.play().catch(() => { if (generation.current === mine) stop(); });
   };
   /** Seeks within [from, to] of a take, keeping it paused if it is; starts it if idle. */
-  const seek = (key: string, url: string, from: number, to: number, fraction: number) => {
+  const seek = (key: string, url: string, from: number, to: number, fraction: number, offset = 0) => {
     const audio = audioRef.current;
     const at = from + fraction * (to - from);
-    if (!audio || playing?.key !== key) return start(key, url, from, to, at);
-    audio.currentTime = at;
+    if (!audio || playing?.key !== key) return start(key, url, from, to, at, offset);
+    audio.currentTime = at - offset;
     setProgress(fraction);
   };
   // Playback ends with the build it belongs to: a session change or leaving the page.
@@ -528,12 +533,21 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   // The saved song's start, when the first kept take is the trimmed one.
   const first = s?.takes.find(t => t.id === s.kept[0]);
   const trimAt = first && s?.trim && (first.cropOf ?? first.id) === s.trim.take ? s.trim.seconds : null;
+  // What Play build plays: the build's own render while it is current, or a
+  // spine from an older build whose audio still holds the whole song.
+  const preview = s?.preview && spine && s.preview.spine === spine.id ? s.preview : null;
+  const buildAudio = preview?.status === 'done' ? preview.audioUrl ?? null : spine && !spine.audioStart ? spine.audioUrl : null;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
       <audio ref={audioRef} className="hidden" onEnded={() => { setPlaying(null); setProgress(null); }}
         onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
-        onTimeUpdate={e => { if (playing && e.currentTarget.currentTime >= playing.to) { stop(); return; } if (playing) setProgress(Math.min(1, Math.max(0, (e.currentTarget.currentTime - playing.from) / Math.max(0.1, playing.to - playing.from)))); }} />
+        onTimeUpdate={e => {
+          if (!playing) return;
+          const t = e.currentTarget.currentTime + playing.offset;
+          if (t >= playing.to) { stop(); return; }
+          setProgress(Math.min(1, Math.max(0, (t - playing.from) / Math.max(0.1, playing.to - playing.from))));
+        }} />
       {/* Top bar: what is being built and how. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-white/10 px-4 py-2">
         <button type="button" onClick={p.onBack} className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300 hover:text-cyan-600">
@@ -548,7 +562,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Undo last keep</button>
             <button type="button" disabled={!s.kept.length} onClick={() => { setMenu(false); p.onSave(); }}
               title="Render everything kept so far as a library song; this ends the build"
-              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Render the song so far</button>
+              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Save the song so far</button>
             <button type="button" onClick={() => { setMenu(false); p.onStartOver(); }}
               className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-zinc-100 dark:hover:bg-white/5">Start over</button>
           </div>}
@@ -579,9 +593,16 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-semibold uppercase tracking-wide">Song</span>
-          <button type="button" disabled={!spine} onClick={() => spine && toggle('build', spine.audioUrl, trimAt ?? 0, spine.frames / FPS)}
-            className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-            {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
+          {buildAudio || !spine
+            ? <button type="button" disabled={!spine} onClick={() => spine && buildAudio && toggle('build', buildAudio, trimAt ?? 0, spine.frames / FPS)}
+              className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
+              {playing?.key === 'build' && !paused ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}Play build</button>
+            : preview?.status === 'rendering'
+              ? <span role="status" className="flex items-center gap-1 text-amber-600"><Loader2 className="w-3 h-3 animate-spin" />Rendering the build: {preview.progress ?? 0}%</span>
+              : <button type="button" onClick={p.onPreview} disabled={p.busy || waiting > 0}
+                title="Takes hold only their own part, so the whole build is rendered once to play it. It is quicker than a take: nothing is composed."
+                className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40"><Play className="w-3 h-3" />Render the build so far</button>}
+          {preview?.status === 'failed' && !buildAudio && <span role="alert" className="text-red-500" title={preview.error}>Build render failed</span>}
           <Toggle size="sm" accent="cyan" checked={finished} disabled={!editable} label="Ends the song"
             info="Tick it before building the last section: that take composes an ending. Until then each take runs a few seconds into the section that follows it in the source, so the next one has a seam to start from."
             onChange={ends => p.onPlan(items.slice(next).map(i => i.id), ends)} />
@@ -593,8 +614,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             const start = spine?.starts[i];
             return <div key={item.id} style={{ flexGrow: Math.max(1, bars(item.section)), flexBasis: 0, borderColor: colours[item.section],
               backgroundColor: item.kept ? `${colours[item.section]}55` : picked ? `${colours[item.section]}33` : `${colours[item.section]}12` }}
-              onClick={() => { if (item.kept) { if (spine && start != null) toggle(`s${item.id}`, spine.audioUrl, start / FPS, spine.frames / FPS); } else setTarget(t => t === item.id ? null : item.id); }}
-              title={item.kept ? `Play the build from ${nameOf(item)}` : item.id === target ? 'Click again to clear the selection' : `Build up to ${nameOf(item)}`}
+              onClick={() => { if (item.kept) { if (spine && buildAudio && start != null) toggle(`s${item.id}`, buildAudio, start / FPS, spine.frames / FPS); } else setTarget(t => t === item.id ? null : item.id); }}
+              title={item.kept ? (buildAudio ? `Play the build from ${nameOf(item)}` : 'Render the build so far to play it') : item.id === target ? 'Click again to clear the selection' : `Build up to ${nameOf(item)}`}
               className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${!item.kept && i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
                 {item.kept ? '✓ ' : i === next ? '→ ' : ''}{nameOf(item)}</p>
@@ -698,13 +719,13 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title={take.style ? `Sent: ${take.style}` : take.cropOf ? 'A cropped copy of a take' : undefined}>
                     Take {i + 1}{take.cropOf || set ? ' ✂' : ''}{take.caption ? ' ✎' : ''}</span>
-                  <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
+                  <button type="button" onClick={() => toggle(take.id, take.audioUrl, win.from, win.to, (take.audioStart ?? 0) / FPS)} aria-label={playing?.key === take.id && !paused ? `Pause take ${i + 1}` : `Play take ${i + 1}`}
                     className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
                     {playing?.key === take.id && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
                   {editing
                     ? <CropWaveform peaks={peaks} from={full.from} to={full.to} crop={editing} canIn={cropLimits(take).inMax > 0} colour={colour}
                       onMove={(edge, at) => setCropEdit(e => e && { ...e, ...moveCropEdge(take, e, edge, at) })} />
-                    : <Waveform peaks={shown} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f)} />}
+                    : <Waveform peaks={shown} progress={playing?.key === take.id ? progress : null} colour={colour} onSeek={f => seek(take.id, take.audioUrl, win.from, win.to, f, (take.audioStart ?? 0) / FPS)} />}
                   <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of the new part">{clock(win.newPart)}</span>
                   {editing
                     ? <button type="button" onClick={done} disabled={needsMode && !editing.mode}

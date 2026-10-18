@@ -15,7 +15,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, setBuildTrim, setOccurrenceLyrics, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, renderBuildPreview, setBuildTrim, setOccurrenceLyrics, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
 import type { GenerationJob } from '../services/generation/jobTypes.js';
@@ -241,6 +241,9 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   // `mode` is 'regenerate' or 'advance' when the cut falls inside a section.
   router.post('/build/:id/crop', (req: Request, res: Response) =>
     takes(res, () => cropBuildTake(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''), req.body?.revision, req.body?.frame, req.body?.mode)));
+  // Renders everything kept so far once, for Play build (takes hold only their own part).
+  router.post('/build/:id/preview', (req: Request, res: Response) =>
+    takes(res, () => renderBuildPreview(String(req.params.id), authenticate(req)!)));
   // Where Save song starts the song: seconds into a first-section take, or null for the top.
   router.post('/build/:id/trim', (req: Request, res: Response) =>
     takes(res, () => setBuildTrim(String(req.params.id), authenticate(req)!, String(req.body?.take ?? ''), req.body?.revision, req.body?.seconds ?? null)));

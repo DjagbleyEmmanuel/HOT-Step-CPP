@@ -151,6 +151,8 @@ export interface Yue2BuildTake {
   prefix?: number;
   /** A crop of this take: same take, cut short. */
   cropOf?: string;
+  /** The codec frame its audio file starts at (a take renders from a lead-in before its new part); missing: 0. */
+  audioStart?: number;
   /** Where the next take resumes when a crop cut into a section it composes again. */
   resume?: number;
   /** Ids of the occurrences it composed, from..to. */
@@ -183,6 +185,8 @@ export interface Yue2BuildSession {
   arrangement: Yue2Arrangement;
   /** Where Save song starts the song, faded in: seconds into a first-section take (`take` is the uncropped original). */
   trim?: { take: string; seconds: number } | null;
+  /** The whole build rendered once for Play build; stale once `spine` is no longer the last kept take. */
+  preview?: { spine: string; status: 'rendering' | 'done' | 'failed'; progress?: number; audioUrl?: string; error?: string } | null;
 }
 
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
@@ -247,6 +251,9 @@ export const yue2CoverApi = {
    *  a section: compose it again from the cut, or move on to the next one there. */
   buildCrop: (id: string, revision: number, take: string, frame: number | null, mode: 'regenerate' | 'advance' | undefined, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/crop`, token, { method: 'POST', body: JSON.stringify({ revision, take, frame, mode }) }),
+  /** Renders everything kept so far once, for Play build. */
+  buildPreview: (id: string, token: string) =>
+    request<Yue2BuildSession>(`/build/${id}/preview`, token, { method: 'POST', body: JSON.stringify({}) }),
   /** Where Save song starts the song: `seconds` into first-section take `take`, or null for the top. */
   buildTrim: (id: string, revision: number, take: string, seconds: number | null, token: string) =>
     request<Yue2BuildSession>(`/build/${id}/trim`, token, { method: 'POST', body: JSON.stringify({ revision, take, seconds }) }),

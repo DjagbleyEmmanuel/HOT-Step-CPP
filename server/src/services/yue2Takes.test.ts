@@ -416,6 +416,7 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
   config.data.dir = dir;
   t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
   const requests: Yue2SynthRequest[] = [];
+  const aligned: string[] = [];
   const results = new Map<string, Yue2TrackDetail[]>();
   let hold = false, cancelled = false;
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
@@ -425,11 +426,13 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
       requests.push(req);
       const id = String(requests.length);
       // Each take's new codes carry its request number, so prefixes are traceable.
+      const length = (req.codec_ids?.length ?? 0) + (req.continue_codec_ids || !req.codec_ids ? 400 : 0);
       results.set(id, (req.songs?.map(s => s.seed!) ?? [req.seed!]).map((seed, song) => ({ song, seed, noise_seed: seed, variation: 0,
-        semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(400).fill(requests.length)], frames: 400 })));
+        semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(length - (req.codec_ids?.length ?? 0)).fill(requests.length)], frames: length,
+        audio_from: Math.min(req.render_from_frame ?? 0, length - 1) })));
       return Response.json({ id });
     }
-    if (url.pathname === '/yue2/align') return Response.json({ words: [] });
+    if (url.pathname === '/yue2/align') { aligned.push(String((init?.body as FormData).get('lyrics'))); return Response.json({ words: [] }); }
     if (url.searchParams.has('cancel')) { cancelled = true; return Response.json({}); }
     const tracks = results.get(url.searchParams.get('id')!)!;
     if (url.searchParams.has('result')) {
@@ -465,7 +468,7 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     await take(s.id, 0, 0);
     assert.equal(requests.at(-1)!.abc, score);
     assert.equal(requests.at(-1)!.lyrics, lyrics);
-    assert.deepEqual(requests.at(-1)!.lyric_schedule, buildYue2LyricSchedule(score, lyrics, options).wire);
+    assert.equal(requests.at(-1)!.lyric_schedule, undefined, 'Lyric Timing is off for builds');
   });
 
   await t.test('skip, repeat and continue: each take resumes the kept output under the composed prompt', async () => {
@@ -482,7 +485,7 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(first.codec_ids, undefined);
     // Two 3 s bars of verse on the composed clock: 150 frames, then slack.
     assert.equal(first.preview_max_frames, Math.round(150 * 1.3) + 100);
-    assert.deepEqual(first.lyric_schedule, buildYue2LyricSchedule(composed.abc, composed.lyrics, options).wire);
+    assert.equal(first.lyric_schedule, undefined);
     assert.deepEqual(verse.occurrences, ['o4']);
     keepBuildTake(s.id, 'user', verse.id, 1);
     const [chorus] = await take(s.id, 1, 1);
@@ -501,7 +504,7 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(render.abc, composed.abc);
     assert.equal(render.lyrics, composed.lyrics);
     assert.equal(render.codec_ids!.length, 300 + 400);
-    assert.deepEqual(render.lyric_schedule, first.lyric_schedule);
+    assert.equal(render.lyric_schedule, undefined);
     // The last occurrence ends the song: no cap.
     await take(s.id, 3, 1);
     assert.equal(requests.at(-1)!.preview_max_frames, undefined);
@@ -603,6 +606,29 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     await take(s.id, 0, 1);
     assert.equal(requests.at(-1)!.lyric_schedule, undefined);
     assert.equal(requests.at(-1)!.abc, composeArrangement(abc, text, plan).abc);
+  });
+
+  await t.test('a later take renders only from its lead-in and aligns only its own lyrics; Play build renders the whole build once', async () => {
+    const { renderBuildPreview } = await import('./yue2Takes.js');
+    const s = start();
+    const [a] = await take(s.id, 0, 0);
+    assert.equal(requests.at(-1)!.render_from_frame, undefined, 'the first take renders from the top');
+    assert.equal(a.audioStart, undefined);
+    keepBuildTake(s.id, 'user', a.id, 0);
+    const [b] = await take(s.id, 1, 0);
+    const lead = b.prefix! - 4 * YUE2_FPS;
+    assert.equal(requests.at(-1)!.render_from_frame, lead);
+    assert.equal(b.audioStart, lead);
+    assert.ok(aligned.at(-2)!.includes('[intro]') && !aligned.at(-1)!.includes('[intro]'), 'the kept section is not aligned again');
+    // Play build: the spine's whole stream, prefilled, rendered from the top.
+    keepBuildTake(s.id, 'user', b.id, 0);
+    assert.equal(renderBuildPreview(s.id, 'user').preview?.status, 'rendering');
+    await until(() => getBuildSession(s.id, 'user').preview?.status !== 'rendering');
+    const preview = getBuildSession(s.id, 'user').preview!;
+    assert.deepEqual([preview.status, preview.spine], ['done', b.id]);
+    assert.ok(fs.existsSync(path.join(config.data.audioDir, 'takes', s.id, path.basename(preview.audioUrl!))));
+    const req = requests.at(-1)!;
+    assert.deepEqual([req.codec_ids!.length, req.continue_codec_ids, req.render_from_frame, req.lyric_schedule], [b.frames, undefined, undefined, undefined]);
   });
 
   await t.test('trim: only a first-section take starts later, and only while a version of it is the first keep', async () => {

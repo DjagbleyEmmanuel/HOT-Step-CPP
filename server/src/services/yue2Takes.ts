@@ -37,7 +37,6 @@ import {
   BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
-import { buildYue2LyricSchedule } from './backends/yue2/lyricSchedule.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 
 /** Codec frames per second (the composer's frame clock). */
@@ -88,6 +87,9 @@ export interface Yue2Take {
   style?: string;
   /** Its own caption, as typed; missing when it used the session's. */
   caption?: string;
+  /** The codec frame its audio file starts at: a take renders only from a
+   *  lead-in before its new part. Missing or 0: the file starts at the song's start. */
+  audioStart?: number;
 }
 
 /** Session file version 2 (coverArrangement.ts): revisions, take parents, the
@@ -109,6 +111,9 @@ export interface Yue2BuildSession extends ArrangedSession {
    *  only while a version of that take is the first kept one. The codec stream
    *  is not cut, so later takes still continue from all of it. */
   trim?: { take: string; seconds: number } | null;
+  /** The whole build so far rendered once, for Play build (takes hold only their own part).
+   *  `spine` is the kept take it rendered; it is stale once another take is the spine. */
+  preview?: { spine: string; status: 'rendering' | 'done' | 'failed'; progress?: number; audioUrl?: string; error?: string } | null;
 }
 
 /** `request` holds the score and lyrics in source order; arranged() writes them out in plan order. */
@@ -116,6 +121,8 @@ interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRe
 
 interface BuildRun { cancelled: boolean; jobId?: string }
 const runs = new Map<string, BuildRun>();
+/** Build previews rendering now, by session id. */
+const previewRuns = new Set<string>();
 
 const root = () => path.join(config.data.audioDir, 'takes');
 const sessionDir = (id: string) => path.join(root(), id);
@@ -128,7 +135,10 @@ function load(id: string, userId: string): Stored {
   try { stored = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')); }
   catch { throw new TakesError('Build session not found', 404); }
   if (stored.userId !== userId) throw new TakesError('Build session not found', 404);
-  if (stored.version === BUILD_SESSION_VERSION) return repaired(stored);
+  if (stored.version === BUILD_SESSION_VERSION) {
+    if (stored.preview?.status === 'rendering' && !previewRuns.has(id)) stored.preview = { ...stored.preview, status: 'failed', error: 'The render was interrupted.' };
+    return repaired(stored);
+  }
   // A session from before revisions: upgrade it once, on first open.
   let upgraded: Stored;
   try {
@@ -176,19 +186,12 @@ function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = f
   const own = planLyrics(stored.arrangement);
   const composed = composeArrangement(abc, lyrics, plan, own);
   const request = { ...stored.request };
+  // Lyric Timing (C6) is off for builds: with a resumed prefix the engine
+  // replays it one frame per step, which made late sections crawl.
+  delete request.lyric_schedule;
   if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i) || own.some(text => text !== undefined)) {
     request.abc = composed.abc;
     if (request.lyrics) request.lyrics = composed.lyrics;
-    const schedule = request.lyric_schedule;
-    delete request.lyric_schedule;
-    // ponytail: no schedule rather than a mispaired one; pairing the schedule
-    // by occurrence would need lyricSchedule.ts to take the spans.
-    if (schedule && request.lyrics && composed.textPairingMatches) {
-      try {
-        request.lyric_schedule = buildYue2LyricSchedule(composed.abc, composed.lyrics, { mode: schedule.mode,
-          bias: schedule.bias ?? -4, abc: schedule.abc === true, leadSec: schedule.lead_sec ?? 0, behind: schedule.behind ?? -1 }).wire;
-      } catch { /* renders unscheduled, as generate.ts does for a schedule it cannot build */ }
-    }
   }
   const marks = scoreSections(request.abc!);
   if (marks.length !== plan.length) throw new TakesError('The arranged score lost a section label; edit the arrangement again.', 409);
@@ -245,11 +248,21 @@ export function lyricsThrough(lyrics: string, spans: Spans, through: number): st
 // A take that stops early is aligned against the lyrics only up to the
 // block of the occurrence after its own: words it never sang would be
 // squashed into its tail and drag the earlier ones with them.
-async function alignStarts(lyrics: string, spans: Spans, wav: Buffer, frames: number, through?: number): Promise<Array<number | null>> {
+/** Each occurrence's start frame in a take, from aligning its lyrics to its audio.
+ *  A take's audio starts at codec frame `audioStart`, so only the lyrics from
+ *  occurrence `from` on are aligned, and the words are moved back onto the
+ *  song's clock and the whole lyrics' code points. */
+async function alignStarts(lyrics: string, spans: Spans, wav: Buffer, frames: number, through?: number,
+  from = 0, audioStart = 0): Promise<Array<number | null>> {
   if (!lyrics.trim()) return spans.map((_, i) => (i === 0 ? 0 : null));
-  const text = through === undefined ? lyrics : lyricsThrough(lyrics, spans, through);
+  const chars = Array.from(through === undefined ? lyrics : lyricsThrough(lyrics, spans, through));
+  const first = audioStart ? spans.slice(from).find(span => span !== null)?.[0] ?? chars.length : 0;
+  const text = chars.slice(first).join('');
+  if (!text.trim()) return spans.map((_, i) => (i === 0 ? 0 : null));
   const aligned = await yue2Align(wav, text);
-  const starts = sectionStarts(spans, aligned.words, frames);
+  const offset = audioStart / YUE2_FPS;
+  const words = aligned.words.map(word => ({ ...word, char0: word.char0 + first, start: word.start + offset, end: word.end + offset }));
+  const starts = sectionStarts(spans, words, frames);
   // Past `through` the lyrics were cut, so those occurrences read as unsung.
   return spans.map((_, i) => (through !== undefined && i > through ? null : starts[i] ?? null));
 }
@@ -384,7 +397,11 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const length = clock[to + 1] - clock[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
   const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i].section)?.label ?? `#${i + 1}`;
+  // The audio renders from the lead-in a take plays from: the NAR and VAE skip
+  // what is already kept, which is what made late sections slow.
+  const renderFrom = start ? Math.max(0, start - LEAD_IN_S * YUE2_FPS) : 0;
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
+  if (previewRuns.has(id)) throw new TakesError('Wait for the build render to finish first.');
   const identity = takeIdentity(stored, to);
   const pending = { from, to, count, activeCount: 0, phase: 'queued', progress: 0 };
   stored.pending.push(pending);
@@ -411,7 +428,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
           update('starting', 0);
           const req: Yue2SynthRequest = { ...request, synth_batch_size: 1,
             ...(prefix.length ? { codec_ids: prefix, continue_codec_ids: true } : {}),
-            ...(cap ? { preview_max_frames: cap } : {}) };
+            ...(cap ? { preview_max_frames: cap } : {}),
+            ...(renderFrom ? { render_from_frame: renderFrom } : {}) };
           // Sessions saved by older servers may still carry batch fields.
           delete req.lm_batch_size;
           delete req.songs;
@@ -437,9 +455,9 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             const mapped = mapTakeTracks(seeds, tracks, parts);
             update('aligning', 100);
             const takes: ArrangedTake[] = [];
-            for (const { seed, ids, wav } of mapped) {
+            for (const { seed, ids, wav, audioStart } of mapped) {
               checkCancelled();
-              const starts = await alignStarts(lyrics, spans, wav, ids.length, last ? undefined : to + 1);
+              const starts = await alignStarts(lyrics, spans, wav, ids.length, last ? undefined : to + 1, from, audioStart);
               checkCancelled();
               for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
               for (let i = from + 1; i <= Math.min(to + 1, occurrences - 1); i++) {
@@ -447,10 +465,10 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
                 if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
               }
               const takeId = randomUUID().slice(0, 8);
-              const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)), ids.length / YUE2_FPS);
+              const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)) - audioStart / YUE2_FPS, (ids.length - audioStart) / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, style: request.style, ...(own ? { caption: own } : {}), ...identity });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, style: request.style, ...(own ? { caption: own } : {}), ...(audioStart ? { audioStart } : {}), ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);
@@ -479,11 +497,11 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
 }
 
 /** Validate every track before any take is saved. Parts follow track order. */
-export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts: Buffer[]): Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer }> {
+export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts: Buffer[]): Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer; audioStart: number }> {
   if (tracks.length !== seeds.length || parts.length !== tracks.length) {
     throw new Error(`YuE2 take chunk expected ${seeds.length} tracks, received ${tracks.length} metadata rows and ${parts.length} audio parts. No takes saved.`);
   }
-  const mapped: Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer }> = [];
+  const mapped: Array<{ seed: Yue2Seed; ids: number[]; wav: Buffer; audioStart: number }> = [];
   for (let i = 0; i < tracks.length; i++) {
     const track = tracks[i];
     if (!Number.isInteger(track.song) || track.song < 0 || track.song >= seeds.length || mapped[track.song]
@@ -494,7 +512,7 @@ export function mapTakeTracks(seeds: number[], tracks: Yue2TrackDetail[], parts:
       || parts[i].toString('ascii', 0, 4) !== 'RIFF' || parts[i].toString('ascii', 8, 12) !== 'WAVE') {
       throw new Error(`YuE2 take chunk song ${track.song} has no codec stream or valid WAV audio. No takes saved.`);
     }
-    mapped[track.song] = { seed: yue2Seed(track.seed)!, ids: track.semantic_ids, wav: parts[i] };
+    mapped[track.song] = { seed: yue2Seed(track.seed)!, ids: track.semantic_ids, wav: parts[i], audioStart: track.audio_from ?? 0 };
   }
   return mapped;
 }
@@ -695,13 +713,14 @@ export function cropBuildTake(id: string, userId: string, takeId: string, revisi
     if (same) next = same;
     else {
       const cropId = randomUUID().slice(0, 8);
-      const wav = cropWav(fs.readFileSync(path.join(sessionDir(id), `${base.id}.wav`)), cut / YUE2_FPS);
+      const audioStart = base.audioStart ?? 0;
+      const wav = cropWav(fs.readFileSync(path.join(sessionDir(id), `${base.id}.wav`)), (cut - audioStart) / YUE2_FPS);
       const codes = (JSON.parse(fs.readFileSync(codesFile(id, base.id), 'utf8')) as number[]).slice(0, cut);
       fs.writeFileSync(path.join(sessionDir(id), `${cropId}.wav`), wav);
       fs.writeFileSync(codesFile(id, cropId), JSON.stringify(codes));
       next = { ...base, id: cropId, audioUrl: `/audio/takes/${id}/${cropId}.wav`, frames: cut, to: plan.to, starts: plan.starts,
         prefix: plan.prefix, resume: plan.resume, cropOf: base.cropOf ?? base.id, occurrences,
-        peaks: wavPeaks(wav, Math.max(0, plan.prefix / YUE2_FPS - (plan.prefix ? LEAD_IN_S : 0)), cut / YUE2_FPS) };
+        peaks: wavPeaks(wav, Math.max(0, plan.prefix / YUE2_FPS - (plan.prefix ? LEAD_IN_S : 0)) - audioStart / YUE2_FPS, (cut - audioStart) / YUE2_FPS) };
       stored.takes.push(next);
     }
   }
@@ -727,6 +746,67 @@ export function buildSessionRender(id: string, userId: string):
   const { request } = arranged(stored);
   return { codec_ids: JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[],
     abc: request.abc, lyrics: request.lyrics, lyric_schedule: request.lyric_schedule, trimStart: trimStart(stored) };
+}
+
+/** Renders everything kept so far as one audio file, for Play build: the
+ *  spine's whole codec stream prefilled under the arranged prompt, as Save
+ *  song renders it but without post-processing or a library song. Returns at
+ *  once; the session's `preview` tracks it. */
+export function renderBuildPreview(id: string, userId: string): Yue2BuildSession {
+  const stored = load(id, userId);
+  const spine = stored.kept.at(-1);
+  if (!spine) throw new TakesError('Keep a take before rendering the build.');
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (previewRuns.has(id)) return view(stored);
+  const codes = JSON.parse(fs.readFileSync(codesFile(id, spine), 'utf8')) as number[];
+  const { request } = arranged(stored);
+  stored.preview = { spine, status: 'rendering', progress: 0 };
+  save(stored);
+  previewRuns.add(id);
+  const finish = (preview: NonNullable<Yue2BuildSession['preview']>) => {
+    const fresh = load(id, userId);
+    const old = fresh.preview?.audioUrl;
+    fresh.preview = preview;
+    save(fresh);
+    if (old && old !== preview.audioUrl) {
+      try { fs.unlinkSync(path.join(sessionDir(id), path.basename(old))); } catch { /* already gone */ }
+    }
+  };
+  void (async () => {
+    try {
+      await runOnGpuLane(async lease => {
+        const req: Yue2SynthRequest = { ...request, codec_ids: codes, synth_batch_size: 1 };
+        delete req.lm_batch_size;
+        delete req.songs;
+        delete req.semantic_retries;
+        delete req.preview_max_frames;
+        const sub = await yue2Synth(req);
+        const run: BuildRun = { cancelled: false, jobId: sub.job_id };
+        try {
+          await waitJob(sub.job_id, run, lease, (_phase, progress) => {
+            const fresh = load(id, userId);
+            if (fresh.preview?.status === 'rendering') { fresh.preview.progress = progress; save(fresh); }
+          });
+          const body = await aceClient.getJobResult(sub.job_id);
+          if (!body.ok) throw new Error(`YuE2 build render result fetch failed (${body.status})`);
+          const audio = Buffer.from(await body.arrayBuffer());
+          const contentType = body.headers.get('content-type') ?? 'audio/wav';
+          const wav = contentType.startsWith('multipart/mixed') ? splitMultipartMixed(audio, contentType)[0] : audio;
+          const file = `build-${spine}-${randomUUID().slice(0, 6)}.wav`;
+          fs.writeFileSync(path.join(sessionDir(id), file), wav);
+          finish({ spine, status: 'done', audioUrl: `/audio/takes/${id}/${file}` });
+        } catch (err) {
+          await aceClient.cancelJob(sub.job_id).catch(() => {});
+          throw err;
+        }
+      }, { label: 'yue2 build: render so far', family: 'yue2' });
+    } catch (err) {
+      finish({ spine, status: 'failed', error: (err as Error).message });
+    } finally {
+      previewRuns.delete(id);
+    }
+  })();
+  return view(load(id, userId));
 }
 
 const MAX_OCCURRENCES = 100;

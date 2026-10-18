@@ -287,6 +287,8 @@ export interface Yue2SynthRequest {
   noise_source?: 'native' | 'fixture';
   /** Preview-only semantic frame ceiling; 0 leaves normal generation limits. */
   preview_max_frames?: number;
+  /** The codec frame the NAR and VAE start at; the audio covers only [it, end). Section-by-section takes. */
+  render_from_frame?: number;
   /** The composer's codec stream, prefilled instead of sampled; with
    *  continue_codec_ids, a prefix the composer resumes from. */
   codec_ids?: number[];
@@ -348,6 +350,8 @@ export interface Yue2TrackDetail {
   abc?: string;
   /** The composer's codec stream (raw ids), for resuming it with codec_ids. */
   semantic_ids?: number[];
+  /** The codec frame the track's audio starts at (render_from_frame, clamped); 0 or missing: the start. */
+  audio_from?: number;
 }
 
 export interface Yue2SynthResponse {

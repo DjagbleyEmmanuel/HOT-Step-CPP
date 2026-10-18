@@ -185,7 +185,8 @@ are saved with the draft.
    when it moves the melody to Ins. Advanced **Condition strength** tightens style, lyrics and
    score together. Advanced **Lyric Timing (C6)** ties each lyric block to its score section's
    timing; Off by default, Soft and Hard stay selectable but condition strength 1 with either on
-   ruins lyric adherence. The reviewed full score stays available. Click
+   ruins lyric adherence. Build by section ignores it: with a kept prefix it made each take
+   replay the whole song so far one frame at a time. The reviewed full score stays available. Click
    **Generate cover** on the **Prepare** tab for a one-shot render; queued renders
    keep all five choices, selected pair, score and settings from that click
    even if the picker changes later.
@@ -400,7 +401,9 @@ Prepare. Finish preparing those before generating the first takes.
    old lines stay listed with **Keep** disabled. **Use Prepare lyrics** puts the
    Prepare page's text back for every section not yet built.
 3. Play each take to compare it. Preview starts four seconds before its first new
-   section, where available, so you can hear the join. Takes covering the first
+   section, where available, so you can hear the join. A take renders only that
+   lead-in and its new part, not the whole song again, so late sections take
+   about as long as early ones. The composer still hears everything kept. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
    The play button pauses and resumes from the same spot. Click the
    waveform to seek within the preview, lead-in included. Playback stops when you
@@ -424,15 +427,19 @@ Prepare. Finish preparing those before generating the first takes.
    A line under the Song bar shows a stored start or a cropped last keep, with
    **Start from the top** and **Undo crop** to take either back. Takes made
    before a crop can no longer be kept until the build they continued is back.
-4. Repeat for the remaining sections. **Play build** plays everything kept so far;
-   clicking a built section plays from its start. To undo a keep, open **Build
+4. Repeat for the remaining sections. Because takes hold only their own part,
+   **Render the build so far** (on the Song bar) renders everything kept once,
+   which is quicker than a take since nothing is composed; then **Play build**
+   plays it, and clicking a built section plays from its start. After another
+   keep the button comes back to render again. A failed render shows **Build
+   render failed**; hover it for the reason. To undo a keep, open **Build
    actions** and choose **Undo last keep**. A built section's undo button rolls
    back far enough to build that section again.
 
 5. When every section is built, press **Render Final Song** in the Takes box.
    It submits the kept audio codes as an ordinary generation job, with the usual
    post-processing, drift check and Library save. To render before the song is
-   finished, open **Build actions** and choose **Render the song so far**. Once
+   finished, open **Build actions** and choose **Save the song so far**. Once
    the song is saved, the build clears so the next Build starts fresh. If the
    render fails, is cancelled or times out, the build stays so you can try again.
 
