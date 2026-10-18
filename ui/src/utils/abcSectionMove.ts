@@ -7,6 +7,8 @@
 // marker in the gap. Bars are numbered as the server's scoreSections.ts does:
 // Vocal bars from 1, with `Z4` counting as four.
 
+import { abcSectionMarks, hasLyricTags, mergeLyricBlocks, relabelLyricBlock, sectionPairingError, splitLyricBlock } from './abcSections';
+
 export interface Bar { text: string; start: number; count: number }
 // pre: the lines before this part's music since the last part (its V: line,
 // if it has one); header: the V: line governing it, own or inherited.
@@ -279,4 +281,77 @@ export function resectionScore(abc: string, sections: Array<{ label: string; bar
     });
   }
   return { abc: out.join('\n') };
+}
+
+// ── Merge, relabel and split: section edits that keep every bar ──
+// Score section i pairs with lyric block i, so each edit changes both, after
+// checking that every section already pairs with its tag; otherwise it
+// refuses rather than guess which block to change. Lyrics with no tags at
+// all have nothing to pair, and stay as they are. None of these edits removes
+// music, so a score's alignment to its audio still holds.
+
+export type SectionEdit = { abc: string; lyrics: string; removedMusic: false } | { error: string };
+
+/** The score's lines and the line of each section marker, with whether the
+ *  lyrics pair with it, or why section `index` (and the `span - 1` after it)
+ *  cannot be edited. */
+function editable(abc: string, lyrics: string, index: number, span: number)
+  : { lines: string[]; markers: number[]; paired: boolean } | { error: string } {
+  const text = abc.replace(/\r\n?/g, '\n');
+  const parsed = parseScore(text);
+  if (typeof parsed === 'string') return { error: parsed };
+  const labels = abcSectionMarks(text).map(mark => mark.label);
+  // The server counts a marker above K: too; this file only edits the body.
+  if (labels.length !== parsed.items.filter(item => item.kind === 'marker').length)
+    return { error: 'The score has a section marker above its K: line; edit the sections in the ABC text.' };
+  if (!Number.isInteger(index) || index < 0 || index + span > labels.length) return { error: 'That section is not in the score.' };
+  const paired = hasLyricTags(lyrics);
+  const mismatch = paired ? sectionPairingError(labels, lyrics) : null;
+  if (mismatch) return { error: mismatch };
+  const lines = text.split('\n');
+  return { lines, markers: lines.flatMap((line, i) => isMarker(line) ? [i] : []), paired };
+}
+
+/** Why `label` cannot name a section, or null. */
+const badLabel = (label: string) => !label.trim() || /[[\]\r\n]/.test(label) || label.trim().startsWith('%')
+  ? 'A section name needs some text, and no brackets, line breaks or leading %.' : null;
+
+/** A marker line with its label replaced, keeping its `%` and spacing. */
+const relabelMarker = (line: string, label: string) => line.match(/^\s*%\s*/)![0] + label.trim();
+
+/** Sections `index` and `index + 1` as one, named after the first or the
+ *  second; the lyric blocks join the same way. */
+export function mergeSections(abc: string, lyrics: string, index: number, keep: 'first' | 'second'): SectionEdit {
+  const at = editable(abc, lyrics, index, 2);
+  if ('error' in at) return at;
+  const { lines, markers } = at;
+  if (keep === 'second') lines[markers[index]] = lines[markers[index + 1]];
+  lines.splice(markers[index + 1], 1);
+  return { abc: lines.join('\n'), lyrics: at.paired ? mergeLyricBlocks(lyrics, index, keep === 'second') : lyrics, removedMusic: false };
+}
+
+/** Section `index` and its lyric tag renamed to `label`. */
+export function relabelSection(abc: string, lyrics: string, index: number, label: string): SectionEdit {
+  const bad = badLabel(label);
+  if (bad) return { error: bad };
+  const at = editable(abc, lyrics, index, 1);
+  if ('error' in at) return at;
+  at.lines[at.markers[index]] = relabelMarker(at.lines[at.markers[index]], label);
+  return { abc: at.lines.join('\n'), lyrics: at.paired ? relabelLyricBlock(lyrics, index, label.trim()) : lyrics, removedMusic: false };
+}
+
+/** Section `index` split in two: a new section `label` from score bar `bar`,
+ *  holding block i's lyric lines from its `lyricLine`-th non-blank line on
+ *  (see lyricBlockLines). */
+export function splitSection(abc: string, lyrics: string, index: number, bar: number, lyricLine: number, label: string): SectionEdit {
+  const bad = badLabel(label);
+  if (bad) return { error: bad };
+  const at = editable(abc, lyrics, index, 1);
+  if ('error' in at) return at;
+  const newLyrics = at.paired ? splitLyricBlock(lyrics, index, lyricLine, label.trim()) : lyrics;
+  if (newLyrics === null) return { error: 'That lyric line is not in the section being split.' };
+  // The new marker starts beside the old one, then moves to its bar.
+  at.lines.splice(at.markers[index] + 1, 0, `% ${label.trim()}`);
+  const moved = moveSectionStart(at.lines.join('\n'), index + 1, bar);
+  return 'error' in moved ? moved : { abc: moved.abc, lyrics: newLyrics, removedMusic: false };
 }
