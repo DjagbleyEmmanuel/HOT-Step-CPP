@@ -432,3 +432,36 @@ test('an accepted score plan saves lyrics and the revised score with backups, an
     assert.equal(f.counts().started, 0);
   } finally { f.close(); }
 });
+
+test('suggestions stamp what they were made for, stay instant unless asked, and fall back when the recording fails', async () => {
+  const f = fixture();
+  try {
+    const abc = ['X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C', '% verse', 'V: Vocal', 'C6|D6|',
+      '% chorus', 'V: Vocal', 'E6|F6|', '% chorus', 'V: Vocal', 'E6|F6|', ''].join('\n');
+    const prepare = {
+      version: 2, sourceKey: 'src-1', abc, sectionIds: ['s1', 's2', 's3'], paste: '', excluded: [], flagged: [], nextId: 4,
+      lyricRevision: 7, assignments: {}, confirmed: { structure: null, lyrics: null },
+      blocks: [{ id: 'b1', text: 'first line', tag: 'Verse' }, { id: 'b2', text: 'second line', tag: 'Chorus' }],
+    };
+    const input = { sourceAudioUrl: `/references/${f.upload}`, prepare };
+    const instant = await f.service.suggestAssignments(input, 'owner');
+    assert.deepEqual([instant.sourceKey, instant.lyricRevision, instant.structureHash.startsWith('v1:')], ['src-1', 7, true]);
+    assert.deepEqual(instant.assignments, { s1: ['b1'], s2: ['b2'] });
+    assert.deepEqual(instant.reuse, [{ sectionId: 's3', blockId: 'b2' }]);
+    assert.equal(instant.recording, false);
+    // Opt in, and the recording places the blocks.
+    f.setAlign([['first', 0.2], ['second', 6.1]]);
+    const aligned = await f.service.suggestAssignments({ ...input, useRecording: true }, 'owner');
+    assert.equal(aligned.recording, true);
+    assert.deepEqual(aligned.assignments, { s1: ['b1'], s2: ['b2'] });
+    // A source that cannot be read falls back to the instant proposals, with the reason.
+    const fallback = await f.service.suggestAssignments({ ...input, sourceAudioUrl: '/references/missing.wav', useRecording: true }, 'owner');
+    assert.equal(fallback.recording, false);
+    assert.deepEqual(fallback.assignments, instant.assignments);
+    assert.equal(typeof fallback.recordingError, 'string');
+    // A malformed document is a 400; replacement score or lyrics in the body are ignored.
+    await assert.rejects(f.service.suggestAssignments({ ...input, prepare: { ...prepare, version: 1 } }, 'owner'), /version/);
+    const sneaky = await f.service.suggestAssignments({ ...input, abc: 'X:1\nK:C\nC', lyrics: 'nope' } as never, 'owner');
+    assert.equal(sneaky.structureHash, instant.structureHash);
+  } finally { f.close(); }
+});

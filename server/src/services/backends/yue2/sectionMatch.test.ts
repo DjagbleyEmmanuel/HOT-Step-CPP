@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { matchSectionsToScore, planScoreFromLyrics } from './sectionMatch.js';
+import { matchSectionsToScore, planScoreFromLyrics, suggestionLyrics, suggestSections } from './sectionMatch.js';
 import type { Yue2AlignWord } from './align.js';
 
 // Two 3-second bars per section: intro 0, verse 6, chorus 12, verse 18,
@@ -150,4 +150,46 @@ test('score to lyrics: a kept marker with another label is untouched', () => {
   const plan = planScoreFromLyrics(score, lyrics, words(lyrics, [['first', 6.2], ['hook line', 12.1]]));
   assert.equal(plan.sections[0].label, 'intro');
   assert.equal(plan.sections[0].block, null);
+});
+
+const ids = ['s0', 's1', 's2', 's3', 's4', 's5'];
+const b = (id: string, tag: string | null, text = `${id} words`) => ({ id, tag, text });
+
+test('instant suggestions go by tag kind and order, offer one pasted chorus as a reuse, and leave the score alone', () => {
+  const result = suggestSections(score, ids, [b('b1', 'Verse 1'), b('b2', 'Chorus'), b('b3', 'Verse 2')]);
+  assert.deepEqual(result.assignments, { s0: 'instrumental', s1: ['b1'], s2: ['b2'], s3: ['b3'], s5: 'instrumental' });
+  assert.deepEqual(result.reuse, [{ sectionId: 's4', blockId: 'b2' }]);
+  assert.deepEqual([result.uncertain, result.unplaced, result.recording], [[], [], false]);
+});
+
+test('a repeat present in the paste stays its own block; nothing is reused for it', () => {
+  const result = suggestSections(score, ids, [b('b1', 'verse'), b('b2', 'chorus'), b('b3', 'verse'), b('b4', 'hook')]);
+  assert.deepEqual(result.assignments.s4, ['b4']);
+  assert.deepEqual(result.reuse, []);
+});
+
+test('untagged words are a guess, and a block with no section of its kind is left unplaced, not forced', () => {
+  const result = suggestSections(score, ids, [b('b1', null), b('b2', 'bridge')]);
+  assert.deepEqual(result.assignments.s1, ['b1']);
+  assert.deepEqual(result.uncertain, ['s1']);
+  assert.deepEqual(result.unplaced, ['b2']);
+  assert.equal('s2' in result.assignments, false);
+});
+
+test('an empty tag keeps its section as instrumental instead of vanishing', () => {
+  const result = suggestSections(score, ids, [b('b1', 'verse', ''), b('b2', 'verse'), b('b3', 'chorus')]);
+  assert.equal(result.assignments.s1, 'instrumental');
+  assert.deepEqual(result.assignments.s3, ['b2']);
+  assert.deepEqual(result.assignments.s4, ['b3']);
+});
+
+test('with the recording, sung time beats the pasted tag and two blocks in one section are marked uncertain', () => {
+  const blocks = [b('b1', 'chorus'), b('b2', 'verse'), b('b3', 'verse')];
+  const lyrics = suggestionLyrics(blocks);
+  // b1 is sung in the first verse, b2 right after it, b3 in the second.
+  const result = suggestSections(score, ids, blocks, words(lyrics, [['b1 words', 6.2], ['b2 words', 7], ['b3 words', 18.3]]));
+  assert.equal(result.recording, true);
+  assert.deepEqual(result.assignments.s1, ['b1', 'b2']);
+  assert.deepEqual(result.assignments.s3, ['b3']);
+  assert.deepEqual(result.uncertain, ['s1']);
 });

@@ -3,6 +3,7 @@ import { serverKey } from '../queries/keys';
 import { apiClient, type ReadOptions } from './httpClient';
 import { readSnapshot, changed } from '../queries/cover-lyrics/reads';
 import { getSessionEpoch } from '../queries/keys';
+import type { PrepareV2 } from '../utils/yue2Prepare';
 // Authenticated YuE2 cover transcription endpoints.
 const BASE = '/api/yue2-cover';
 
@@ -67,6 +68,24 @@ export interface Yue2ScorePlan {
   unchanged: boolean;
   datasetSong: boolean;
   revision?: string;
+}
+
+/** POST /sections/suggest: proposals for a Prepare document, never applied by the server. */
+export interface Yue2AssignmentSuggestions {
+  /** What it was computed for; drop the reply if the document no longer matches. */
+  sourceKey: string;
+  structureHash: string;
+  lyricRevision: number;
+  /** Section id -> block ids sung there in order, or 'instrumental'. */
+  assignments: Record<string, string[] | 'instrumental'>;
+  /** Sections to fill with a copy of a block placed elsewhere. */
+  reuse: Array<{ sectionId: string; blockId: string }>;
+  uncertain: string[];
+  unplaced: string[];
+  /** True when the recording placed the blocks. */
+  recording: boolean;
+  /** Set when the recording was asked for and failed; the proposals are the instant ones. */
+  recordingError?: string;
 }
 
 export interface Yue2CoverDatasetMetadata {
@@ -226,6 +245,8 @@ export const yue2CoverApi = {
     request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, token, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2ScorePlan>('/sections/plan-score', token, { method: 'POST', body: JSON.stringify(input) }),
+  suggestAssignments: (input: Yue2CoverSourceInput & { prepare: PrepareV2; useRecording?: boolean }, token: string) =>
+    request<Yue2AssignmentSuggestions>('/sections/suggest', token, { method: 'POST', body: JSON.stringify(input) }),
   /** Lyrics (.txt) and/or the revised score (.abc) of a matched proposal, with the
    *  `revision` it returned; or the score's tempo and key into the .txt. The two
    *  files are separate writes: `abcSaved: false` means the lyrics went in and the score did not. */

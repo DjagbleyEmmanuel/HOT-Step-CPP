@@ -18,7 +18,8 @@ import { createCoverStemCache } from './coverStemCache.js';
 import { NoVocalsError, separateOne, YUE2_STEMS_DEFAULT_LEVEL } from './training/yue2Stems.js';
 import { yue2Align } from './backends/yue2/client.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
-import { matchSectionsToScore, planScoreFromLyrics } from './backends/yue2/sectionMatch.js';
+import { matchSectionsToScore, planScoreFromLyrics, suggestionLyrics, suggestSections } from './backends/yue2/sectionMatch.js';
+import { prepareV2Problem, structureHash, type PrepareV2 } from '../contracts/yue2Prepare.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar, writeAbcSidecar } from './training/abcSidecar.js';
 import { hasSoundingVocalBar } from './backends/yue2/scoreHealth.js';
@@ -250,6 +251,32 @@ export function createYue2CoverService(deps = {
     catch (err) { throw new CoverRequestError((err as Error).message, 422); }
   }
 
+  /** Proposals for which lyric blocks belong to which section of a Prepare
+   *  document, as section id -> block ids. Nothing is stored or rewritten: the
+   *  reply names the {sourceKey, structureHash, lyricRevision} it was made for,
+   *  so the client can drop it if the document moved on. With `useRecording`
+   *  the source vocal is aligned to place blocks by where they are sung; if
+   *  that fails the instant (tag and order) proposals are returned instead,
+   *  with `recordingError`. */
+  async function suggestAssignments(input: CoverInput & { prepare?: unknown; useRecording?: unknown }, userId: string) {
+    const { prepare, useRecording, abc: _abc, ...rest } = input;
+    const problem = prepareV2Problem(prepare);
+    if (problem) throw new CoverRequestError(problem);
+    const p = prepare as PrepareV2;
+    if (!p.sectionIds.length) throw new CoverRequestError('The score has no sections.');
+    const blocks = p.blocks.map(({ id, tag, text }) => ({ id, tag, text }));
+    const stamp = { sourceKey: p.sourceKey, structureHash: structureHash(p.abc), lyricRevision: p.lyricRevision };
+    const make = (words?: Yue2AlignWord[]) => {
+      try { return suggestSections(p.abc, p.sectionIds, blocks, words); }
+      catch (err) { throw new CoverRequestError((err as Error).message, 422); }
+    };
+    if (useRecording !== true) return { ...stamp, ...make(), recordingError: undefined as string | undefined };
+    let words: Yue2AlignWord[];
+    try { words = (await alignSource({ ...rest, abc: p.abc, lyrics: suggestionLyrics(blocks) }, userId)).words; }
+    catch (err) { return { ...stamp, ...make(), recordingError: (err as Error).message }; }
+    return { ...stamp, ...make(words), recordingError: undefined };
+  }
+
   /** Write lyrics and/or the revised score, or the score's tempo and key, into
    *  the matched dataset song. Lyrics and tempo go in the .txt, the score in
    *  the .abc; each writer keeps the previous file as a .bak (a timestamped
@@ -296,7 +323,7 @@ export function createYue2CoverService(deps = {
     }
   }
 
-  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, planScoreSections, saveDatasetDetails };
+  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, planScoreSections, suggestAssignments, saveDatasetDetails };
 }
 
 export const yue2CoverService = createYue2CoverService();
