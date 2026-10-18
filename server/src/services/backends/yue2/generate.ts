@@ -406,9 +406,10 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
 
   // Draw it here, not in the engine: the engine's random seed is a full uint64,
   // which JSON.parse rounds past 2^53, so the take would record (and replay) a
-  // different seed. A 53-bit draw is exact through every Number on the way.
+  // different seed. 32 bits leaves the engine's derived seeds (seed + song,
+  // + 1000003 per retry) far below 2^53, so they stay exact too.
   const seed: number = params.randomSeed || !(typeof params.seed === 'number' && params.seed >= 0)
-    ? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
+    ? Math.floor(Math.random() * 2 ** 32)
     : params.seed;
 
   // A previewed-and-approved lead sheet (score preview flow): the engine
