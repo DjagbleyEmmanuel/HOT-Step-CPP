@@ -18,7 +18,7 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { config, USER_PLUGINS_DIR } from '../config.js';
 import { logEngine } from './logger.js';
 import { pushLog } from '../routes/logs.js';
-import { setEngineReady, setEngineNoModels, noteEngineBackendLine, resetEngineDevice } from '../engineState.js';
+import { setEngineReady, setEngineNoModels, backendLineFeeder, resetEngineDevice } from '../engineState.js';
 import { aceClient } from './aceClient.js';
 import { buildGpuEnv } from './gpuDevices.js';
 
@@ -248,17 +248,20 @@ export function startAceServer(): ChildProcess | null {
   const isNoise = (line: string) =>
     line.includes('CUDA graph warmup') || line.includes('CUDA Graph id') || line.includes('ggml_backend_cuda_graph_compute');
 
+  const feedOut = backendLineFeeder();
+  const feedErr = backendLineFeeder();
   child.stdout?.on('data', (data: Buffer) => {
+    feedOut(data.toString());
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
-      noteEngineBackendLine(line);
       pushLog(line, 'engine');
     }
   });
 
   child.stderr?.on('data', (data: Buffer) => {
+    feedErr(data.toString());
     // Chunks are not lines: match on a rolling tail so a split marker still counts.
     errTail = (errTail + data.toString()).slice(-256);
     if (errTail.includes(NO_MODELS_LINE)) sawNoModels = true;
@@ -266,7 +269,6 @@ export function startAceServer(): ChildProcess | null {
     for (const line of lines) {
       if (!isNoise(line)) console.log(`[ace-server] ${line}`);
       logEngine(line);
-      noteEngineBackendLine(line);
       pushLog(line, 'engine');
     }
   });

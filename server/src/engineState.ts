@@ -49,3 +49,13 @@ export function backendFamily(device: string | null): 'cuda' | 'vulkan' | 'metal
   if (d.startsWith('cpu')) return 'cpu';
   return null;
 }
+
+/** Per-stream feeder for raw chunks: holds back a trailing partial line so a marker split across chunks still parses. */
+export function backendLineFeeder(): (chunk: string) => void {
+  let rest = '';
+  return (chunk) => {
+    const lines = (rest + chunk).split('\n');
+    rest = lines.pop() ?? '';
+    for (const l of lines) noteEngineBackendLine(l);
+  };
+}
