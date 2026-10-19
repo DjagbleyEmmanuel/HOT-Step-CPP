@@ -371,11 +371,8 @@ async function drainWorker(crashSeqAtStart: number, retryMs = 1000): Promise<voi
     try {
       const res = await fetch(`${BASE}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) });
       if (res.ok) return;
-      if (res.status === 404) {
-        // An engine older than the route answers 404 at once; waiting can't help.
-        console.warn('[aceClient] engine has no /worker-drain; releasing without confirming the stop');
-        return;
-      }
+      // Any other status (a 404 from an engine older than the route included)
+      // proves nothing about the render, so keep holding.
     } catch { /* unreachable or timed out: not proof that it stopped */ }
     if (engineCrashSeq() !== crashSeqAtStart) return;
     await new Promise(r => setTimeout(r, retryMs));

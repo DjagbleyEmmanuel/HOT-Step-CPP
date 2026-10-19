@@ -27,9 +27,9 @@ test('real progress (saving audio) replaces the loading stage', () => {
 
 // The lane must stay held until the engine's worker has provably finished the
 // SA3 call. Each test scripts the engine: the render POST, then the replies to
-// successive /worker-drain calls ('fail' = socket error, 'ok' = held until
-// released by the test).
-type DrainReply = 'fail' | 'ok';
+// successive /worker-drain calls ('fail' = socket error, '404' = an engine
+// without the route, 'ok' = held until released by the test).
+type DrainReply = 'fail' | '404' | 'ok';
 async function withScriptedEngine(
   post: 'hang' | 'socket-error',
   drains: DrainReply[],
@@ -43,7 +43,9 @@ async function withScriptedEngine(
     const path = new URL(String(url)).pathname;
     calls.push(path);
     if (path === '/worker-drain') {
-      if ((drains.shift() ?? 'ok') === 'fail') throw socketError();
+      const reply = drains.shift() ?? 'ok';
+      if (reply === 'fail') throw socketError();
+      if (reply === '404') return new Response('Not Found', { status: 404 });
       await new Promise<void>(r => { releaseDrain = r; });
       return new Response('{"status":"ok"}');
     }
@@ -106,5 +108,19 @@ test('a render POST that dies on a socket error drains before it rejects', async
     assert.equal(state.settled, false);
     releaseDrain();
     assert.equal(((await p) as Error).message, 'fetch failed');
+  });
+});
+
+test('a 404 from /worker-drain keeps the lane held', async () => {
+  await withScriptedEngine('hang', ['404', 'ok'], async ({ calls, releaseDrain }) => {
+    const ac = new AbortController();
+    const { p, state } = await startSynth(ac.signal);
+    await tick(0);
+    ac.abort();
+    await tick(1300);  // past the 1 s retry delay
+    assert.deepEqual(calls, ['/sa3-synth', '/worker-drain', '/worker-drain']);
+    assert.equal(state.settled, false, 'a 404 proves nothing about the render');
+    releaseDrain();
+    assert.equal(((await p) as Error).name, 'AbortError');
   });
 });
