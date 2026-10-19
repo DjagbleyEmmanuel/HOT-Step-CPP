@@ -155,15 +155,20 @@ Development checkouts keep their existing paths; see [Configuration](../dev/conf
 ## Install on your phone
 
 The production UI (`LAUNCH.bat` or a release launcher, not `dev.bat`) is an installable web app.
-Open it from your phone over your LAN or Tailscale address, then:
+Phone PWA installation needs a secure origin. Open the production UI through an
+HTTPS address reachable from your phone, with a certificate the browser trusts,
+then:
 
 - **Android (Chrome):** menu, then **Install app** or **Add to Home screen**.
 - **iPhone / iPad (Safari):** Share, then **Add to Home Screen**.
 
 It opens full screen with its own icon. Only the app shell (page, scripts, icons) is cached;
 songs, audio and every `/api` call always come from your server, so the server must be running.
-Browsers only allow installing from `localhost` or an HTTPS address; on a plain `http://` LAN
-address you still get a home-screen shortcut, but not the offline shell.
+The `localhost` secure-origin exception refers to the device running the browser,
+so it does not cover your computer's LAN or Tailscale address when viewed on a
+phone. A plain `http://` address does not enable the service worker or offline
+shell; the browser may still offer a home-screen shortcut. A Tailscale connection
+alone does not turn an HTTP URL into HTTPS.
 
 ## Running from source
 

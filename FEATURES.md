@@ -109,7 +109,7 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | Tiled decoder | A postprocess plugin can replace the built-in VAE decode. |
 
 - **Job progress badge and done notification**: running count and active % on the sidebar Create entry, mobile header and tab title; optional notification when a job finishes in a hidden tab (click opens the song).
-- **Mobile bottom sheets**: on phones the per-song actions menu and the parameter bar section panels open as bottom sheets (drag handle, swipe down or Esc to dismiss, focus trapped, safe-area padded); desktop keeps the dropdowns.
+- **Mobile bottom sheets**: on phones the per-song actions menu opens as a bottom sheet (drag handle, swipe down or Esc to dismiss, focus trapped, safe-area padded); desktop keeps the dropdown.
 
 ## Auto-Gen
 
