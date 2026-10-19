@@ -178,7 +178,9 @@ if (fs.existsSync(uiDistPath)) {
   // Assets with content hashes get long cache; index.html always revalidates
   app.use(express.static(uiDistPath, {
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
+      if (filePath.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
+      // index.html, the service worker and the manifest must revalidate so updates reach installed apps.
+      if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('.webmanifest')) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       } else {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

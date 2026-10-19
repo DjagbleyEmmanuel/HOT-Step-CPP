@@ -37,6 +37,7 @@ import { queryClient } from '../../queries/client';
 import { invalidateSidecars } from '../../queries/keys';
 import { invalidateSongs } from '../../queries/shell-queue/songs';
 import { scoreAbcOptions } from '../../queries/shell-queue/lyrics';
+import { BottomSheet, useIsMobile } from './BottomSheet';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,14 @@ interface PortalMenuProps {
 const MENU_WIDTH = 220;
 const MENU_MAX_HEIGHT = 420;
 
-const PortalMenu: React.FC<PortalMenuProps> = ({ anchorRef, onClose, children }) => {
+const PortalMenu: React.FC<PortalMenuProps & { sheet?: boolean; title?: React.ReactNode }> = ({ anchorRef, onClose, children, sheet, title }) => {
+  if (sheet) {
+    return <BottomSheet open onClose={onClose} title={title} ariaLabel="Song actions">{children}</BottomSheet>;
+  }
+  return <DropdownMenu anchorRef={anchorRef} onClose={onClose}>{children}</DropdownMenu>;
+};
+
+const DropdownMenu: React.FC<PortalMenuProps> = ({ anchorRef, onClose, children }) => {
   const [pos, setPos] = useState({ top: 0, left: 0, flipped: false });
 
   useLayoutEffect(() => {
@@ -91,7 +99,7 @@ const PortalMenu: React.FC<PortalMenuProps> = ({ anchorRef, onClose, children })
 
 // ── Menu items ───────────────────────────────────────────────────────────────
 
-const ITEM_BASE = 'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors';
+const ITEM_BASE = 'w-full flex items-center gap-2 px-3 py-2 max-[1023px]:py-3 text-sm text-left transition-colors';
 
 interface ItemProps {
   icon: React.ReactNode;
@@ -321,6 +329,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
 }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const isMobile = useIsMobile();
   const btnRef = useRef<HTMLButtonElement>(null);
   const abTrackAId = useABCompareSelector(s => s.trackA?.id);
   const abTrackBId = useABCompareSelector(s => s.trackB?.id);
@@ -388,7 +397,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
       </button>
 
       {open && (
-        <PortalMenu anchorRef={btnRef} onClose={close}>
+        <PortalMenu anchorRef={btnRef} onClose={close} sheet={isMobile} title={song.title}>
           {/* Post-processing — the reason this menu exists. Deliberately first
               and deliberately shown (disabled) rather than hidden when it can't
               run, so "why can't I master this?" has an answer on hover. */}

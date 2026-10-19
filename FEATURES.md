@@ -109,6 +109,7 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | Tiled decoder | A postprocess plugin can replace the built-in VAE decode. |
 
 - **Job progress badge and done notification**: running count and active % on the sidebar Create entry, mobile header and tab title; optional notification when a job finishes in a hidden tab (click opens the song).
+- **Mobile bottom sheets**: on phones the per-song actions menu and the parameter bar section panels open as bottom sheets (drag handle, swipe down or Esc to dismiss, focus trapped, safe-area padded); desktop keeps the dropdowns.
 
 ## Auto-Gen
 
@@ -153,6 +154,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Source filters | Tabs per studio plus Imported, with counts. |
 | Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
 | Multi-select | Bulk download, zip export (up to 256 MB), add to playlist or delete. Shift+click range select, Ctrl/Cmd+click toggle, long-press range select on touch. |
+| Installable web app | Web app manifest, icons and an app-shell service worker (production builds only, never caches /api or audio), so the UI can be added to a phone home screen and run standalone. |
 | Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
 | Metadata editor | Title, artist, album, year, genre, BPM, key, comment, lyrics and cover image; some fields are embed-only. |

@@ -36,7 +36,7 @@ disk.
 | Per page | 20, 40, 60, 80, 100, or All. Remembered per browser. |
 | Columns (table view only) | Choose which columns show. Title and Actions are always on; everything else, including generation details like seed, CFG, solver, and adapter, is opt-in and off by default. Column widths are drag-resizable and persist. |
 | Rename (pencil icon) | Inline title edit, on the card, row, or table cell. |
-| Track menu (⋯) | Run Post-Processing, Edit (loads the track's parameters back into Create), Add to Playlist, Download, Send to Cover Studio, Edit Metadata, Export Params, Retranscribe Lyrics, Generate/Regenerate Cover Art, Set as Track A / Track B, Delete. Same menu on every song list in the app: grid card, list row, table row, playlist, and the right sidebar. |
+| Track menu (⋯) | Run Post-Processing, Edit (loads the track's parameters back into Create), Add to Playlist, Download, Send to Cover Studio, Edit Metadata, Export Params, Retranscribe Lyrics, Generate/Regenerate Cover Art, Set as Track A / Track B, Delete. Same menu on every song list in the app: grid card, list row, table row, playlist, and the right sidebar. On phones (1023px wide or less) it opens as a bottom sheet instead of a dropdown: drag the handle down, tap the backdrop or press Esc to close it. |
 | Set as Track A / Track B | Pins two tracks for the A/B comparison bar above the list, with a Play A/B button and a Compare button that opens a parameter diff modal. |
 | Upload into Library | Opens the import dialog (see below). Only on the Library page. |
 
