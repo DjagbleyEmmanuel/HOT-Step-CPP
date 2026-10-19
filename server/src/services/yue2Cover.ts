@@ -24,6 +24,7 @@ import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar, writeAbcSidecar } from './training/abcSidecar.js';
 import { hasSoundingVocalBar } from './backends/yue2/scoreHealth.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
+import { cachedMp3 } from './audioConvert.js';
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -34,7 +35,9 @@ export class CoverRequestError extends Error {
   constructor(message: string, public readonly status = 400) { super(message); }
 }
 
-export interface CoverSource { sourceId: string; sourceLabel: string; audioPath: string }
+// audioPath is the chosen file, for dataset matching; workPath is what the
+// models read, a cached MP3 when the file is over MAX_AUDIO_BYTES.
+export interface CoverSource { sourceId: string; sourceLabel: string; audioPath: string; workPath: string }
 type SavedSource = Pick<CoverSource, 'sourceId' | 'sourceLabel'> & { userId: string; name: string };
 type CoverInput = { sourceAudioUrl?: unknown; songId?: unknown; sourceLabel?: unknown; abc?: unknown; force?: unknown };
 
@@ -48,6 +51,7 @@ export function createYue2CoverService(deps = {
   model: resolveYue2SheetModel,
   run: runYue2CoverSheetJob,
   datasetMatch: resolveCoverDatasetSource,
+  toMp3: (file: string) => cachedMp3(file, path.join(config.data.dir, 'tmp', 'cover-mp3')),
   // The source's vocal stem, separated once per audio content: MMS_FA places
   // words reliably on a stem, not on the full mix.
   vocalStem: createCoverStemCache({
@@ -116,14 +120,19 @@ export function createYue2CoverService(deps = {
       stat = fs.lstatSync(audioPath);
       if (!stat.isFile()) throw new Error('not a file');
     } catch { throw new CoverRequestError('Audio source not found. Re-upload or choose another library song.', 404); }
-    if (stat.size === 0 || stat.size > MAX_AUDIO_BYTES) throw new CoverRequestError('Audio source must be between 1 byte and 100 MB.');
-    const duration = await deps.duration(audioPath);
+    if (stat.size === 0) throw new CoverRequestError('Audio source is empty.');
+    let workPath = audioPath;
+    if (stat.size > MAX_AUDIO_BYTES) {
+      try { workPath = await deps.toMp3(audioPath); }
+      catch (err) { throw new CoverRequestError(`Audio source is over 100 MB and could not be converted: ${(err as Error).message}`); }
+    }
+    const duration = await deps.duration(workPath);
     if (!Number.isFinite(duration) || duration <= 0 || duration > MAX_AUDIO_SECONDS) throw new CoverRequestError('Audio source must have a readable duration of at most 10 minutes.');
     if (input.sourceLabel !== undefined) {
       if (typeof input.sourceLabel !== 'string' || input.sourceLabel.trim().length > 120) throw new CoverRequestError('sourceLabel must be at most 120 characters.');
       if (input.sourceLabel.trim()) sourceLabel = input.sourceLabel.trim();
     }
-    return { sourceId, sourceLabel, audioPath };
+    return { sourceId, sourceLabel, audioPath, workPath };
   }
 
   async function start(input: CoverInput, userId: string) {
@@ -147,7 +156,7 @@ export function createYue2CoverService(deps = {
     const dir = path.join(deps.jobRoot, job.id);
     try {
       fs.mkdirSync(dir, { recursive: true });
-      const saved: SavedSource = { userId, sourceId: selected.sourceId, sourceLabel: selected.sourceLabel, name: path.basename(selected.audioPath) };
+      const saved: SavedSource = { userId, sourceId: selected.sourceId, sourceLabel: selected.sourceLabel, name: path.basename(selected.workPath) };
       fs.writeFileSync(path.join(dir, 'cover-source.json'), JSON.stringify(saved), { mode: 0o600 });
     } catch (err) {
       deps.queue.cancelJob(job.id);
@@ -155,7 +164,7 @@ export function createYue2CoverService(deps = {
     }
     deps.queue.enqueue(job, async j => {
       if (j.controller.signal.aborted) return;
-      try { await deps.run(j, selected.audioPath, dir); } catch { /* runner records failed/cancelled status */ }
+      try { await deps.run(j, selected.workPath, dir); } catch { /* runner records failed/cancelled status */ }
     });
     return { status: 'queued' as const, jobId: job.id, sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
   }
@@ -222,7 +231,7 @@ export function createYue2CoverService(deps = {
     const matched = deps.datasetMatch(selected.audioPath);
     const revision = matched ? datasetRevision(matched) : undefined;
     let stem: string;
-    try { stem = await deps.vocalStem(selected.audioPath); }
+    try { stem = await deps.vocalStem(selected.workPath); }
     catch (err) {
       if (err instanceof NoVocalsError) throw new CoverRequestError('The source has no vocals to align.', 422);
       throw err;

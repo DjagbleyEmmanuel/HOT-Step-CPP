@@ -27,6 +27,7 @@ function fixture(missing = false, defer = false) {
   let started = 0;
   let cancelled = 0;
   let runnerCalls = 0;
+  let ranOn = '';
   let duration = 120;
   let datasetAudio: string | null = null;
   let failAbc = false;
@@ -73,15 +74,17 @@ function fixture(missing = false, defer = false) {
       if (failAbc) throw new Error('disk full');
       return writeAbcSidecar(audioPath, abc, { keepBackups: true });
     },
+    toMp3: async (file: string) => { const out = path.join(root, 'cover-mp3', path.basename(file) + '.mp3'); fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, 'mp3'); return out; },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
-    run: async (job, _audioPath, dir) => {
+    run: async (job, audioPath, dir) => {
       runnerCalls++;
+      ranOn = audioPath;
       job.status = 'running';
       job.phase = 'transcribing';
       await new Promise<void>(resolve => { job.controller.signal.addEventListener('abort', () => resolve(), { once: true }); setTimeout(resolve, 15); });
       if (job.controller.signal.aborted) return '';
-      fs.writeFileSync(path.join(dir, 'cover-sheet.json'), JSON.stringify({ sources: [{ name: upload, abc: 'X:1\nK:C\nC' }] }));
+      fs.writeFileSync(path.join(dir, 'cover-sheet.json'), JSON.stringify({ sources: [{ name: path.basename(audioPath), abc: 'X:1\nK:C\nC' }] }));
       job.status = 'done';
       return 'X:1\nK:C\nC';
     },
@@ -90,7 +93,7 @@ function fixture(missing = false, defer = false) {
     setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
     failAbcWrites: (fail: boolean) => { failAbc = fail; },
     setAlign: (times: Array<[string, number]>) => { alignTimes = times; },
-    counts: () => ({ started, cancelled, runnerCalls }), drain: async () => { await pending?.(); },
+    counts: () => ({ started, cancelled, runnerCalls }), ranOn: () => ranOn, drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -165,9 +168,24 @@ test('invalid, oversized, and unreadable sources are refused before enqueue', as
     f.setDuration(601);
     await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /10 minutes/);
     f.setDuration(120);
-    fs.truncateSync(path.join(f.referenceDir, f.upload), 100 * 1024 * 1024 + 1);
-    await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /100 MB/);
+    fs.truncateSync(path.join(f.referenceDir, f.upload), 0);
+    await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /empty/);
     assert.equal(f.counts().started, 0);
+  } finally { f.close(); }
+});
+
+test('an oversized source runs on a cached MP3 copy, leaving the original alone', async () => {
+  const f = fixture();
+  try {
+    const original = path.join(f.referenceDir, f.upload);
+    fs.truncateSync(original, 100 * 1024 * 1024 + 1);
+    const result = await f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner');
+    assert.equal(result.status, 'queued');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(f.ranOn(), path.join(f.root, 'cover-mp3', f.upload + '.mp3'));
+    assert.equal(fs.statSync(original).size, 100 * 1024 * 1024 + 1);
+    assert.deepEqual(fs.readdirSync(f.referenceDir), [f.upload]);
+    assert.equal(f.service.find(result.jobId!, 'owner').abc, 'X:1\nK:C\nC');
   } finally { f.close(); }
 });
 
