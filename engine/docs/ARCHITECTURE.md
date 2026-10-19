@@ -127,6 +127,20 @@ means no specific language, any other code is used as given.
 **`seed`** (int64, `-1` = random). Seed for the DiT's Philox noise; the low 32 bits
 are used. Resolved once per input request.
 
+**`seed_b`** (int64, `-1` = off) and **`seed_blend`** (float 0 to 1, default 0). Seed
+breeding: the initial DiT noise is a slerp from the `seed` noise toward the `seed_b`
+noise (each batch item treated as one vector, normalized lerp when nearly parallel).
+`0` gives `seed` exactly, `1` gives `seed_b` exactly. Synth batch items offset
+`seed_b` by the same `+i` as `seed`. Ignored by the streaming path. API field names
+on `/api/generate`: `seedB`, `seedBlend`.
+
+**`seed_blend_end`** (float 0 to 1, default `-1` = off). Seed morph: when set with
+`seed_b`, the blend varies along the latent time axis. The noise is `[T, C]`
+time-major; frame `f` is slerped on its own (per-frame vector across channels) at
+`w(f) = seed_blend + (seed_blend_end - seed_blend) * smoothstep(f / (T-1))`, so a
+song can start as one seed and end as the other. API field: `seedBlendEnd`.
+Per-frame morph is not the same as whole-item breeding even at a constant blend (each frame is slerped on its own), so when `seed_blend_end` equals `seed_blend` the engine uses the whole-item breeding path.
+
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
 item `b` of `/lm` gets `lm_seed + b`.
