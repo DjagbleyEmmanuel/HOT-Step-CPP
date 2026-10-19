@@ -151,3 +151,19 @@ test('typed fields are checked: strings, booleans, seed ranges, 0..1 fractions',
   const ok = parseDawRequest({ mode: 'text2music', caption: 'x', seed: '42', seed_b: 0, seed_blend: 1, steps: 8, skip_lm: false });
   assert.equal(ok.seed, 42);
 });
+
+test('region and derived duration: strict numbers, objects only, finite result', () => {
+  const bad = (extra: Record<string, unknown>) => assert.throws(
+    () => parseDawRequest({ mode: 'repaint', caption: 'x', ...extra }),
+    (e) => e instanceof DawError && e.status === 400 && e.code === 'bad_request', JSON.stringify(extra));
+  bad({ region: { start_s: false, end_s: true } });
+  bad({ region: { start_s: null, end_s: 4 } });
+  bad({ region: { end_s: 4 } });
+  bad({ region: { start_s: 1, end_s: [4] } });
+  bad({ region: null });
+  bad({ region: [] });
+  bad({ region: 'x' });
+  bad({ region: { start_s: 4, end_s: 2 } });
+  assert.deepEqual(parseDawRequest({ mode: 'repaint', caption: 'x', region: { start_s: '1', end_s: 3 } }).region, { start_s: 1, end_s: 3 });
+  bad({ mode: 'text2music', bars: 1e308, bpm: 1 });
+});

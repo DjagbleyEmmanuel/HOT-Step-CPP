@@ -121,7 +121,7 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
     if (!(out.bars > 0) || !(out.bpm && out.bpm > 0)) throw new DawError(400, 'bad_request', 'bars needs a positive bpm');
     out.duration_s = barsToDurationS(out.bars, out.bpm, out.timesig);
   }
-  if (out.duration_s !== undefined && !(out.duration_s > 0)) throw new DawError(400, 'bad_request', 'duration_s must be positive');
+  if (out.duration_s !== undefined && !(out.duration_s > 0 && Number.isFinite(out.duration_s))) throw new DawError(400, 'bad_request', 'duration_s must be positive');
   if (out.takes !== undefined && (!Number.isInteger(out.takes) || out.takes < 1 || out.takes > 8)) {
     throw new DawError(400, 'bad_request', 'takes must be an integer 1..8');
   }
@@ -130,12 +130,14 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
   if (out.seed !== undefined && out.seed + (out.takes ?? 1) - 1 > SEED_MAX) {
     throw new DawError(400, 'bad_request', `seed + takes - 1 must be at most ${SEED_MAX}`);
   }
-  if (out.region !== undefined) {
-    const s = Number(out.region?.start_s), e = Number(out.region?.end_s);
-    if (!Number.isFinite(s) || !Number.isFinite(e) || s < 0 || e <= s) {
+  if (r.region !== undefined) {
+    const g = r.region as Record<string, unknown> | null;
+    const ok = g !== null && typeof g === 'object' && !Array.isArray(g);
+    const st = ok ? num(g.start_s) : undefined, en = ok ? num(g.end_s) : undefined;
+    if (st === undefined || en === undefined || !Number.isFinite(st) || !Number.isFinite(en) || st < 0 || en <= st) {
       throw new DawError(400, 'bad_request', 'region needs 0 <= start_s < end_s');
     }
-    out.region = { start_s: s, end_s: e };
+    out.region = { start_s: st, end_s: en };
   }
   if (out.model !== undefined && (typeof out.model !== 'string' || !out.model.trim())) {
     throw new DawError(400, 'bad_request', 'model must be "turbo", "base" or an installed DiT model name');
