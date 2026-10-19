@@ -243,6 +243,8 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
         {/* Right: the score's sections */}
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={btn} disabled={locked || asking || !doc.blocks.length}
+              onClick={() => void ask(false)} title={t('cover.prepare.lyrics.suggestAgainInfo')}>{t('cover.prepare.lyrics.suggestAgain')}</button>
             <button type="button" className={btn} disabled={locked || asking || !doc.blocks.length || !prep.recordingAlignmentAvailable}
               onClick={() => void ask(true)} title={t('cover.prepare.lyrics.useRecordingInfo')}>{t('cover.prepare.lyrics.useRecording')}</button>
             {asking && <span role="status" className="text-zinc-500">{t('cover.prepare.lyrics.suggesting')}</span>}
@@ -325,7 +327,7 @@ export const PrepareLyrics: React.FC<Props> = ({ prep, lyrics, onLyricsText, sug
         {orderedPreview}
       </details>}
       {/* Stuck to the bottom of the scrolling column, so it is always in view. */}
-      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
+      <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex flex-wrap items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
         <button type="button" disabled={locked || !!problem} onClick={() => run(prep.confirmLyrics())}
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{t('cover.prepare.lyrics.confirm')}</button>
         {problem && <span className="text-[11px] text-amber-700 dark:text-amber-300">{problem}</span>}

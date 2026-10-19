@@ -283,7 +283,9 @@ The score itself is read-only here.
   marks a section as wordless.
 - Suggestions from the tags and the order are made when you first arrive at this
   step, once per confirmed structure, as long as a section still needs words. They
-  mark doubtful ones **not sure** and list blocks left unplaced. Pick which
+  mark doubtful ones **not sure** and list blocks left unplaced. **Suggest from tags
+  and order** makes them again at any time, for instance after discarding the
+  recording suggestions. Pick which
   suggestions to take and press **Accept selected**, or **Discard**. Nothing
   changes until you accept, and suggestions are dropped if the score or lyrics
   change while they are being made.

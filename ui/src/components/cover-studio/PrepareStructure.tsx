@@ -318,7 +318,7 @@ export const PrepareStructure: React.FC<Props> = ({ prep, sourceAudioUrl, scoreP
       {editing && children}
 
       {/* Stuck to the bottom of the scrolling column, so it is always in view. */}
-      <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
+      <div className="sticky -bottom-4 z-10 -mx-4 -mb-4 flex items-center gap-3 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-950 px-4 py-2">
         <button type="button" disabled={confirmDisabled} onClick={doConfirm}
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{t('cover.prepare.structure.confirm')}</button>
         <span className="text-[11px] text-zinc-500">{t('cover.prepare.structure.confirmHint')}</span>

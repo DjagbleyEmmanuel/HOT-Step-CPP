@@ -714,6 +714,8 @@
     "cover.prepare.lyrics.splitBefore": "Split before line…",
     "cover.prepare.lyrics.joinNext": "Join with next",
     "cover.prepare.lyrics.suggesting": "Suggesting…",
+    "cover.prepare.lyrics.suggestAgain": "Suggest from tags and order",
+    "cover.prepare.lyrics.suggestAgainInfo": "Makes the tag and order suggestions again, the ones shown when you arrived here. Nothing changes until you accept.",
     "cover.prepare.lyrics.useRecording": "Use the recording to improve suggestions",
     "cover.prepare.lyrics.blocks": "Lyric Blocks",
     "cover.prepare.lyrics.useRecordingInfo": "Listens to the vocal in the source recording to see where each block is sung. It takes longer, and the first run may separate the vocals. Off: suggestions use the tags and the order only.",
