@@ -75,12 +75,31 @@ export function useJobProgressWatcher(doneTitle: string, doneBody: (name: string
   // Service worker relays notification clicks as a message.
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    // AppContent installs its song listener in a separate effect.
+    const afterMount = (fn: () => void) => {
+      const timer = setTimeout(() => { timers.delete(timer); fn(); }, 0);
+      timers.add(timer);
+    };
     const onMsg = (e: MessageEvent) => {
-      if (e.data?.type === 'open-song' && e.data.songId) {
+      if (e.data?.type === 'notification-ready') {
+        afterMount(() => e.ports[0]?.postMessage('ready'));
+      }
+      if (e.data?.type === 'open-song' && typeof e.data.songId === 'string' && e.data.songId) {
         window.dispatchEvent(new CustomEvent('hotstep:open-song', { detail: { songId: e.data.songId } }));
       }
     };
     navigator.serviceWorker.addEventListener('message', onMsg);
-    return () => navigator.serviceWorker.removeEventListener('message', onMsg);
+    const url = new URL(window.location.href);
+    const songId = url.searchParams.get('open-song');
+    if (songId) afterMount(() => {
+      window.dispatchEvent(new CustomEvent('hotstep:open-song', { detail: { songId } }));
+      url.searchParams.delete('open-song');
+      history.replaceState(history.state, '', url);
+    });
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', onMsg);
+      timers.forEach(clearTimeout);
+    };
   }, []);
 }

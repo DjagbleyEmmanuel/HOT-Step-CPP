@@ -43,6 +43,19 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, title, 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
+  // Child dialogs and dropdowns portal outside the sheet. Let the higher
+  // layer own keyboard focus and dismissal until it has closed.
+  const childLayerOpen = () => {
+    const sheet = sheetRef.current;
+    if (!sheet) return false;
+    const z = Number(getComputedStyle(sheet).zIndex);
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-portal-layer], [role="dialog"]'))
+      .some(layer => !sheet.contains(layer) && !layer.contains(sheet)
+        && Number(getComputedStyle(layer).zIndex) > z && layer.getClientRects().length > 0);
+  };
+  const childLayerOpenRef = useRef(childLayerOpen);
+  childLayerOpenRef.current = childLayerOpen;
+
   useLayoutEffect(() => {
     if (!open) { setShown(false); setDragY(0); return; }
     const id = requestAnimationFrame(() => setShown(true));
@@ -53,17 +66,19 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, title, 
     if (!open) return;
     const prevFocus = document.activeElement as HTMLElement | null;
     const t = setTimeout(() => {
+      if (childLayerOpenRef.current()) return;
       const first = sheetRef.current?.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? sheetRef.current)?.focus();
     }, 0);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); return; }
+      if (childLayerOpenRef.current()) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCloseRef.current(); return; }
       if (e.key !== 'Tab' || !sheetRef.current) return;
       const els = Array.from(sheetRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (els.length === 0) { e.preventDefault(); return; }
       const first = els[0], last = els[els.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      if (e.shiftKey && (document.activeElement === first || !sheetRef.current.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !sheetRef.current.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onKey, true);
     return () => {
@@ -94,8 +109,8 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, title, 
     <>
       <div
         data-portal-layer
-        className={`fixed inset-0 z-[9998] bg-black/50 transition-opacity duration-200 ${shown ? 'opacity-100' : 'opacity-0'}`}
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        className={`fixed inset-0 z-[59] bg-black/50 transition-opacity duration-200 ${shown ? 'opacity-100' : 'opacity-0'}`}
+        onClick={(e) => { e.stopPropagation(); if (!childLayerOpen()) onClose(); }}
       />
       <div
         data-portal-layer
@@ -105,7 +120,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, title, 
         aria-label={ariaLabel}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="fixed inset-x-0 bottom-0 z-[9999] max-h-[85vh] flex flex-col rounded-t-2xl bg-white dark:bg-zinc-900 border-t border-zinc-300 dark:border-white/10 shadow-2xl outline-none"
+        className="fixed inset-x-0 bottom-0 z-[60] max-h-[85vh] flex flex-col rounded-t-2xl bg-white dark:bg-zinc-900 border-t border-zinc-300 dark:border-white/10 shadow-2xl outline-none"
         style={{
           transform: shown ? `translateY(${dragY}px)` : 'translateY(100%)',
           transition: drag.current ? 'none' : 'transform 200ms ease-out',
