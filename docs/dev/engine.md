@@ -214,6 +214,31 @@ them as `<song>.yue2-request.json`, so a later request can resume the stream. Ad
 `yue2-probe --continue-check <request.json>` checks prefix identity, cancellation and
 the context cap on any backend.
 
+NAR plugins and plan conditioning. `nar_solver` accepts `md_wasserstein_yue2` and
+`md_ancestral_yue2`; `nar_scheduler` accepts `md_ht_scheduler V3`,
+`md_plan_aware_yue2` and `md_plan_loose_yue2`. Any other name fails the request. A
+Lua solver gets a seed mixed from the variation's noise seed and the chunk's start
+frame, so each chunk draws its own solver noise. `postprocess_plugin` names a Lua
+postprocess plugin that replaces the native tiled VAE decode; empty (the default) or
+an unknown name keeps the native decode, and so does a plugin that fails.
+These `plugin_params` keys tune the NAR stage; every default leaves it unchanged:
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `yue2:cads_strength` | 0 | CADS noise on the conditioning, 0..1; 0 builds nothing |
+| `yue2:cads_t1`, `yue2:cads_t2` | 0.6, 0.9 | CADS anneal window |
+| `yue2:cads_rescale` | true | restore the clean conditioning's per-row mean and spread after noising |
+| `yue2:plan_w_start`, `yue2:plan_w_end` | 1, 1 | plan (AR-prefix) attention weight across the steps, clamped to 0..4 |
+| `yue2:plan_w_curve` | `linear` | `linear` or `cosine` ramp between them |
+| `yue2:plan_cfg` | 1 | plan CFG scale, 1..8; above 1 adds a plan-masked pass per velocity call |
+| `yue2:plan_cfg_t1`, `yue2:plan_cfg_t2` | 0, 1 | step window where plan CFG applies (swapped if reversed) |
+| `yue2:plan_cfg_rescale` | 0.7 | CFG-rescale blend, 0..1 |
+| `yue2:plan_cfg_level_match` | true | with plan CFG above 1, match the latent level to the no-CFG render |
+
+A YuE2 NAR scheduler can also set per-step plan weights through the `plan_strength`
+global, and Lua plugins on this path see the plan as `model_context.yue2`; both are
+in [Plugin authoring](plugins-authoring.md).
+
 YuE2 loads its weights itself, outside `model-store.h`. Under the default policy a
 YuE2 job first evicts every unreferenced store module (`store_evict_all`), as MM3 does,
 because the store keeps 0-byte entries resident after use and their real VRAM would

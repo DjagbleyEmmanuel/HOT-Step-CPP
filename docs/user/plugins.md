@@ -99,6 +99,7 @@ counts the settings the plugin adds to the UI. Source says which folder the file
 | Heun (2 NFE) | `heun` | 2 | 2 |  |  | Second-order predictor-corrector | built in, `engine/plugins/solvers/heun.lua` |
 | JKASS Fast | `jkass_fast` | 1 | 1 |  | 3 | Euler with beat stability, frequency damping, and temporal smoothing | built in, `engine/plugins/solvers/jkass_fast.lua` |
 | JKASS Quality (2 NFE) | `jkass_quality` | 2 | 2 |  |  | Heun predictor-corrector with derivative averaging | built in, `engine/plugins/solvers/jkass_quality.lua` |
+| MD Ancestral Euler (YuE2) | `md_ancestral_yue2` | 1 | 1 |  | 1 | One-evaluation Euler step with per-step noise re-injection (churn). churn 0 = plain Euler. | community, `plugins/solvers/md_ancestral_yue2.lua` |
 | MD Confluence V3 | `md_confluence_v3` | 1 | 1 | yes | 7 | STORM / Trajectory Anchor hybrid with batch-aware routing. Disagreement- and inertia-modulated latent blend. Per-batch tonal anchor, spectral guard, and RMS servo. | built in, `engine/plugins/solvers/md_confluence_v3.lua` |
 | MD Confluence V4 | `md_confluence_v4` | 1 | 1 | yes | 7 | STORM / Trajectory Anchor hybrid with batch-aware routing. Disagreement- and inertia-modulated latent blend. Per-batch tonal anchor, spectral guard, and RMS servo. | community, `plugins/solvers/md_confluence_v4.lua` |
 | MD Confluence V5 | `md_confluence_v5` | 1 | 1 | yes | 7 | STORM / Trajectory Anchor hybrid with batch-aware routing. Disagreement- and inertia-modulated latent blend. Per-batch tonal anchor, spectral guard, and RMS servo. | community, `plugins/solvers/md_confluence_v5.lua` |
@@ -152,6 +153,8 @@ counts the settings the plugin adds to the UI. Source says which folder the file
 | MD HT Scheduler (HAP+TPT) v5.1 | `md_ht_scheduler v5.1` | 8 | Thermodynamic timestep schedule: HAP + TPT additive density, density floor, LINA warp, SNR-space, poly slope, uniformity blend, smoothing, auto-shift compensation for low step counts. 12 to 150+ steps. | built in, `engine/plugins/schedulers/md_ht_scheduler_v5_1.lua` |
 | MD HT Scheduler (HAP+TPT) v5.1 | `md_ht_scheduler v5.1` | 8 | Thermodynamic timestep schedule: HAP + TPT additive density, density floor, LINA warp, SNR-space, poly slope, uniformity blend, smoothing, auto-shift compensation for low step counts. 12 to 150+ steps. | community, `plugins/schedulers/md_ht_scheduler_V5.1.lua` |
 | MD Noise Decay (Multi-Algorithm) V2 | `md_noise_decay V2` | 6 | 6-algorithm noise decay scheduler: polynomial, sigmoidal, piecewise, fourier, exponential, gaussian. Memory-optimized. | community, `plugins/schedulers/md_noise_decay_V2.lua` |
+| MD Plan-Aware (YuE2) | `md_plan_aware_yue2` | 2 | YuE2 only: denser high-noise steps in NAR chunks that overlap a chosen plan section; uniform elsewhere. | community, `plugins/schedulers/md_plan_aware_yue2.lua` |
+| MD Plan-Loose (YuE2) | `md_plan_loose_yue2` | 2 | YuE2 only: uniform steps, plan conditioning loosened early and locked in later. | community, `plugins/schedulers/md_plan_loose_yue2.lua` |
 | MD Psychoacoustic (Complexity-Adaptive) | `md_psychoacoustic` | 6 | Clusters step density around phase transition zones using psychoacoustic masking curves. Optional Fibonacci golden-ratio spacing. Focuses compute where perceptual impact is highest. | community, `plugins/schedulers/md_psychoacoustic_v1_2.lua` |
 | MD QRD Scatter (Acoustic Diffusion) | `md_qrd_scatter` | 4 | Uses prime number quadratic residues to scatter sigma step intervals. Eliminates harmonic step-ringing by destroying uniform grids. | community, `plugins/schedulers/md_qrd_scatter_v2.0.lua` |
 | Power (p=2) | `power` | 1 | Power-law t^p, front-loaded | built in, `engine/plugins/schedulers/power.lua` |
@@ -194,6 +197,7 @@ Run on the decoded audio after the VAE. Only community plugins exist for this ty
 |---|---|---|---|---|
 | MD Audio Tiled Decoder | `md_audio_tiled` | 6 | Tiled VAE decode with OLA crossfade, dual-pass merge, LSS, and DSP chain | community, `plugins/postprocess/md_audio_tiled.lua` |
 | MD Audio Tiled Decoder V2 | `md_audio_tiled V2` | 10 | Tiled VAE decode with OLA crossfade, dual-pass merge, LSS, and DSP chain | community, `plugins/postprocess/md_audio_tiled_V2.lua` |
+| MD Audio Tiled Decoder V2.1 | `md_audio_tiled V2.1` | 9 | Tiled VAE decode with OLA crossfade, dual-pass merge, LSS, and DSP chain | community, `plugins/postprocess/md_audio_tiled_V2.1.lua` |
 <!-- generated:end postprocess -->
 
 ## Choosing
