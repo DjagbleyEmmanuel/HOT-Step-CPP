@@ -555,6 +555,13 @@ jobs:
             Copy-Item -Recurse "plugins" "$dist/plugins"
           }
 
+          # Profile presets users import by hand (YuE2 Plan Play)
+          New-Item -ItemType Directory -Force "$dist/presets" | Out-Null
+          Copy-Item -Recurse "docs/user/presets/yue2-plan-play" "$dist/presets/yue2-plan-play"
+          if (-not (Test-Path "$dist/presets/yue2-plan-play/plan-play-sections.json")) {
+            throw "YuE2 Plan Play presets missing from the archive"
+          }
+
           # MSVC Runtime DLLs (CRT + OpenMP)
           # CI runners have multiple Redist versions — always pick the NEWEST
           # to avoid ABI mismatches with pre-built engine dependencies.
@@ -1306,6 +1313,11 @@ jobs:
           [ -d "engine/plugins" ] && cp -r engine/plugins "$DIST/engine/plugins"
           [ -d "plugins" ] && cp -r plugins "$DIST/plugins"
 
+          # Profile presets users import by hand (YuE2 Plan Play)
+          mkdir -p "$DIST/presets"
+          cp -r docs/user/presets/yue2-plan-play "$DIST/presets/yue2-plan-play"
+          test -f "$DIST/presets/yue2-plan-play/plan-play-sections.json" || { echo "YuE2 Plan Play presets missing from the archive"; exit 1; }
+
           # Server
           SRVOUT="$DIST/server"
           mkdir -p "$SRVOUT"
@@ -1812,6 +1824,11 @@ jobs:
           # Lua plugins
           [ -d "engine/plugins" ] && cp -r engine/plugins "$DIST/engine/plugins"
           [ -d "plugins" ] && cp -r plugins "$DIST/plugins"
+
+          # Profile presets users import by hand (YuE2 Plan Play)
+          mkdir -p "$DIST/presets"
+          cp -r docs/user/presets/yue2-plan-play "$DIST/presets/yue2-plan-play"
+          test -f "$DIST/presets/yue2-plan-play/plan-play-sections.json" || { echo "YuE2 Plan Play presets missing from the archive"; exit 1; }
 
           # Server
           SRVOUT="$DIST/server"
