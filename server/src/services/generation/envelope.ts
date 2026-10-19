@@ -2,6 +2,7 @@
 
 import { getActiveBackendId, getBackend } from '../backends/registry.js';
 import { GENERATION_ENVELOPE_VERSION } from '../backends/types.js';
+import { readBackendOverride } from '../../contracts/generation.js';
 import type {
   GenerationEnvelope,
   GenerationOperation,
@@ -102,7 +103,18 @@ export function buildEnvelope(
   enqueuedAt: number,
 ): Readonly<GenerationEnvelope> {
   const body = requireBody(raw, userId, jobId, enqueuedAt);
-  const backendId = getActiveBackendId();
+  // Opt-in per-job override (a separate field from `raw.backend`, which stays
+  // log-only as described above). Absent means the active backend.
+  let override: string | undefined;
+  try {
+    override = readBackendOverride(body);
+  } catch (err) {
+    throw new GenerationEnvelopeError('invalid_body', err instanceof Error ? err.message : 'Invalid backendOverride');
+  }
+  if (override !== undefined && !getBackend(override)) {
+    throw new GenerationEnvelopeError('invalid_body', `Unknown backendOverride '${override}'`);
+  }
+  const backendId = override ?? getActiveBackendId();
   const backend = getBackend(backendId);
   if (!backend) {
     throw new GenerationEnvelopeError(

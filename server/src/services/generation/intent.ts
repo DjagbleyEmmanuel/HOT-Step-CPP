@@ -41,5 +41,9 @@ export function resolveGenerationIntent(
     }
   }
   state.backendParams = values;
-  return { ...resolveGenerationParams(state, { backendId, settings: parsed.data.settings }), ...(parsed.data.input ?? {}) };
+  return {
+    ...resolveGenerationParams(state, { backendId, settings: parsed.data.settings }),
+    ...(parsed.data.input ?? {}),
+    ...(parsed.data.backendOverride === undefined ? {} : { backendOverride: parsed.data.backendOverride }),
+  };
 }

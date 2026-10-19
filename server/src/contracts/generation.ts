@@ -10,8 +10,16 @@ import type { GenerationControls } from './generationControls.js';
  * never narrows what this route accepts; `GenerationIntentParams` just gives
  * callers the documented shape to type against.
  */
+/**
+ * Opt-in per-job backend override. When present it names the registered
+ * backend this one job runs on; the active backend is not changed. It is a
+ * separate field from the legacy `backend`, which stays log-only.
+ */
+export const backendOverrideSchema = z.string().min(1);
+
 export const generationIntentSchema = z.object({
   contract: z.literal('generation-intent/1'),
+  backendOverride: backendOverrideSchema.optional(),
   params: z.record(z.string(), z.unknown()),
   input: z.record(z.string(), z.unknown()).optional(),
   settings: z.object({
@@ -26,4 +34,15 @@ export type GenerationIntentParams = GenerationControls;
 export function isGenerationIntent(value: unknown): value is { contract: 'generation-intent/1'; input?: unknown } {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && (value as Record<string, unknown>).contract === 'generation-intent/1';
+}
+
+/** Read and validate `backendOverride` from a flat body or an intent. Returns
+ *  undefined when absent; throws on a present but malformed value. */
+export function readBackendOverride(raw: unknown): string | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const value = (raw as Record<string, unknown>).backendOverride;
+  if (value === undefined) return undefined;
+  const parsed = backendOverrideSchema.safeParse(value);
+  if (!parsed.success) throw new Error('backendOverride must be a non-empty string when supplied');
+  return parsed.data;
 }
