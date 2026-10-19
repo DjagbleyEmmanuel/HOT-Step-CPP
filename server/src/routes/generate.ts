@@ -911,6 +911,7 @@ router.post('/storm/stream', async (req, res) => {
         });
         if (!streamRunning.get(streamId)) break;
         res.write(sa3Buf);
+        session?.chunk(sa3Buf);
         slotIdx++;
         continue;
       }
