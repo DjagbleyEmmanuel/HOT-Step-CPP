@@ -442,6 +442,8 @@ export const vstApi = {
   /** Launch plugin GUI */
   openGui: (pluginPath: string, uid?: string) =>
     post<GuiResponse>('/vst/gui', { pluginPath, uid }),
+  /** Chain uids whose editor window process is still running */
+  openGuis: () => get<{ uids: string[] }>('/vst/gui/open'),
   /** Start real-time monitor */
   monitorStart: (trackPath: string) =>
     post<MonitorStartResponse>('/vst/monitor/start', { trackPath }),

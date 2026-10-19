@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -193,8 +194,11 @@ struct PluginInstance {
     int32                      numActiveInputBuses  = 1;
     int32                      numActiveOutputBuses = 1;
     ParamChangeHandler *       paramHandler = nullptr;  // realtime param bridge
+    std::string                lc_uid, lc_name;          // lifecycle log only
 
     ~PluginInstance() {
+        if (!lc_name.empty())
+            fprintf(stderr, "[lifecycle] plugin unload uid=%s name=%s\n", lc_uid.c_str(), lc_name.c_str());
         if (active && processor) {
             processor->setProcessing(false);
             component->setActive(false);
@@ -215,6 +219,9 @@ static bool load_plugin(const std::string & path, PluginInstance & inst) {
     for (auto & classInfo : factory.classInfos()) {
         if (classInfo.category() == kVstAudioEffectClass) {
             inst.provider = owned(new PlugProvider(factory, classInfo, true));
+            inst.lc_uid  = classInfo.ID().toString();
+            inst.lc_name = classInfo.name();
+            fprintf(stderr, "[lifecycle] plugin load uid=%s name=%s\n", inst.lc_uid.c_str(), inst.lc_name.c_str());
             break;
         }
     }
@@ -526,11 +533,18 @@ static IPlugView * g_plugView = nullptr;
 static PluginInstance * g_guiInst = nullptr;
 static const char * g_guiStatePath = nullptr;
 static bool g_guiRunning = true;
+static bool g_plugViewRemoved = false;
 
 static LRESULT CALLBACK VstWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CLOSE:
             g_guiRunning = false;
+            // Detach the editor while its window still exists (JUCE plugins
+            // crash if removed() runs after the HWND is gone).
+            if (g_plugView && !g_plugViewRemoved) {
+                g_plugView->removed();
+                g_plugViewRemoved = true;
+            }
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
@@ -625,6 +639,7 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
     UpdateWindow(hwnd);
 
     fprintf(stderr, "[vst-host] Plugin GUI opened (%dx%d). Close window to save state.\n", w, h);
+    fprintf(stderr, "[lifecycle] editor open name=%s\n", inst.lc_name.c_str());
 
     // Message loop
     MSG msg;
@@ -633,9 +648,10 @@ static int cmd_gui(const char * plugin_path, const char * state_path) {
         DispatchMessage(&msg);
     }
 
-    // Detach view
-    view->removed();
+    // Detach view (already done in WM_CLOSE if the user closed the window)
+    if (!g_plugViewRemoved) view->removed();
     view->release();
+    fprintf(stderr, "[lifecycle] editor close name=%s\n", inst.lc_name.c_str());
 
     // Save state on close
     if (state_path && state_path[0]) {
@@ -772,12 +788,38 @@ struct MonitorState {
     std::string status_file;
     std::string current_track;
     FILETIME    control_mtime = {};
+    int64_t     control_seq = 0;       // last applied control seq (0 = none seen)
+    int64_t     control_seek_seq = 0;  // last applied seekSeq
     bool        running = true;
     bool        paused  = false;
 
     // Processing buffers (reused per block)
     std::vector<float> buf_a_L, buf_a_R, buf_b_L, buf_b_R;
+
+    // Linear resampler state (used only when the WASAPI device format could not
+    // be switched to the track's native rate; see monitor_resample_block()).
+    bool   rs_active = false;
+    double rs_phase  = 0.0;   // fractional position, in source-sample units, carried across callbacks
+    float  rs_last_L = 0.0f;  // last source sample emitted (history for interpolation continuity)
+    float  rs_last_R = 0.0f;
+    std::vector<float> rs_src_L, rs_src_R; // scratch: [0]=history, [1..] = freshly read source frames
 };
+
+// Flush plugin DSP state (reverb/delay tails, lookahead buffers) without a
+// full re-prepare: the VST3 spec requires plugins to reset their processing
+// state on setActive(false) -> setActive(true). Rate/block setup is unchanged,
+// so this is cheap and does not interfere with the rate re-prepare path.
+static void monitor_flush_plugins(MonitorState & ms) {
+    for (auto & p : ms.plugins) {
+        if (!p.component || !p.active) continue;
+        if (p.processor) p.processor->setProcessing(false);
+        p.component->setActive(false);
+        p.component->setActive(true);
+        if (p.processor) p.processor->setProcessing(true);
+    }
+    ms.rs_phase = 0.0;
+    ms.rs_last_L = ms.rs_last_R = 0.0f;
+}
 
 static bool monitor_load_track(MonitorState & ms, const std::string & path) {
     int T = 0, sr = 0;
@@ -787,9 +829,25 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
         return false;
     }
     if (ms.audio) free(ms.audio);
+    const int old_sr = ms.sr;
     ms.audio = audio;
     ms.T = T;
     ms.sr = sr;
+    // Track rate changed mid-session (e.g. 44.1k SA3/MM3 -> 48k ACE): the
+    // plugins were prepared at the old rate, so re-prepare them at the new one.
+    // The render loop picks the resampler whenever ms.sr != the device rate.
+    if (old_sr > 0 && old_sr != sr) {
+        for (auto & p : ms.plugins) {
+            if (!p.component) continue;
+            if (p.processor) p.processor->setProcessing(false);
+            p.component->setActive(false);
+            setup_processing(p, sr, 4096, kRealtime);
+        }
+        ms.rs_phase = 0.0;
+        ms.rs_last_L = ms.rs_last_R = 0.0f;
+        fprintf(stderr, "[monitor] Track rate changed %d -> %d Hz, plugins re-prepared\n", old_sr, sr);
+        fprintf(stderr, "[lifecycle] sample-rate change %d -> %d\n", old_sr, sr);
+    }
     ms.pos = 0;
     ms.current_track = path;
     fprintf(stderr, "[monitor] Loaded: %s (%d frames, %d Hz, %.1fs)\n",
@@ -800,7 +858,7 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
 static void monitor_check_control(MonitorState & ms) {
     if (ms.control_file.empty()) return;
     HANDLE hFile = CreateFileA(ms.control_file.c_str(), GENERIC_READ,
-                               FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                nullptr, OPEN_EXISTING, 0, nullptr);
     if (hFile == INVALID_HANDLE_VALUE) return;
 
@@ -809,7 +867,6 @@ static void monitor_check_control(MonitorState & ms) {
     bool changed = (ft.dwHighDateTime != ms.control_mtime.dwHighDateTime ||
                     ft.dwLowDateTime  != ms.control_mtime.dwLowDateTime);
     if (!changed) { CloseHandle(hFile); return; }
-    ms.control_mtime = ft;
 
     DWORD size = GetFileSize(hFile, nullptr);
     if (size == 0 || size == INVALID_FILE_SIZE) { CloseHandle(hFile); return; }
@@ -819,8 +876,18 @@ static void monitor_check_control(MonitorState & ms) {
     CloseHandle(hFile);
 
     yyjson_doc * doc = yyjson_read(buf.data(), bytesRead, 0);
-    if (!doc) return;
+    if (!doc) return;  // partial or empty write: mtime not recorded, retry next poll
     yyjson_val * root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_obj(root)) { yyjson_doc_free(doc); return; }
+    ms.control_mtime = ft;  // record only after a successful parse
+
+    // Act only on a newer seq. Files without seq (older servers) act on mtime.
+    yyjson_val * seq_val = yyjson_obj_get(root, "seq");
+    if (seq_val && yyjson_is_num(seq_val)) {
+        int64_t seq = (int64_t)yyjson_get_num(seq_val);
+        if (seq <= ms.control_seq) { yyjson_doc_free(doc); return; }
+        ms.control_seq = seq;
+    }
 
     yyjson_val * action_val = yyjson_obj_get(root, "action");
     if (action_val) {
@@ -848,12 +915,21 @@ static void monitor_check_control(MonitorState & ms) {
 
     // Seek support: { "seek": 42.5 } = jump to 42.5 seconds
     yyjson_val * seek_val = yyjson_obj_get(root, "seek");
-    if (seek_val && yyjson_is_num(seek_val)) {
+    yyjson_val * seek_seq_val = yyjson_obj_get(root, "seekSeq");
+    bool seek_new = true;
+    if (seek_seq_val && yyjson_is_num(seek_seq_val)) {
+        int64_t sseq = (int64_t)yyjson_get_num(seek_seq_val);
+        seek_new = sseq > ms.control_seek_seq;
+        if (seek_new) ms.control_seek_seq = sseq;
+    }
+    if (seek_new && seek_val && yyjson_is_num(seek_val)) {
         double seek_sec = yyjson_get_num(seek_val);  // get_real reads a JSON integer as 0
         int new_pos = (int)(seek_sec * ms.sr);
         if (new_pos < 0) new_pos = 0;
         if (new_pos >= ms.T) new_pos = ms.T - 1;
+        fprintf(stderr, "[lifecycle] seek %.3fs (frame %d -> %d)\n", seek_sec, ms.pos, new_pos);
         ms.pos = new_pos;
+        monitor_flush_plugins(ms);  // drop tails from the old position
     }
 
     yyjson_doc_free(doc);
@@ -959,15 +1035,70 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
     memcpy(out_R, cur_R, n * sizeof(float));
 }
 
+// Fallback path when the WASAPI device could not be switched to the track's
+// native sample rate (ms.sr). Reads `available` device-rate frames worth of
+// source audio via monitor_process_block() (advancing ms.pos in *source*
+// frames, so looping/seeking accounting is unaffected) and linearly
+// interpolates it up/down to dev_sr. A one-sample history is carried across
+// calls so no source samples are skipped or duplicated at block boundaries.
+static void monitor_resample_block(MonitorState & ms, float * out_L, float * out_R,
+                                    UINT32 available, int dev_sr) {
+    if (dev_sr <= 0 || ms.sr <= 0) {
+        memset(out_L, 0, available * sizeof(float));
+        memset(out_R, 0, available * sizeof(float));
+        return;
+    }
+
+    const double step = (double)ms.sr / (double)dev_sr; // source samples per device sample
+
+    // Combined buffer layout: index 0 = carried history sample, indices
+    // [1 .. srcNeeded-1] = freshly read source frames.
+    int srcNeeded = (int)std::ceil(ms.rs_phase + (double)available * step) + 2;
+    if (srcNeeded < 2) srcNeeded = 2;
+    if ((int)ms.rs_src_L.size() < srcNeeded) {
+        ms.rs_src_L.resize(srcNeeded);
+        ms.rs_src_R.resize(srcNeeded);
+    }
+    ms.rs_src_L[0] = ms.rs_last_L;
+    ms.rs_src_R[0] = ms.rs_last_R;
+    monitor_process_block(ms, ms.rs_src_L.data() + 1, ms.rs_src_R.data() + 1, srcNeeded - 1);
+
+    for (UINT32 i = 0; i < available; i++) {
+        double pos = ms.rs_phase + (double)i * step;
+        int idx = (int)pos;
+        if (idx > srcNeeded - 2) idx = srcNeeded - 2;
+        if (idx < 0) idx = 0;
+        double frac = pos - idx;
+        out_L[i] = (float)(ms.rs_src_L[idx] + (ms.rs_src_L[idx + 1] - ms.rs_src_L[idx]) * frac);
+        out_R[i] = (float)(ms.rs_src_R[idx] + (ms.rs_src_R[idx + 1] - ms.rs_src_R[idx]) * frac);
+    }
+
+    double nextPos = ms.rs_phase + (double)available * step;
+    int consumed = (int)nextPos;
+    if (consumed >= srcNeeded) consumed = srcNeeded - 1;
+    if (consumed < 0) consumed = 0;
+    ms.rs_phase  = nextPos - consumed;
+    ms.rs_last_L = ms.rs_src_L[consumed];
+    ms.rs_last_R = ms.rs_src_R[consumed];
+}
+
 // Window proc for plugin GUIs in monitor mode
 static MonitorState * g_monitorState = nullptr;
 static int g_monitorWindowCount = 0;
 
 static LRESULT CALLBACK MonitorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-        case WM_CLOSE:
+        case WM_CLOSE: {
+            // Detach the editor before its window is destroyed.
+            auto * view = reinterpret_cast<IPlugView *>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
+            if (view) {
+                SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
+                view->removed();
+                fprintf(stderr, "[lifecycle] editor close (user)\n");
+            }
             DestroyWindow(hwnd);
             return 0;
+        }
         case WM_DESTROY:
             g_monitorWindowCount--;
             if (g_monitorWindowCount <= 0 && g_monitorState) {
@@ -1056,6 +1187,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     // Open GUI for each plugin
     std::vector<IPlugView*> views;
     std::vector<SimplePlugFrame*> plugFrames;
+    std::vector<HWND> viewWindows;  // parallel to views
     for (size_t i = 0; i < ms.plugins.size(); i++) {
         auto ctrl = ms.plugins[i].provider->getController();
         if (!ctrl) continue;
@@ -1084,9 +1216,13 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
         if (view->attached(hwnd, kPlatformTypeHWND) != kResultOk) {
             view->release(); DestroyWindow(hwnd); continue;
         }
+        // GWLP_USERDATA holds the view while it is attached; WM_CLOSE clears it.
+        SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(view));
         ShowWindow(hwnd, SW_SHOW);
         g_monitorWindowCount++;
+        fprintf(stderr, "[lifecycle] editor open name=%s\n", ms.plugins[i].lc_name.c_str());
         views.push_back(view);
+        viewWindows.push_back(hwnd);
     }
 
     fprintf(stderr, "[monitor] %d plugin GUI(s) opened\n", g_monitorWindowCount);
@@ -1113,25 +1249,74 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     fprintf(stderr, "[monitor] WASAPI: %d Hz, %d ch, %d bits\n",
             (int)pwfx->nSamplesPerSec, (int)pwfx->nChannels, (int)pwfx->wBitsPerSample);
 
+    // The track was decoded at ms.sr (44.1k for SA3/MM3, 48k for ACE) but the
+    // device mix format from GetMixFormat is typically 48k. If we Initialize
+    // with the mix format and just pump ms.sr-rate samples into it verbatim,
+    // playback runs at (dev_sr / ms.sr) speed -- audibly fast/sharp plus
+    // stutter. Prefer asking the shared-mode audio engine to do the rate
+    // conversion for us; fall back to a manual linear resampler if it can't.
+    std::vector<BYTE> modFmtBuf;
+    WAVEFORMATEX * pInitFmt = pwfx;
+    if (ms.sr > 0 && (DWORD)ms.sr != pwfx->nSamplesPerSec) {
+        modFmtBuf.assign((BYTE*)pwfx, (BYTE*)pwfx + sizeof(WAVEFORMATEX) + pwfx->cbSize);
+        WAVEFORMATEX * modFmt = (WAVEFORMATEX*)modFmtBuf.data();
+        modFmt->nSamplesPerSec  = (DWORD)ms.sr;
+        modFmt->nAvgBytesPerSec = modFmt->nSamplesPerSec * modFmt->nBlockAlign;
+
+        WAVEFORMATEX * closest = nullptr;
+        HRESULT hrFmt = pAudioClient->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, modFmt, &closest);
+        if (closest) CoTaskMemFree(closest);
+
+        if (hrFmt == S_OK) {
+            pInitFmt = modFmt;
+            fprintf(stderr, "[vst-host] monitor: device %d Hz, track %d Hz -> requesting track rate (shared mode)\n",
+                    (int)pwfx->nSamplesPerSec, ms.sr);
+        } else {
+            ms.rs_active = true;
+            fprintf(stderr, "[vst-host] monitor: device %d Hz, track %d Hz -> linear resampling\n",
+                    (int)pwfx->nSamplesPerSec, ms.sr);
+        }
+    }
+
     REFERENCE_TIME bufDuration = 200000; // 20ms buffer
     hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                   bufDuration, 0, pwfx, nullptr);
+                                   bufDuration, 0, pInitFmt, nullptr);
+    if (FAILED(hr) && pInitFmt != pwfx) {
+        // Modified format was reported supported but Initialize still rejected it
+        // (rare, e.g. exclusive-mode-only endpoints). A WASAPI IAudioClient can
+        // only be Initialize()'d once -- calling it again on the same client
+        // after a failed attempt is undefined behavior. Release it and get a
+        // fresh IAudioClient from the still-in-scope device, then Initialize
+        // once with the device's native mix format + manual resampling.
+        fprintf(stderr, "[monitor] WASAPI Initialize with track rate failed (0x%08X), falling back to linear resampling\n", (unsigned)hr);
+        pAudioClient->Release();
+        pAudioClient = nullptr;
+        hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&pAudioClient);
+        if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to re-activate audio client: 0x%08X\n", (unsigned)hr); return 1; }
+        pInitFmt = pwfx;
+        ms.rs_active = true;
+        hr = pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                       AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                       bufDuration, 0, pInitFmt, nullptr);
+    }
     if (FAILED(hr)) { fprintf(stderr, "[monitor] WASAPI Initialize failed: 0x%08X\n", (unsigned)hr); return 1; }
+    const int dev_sr = (int)pInitFmt->nSamplesPerSec;
     pAudioClient->SetEventHandle(hAudioEvent);
     pAudioClient->GetBufferSize(&bufferFrames);
     hr = pAudioClient->GetService(__uuidof(IAudioRenderClient), (void**)&pRenderClient);
     if (FAILED(hr)) { fprintf(stderr, "[monitor] Failed to get render client\n"); return 1; }
 
     fprintf(stderr, "[monitor] Buffer: %u frames (%.1f ms)\n",
-            bufferFrames, 1000.0f * bufferFrames / pwfx->nSamplesPerSec);
+            bufferFrames, 1000.0f * bufferFrames / dev_sr);
 
     // Pre-fill buffer
     {   BYTE * data; pRenderClient->GetBuffer(bufferFrames, &data);
-        memset(data, 0, bufferFrames * pwfx->nBlockAlign);
+        memset(data, 0, bufferFrames * pInitFmt->nBlockAlign);
         pRenderClient->ReleaseBuffer(bufferFrames, 0); }
 
     pAudioClient->Start();
+    fprintf(stderr, "[lifecycle] device start (%u frames)\n", bufferFrames);
     fprintf(stderr, "[monitor] Playing... Close all plugin windows to stop.\n");
 
     // Temp buffers for processed audio
@@ -1150,10 +1335,14 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             if (available > 0) {
                 BYTE * data = nullptr;
                 if (SUCCEEDED(pRenderClient->GetBuffer(available, &data))) {
-                    monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
+                    if (ms.rs_active || ms.sr != dev_sr) {
+                        monitor_resample_block(ms, proc_L.data(), proc_R.data(), available, dev_sr);
+                    } else {
+                        monitor_process_block(ms, proc_L.data(), proc_R.data(), (int)available);
+                    }
                     // Interleave into WASAPI buffer (float32, potentially >2 channels)
                     float * fdata = (float *)data;
-                    int ch = pwfx->nChannels;
+                    int ch = pInitFmt->nChannels;
                     for (UINT32 i = 0; i < available; i++) {
                         fdata[i * ch + 0] = proc_L[i];
                         fdata[i * ch + 1] = (ch >= 2) ? proc_R[i] : 0;
@@ -1177,9 +1366,9 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             }
         }
 
-        // Check control file periodically (~500ms)
+        // Check control file periodically (~50ms; one stat when unchanged)
         DWORD now = GetTickCount();
-        if (now - controlCheckTick > 500) {
+        if (now - controlCheckTick > 50) {
             controlCheckTick = now;
             monitor_check_control(ms);
         }
@@ -1207,6 +1396,7 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
 
     // ── Cleanup ──
     pAudioClient->Stop();
+    fprintf(stderr, "[lifecycle] device stop\n");
     if (pRenderClient) pRenderClient->Release();
     if (pAudioClient)  pAudioClient->Release();
     if (pDevice)       pDevice->Release();
@@ -1215,7 +1405,19 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
     CloseHandle(hAudioEvent);
 
     // Detach and release views
-    for (auto * v : views) { v->removed(); v->release(); }
+    // Detach each still-open editor while its window exists, then destroy the
+    // window. Editors the user already closed were detached in WM_CLOSE.
+    for (size_t i = 0; i < views.size(); i++) {
+        HWND hwnd = viewWindows[i];
+        if (IsWindow(hwnd) &&
+            GetWindowLongPtrA(hwnd, GWLP_USERDATA) == reinterpret_cast<LONG_PTR>(views[i])) {
+            SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0);
+            views[i]->removed();
+            fprintf(stderr, "[lifecycle] editor close name=%s\n", ms.plugins[i].lc_name.c_str());
+            DestroyWindow(hwnd);
+        }
+        views[i]->release();
+    }
     for (auto * f : plugFrames) delete f;
 
     // Save all plugin states
@@ -1247,6 +1449,15 @@ static void usage(const char * prog) {
 
 int main(int argc, char * argv[]) {
     if (argc < 2) { usage(argv[0]); return 1; }
+    {
+        std::string a;
+        for (int i = 1; i < argc; i++) { a += ' '; a += argv[i]; }
+#ifdef _WIN32
+        fprintf(stderr, "[lifecycle] start pid=%lu args=%s\n", (unsigned long)GetCurrentProcessId(), a.c_str());
+#else
+        fprintf(stderr, "[lifecycle] start args=%s\n", a.c_str());
+#endif
+    }
 
     const char * mode    = nullptr;
     const char * plugin  = nullptr;
