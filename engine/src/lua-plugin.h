@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <cstring>
 #include <functional>
@@ -404,6 +405,28 @@ static ParamSchema lua_extract_param(lua_State * L, int idx) {
         p.visible_when.active = true;
         p.visible_when.key    = lua_get_string(L, -1, "key");
         p.visible_when.equals = lua_get_string(L, -1, "equals");
+        // Accept equals = true/false and numbers too; format to match the
+        // UI's String(value) comparison ("true", "2", "2.5").
+        lua_getfield(L, -1, "equals");
+        if (lua_isboolean(L, -1)) {
+            p.visible_when.equals = lua_toboolean(L, -1) ? "true" : "false";
+        } else if (lua_type(L, -1) == LUA_TNUMBER) {
+            double v = lua_tonumber(L, -1);
+            char buf[32];
+            if (v == std::floor(v) && std::fabs(v) < 1e15) {
+                snprintf(buf, sizeof(buf), "%lld", (long long) v);
+            } else {
+                snprintf(buf, sizeof(buf), "%.17g", v);
+                // shortest round-trip form, like JS String(number)
+                for (int prec = 1; prec <= 17; prec++) {
+                    char t[32];
+                    snprintf(t, sizeof(t), "%.*g", prec, v);
+                    if (std::strtod(t, nullptr) == v) { memcpy(buf, t, sizeof(t)); break; }
+                }
+            }
+            p.visible_when.equals = buf;
+        }
+        lua_pop(L, 1);
     }
     lua_pop(L, 1);
 

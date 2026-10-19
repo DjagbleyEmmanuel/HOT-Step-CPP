@@ -289,6 +289,8 @@ Parameters can be shown/hidden based on another parameter's value:
   hint = "Only visible when Mode is set to Quality" }
 ```
 
+> **Note:** Use string values for `equals` (e.g. `"true"`, `"2"`) for maximum compatibility. The engine also accepts Lua booleans (`true`/`false`) and numbers directly, so `equals = true` now works. Older builds only accept strings, so prefer strings if you distribute plugins for use with unpatched releases.
+
 ### Transform Expressions
 
 The `transform` field allows the UI to apply a mathematical transformation to the displayed value before sending it to the plugin. This is useful when the internal value differs from what the user sees:
@@ -463,6 +465,7 @@ end
 
 ## Tips
 
+- **Sigma schedule has no trailing 0.** The HOT-Step engine passes the schedule to full-loop solvers without a trailing 0 entry (unlike ComfyUI). This means the schedule length equals the step count: use `n_steps = #sigmas`, not `#sigmas - 1`. With `#sigmas - 1` the loop exits one step early, the terminal x0 projection never runs, and the output keeps residual noise at the final sigma level.
 - **Test with Euler + Linear first.** The simplest solver/scheduler combination isolates your plugin's behaviour.
 - **Use `print()` for debugging.** Output goes to the terminal panel in the app.
 - **Lua tables for scratch space.** If you need temporary arrays, use Lua tables: `local tmp = {}; for i = 0, n-1 do tmp[i] = 0 end`. They're slower than FloatArrays but work for intermediate calculations.
