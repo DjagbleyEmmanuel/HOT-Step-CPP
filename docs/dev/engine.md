@@ -44,7 +44,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
 | `quantize` | `tools/quantize.cpp` | GGUF requantizer for ACE-Step, MM3 and YuE2 files, with optional `--imatrix` |
 | `mastering` | `tools/mastering.cpp` | Reference-based mastering (the matchering algorithm) |
-| `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins |
+| `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`, `--monitor`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins. `--monitor` (Windows, WASAPI) plays a track through the chain live, driven by a control file the server rewrites atomically with an increasing `seq`; see the note below |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
 | `yue2-train-gemm-precision-test` | `tools/yue2-train-gemm-precision-test.cpp` | The YuE2 trainer's BF16 GEMMs against `YUE2_AITK_PRECISION=strict-f32`, forward and backward, at YuE2 shapes on the first GPU |
@@ -57,6 +57,19 @@ backend that is not loaded is a hard failure (prints the loaded device list), ne
 CPU fallback. `--prec tf32` stays CUDA-only; Vulkan runs f32 at the same 1e-4 tolerance as CPU.
 `--bench`/`--bench-lm`/`--bench-tr` always target CUDA specifically (the tf32 arm is a
 tensor-core question) and reject `--backend vulkan` rather than silently ignoring it.
+
+`vst-host --monitor` first asks WASAPI's shared mode to take the track's own rate. If the
+device refuses, it renders at the device rate through a linear resampler
+(`tools/monitor-resampler.h`). The resampler keeps every processed source frame it has not
+yet passed, plus the fractional phase, across device callbacks, so the track advances by
+exactly `n * track_rate / device_rate` frames per `n` device frames whatever the callback
+sizes are. Seek, track change and stop drop the buffered frames; pause leaves them for the
+resume. A track at a new rate re-prepares every plugin at that rate.
+`engine/tests/test-monitor-resampler.cpp` checks continuity and frame accounting with
+irregular block sizes (compile line in the file). On the Node side
+(`server/src/routes/vst.ts`), monitor start, restart and stop run one at a time, so
+overlapping requests cannot spawn two hosts on the same control and status files. Host
+lifecycle lines go to `logs/<session>/vst_host.log`.
 
 `tools/ace-server.cpp` is upstream's server, kept as a reference for syncs. It is
 not compiled. The shipped `ace-server` is built from `hot-step-server.cpp`.

@@ -36,6 +36,18 @@ export function writeJsonAtomic(file: string, data: unknown): void {
   fs.writeFileSync(file, json, 'utf-8');
 }
 
+/** Runs async tasks one at a time, in call order. A task starts only after the
+ *  previous one has settled, whether it resolved or threw, so a monitor
+ *  start/restart/stop cannot interleave with another across its awaits. */
+export function createSerializer() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.then(task, task);
+    tail = run.catch(() => {});
+    return run;
+  };
+}
+
 /** Stateful writer: holds the current control state and the next seq. The seq
  *  starts at the current time so it keeps increasing across server restarts. */
 export function createControlWriter(fileFn: () => string) {

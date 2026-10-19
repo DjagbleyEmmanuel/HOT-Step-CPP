@@ -348,6 +348,11 @@ in the player through the chain, pausing the normal player so you do not hear bo
 the monitor runs, a strip replaces the Profiles and VRAM controls at the right of the bar,
 with the track name, a seek bar, the time, pause and stop. Changes made in a plugin window
 while monitoring are only heard after you restart the monitor; a banner offers the restart.
+The monitor plays at the track's own rate (44.1 kHz for some backends, 48 kHz for
+ACE-Step). If your sound device cannot switch to that rate, the monitor converts to the
+device's rate itself, at the same pitch and speed. When the next track has a different rate,
+the plugins are set up again for it. If the monitor misbehaves, `vst_host.log` in the newest
+`logs/<session>` folder records each start, stop, seek and rate change.
 
 Presets save the current chain under a name so you can switch between chains. The chain
 itself is stored by the server; presets are stored in the browser.

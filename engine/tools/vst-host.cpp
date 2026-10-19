@@ -49,6 +49,7 @@
 
 // WAV I/O (our existing header)
 #include "audio-io.h"
+#include "monitor-resampler.h"
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -799,10 +800,7 @@ struct MonitorState {
     // Linear resampler state (used only when the WASAPI device format could not
     // be switched to the track's native rate; see monitor_resample_block()).
     bool   rs_active = false;
-    double rs_phase  = 0.0;   // fractional position, in source-sample units, carried across callbacks
-    float  rs_last_L = 0.0f;  // last source sample emitted (history for interpolation continuity)
-    float  rs_last_R = 0.0f;
-    std::vector<float> rs_src_L, rs_src_R; // scratch: [0]=history, [1..] = freshly read source frames
+    MonitorResampler rs;
 };
 
 // Flush plugin DSP state (reverb/delay tails, lookahead buffers) without a
@@ -817,8 +815,7 @@ static void monitor_flush_plugins(MonitorState & ms) {
         p.component->setActive(true);
         if (p.processor) p.processor->setProcessing(true);
     }
-    ms.rs_phase = 0.0;
-    ms.rs_last_L = ms.rs_last_R = 0.0f;
+    ms.rs.reset();
 }
 
 static bool monitor_load_track(MonitorState & ms, const std::string & path) {
@@ -843,11 +840,10 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
             p.component->setActive(false);
             setup_processing(p, sr, 4096, kRealtime);
         }
-        ms.rs_phase = 0.0;
-        ms.rs_last_L = ms.rs_last_R = 0.0f;
         fprintf(stderr, "[monitor] Track rate changed %d -> %d Hz, plugins re-prepared\n", old_sr, sr);
         fprintf(stderr, "[lifecycle] sample-rate change %d -> %d\n", old_sr, sr);
     }
+    ms.rs.reset();  // buffered frames belong to the old track
     ms.pos = 0;
     ms.current_track = path;
     fprintf(stderr, "[monitor] Loaded: %s (%d frames, %d Hz, %.1fs)\n",
@@ -894,6 +890,7 @@ static void monitor_check_control(MonitorState & ms) {
         const char * action = yyjson_get_str(action_val);
         if (action && !strcmp(action, "stop")) {
             ms.running = false;
+            ms.rs.reset();
             yyjson_doc_free(doc);
             return;
         }
@@ -1036,50 +1033,23 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
 }
 
 // Fallback path when the WASAPI device could not be switched to the track's
-// native sample rate (ms.sr). Reads `available` device-rate frames worth of
-// source audio via monitor_process_block() (advancing ms.pos in *source*
-// frames, so looping/seeking accounting is unaffected) and linearly
-// interpolates it up/down to dev_sr. A one-sample history is carried across
-// calls so no source samples are skipped or duplicated at block boundaries.
+// native sample rate (ms.sr). Pulls processed source frames through
+// monitor_process_block() (advancing ms.pos in *source* frames, so looping
+// and seeking accounting is unaffected) and linearly interpolates them to
+// dev_sr. ms.rs keeps every pulled frame it has not yet passed, so nothing is
+// skipped or repeated at callback boundaries. While paused (or with no track)
+// it outputs silence and leaves the buffered frames for the resume.
 static void monitor_resample_block(MonitorState & ms, float * out_L, float * out_R,
                                     UINT32 available, int dev_sr) {
-    if (dev_sr <= 0 || ms.sr <= 0) {
+    if (dev_sr <= 0 || ms.sr <= 0 || ms.paused || !ms.audio || ms.T <= 0) {
         memset(out_L, 0, available * sizeof(float));
         memset(out_R, 0, available * sizeof(float));
         return;
     }
-
-    const double step = (double)ms.sr / (double)dev_sr; // source samples per device sample
-
-    // Combined buffer layout: index 0 = carried history sample, indices
-    // [1 .. srcNeeded-1] = freshly read source frames.
-    int srcNeeded = (int)std::ceil(ms.rs_phase + (double)available * step) + 2;
-    if (srcNeeded < 2) srcNeeded = 2;
-    if ((int)ms.rs_src_L.size() < srcNeeded) {
-        ms.rs_src_L.resize(srcNeeded);
-        ms.rs_src_R.resize(srcNeeded);
-    }
-    ms.rs_src_L[0] = ms.rs_last_L;
-    ms.rs_src_R[0] = ms.rs_last_R;
-    monitor_process_block(ms, ms.rs_src_L.data() + 1, ms.rs_src_R.data() + 1, srcNeeded - 1);
-
-    for (UINT32 i = 0; i < available; i++) {
-        double pos = ms.rs_phase + (double)i * step;
-        int idx = (int)pos;
-        if (idx > srcNeeded - 2) idx = srcNeeded - 2;
-        if (idx < 0) idx = 0;
-        double frac = pos - idx;
-        out_L[i] = (float)(ms.rs_src_L[idx] + (ms.rs_src_L[idx + 1] - ms.rs_src_L[idx]) * frac);
-        out_R[i] = (float)(ms.rs_src_R[idx] + (ms.rs_src_R[idx + 1] - ms.rs_src_R[idx]) * frac);
-    }
-
-    double nextPos = ms.rs_phase + (double)available * step;
-    int consumed = (int)nextPos;
-    if (consumed >= srcNeeded) consumed = srcNeeded - 1;
-    if (consumed < 0) consumed = 0;
-    ms.rs_phase  = nextPos - consumed;
-    ms.rs_last_L = ms.rs_src_L[consumed];
-    ms.rs_last_R = ms.rs_src_R[consumed];
+    const double step = (double)ms.sr / (double)dev_sr; // source frames per device frame
+    ms.rs.run(out_L, out_R, (int)available, step, [&](float * L, float * R, int count) {
+        monitor_process_block(ms, L, R, count);
+    });
 }
 
 // Window proc for plugin GUIs in monitor mode
