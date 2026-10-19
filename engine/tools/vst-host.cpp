@@ -833,12 +833,21 @@ static bool monitor_load_track(MonitorState & ms, const std::string & path) {
     // Track rate changed mid-session (e.g. 44.1k SA3/MM3 -> 48k ACE): the
     // plugins were prepared at the old rate, so re-prepare them at the new one.
     // The render loop picks the resampler whenever ms.sr != the device rate.
+    // A plugin that rejects the new rate is left inactive, and process() must
+    // never reach it, so stop the monitor, as a failed setup at startup does.
     if (old_sr > 0 && old_sr != sr) {
-        for (auto & p : ms.plugins) {
+        for (size_t i = 0; i < ms.plugins.size(); i++) {
+            auto & p = ms.plugins[i];
             if (!p.component) continue;
             if (p.processor) p.processor->setProcessing(false);
             p.component->setActive(false);
-            setup_processing(p, sr, 4096, kRealtime);
+            p.active = false;
+            if (!setup_processing(p, sr, 4096, kRealtime)) {
+                fprintf(stderr, "[monitor] Plugin %zu rejected %d Hz, stopping monitor\n", i, sr);
+                fprintf(stderr, "[lifecycle] sample-rate change %d -> %d failed, stopping\n", old_sr, sr);
+                ms.running = false;
+                return false;
+            }
         }
         fprintf(stderr, "[monitor] Track rate changed %d -> %d Hz, plugins re-prepared\n", old_sr, sr);
         fprintf(stderr, "[lifecycle] sample-rate change %d -> %d\n", old_sr, sr);
