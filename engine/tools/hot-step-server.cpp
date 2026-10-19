@@ -101,6 +101,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 // own comment on why).
 #include "hot-step-families.h"
 
+#include <algorithm>   // std::sort (HOT-Step /sa3/props adapter list)
 #include <atomic>
 #include <condition_variable>
 #include <cmath>
@@ -109,6 +110,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>  // HOT-Step /sa3/props adapter dir scan
 #include <functional>
 #include <future>
 #include <memory>
@@ -3999,10 +4001,20 @@ int main(int argc, char ** argv) {
         if (req.has_param("solver"))        sa3_sp.solver        = req.get_param_value("solver");
         if (req.has_param("scheduler"))     sa3_sp.scheduler     = req.get_param_value("scheduler");
         if (req.has_param("guidance_mode")) sa3_sp.guidance_mode = req.get_param_value("guidance_mode");
+        // Postprocess plugin: replaces the built-in latent->audio decode.
+        // Same field name as ACE's request.h postprocess_plugin.
+        if (req.has_param("postprocess_plugin")) {
+            sa3_sp.postprocess_plugin = req.get_param_value("postprocess_plugin");
+        }
         if (req.has_param("guidance_scale")) {
             sa3_sp.guidance_scale = std::strtof(req.get_param_value("guidance_scale").c_str(), nullptr);
             if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;
             if (sa3_sp.guidance_scale > 20.0f) sa3_sp.guidance_scale = 20.0f;
+        }
+        // Default true (see Sa3PluginParams::sa3_lua_renoise in sa3-refine.h);
+        // "0" opts out for A/B against the un-wrapped solver update.
+        if (req.has_param("sa3_lua_renoise") && req.get_param_value("sa3_lua_renoise") == "0") {
+            sa3_sp.sa3_lua_renoise = false;
         }
         // plugin_params: a flat JSON object {"<plugin>:<key>": value, ...},
         // the same shape /synth forwards to Lua plugins.
@@ -4313,6 +4325,319 @@ int main(int argc, char ** argv) {
         free(out_native);
         res.set_content(wav, "audio/wav");
     }));
+
+    // ═══════════════════════════════════════════════════════════════════
+    // HOT-Step: SA3 as a primary backend (MDMAchine / A&E Concepts)
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // GET  /sa3/props   — readiness probe for backends/sa3/index.ts
+    // POST /sa3-synth   — text-to-audio from pure noise
+    //
+    // /sa3-synth is /sa3-refine minus the input: no WAV body, no encoder pass,
+    // no strength mix, no RMS / envelope / mix / band-splice level-matching
+    // (there is no source to match). Model selection, adapter parsing, the
+    // Lua plugin routing and the Sa3GlobalsGuard are the refine handler's
+    // code verbatim. The denoise itself is sa3_refine_run_backend with
+    // noise_only=true (sa3-refine.h) — same loop, same plugins, same decode.
+
+    svr.Get("/sa3/props", [models_dir](const httplib::Request &, httplib::Response & res) {
+        std::string sa3_dir = std::string(models_dir) + "/onnx/sa3";
+        auto file_exists = [](const std::string & p) {
+            FILE * f = fopen(p.c_str(), "rb");
+            if (f) { fclose(f); return true; }
+            return false;
+        };
+        const bool have_gguf = file_exists(std::string(models_dir) + "/sa3-dit-BF16.gguf");
+        const bool have_tok  = file_exists(sa3_dir + "/tokenizer.json");
+
+        // Adapter catalogue: models/sa3-adapters/*.gguf, bare stems.
+        std::vector<std::string> adapters;
+        {
+            std::string adir = std::string(models_dir) + "/sa3-adapters";
+            std::error_code ec;
+            if (std::filesystem::is_directory(adir, ec)) {
+                for (auto & e : std::filesystem::directory_iterator(adir, ec)) {
+                    if (!e.is_regular_file()) continue;
+                    auto p = e.path();
+                    if (p.extension() == ".gguf") adapters.push_back(p.stem().string());
+                }
+                std::sort(adapters.begin(), adapters.end());
+            }
+        }
+
+        yyjson_mut_doc * doc  = yyjson_mut_doc_new(nullptr);
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        yyjson_mut_obj_add_str (doc, root, "backend", "sa3");
+        yyjson_mut_obj_add_str (doc, root, "model",   "Stable Audio 3");
+        yyjson_mut_obj_add_bool(doc, root, "available",   have_gguf);
+        // synth_ready mirrors mm3 props: weights + tokenizer present, so the
+        // request will at least get as far as loading a model.
+        yyjson_mut_obj_add_bool(doc, root, "synth_ready", have_gguf && have_tok);
+        yyjson_mut_obj_add_str (doc, root, "backend_hint", have_gguf ? "gguf" : "none");
+        yyjson_mut_obj_add_int (doc, root, "sample_rate", SA3_SR);
+        yyjson_mut_obj_add_int (doc, root, "prompt_token_limit", SA3_TOK_LEN);
+        yyjson_mut_val * files = yyjson_mut_obj(doc);
+        yyjson_mut_val * f_gguf = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_bool(doc, f_gguf, "found", have_gguf);
+        yyjson_mut_obj_add_val (doc, files, "gguf", f_gguf);
+        yyjson_mut_val * f_tok = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_bool(doc, f_tok, "found", have_tok);
+        yyjson_mut_obj_add_val (doc, files, "tokenizer", f_tok);
+        yyjson_mut_obj_add_val (doc, root, "files", files);
+        yyjson_mut_val * arr = yyjson_mut_arr(doc);
+        for (auto & a : adapters) yyjson_mut_arr_add_str(doc, arr, a.c_str());
+        yyjson_mut_obj_add_val(doc, root, "adapters", arr);
+        char * s = yyjson_mut_write(doc, 0, nullptr);
+        res.set_content(s ? s : "{}", "application/json");
+        if (s) free(s);
+        yyjson_mut_doc_free(doc);
+    });
+
+    svr.Post("/sa3-synth", [models_dir](const httplib::Request & req, httplib::Response & res) {
+        auto file_exists = [](const std::string & p) {
+            FILE * f = fopen(p.c_str(), "rb");
+            if (f) { fclose(f); return true; }
+            return false;
+        };
+        bool have_gguf = file_exists(std::string(models_dir) + "/sa3-dit-BF16.gguf");
+        // GGUF only, same as /sa3-refine: the ONNX Runtime backend is retired,
+        // and an explicit backend=onnx is refused rather than silently rerouted.
+        if (req.has_param("backend") && req.get_param_value("backend") == "onnx") {
+            json_error(res, 400, "StableStep ONNX backend is no longer available; omit backend or use gguf");
+            return;
+        }
+
+        // Duration — the one param synth has that refine does not. Refine gets
+        // its length from the input WAV; here it is the request. Tiled
+        // encode/decode (sa3_chunk_starts) handles any length, so the ceiling
+        // is a sanity bound, not an engine limit.
+        float duration_sec = 30.0f;
+        if (req.has_param("duration")) {
+            duration_sec = std::strtof(req.get_param_value("duration").c_str(), nullptr);
+        }
+        if (!(duration_sec >= 1.0f)) {
+            json_error(res, 400, "\"duration\" must be >= 1 second");
+            return;
+        }
+        if (duration_sec > 600.0f) duration_sec = 600.0f;
+        const int T44 = (int) (duration_sec * SA3_SR);
+
+        // Adapters: same parse + same GGUF forcing as /sa3-refine.
+        std::vector<std::pair<std::string, float>> adapter_specs;
+        std::string adapter_sig;
+        if (req.has_param("adapters") && !req.get_param_value("adapters").empty()) {
+            const std::string csv = req.get_param_value("adapters");
+            size_t pos = 0;
+            while (pos < csv.size()) {
+                size_t comma = csv.find(',', pos);
+                if (comma == std::string::npos) comma = csv.size();
+                std::string entry = csv.substr(pos, comma - pos);
+                pos = comma + 1;
+                if (entry.empty()) continue;
+                size_t colon = entry.rfind(':');
+                std::string name  = (colon == std::string::npos) ? entry : entry.substr(0, colon);
+                float       scale = (colon == std::string::npos) ? 1.0f
+                                    : strtof(entry.c_str() + colon + 1, nullptr);
+                if (name.empty() || name.find('/') != std::string::npos ||
+                    name.find('\\') != std::string::npos || name.find("..") != std::string::npos) {
+                    json_error(res, 400, "Invalid adapter name");
+                    return;
+                }
+                std::string path = std::string(models_dir) + "/sa3-adapters/" + name + ".gguf";
+                if (!file_exists(path)) {
+                    json_error(res, 400, ("SA3 adapter not found: " + name +
+                                          " (expected models/sa3-adapters/" + name + ".gguf)").c_str());
+                    return;
+                }
+                adapter_specs.push_back({ path, scale });
+                if (!adapter_sig.empty()) adapter_sig += ";";
+                adapter_sig += path + "=" + std::to_string(scale);
+            }
+            if (!adapter_specs.empty()) {
+                if (!have_gguf) {
+                    json_error(res, 501, "SA3 adapters require the GGUF backend (sa3-*.gguf not installed)");
+                    return;
+                }
+                fprintf(stderr, "[Server] SA3 synth: %zu adapter(s) requested\n",
+                        adapter_specs.size());
+            }
+        }
+
+        if (!have_gguf) {
+            json_error(res, 501, "SA3 GGUF models not installed (expected sa3-*.gguf in models dir)");
+            return;
+        }
+
+        // Params. No strength / rms_match / env_match / mix / band_blend —
+        // those are all relative to an input that does not exist here.
+        int   steps = 8;
+        bool  pingpong = true;
+        bool  zero_noise = false;
+        uint64_t seed = (uint64_t)time(nullptr) * 2654435761ull;
+        if (req.has_param("steps")) {
+            steps = atoi(req.get_param_value("steps").c_str());
+            if (steps < 1) steps = 1;
+            if (steps > 64) steps = 64;
+        }
+        if (req.has_param("sampler") && req.get_param_value("sampler") == "euler") pingpong = false;
+        if (req.has_param("seed"))  seed = std::strtoull(req.get_param_value("seed").c_str(), nullptr, 10);
+        if (req.has_param("debug_zero_noise") && req.get_param_value("debug_zero_noise") == "1") zero_noise = true;
+
+        // dump_latent=<path>: write the final denoised latent (pre-decode) as
+        // flat f32 for offline calibration. Path is sanitised to the models
+        // dir's sibling "sa3-latents/" — no traversal, no absolute paths.
+        std::string dump_latent_path;
+        if (req.has_param("dump_latent") && !req.get_param_value("dump_latent").empty()) {
+            std::string name = req.get_param_value("dump_latent");
+            if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
+                name.find("..") != std::string::npos) {
+                json_error(res, 400, "dump_latent must be a bare filename");
+                return;
+            }
+            std::string ldir = std::string(models_dir) + "/sa3-latents";
+            std::error_code ec;
+            std::filesystem::create_directories(ldir, ec);
+            dump_latent_path = ldir + "/" + name;
+        }
+
+        // Lua plugin routing — identical to /sa3-refine.
+        Sa3PluginParams sa3_sp;
+        if (req.has_param("solver"))        sa3_sp.solver        = req.get_param_value("solver");
+        if (req.has_param("scheduler"))     sa3_sp.scheduler     = req.get_param_value("scheduler");
+        if (req.has_param("guidance_mode")) sa3_sp.guidance_mode = req.get_param_value("guidance_mode");
+        if (req.has_param("postprocess_plugin")) {
+            sa3_sp.postprocess_plugin = req.get_param_value("postprocess_plugin");
+        }
+        if (req.has_param("guidance_scale")) {
+            sa3_sp.guidance_scale = std::strtof(req.get_param_value("guidance_scale").c_str(), nullptr);
+            if (sa3_sp.guidance_scale < 1.0f)  sa3_sp.guidance_scale = 1.0f;
+            if (sa3_sp.guidance_scale > 20.0f) sa3_sp.guidance_scale = 20.0f;
+        }
+        // Default true (see Sa3PluginParams::sa3_lua_renoise in sa3-refine.h);
+        // "0" opts out for A/B against the un-wrapped solver update.
+        if (req.has_param("sa3_lua_renoise") && req.get_param_value("sa3_lua_renoise") == "0") {
+            sa3_sp.sa3_lua_renoise = false;
+        }
+        if (req.has_param("plugin_params")) {
+            const std::string & pp_json = req.get_param_value("plugin_params");
+            yyjson_doc * pp_doc = yyjson_read(pp_json.c_str(), pp_json.size(), 0);
+            if (pp_doc) {
+                yyjson_val * pp_obj = yyjson_doc_get_root(pp_doc);
+                if (yyjson_is_obj(pp_obj)) {
+                    yyjson_obj_iter iter;
+                    yyjson_obj_iter_init(pp_obj, &iter);
+                    yyjson_val * k;
+                    while ((k = yyjson_obj_iter_next(&iter))) {
+                        yyjson_val * v = yyjson_obj_iter_get_val(k);
+                        if (!yyjson_is_str(k)) continue;
+                        if (yyjson_is_str(v)) {
+                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_str(v);
+                        } else if (yyjson_is_num(v)) {
+                            char buf[32];
+                            snprintf(buf, sizeof(buf), "%g", yyjson_get_real(v));
+                            sa3_sp.plugin_params[yyjson_get_str(k)] = buf;
+                        } else if (yyjson_is_bool(v)) {
+                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "1" : "0";
+                        }
+                    }
+                }
+                yyjson_doc_free(pp_doc);
+            }
+        }
+        const Sa3PluginParams * sp_ptr = sa3_sp.any() ? &sa3_sp : nullptr;
+
+        // Same process-global save/set/restore as /sa3-refine — this runs on
+        // the shared worker and must not leak solver/scheduler into the next
+        // ACE generation.
+        struct Sa3SynthGlobalsGuard {
+            bool        active;
+            std::string solver_name, scheduler;
+            std::unordered_map<std::string, std::string> plugin_params;
+            explicit Sa3SynthGlobalsGuard(const Sa3PluginParams * p) : active(p != nullptr) {
+                if (!active) return;
+                solver_name   = g_hotstep_params.solver_name;
+                scheduler     = g_hotstep_params.scheduler;
+                plugin_params = g_hotstep_params.plugin_params;
+                if (!p->solver.empty())    g_hotstep_params.solver_name = p->solver;
+                if (!p->scheduler.empty()) g_hotstep_params.scheduler   = p->scheduler;
+                if (!p->plugin_params.empty()) g_hotstep_params.plugin_params = p->plugin_params;
+            }
+            ~Sa3SynthGlobalsGuard() {
+                if (!active) return;
+                g_hotstep_params.solver_name   = solver_name;
+                g_hotstep_params.scheduler     = scheduler;
+                g_hotstep_params.plugin_params = plugin_params;
+            }
+        } sa3_globals_guard(sp_ptr);
+
+        // Tokenized prompt (padded to SA3_TOK_LEN) — same wire as /sa3-refine.
+        std::vector<int64_t> ids(SA3_TOK_LEN, 0);
+        int n_tokens = req.has_param("n_tokens") ? atoi(req.get_param_value("n_tokens").c_str()) : 0;
+        if (req.has_param("tokens")) {
+            const std::string & csv = req.get_param_value("tokens");
+            int idx = 0;
+            const char * p = csv.c_str();
+            while (*p && idx < SA3_TOK_LEN) {
+                ids[idx++] = strtoll(p, nullptr, 10);
+                const char * comma = strchr(p, ',');
+                if (!comma) break;
+                p = comma + 1;
+            }
+        }
+        if (n_tokens <= 0) {
+            json_error(res, 400, "Missing tokens/n_tokens (tokenized prompt required)");
+            return;
+        }
+
+        fprintf(stderr, "[Server] SA3 synth: %.2fs, steps=%d, sampler=%s, seed=%llu, backend=gguf\n",
+                duration_sec, steps, pingpong ? "pingpong" : "euler",
+                (unsigned long long) seed);
+
+        // Acquire model + run. Same ModelKey / store / ModelHandle as refine.
+        std::vector<float> out44;
+        bool ok;
+        Timer synth_timer;
+        {
+            ModelKey k{};
+            k.kind = MODEL_SA3_GGML;
+            k.path = models_dir;
+            k.adapter_stack = adapter_sig;
+            Sa3GgmlRefine * sa3 = store_require_sa3_ggml(g_store, k);
+            if (!sa3) { json_error(res, 500, "SA3 GGML model load failed"); return; }
+            ModelHandle guard(g_store, sa3);
+            synth_timer.reset();
+            ok = sa3_synth_run_ggml(sa3, T44, ids.data(), n_tokens,
+                                    steps, pingpong, seed, zero_noise, out44, sp_ptr,
+                                    dump_latent_path.empty() ? nullptr : dump_latent_path.c_str());
+        }
+        fprintf(stderr, "[Server] SA3 synth compute (gguf): %.0f ms\n",
+                synth_timer.ms());
+        if (!ok) { json_error(res, 500, "SA3 synth failed"); return; }
+
+        // Encode. Same format/saturation convention as refine: f32 keeps peaks,
+        // integer formats clamp (audio_encode_wav would anyway).
+        const WavFormat sa3_out_fmt  = wav_fmt_param(req);
+        const bool      sa3_saturate = (sa3_out_fmt != WAV_F32);
+        if (sa3_saturate) {
+            for (auto & v : out44) v = std::fmax(-1.0f, std::fmin(1.0f, v));
+        }
+        int sr_out = SA3_SR;
+        if (req.has_param("out_sr")) {
+            int v = atoi(req.get_param_value("out_sr").c_str());
+            if (v >= 8000 && v <= 192000) sr_out = v;
+        }
+        int T_out = 0;
+        float * out_native = audio_resample(out44.data(), T44, SA3_SR, sr_out, 2, &T_out);
+        if (!out_native || T_out <= 0) {
+            free(out_native);
+            json_error(res, 500, "Resample to output rate failed");
+            return;
+        }
+        std::string wav = audio_encode_wav(out_native, T_out, sr_out, sa3_out_fmt);
+        free(out_native);
+        res.set_content(wav, "audio/wav");
+    });
 
     // ═══════════════════════════════════════════════════════════════════
     // SuperSep: Native stem separation (GGML)

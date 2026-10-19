@@ -371,6 +371,38 @@ want a stream that is independent of what else the plugin drew).
 
 ---
 
+### `model_context` (all plugin types)
+
+Every call (solver step, scheduler, guidance, postprocess) also gets a
+`model_context` global with info about which backend is currently running:
+
+| Field | Type | ACE | MM3 | SA3 |
+|-------|------|-----|-----|-----|
+| `native_sr` | int | 48000 | 44100 | 44100 |
+| `latent_rms` | float | 2.0 | 2.35 (range 1.76-3.14) | 0.685 |
+| `model_id` | string | `"ace"` | `"mm3"` | `"sa3"` |
+
+`latent_rms` is roughly how "loud" that model's native latent space runs.
+A rms-target slider tuned against ACE's ~2.0 and pointed at SA3 unchanged
+just keeps inflating the signal past where SA3 actually settles, like a
+thermostat built for a big house bolted onto a studio apartment. Plugins
+that expose an rms-target param should scale it by `model_context.latent_rms
+/ 2.0` instead of hardcoding the ACE number. `md_solver_commons.lua` has
+the helpers: `C.rms_scale()` returns that ratio, and `C.rms_scaled(p, key,
+ace_default)` resolves a param with the convention that **`0` means "auto"**
+(scale `ace_default` by the ratio) and any nonzero value is the user's
+explicit override, used as-is.
+
+Watch the trap: in Lua, `0` is truthy, only `nil` and `false` are falsy. A
+naive `params.rms_target or default` will keep a user's `0` as `0` instead
+of treating it as "unset". Compare against `0` explicitly, the way
+`C.rms_scaled` does, rather than relying on Lua's truthiness.
+
+`model_context` is always present with sane ACE-matching defaults, so a
+plugin that never reads it behaves exactly as before.
+
+---
+
 ## Sandbox
 
 Each plugin runs in an isolated LuaJIT 2.1 VM (Lua 5.1 with LuaJIT's Lua 5.2 extensions, including `goto`) with:

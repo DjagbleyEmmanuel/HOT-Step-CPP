@@ -242,6 +242,7 @@ struct LuaPlugin {
 
     // Guidance-specific
     bool has_post_step = false;  // guidance plugin declares post_step()
+    bool has_guide     = false;  // guidance plugin declares guide()
 
     // Lua VM state
     lua_State * L = nullptr;
@@ -258,7 +259,7 @@ struct LuaPlugin {
           filepath(std::move(o.filepath)), params(std::move(o.params)),
           nfe(o.nfe), order(o.order), needs_model(o.needs_model),
           stateful(o.stateful), stochastic(o.stochastic), owns_loop(o.owns_loop),
-          has_post_step(o.has_post_step), L(o.L) {
+          has_post_step(o.has_post_step), has_guide(o.has_guide), L(o.L) {
         o.L = nullptr;
     }
     LuaPlugin & operator=(LuaPlugin &&) = delete;
@@ -525,10 +526,17 @@ static bool lua_load_plugin(LuaPlugin & plugin, const char * filepath, const cha
                 plugin.owns_loop   = lua_get_bool(L, tbl, "owns_loop", false);
             }
 
-            // Detect post_step() for guidance plugins
+            // Detect post_step() / guide() for guidance plugins. A plugin may
+            // ship post_step() only (e.g. a manifold-projection hook with no
+            // per-pred blend) -- has_guide lets callers skip the guide() path
+            // entirely instead of hitting the "no guide()" error every step.
             if (plugin.type == PluginType::Guidance) {
                 lua_getglobal(L, "post_step");
                 plugin.has_post_step = lua_isfunction(L, -1);
+                lua_pop(L, 1);
+
+                lua_getglobal(L, "guide");
+                plugin.has_guide = lua_isfunction(L, -1);
                 lua_pop(L, 1);
             }
 
@@ -607,6 +615,17 @@ struct LuaModelContext {
     int          latent_fps      = 25;     // latent frames per second
     int          latent_channels = 64;     // Oc (64 ACE, 128 MM3, 256 SA3)
     const char * model_id        = "ace";  // "ace", "mm3", "sa3"
+    // Measured RMS of this model's clean latent -- the number every
+    // rms_target / latent-pressure servo should default to. A plugin tuned
+    // against ACE's ~2.0 that is dropped onto SA3 (measured 0.685 on a 24-step
+    // native render) spends every step inflating the latent to 3x its natural
+    // magnitude. Plugins read it as `model_context.latent_rms` and fall back
+    // to 2.0 when absent, so ACE behaviour is unchanged. (HOT-Step)
+    float        latent_rms      = 2.0f;
+    // True when the backend re-noises the latent after every solver step
+    // itself (SA3 pingpong); stochastic solvers should skip their own noise
+    // injection when set. (HOT-Step)
+    bool         engine_renoise  = false;
 };
 
 static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx) {
@@ -615,6 +634,8 @@ static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx)
     lua_pushinteger(L, ctx.latent_fps);      lua_setfield(L, -2, "latent_fps");
     lua_pushinteger(L, ctx.latent_channels); lua_setfield(L, -2, "latent_channels");
     lua_pushstring(L, ctx.model_id);         lua_setfield(L, -2, "model_id");
+    lua_pushnumber(L, ctx.latent_rms);       lua_setfield(L, -2, "latent_rms");
+    lua_pushboolean(L, ctx.engine_renoise);  lua_setfield(L, -2, "engine_renoise");
     lua_setglobal(L, "model_context");
 }
 
@@ -1060,7 +1081,8 @@ static int lua_call_postprocess(
     int           max_T_audio,
     PostprocessVaeDecodeFn vae_decode_fn,
     const std::unordered_map<std::string, std::string> & params,
-    const LuaModelContext & model_ctx = LuaModelContext{})
+    const LuaModelContext & model_ctx = LuaModelContext{},
+    int samples_per_frame = 1920)
 {
     lua_State * L = plugin.L;
     if (!L) return -1;
@@ -1077,7 +1099,7 @@ static int lua_call_postprocess(
         return -1;
     }
 
-    int upscale  = 1920;
+    int upscale  = samples_per_frame;
     int final_samples = T_latent * upscale;
 
     // Arg 1: latents as Lua table (1-indexed, channel-major [C_lat, T_latent])
@@ -1115,14 +1137,20 @@ static int lua_call_postprocess(
     // Captures the C++ decode function via light userdata.
     // Lua signature: vae_decode_fn(latent_table, T_latent) → audio_table, T_audio
     auto * fn_ptr = new PostprocessVaeDecodeFn(std::move(vae_decode_fn));
+    int samples_per_frame_capture = samples_per_frame;
+    int c_lat_capture = C_lat;
     lua_pushlightuserdata(L, fn_ptr);
+    lua_pushinteger(L, samples_per_frame_capture);
+    lua_pushinteger(L, c_lat_capture);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
         auto * fn = (PostprocessVaeDecodeFn *) lua_touserdata(Ls, lua_upvalueindex(1));
+        int samples_per_frame_u = (int) lua_tointeger(Ls, lua_upvalueindex(2));
+        int c_lat_u = (int) lua_tointeger(Ls, lua_upvalueindex(3));
 
         // Read latent table from Lua (arg 1) — 1-indexed, channel-major [C, T]
         luaL_checktype(Ls, 1, LUA_TTABLE);
         int T_lat = (int) luaL_checkinteger(Ls, 2);
-        int C_l   = 64;
+        int C_l   = c_lat_u;
         int n_lat = T_lat * C_l;
 
         // Read channel-major [C, T] from Lua and transpose to time-major [T, C] for C++
@@ -1138,7 +1166,7 @@ static int lua_call_postprocess(
         }
 
         // Decode
-        int max_T = T_lat * 1920;
+        int max_T = T_lat * samples_per_frame_u;
         std::vector<float> aud_buf(2 * max_T);
         int T_audio = (*fn)(lat_buf.data(), T_lat, aud_buf.data(), max_T);
 
@@ -1158,7 +1186,7 @@ static int lua_call_postprocess(
         }
         lua_pushinteger(Ls, T_audio);
         return 2;
-    }, 1);
+    }, 3);
 
     // 8 args: latents, B, C_lat, W, C_aud, final_samples, upscale_factor, vae_decode_fn
     // Returns: audio_table, T_audio
