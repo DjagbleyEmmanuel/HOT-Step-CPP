@@ -73,7 +73,7 @@ end
 local function channel_gains(ch)
     local gs = {}
     local any = false
-    local per = math.max(1, ch // GROUPS)
+    local per = math.max(1, math.floor(ch / GROUPS))
     local function set_group(g, gain)
         if gain == 1 then return end
         any = true
@@ -108,9 +108,9 @@ local function frame_mask(n)
     local frames, ch
     if y and y.chunk and y.chunk.end_frame and y.chunk.start_frame then
         frames = y.chunk.end_frame - y.chunk.start_frame
-        if frames > 0 and n % frames == 0 then ch = n // frames end
+        if frames > 0 and n % frames == 0 then ch = math.floor(n / frames) end
     end
-    if not ch then ch = CH_DEFAULT; frames = n // ch end
+    if not ch then ch = CH_DEFAULT; frames = math.floor(n / ch) end
     if want == "" then return nil, frames, ch end
     if not (y and y.sections and y.chunk) then return {}, frames, ch end
     local fps = y.frame_rate or 25

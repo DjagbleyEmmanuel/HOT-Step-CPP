@@ -146,7 +146,7 @@ local function frame_lies(n, base_lie)
     local list = {}
     for l in pairs(distinct) do list[#list + 1] = l end
     table.sort(list)
-    return lies, list, n // frames, frames
+    return lies, list, math.floor(n / frames), frames
 end
 
 function sample(xt, vt_buf, schedule, n, model_fn)
