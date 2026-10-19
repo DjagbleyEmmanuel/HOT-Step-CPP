@@ -716,7 +716,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'select',
         label: 'NAR Solver',
         hint: 'Midpoint is the tested default (two model evaluations per step). Wasserstein uses one evaluation plus latent regularization; compare by listening. '
-            + 'On YuE2, solvers and schedulers only shape the final polish (clarity, loudness, air, grit). To change the song itself, use the composer sampling settings, CFG, style words or an ABC sketch.',
+            + 'The composer supplies the song plan. NAR settings shape its rendering; experimental Plan Strength, Plan CFG, CADS and plan-aware schedulers can also change how closely it follows that plan.',
         default: 'stock',
         options: [
           { value: 'stock', label: 'Midpoint (stock)' },

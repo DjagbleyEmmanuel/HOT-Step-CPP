@@ -262,20 +262,23 @@ What sets it apart:
 
 ### What changes what on YuE2
 
-A YuE2 song's character (melody, arrangement, phrasing, structure) is decided at the
-semantic stage, when the composer writes the codec frames. The refiner stage that turns
-those frames into audio is where the NAR solver, scheduler, guidance, refiner plugins and
-the noise seed apply, and it only changes the finish: clarity, loudness, high-end air and
-grit. Swapping solvers will not give you a different song.
+The composer supplies YuE2's song plan. Composer seed, sampling settings, composer CFG, style words and the ABC sketch can change that plan. The NAR renderer turns it into audio. Solver, scheduler, guidance and noise settings affect the rendering. With the experimental plan controls from #269, Plan Strength, Plan CFG, CADS and plan-aware scheduler plugins can also change how closely the rendering follows the plan; their effects are not limited to clarity or loudness.
 
-Dials that change the song itself, roughly strongest first:
+Dials that change the song plan:
 
-- An ABC melody sketch (pasted lead sheet) is the strongest lever.
+- An ABC melody sketch (pasted lead sheet).
 - Style words in the prompt.
 - Seed, Composer Temperature, Top-K, Top-P and repetition penalty.
-- CFG scale.
+- Composer CFG.
 
-Tips from listening tests:
+Dials that change how closely the rendering follows the plan (experimental):
+
+- Plan Strength.
+- Plan CFG.
+- CADS.
+- Plan-aware schedulers.
+
+Listening observations (not guarantees):
 
 - Top-K 0 (unlimited) with temperature above 1.0 can break the render.
 - Temperature works in both directions: around 0.7 and around 1.3 are both usable.
