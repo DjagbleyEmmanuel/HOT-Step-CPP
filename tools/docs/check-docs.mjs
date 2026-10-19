@@ -43,6 +43,7 @@ const STUDIO_PAGES = {
   storm: 'docs/user/studios/storm.md',
   'midi-studio': 'docs/user/studios/midi-studio.md',
   'training-studio': 'docs/user/studios/training-studio.md',
+  'compare-studio': 'docs/user/studios/compare-studio.md',
   settings: 'docs/user/studios/settings.md',
   terminal: 'docs/user/studios/settings.md',
   'model-manager': 'docs/user/studios/model-manager.md',

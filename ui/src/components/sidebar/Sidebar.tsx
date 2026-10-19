@@ -3,7 +3,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap, X } from 'lucide-react';
+import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap, X, GitCompare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useJobBadge } from '../../hooks/useJobProgress';
@@ -116,6 +116,14 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         label={t('sidebar.stemStudio')}
         active={activeView === 'stem-studio'}
         onClick={() => onNav('stem-studio')}
+        isExpanded={isExpanded}
+      />
+
+      <NavItem
+        icon={<GitCompare size={20} />}
+        label={t('sidebar.compare')}
+        active={activeView === 'compare-studio'}
+        onClick={() => onNav('compare-studio')}
         isExpanded={isExpanded}
       />
 

@@ -7,6 +7,7 @@ import {
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Loader2,
   Check, Columns3, ChevronLeft, ChevronRight, Radio, Upload,
+  GitCompare,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -120,6 +121,8 @@ interface SongListProps {
   onPlay: (song: Song) => void;
   onDelete: (song: Song) => void;
   onBulkDelete?: (ids: string[]) => void;
+  /** Open the selected songs in a new Compare session (Library only). */
+  onCompare?: (ids: string[]) => void;
   onSelect?: (song: Song) => void;
   onReuse?: (song: Song) => void;
   onDownload?: (song: Song) => void;
@@ -142,7 +145,7 @@ interface SongListProps {
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onBulkDelete, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
+  songs, currentSongId, onPlay, onDelete, onBulkDelete, onCompare, onSelect, onReuse, onDownload, onRename, onAddToPlaylist,
   onSendToCover, onEditMetadata, showFilters = true, showImport = false,
   viewMode = 'list', title = 'Library',
 }) => {
@@ -393,6 +396,14 @@ export const SongList: React.FC<SongListProps> = ({
 
           {selectedIds.size > 0 && (
             <>
+              {onCompare && selectedIds.size >= 2 && (
+                <button
+                  onClick={() => { onCompare(Array.from(selectedIds)); exitSelectionMode(); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300 text-xs font-semibold transition-all"
+                >
+                  <GitCompare size={13} /> {t('library.compareCount', 'Compare {{count}}', { count: selectedIds.size })}
+                </button>
+              )}
               <button
                 onClick={handleBulkDownload}
                 disabled={bulkDownloading}

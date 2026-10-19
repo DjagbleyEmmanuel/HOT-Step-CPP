@@ -55,6 +55,8 @@ import { SongBuilder } from './components/song-builder/SongBuilder';
 import { StormPage } from './components/storm/StormPage';
 import { MidiStudio } from './components/midi-studio/MidiStudio';
 import { TrainingStudio } from './components/training-studio/TrainingStudio';
+import { CompareStudio } from './components/compare-studio/CompareStudio';
+import { setPendingCompareSongs } from './services/compareApi';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
 import {
@@ -105,6 +107,7 @@ function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/storm')) return 'storm';
   if (path.startsWith('/midi-studio')) return 'midi-studio';
   if (path.startsWith('/training-studio')) return 'training-studio';
+  if (path.startsWith('/compare')) return 'compare-studio';
   if (path.startsWith('/repaint')) return 'repaint';
   if (path.startsWith('/library')) return 'library';
   if (path.startsWith('/settings')) return 'settings';
@@ -136,6 +139,7 @@ function urlForView(view: string): string {
     } catch { /* ignore */ }
     return '/training-studio';
   }
+  if (view === 'compare-studio') return '/compare';
   if (view === 'repaint') return '/repaint';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
@@ -941,6 +945,14 @@ const AppContent: React.FC = () => {
       );
     }
 
+    if (activeView === 'compare-studio') {
+      return (
+        <DiscoPulseWrapper hue={DISCO.playlist} className="flex-1 overflow-hidden">
+          <CompareStudio />
+        </DiscoPulseWrapper>
+      );
+    }
+
     if (activeView === 'repaint') {
       return (
         <DiscoPulseWrapper hue={DISCO.createPanel} className="flex-1 overflow-hidden">
@@ -1090,6 +1102,7 @@ const AppContent: React.FC = () => {
               onPlay={playSong}
               onDelete={handleDelete}
               onBulkDelete={handleBulkDelete}
+              onCompare={(ids) => { setPendingCompareSongs(ids); navigateTo('compare-studio'); }}
               onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
               onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
@@ -1306,7 +1319,7 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
+    <div className="flex flex-col h-[100dvh] bg-white dark:bg-suno text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-all duration-300">
       {/* Global Parameter Bar — full width, above everything.
           The mobile compact row (hamburger + Settings) lives inside
           GlobalParamBar so both desktop and mobile bars share the same
