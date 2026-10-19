@@ -91,6 +91,12 @@ local function clamp(x, a, b)
     return x
 end
 
+-- Queried t for a lie; a zero lie keeps the true t (no clamp), so lie = 0 is plain Euler.
+local function lied(t, l)
+    if l == 0 then return t end
+    return clamp(t + l, T_MIN, T_MAX)
+end
+
 local function curve_weight(curve, t, t1, t2)
     if t2 < t1 then t1, t2 = t2, t1 end
     local span = t2 - t1
@@ -174,7 +180,7 @@ function sample(xt, vt_buf, schedule, n, model_fn)
         local t_next = (i < ns) and schedule[i + 1] or 0.0
         if lies then
             for _, l in ipairs(list) do
-                model_fn(xt, clamp(t + l, T_MIN, T_MAX))
+                model_fn(xt, lied(t, l))
                 for f = 0, frames - 1 do
                     if lies[f] == l then
                         local b = f * ch
@@ -184,7 +190,7 @@ function sample(xt, vt_buf, schedule, n, model_fn)
             end
             for k = 0, n - 1 do vt_buf[k] = v[k] end
         else
-            local tq = clamp(t + lie * curve_weight(curve, t, t1, t2), T_MIN, T_MAX)
+            local tq = lied(t, lie * curve_weight(curve, t, t1, t2))
             model_fn(xt, tq)
             if dbg then print(string.format("[md_tlie_yue2] step %d t=%.4f t'=%.4f", i - 1, t, tq)) end
         end

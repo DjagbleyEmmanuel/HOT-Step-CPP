@@ -93,6 +93,23 @@ int main() {
     Run a = run(tlie, { { "md_tlie_yue2:lie", "0" } });
     assert(a.ok && a.calls == STEPS && a.last_step == STEPS);
     expect_euler(a);
+    // lie = 0 queries the true t, including t = 1 (no clamp to T_MAX): velocity = t.
+    std::vector<float> lie0_t;
+    Run a2 = run(tlie, { { "md_tlie_yue2:lie", "0" } }, 0, 0, 0, {}, [&](const float *, float t, float * v) {
+        lie0_t.push_back(t);
+        for (int i = 0; i < N; i++) v[i] = t;
+        return true;
+    });
+    assert(a2.ok && lie0_t.size() == STEPS);
+    {
+        std::vector<float> times = uniform_times();
+        double want = start_state()[0];
+        for (int s = 0; s < STEPS; s++) {
+            assert(lie0_t[s] == times[s]);
+            want -= times[s] * (times[s] - times[s + 1]);
+        }
+        assert(std::fabs(a2.x[0] - want) < 1e-6);
+    }
     Run b = run(eq, { { "md_latent_eq_yue2:gain", "1" } });
     assert(b.ok && b.calls == STEPS);
     expect_euler(b);
@@ -148,7 +165,7 @@ int main() {
         for (int f = 0; f < FRAMES; f++) {
             double want = start_state()[f * CH];
             for (int s = 0; s < STEPS; s++) {
-                double tq = std::min(0.9999, (double) times[s] + (f >= 2 ? 0.25 : 0.0));
+                double tq = f >= 2 ? std::min(0.9999, (double) times[s] + 0.25) : (double) times[s];
                 want -= tq * (times[s] - times[s + 1]);
             }
             if (std::fabs(g.x[f * CH] - want) > 1e-5) {

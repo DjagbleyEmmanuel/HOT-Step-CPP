@@ -4041,10 +4041,10 @@ int main(int argc, char ** argv) {
                             sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_str(v);
                         } else if (yyjson_is_num(v)) {
                             char buf[32];
-                            snprintf(buf, sizeof(buf), "%g", yyjson_get_num(v));
+                            snprintf(buf, sizeof(buf), "%.17g", yyjson_get_num(v));
                             sa3_sp.plugin_params[yyjson_get_str(k)] = buf;
                         } else if (yyjson_is_bool(v)) {
-                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "1" : "0";
+                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "true" : "false";
                         }
                     }
                 }
@@ -4543,10 +4543,10 @@ int main(int argc, char ** argv) {
                             sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_str(v);
                         } else if (yyjson_is_num(v)) {
                             char buf[32];
-                            snprintf(buf, sizeof(buf), "%g", yyjson_get_real(v));
+                            snprintf(buf, sizeof(buf), "%.17g", yyjson_get_num(v));
                             sa3_sp.plugin_params[yyjson_get_str(k)] = buf;
                         } else if (yyjson_is_bool(v)) {
-                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "1" : "0";
+                            sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "true" : "false";
                         }
                     }
                 }
