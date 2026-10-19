@@ -1180,7 +1180,7 @@ static bool yue2_nar_solve_plugins(
         // array of `steps` numbers). Cleared after reading: the lua_State is shared.
         if (lua_State * L = scheduler->L) {
             lua_getglobal(L, "plan_strength");
-            if (lua_istable(L, -1) && (int) lua_rawlen(L, -1) == steps) {
+            if (lua_istable(L, -1) && (int) lua_objlen(L, -1) == steps) {
                 plan_w_override.resize((size_t) steps);
                 for (int i = 0; i < steps; i++) {
                     lua_rawgeti(L, -1, i + 1);

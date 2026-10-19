@@ -1579,8 +1579,7 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
             const int          max_T_audio = (int) (total_frames * 1920);
             std::vector<float> pp_audio((size_t) 2 * max_T_audio);
             int T_audio = lua_call_postprocess(*pp_plugin, song_latents.data(), (int) total_frames, (int) LD, 2,
-                                               pp_audio.data(), max_T_audio, decode_fn, req.plugin_params, yue2_ctx,
-                                               1920);
+                                               pp_audio.data(), max_T_audio, decode_fn, req.plugin_params, yue2_ctx);
             if (T_audio > 0) {
                 int n = T_audio < max_T_audio ? T_audio : max_T_audio;
                 audio_planar_out->assign((size_t) 2 * n, 0.0f);
