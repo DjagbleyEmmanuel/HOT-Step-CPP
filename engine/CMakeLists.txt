@@ -974,3 +974,8 @@ if(MSVC)
         endif()
     endforeach()
 endif()
+
+# Monitor chain unit test (no VST plugins needed)
+enable_testing()
+add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
+add_test(NAME monitor-chain COMMAND test-monitor-chain)

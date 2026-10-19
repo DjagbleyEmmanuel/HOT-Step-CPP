@@ -50,6 +50,7 @@
 // WAV I/O (our existing header)
 #include "audio-io.h"
 #include "monitor-resampler.h"
+#include "monitor-chain.h"
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -989,19 +990,15 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
     mctx.timeSigNumerator   = 4;
     mctx.timeSigDenominator = 4;
 
-    float * cur_L = src_L, * cur_R = src_R;
-    float * dst_L = ms.buf_b_L.data(), * dst_R = ms.buf_b_R.data();
-
-    int processed = 0;
-    while (processed < n) {
-        int chunk = std::min(n - processed, MAX_CHUNK);
-
-    for (size_t pi = 0; pi < ms.plugins.size(); pi++) {
+    monitor_run_chain(src_L, src_R, ms.buf_b_L.data(), ms.buf_b_R.data(), out_L, out_R,
+                      n, MAX_CHUNK, ms.plugins.size(),
+                      [&](size_t pi, float * in_L, float * in_R, float * o_L, float * o_R,
+                          int chunk, int processed) {
         int32 nIn  = ms.plugins[pi].numActiveInputBuses;
         int32 nOut = ms.plugins[pi].numActiveOutputBuses;
 
-        float * in_bufs[2]  = { cur_L + processed, cur_R + processed };
-        float * ob[2]       = { dst_L + processed, dst_R + processed };
+        float * in_bufs[2]  = { in_L, in_R };
+        float * ob[2]       = { o_L, o_R };
         AudioBusBuffers ib; ib.numChannels = 2; ib.silenceFlags = 0; ib.channelBuffers32 = in_bufs;
         AudioBusBuffers ob_bus; ob_bus.numChannels = 2; ob_bus.silenceFlags = 0; ob_bus.channelBuffers32 = ob;
 
@@ -1030,15 +1027,7 @@ static void monitor_process_block(MonitorState & ms, float * out_L, float * out_
         pd.inputEvents = nullptr; pd.outputEvents = nullptr; pd.processContext = &mctx;
 
         ms.plugins[pi].processor->process(pd);
-
-        // after first plugin, subsequent plugins read from dst
-        if (pi == 0) { std::swap(cur_L, dst_L); std::swap(cur_R, dst_R); }
-    }
-        processed += chunk;
-    }
-
-    memcpy(out_L, cur_L, n * sizeof(float));
-    memcpy(out_R, cur_R, n * sizeof(float));
+    });
 }
 
 // Fallback path when the WASAPI device could not be switched to the track's
