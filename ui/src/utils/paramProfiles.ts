@@ -15,6 +15,7 @@
 
 import { useGlobalParamsStore, scopedKey, normalizeModelSelection } from '../stores/globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
+import { mergeProfileField } from './profileMerge';
 
 // ── Content fields (CreatePanel state, persisted via usePersistedState) ──
 // profile key → localStorage key
@@ -206,7 +207,6 @@ export function applyProfileData(raw: ProfileData): void {
 
   const partial: Record<string, unknown> = {};
   const live = useGlobalParamsStore.getState() as unknown as Record<string, unknown>;
-  const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
   for (const field of PROFILE_FIELDS) {
     if (p[field] !== undefined) {
       let value: unknown = field === 'vaeModel'
@@ -214,15 +214,7 @@ export function applyProfileData(raw: ProfileData): void {
         : field === 'stableStepBackend'
           ? normalizeModelSelection('stableStepBackend', p[field])
           : p[field];
-      // backendParams is always merged over the live map: a profile carries
-      // only the knobs it names, and a snapshot from another backend must not
-      // wipe this backend's model paths etc. Preset files may set _mergeMaps
-      // so their pluginParams merge too (they list every key they own, with
-      // defaults, so switching between them leaves no leftovers).
-      if ((field === 'backendParams' || (field === 'pluginParams' && p._mergeMaps === true))
-          && isMap(value) && isMap(live[field])) {
-        value = { ...(live[field] as Record<string, unknown>), ...value };
-      }
+      value = mergeProfileField(field, value, live[field], p._mergeMaps === true);
       partial[field] = value;
       try { localStorage.setItem(fieldStorageKey(field), JSON.stringify(value)); } catch { /* full */ }
     }
