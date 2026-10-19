@@ -277,6 +277,15 @@ function getSongSource(song: Song): string {
 }
 
 /** Inner app content — must be rendered inside GlobalParamsProvider */
+// Tab title "(N) 43% · HOT-Step" + done notification while the tab is hidden.
+// Own component so the queue subscription re-renders only this, not AppContent.
+const JobProgressWatcher: React.FC = () => {
+  const { t } = useTranslation();
+  const doneBody = useCallback((name: string) => t('jobs.doneBody', { name }), [t]);
+  useJobProgressWatcher(t('jobs.doneTitle'), doneBody);
+  return null;
+};
+
 const AppContent: React.FC = () => {
   const { t } = useTranslation();
   // sessionEpoch re-renders this component when the auth-scoped keys move.
@@ -560,9 +569,6 @@ const AppContent: React.FC = () => {
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
   }, [songs]);
 
-  // Tab title "(N) 43% · HOT-Step" + done notification while the tab is hidden.
-  const doneBody = useCallback((name: string) => t('jobs.doneBody', { name }), [t]);
-  useJobProgressWatcher(t('jobs.doneTitle'), doneBody);
   // Notification click: open the finished song in the details panel.
   useEffect(() => {
     const onOpen = async (e: Event) => {
@@ -1324,6 +1330,7 @@ const AppContent: React.FC = () => {
           The mobile compact row (hamburger + Settings) lives inside
           GlobalParamBar so both desktop and mobile bars share the same
           backdrop and z-level. */}
+      <JobProgressWatcher />
       <GlobalParamBar onOpenMobileNav={() => setMobileNavOpen(true)} />
 
       {/* Asks before running a generation queue restored from a previous
