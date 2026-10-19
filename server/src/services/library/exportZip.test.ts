@@ -98,3 +98,16 @@ test('a full zip still writes every entry', async () => {
   const zip = Buffer.concat(chunks).toString('latin1');
   assert.ok(zip.includes('x.wav') && zip.includes('y.wav'));
 });
+
+test('a source file that vanishes after planning fails the download cleanly', async () => {
+  const dir = audioDirWith({ 'a.wav': 10 });
+  const { entries } = planZipEntries([{ id: '1', audio_url: '/audio/a.wav' }], dir);
+  fs.unlinkSync(entries[0].file);
+  const res = new PassThrough();
+  res.on('error', () => {});
+  const errors: Error[] = [];
+  streamZip(res, entries, e => errors.push(e));
+  await new Promise(r => res.once('close', r));
+  assert.equal(errors.length >= 1, true);
+  assert.equal((errors[0] as NodeJS.ErrnoException).code, 'ENOENT');
+});

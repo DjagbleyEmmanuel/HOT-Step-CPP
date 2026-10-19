@@ -95,14 +95,18 @@ export function streamZip(
   const archive = archiver('zip', { zlib: { level: 1 } });
   let current: Readable | null = null;
   let i = 0;
+  const fail = (err: Error) => { onError(err); res.destroy(err); };
   const next = () => {
     if (i >= entries.length) { void archive.finalize(); return; }
     const e = entries[i++];
     current = open(e.file);
+    // append() does not forward source errors; a file that vanished since
+    // planning must fail the download, not crash the process.
+    current.once('error', fail);
     archive.append(current, { name: e.name });
   };
   archive.on('entry', next);
-  archive.on('error', err => { onError(err); res.destroy(err); });
+  archive.on('error', fail);
   res.on('close', () => {
     if (res.writableFinished) return;
     archive.abort();
