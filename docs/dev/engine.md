@@ -84,6 +84,13 @@ long YuE2 batch waits for the whole batch, so a direct engine client needs a tim
 long enough to cover that wait. The MM3 bring-up endpoints and `POST /yue2/imatrix`
 are not wrapped yet and still compute on their HTTP thread.
 
+`POST /sa3-synth` and `/sa3-refine` cancel by connection: when the client closes it,
+both SA3 sampling loops stop before the next step, and a full-loop Lua solver sees
+`on_step` return true. `aceClient` then awaits `GET /worker-drain`, a no-op on the
+worker, so Node releases the lane only after the engine has stopped. Limits: a Lua
+`sample()` that ignores `on_step`'s return runs to its last step, and model load,
+encode and decode are not checked; the drain waits for them.
+
 Models are discovered by scanning `--models` at startup. ACE-Step files are
 classified by their GGUF `general.architecture` into LM, text encoder, DiT and VAE
 buckets (`model-registry.h`). MM3 looks in `<models>/mm3/` and then `<models>/`;
@@ -556,6 +563,7 @@ Routes `ace-server` adds on top of upstream's `/lm`, `/synth`, `/understand`,
 | `POST /models/restore-policy` | Undo a `?keep_loaded=1` switch |
 | `POST /pp-vae-reencode` | Round-trip audio through the post-processing VAE |
 | `POST /sa3-refine` | Stable Audio 3 SDEdit refine of a finished track |
+| `GET /worker-drain` | Answers once the worker queue ahead of it has finished |
 | `POST /supersep/separate`, `GET /supersep/progress`, `GET /supersep/result`, `GET /supersep/serve`, `POST /supersep/release`, `POST /supersep/recombine` | Stem separation jobs |
 | `POST /spectral-lifter` | Spectral Lifter clean-up (CPU) |
 | `GET /mm3/props`, `POST /mm3/warm`, `POST /mm3/unload`, `POST /mm3/select-model` | MM3 status, residency and quant selection |

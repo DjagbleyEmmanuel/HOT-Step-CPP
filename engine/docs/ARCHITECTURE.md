@@ -759,6 +759,8 @@ POST /job?id=N&drop_songs=MASK   YuE2 batch: take songs out (bit b = song b);
 GET  /jobs                       Every job in the table.
 
 GET  /health                     {"status":"ok"}
+GET  /worker-drain               {"status":"ok"} once everything queued on the
+                                 worker before it has finished.
 GET  /props                      version, models (lm, embedding, dit, vae),
                                  adapters, lm_adapters, cli (max_batch,
                                  mp3_bitrate), default (full AceRequest), presets
@@ -848,6 +850,13 @@ One worker thread runs every GPU job in FIFO order: ACE-Step, MM3 and YuE2 alike
 The job table holds 32 entries; finished jobs are evicted oldest first and running
 jobs never are. Each job has its own cancel flag, and a cancel during adapter
 precompute takes effect between deltas.
+
+`/sa3-synth` and `/sa3-refine` have no job id. They cancel when the client closes
+the connection: both sampling loops check before every step, and a full-loop Lua
+solver sees it as `on_step` returning true. A client that drops one of these calls
+awaits `GET /worker-drain` to know the engine has stopped. Limits: a Lua `sample()`
+that ignores `on_step`'s return runs to its last step, and model load, encode and
+decode are not checked, so the drain waits for them.
 
 By default the model store keeps one module in VRAM at a time. `--keep-loaded`
 keeps everything resident for the life of the process; `?keep_loaded=1` does the
