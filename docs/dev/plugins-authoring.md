@@ -244,6 +244,14 @@ The `post_step` hook has access to the same globals as `guide()` (`step_idx`, `t
 
 The hook is **not called on the final step** (the latent is about to be decoded, so further projection is pointless).
 
+A guidance plugin that only needs `post_step()` still has to declare `guide()`. ACE and MM3 call `guide()` every step and its `result` buffer holds the previous step's velocity on entry, so a missing `guide()` leaves stale or zero velocity whenever CFG is on. Route it through native APG:
+
+```lua
+function guide(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
+    apg(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
+end
+```
+
 ---
 
 ## Parameter Schema

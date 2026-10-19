@@ -4394,7 +4394,7 @@ int main(int argc, char ** argv) {
         yyjson_mut_doc_free(doc);
     });
 
-    svr.Post("/sa3-synth", [models_dir](const httplib::Request & req, httplib::Response & res) {
+    svr.Post("/sa3-synth", on_worker([models_dir](const httplib::Request & req, httplib::Response & res) {
         auto file_exists = [](const std::string & p) {
             FILE * f = fopen(p.c_str(), "rb");
             if (f) { fclose(f); return true; }
@@ -4637,7 +4637,7 @@ int main(int argc, char ** argv) {
         std::string wav = audio_encode_wav(out_native, T_out, sr_out, sa3_out_fmt);
         free(out_native);
         res.set_content(wav, "audio/wav");
-    });
+    }));
 
     // ═══════════════════════════════════════════════════════════════════
     // SuperSep: Native stem separation (GGML)

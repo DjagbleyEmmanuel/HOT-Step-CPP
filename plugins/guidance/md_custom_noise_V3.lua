@@ -216,6 +216,12 @@ local GENERATORS = {
     fourier_band = gen_fourier_band,
 }
 
+-- result arrives holding stale velocity, so guide() must write the CFG combine.
+-- This plugin only injects noise in post_step; the base combine is native APG.
+function guide(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
+    apg(pred_cond, pred_uncond, guidance_scale, result, Oc, T, norm_threshold)
+end
+
 function post_step(xt, t, n, eval_cond, eval_uncond, vt_cond, vt_uncond)
     local cur_step = step_index or step_idx or 0
 

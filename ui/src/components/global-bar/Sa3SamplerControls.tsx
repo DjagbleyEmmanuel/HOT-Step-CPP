@@ -31,7 +31,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // Registered plugin names for the SA3 Clean preset (verified against plugins/).
-const SA3_CLEAN_SOLVER    = 'md_wasserstein_flow_v130';
+const SA3_CLEAN_SOLVER    = 'md_wasserstein_flow_v121';
 const SA3_CLEAN_SCHEDULER = 'md_psychoacoustic';
 const SA3_CLEAN_GUIDANCE  = 'md_phase_inversion';
 const SA3_CLEAN_STEPS     = 24;
