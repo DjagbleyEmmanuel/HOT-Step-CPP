@@ -66,6 +66,14 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
     ],
   },
   {
+    // Backend-declared knobs (capabilities().extensions), e.g. the YuE2 NAR
+    // solver/scheduler, CADS and plan-strength sliders. Per backend, like
+    // pluginParams. Merged on apply (see applyProfileData), so a profile
+    // saved before this group existed leaves the live knobs untouched.
+    title: 'Backend Knobs',
+    fields: ['backendParams'],
+  },
+  {
     title: 'LM / Thinking',
     fields: [
       'lmSeed', 'lmSeedFollowsDit', 'skipLm', 'skipLrc', 'useCotCaption',
@@ -197,13 +205,24 @@ export function applyProfileData(raw: ProfileData): void {
   }
 
   const partial: Record<string, unknown> = {};
+  const live = useGlobalParamsStore.getState() as unknown as Record<string, unknown>;
+  const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
   for (const field of PROFILE_FIELDS) {
     if (p[field] !== undefined) {
-      const value = field === 'vaeModel'
+      let value: unknown = field === 'vaeModel'
         ? normalizeModelSelection('vaeModel', p[field])
         : field === 'stableStepBackend'
           ? normalizeModelSelection('stableStepBackend', p[field])
           : p[field];
+      // backendParams is always merged over the live map: a profile carries
+      // only the knobs it names, and a snapshot from another backend must not
+      // wipe this backend's model paths etc. Preset files may set _mergeMaps
+      // so their pluginParams merge too (they list every key they own, with
+      // defaults, so switching between them leaves no leftovers).
+      if ((field === 'backendParams' || (field === 'pluginParams' && p._mergeMaps === true))
+          && isMap(value) && isMap(live[field])) {
+        value = { ...(live[field] as Record<string, unknown>), ...value };
+      }
       partial[field] = value;
       try { localStorage.setItem(fieldStorageKey(field), JSON.stringify(value)); } catch { /* full */ }
     }
