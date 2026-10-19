@@ -975,7 +975,11 @@ if(MSVC)
     endforeach()
 endif()
 
-# Monitor chain unit test (no VST plugins needed)
-enable_testing()
-add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
-add_test(NAME monitor-chain COMMAND test-monitor-chain)
+# Monitor chain unit test (no VST plugins needed). Off by default so it is not
+# part of the ALL build; configure with -DBUILD_TESTING=ON to build and run it.
+option(BUILD_TESTING "Build the engine unit tests" OFF)
+if(BUILD_TESTING)
+    enable_testing()
+    add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
+    add_test(NAME monitor-chain COMMAND test-monitor-chain)
+endif()
