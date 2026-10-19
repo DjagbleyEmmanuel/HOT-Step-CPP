@@ -25,9 +25,7 @@
     "pluginParams": {
       "md_ancestral_yue2:churn": 0,
       "md_plan_loose_yue2:loose": 0.5,
-      "md_plan_loose_yue2:lock_at": 0.5,
-      "md_wasserstein_yue2:section_ease": 0,
-      "md_wasserstein_yue2:section_ease_bars": 1
+      "md_plan_loose_yue2:lock_at": 0.5
     }
   }
 }
