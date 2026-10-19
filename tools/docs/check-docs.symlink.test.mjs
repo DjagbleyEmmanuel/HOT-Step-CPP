@@ -18,6 +18,7 @@ function sandbox() {
   fs.mkdirSync(path.join(dir, 'ui/src/components'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude/skills'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(dir, 'tools/docs/check-docs.mjs'));
+  fs.writeFileSync(path.join(dir, 'tools/docs/build-docs.mjs'), ''); // stub: generated-table check is out of scope here
   fs.writeFileSync(path.join(dir, '.claude/skills/README.md'), '');
   fs.writeFileSync(path.join(dir, 'keep.md'), 'hi\n');
   git('init', '-q');
@@ -35,6 +36,7 @@ test('untracked dangling symlink is skipped with a warning', (t) => {
   const r = s.run();
   assert.match(r.stdout + r.stderr, /dangling\.md: unreadable \(skipped - broken symlink\)/);
   assert.doesNotMatch(r.stderr, /ENOENT/);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
 test('missing tracked doc still fails', (t) => {
