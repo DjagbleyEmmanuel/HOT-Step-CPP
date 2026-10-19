@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { config } from '../config.js';
 import { listBackends } from './backends/registry.js';
 import { createBuildSession, generateBuildTakes, getBuildSession, keepBuildTake, renderBuildPreview } from './yue2Takes.js';
+import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
+import { createJob } from './training/labelingQueue.js';
+import type { runYue2AceTrain } from './training/yue2TrainRunner.js';
 import type { Yue2SynthRequest, Yue2TrackDetail } from './backends/yue2/client.js';
 
 function pcm(): Buffer {
@@ -18,7 +22,7 @@ function pcm(): Buffer {
 
 test('YuE2 takes and the build preview free every other family before calling YuE2', async t => {
   const previousDir = config.data.dir;
-  const dir = fs.mkdtempSync(path.resolve('.test-yue2-evict-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-yue2-evict-'));
   config.data.dir = dir;
   t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
   const calls: string[] = [];
@@ -80,4 +84,45 @@ test('YuE2 takes and the build preview free every other family before calling Yu
   await until(() => getBuildSession(s.id, 'user').preview?.status !== 'rendering');
   assert.equal(getBuildSession(s.id, 'user').preview?.status, 'done');
   checkOrder('preview');
+});
+
+test('the cover transcription fallback frees every other family before the retry', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-yue2-cover-evict-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const audio = path.join(dir, 'track.wav');
+  fs.writeFileSync(audio, 'audio');
+  const calls: string[] = [];
+  const others = listBackends().filter(b => b.id !== 'yue2' && b.releaseVram);
+  assert.ok(others.length > 0, 'at least one other family is registered');
+  for (const b of others) {
+    t.mock.method(b as Required<typeof b>, 'releaseVram', async () => {
+      calls.push(`release-start:${b.id}`);
+      await new Promise(r => setTimeout(r, 30));
+      calls.push(`released:${b.id}`);
+    });
+  }
+  let attempt = 0;
+  const run = (async (_job, _kind, _args, _idleMs, verify, _relay, state) => {
+    attempt += 1;
+    if (attempt === 1) {
+      calls.push('sheet-first');
+      state!.fatalMessage = 'SheetSage2 load failed: out of memory';
+      throw new Error('load failed');
+    }
+    calls.push('sheet-retry');
+    const manifest = path.join(dir, 'cover-sheet.json');
+    const data = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+    data.sources[0].abc = ['X:1', 'V: Vocal', 'z4|C4|', 'V: Ins', 'C4|'].join('\n');
+    fs.writeFileSync(manifest, JSON.stringify(data));
+    if (verify?.()) throw new Error(verify()!);
+  }) as typeof runYue2AceTrain;
+  const job = createJob('yue2-sheet', 'fixture', [], {});
+  await runYue2CoverSheetJob(job, audio, dir, { missingModels: () => [], run });
+  console.log(`[cover fallback] recorded calls: ${calls.join(', ')}`);
+  const retry = calls.indexOf('sheet-retry');
+  assert.ok(retry >= 0, 'the fallback retried the transcriber');
+  for (const b of others) {
+    const done = calls.indexOf(`released:${b.id}`);
+    assert.ok(done >= 0 && done < retry, `cover fallback: '${b.id}' release awaited before the retry (released at ${done}, retry at ${retry})`);
+  }
 });
