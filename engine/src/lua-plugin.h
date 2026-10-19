@@ -610,11 +610,35 @@ static void lua_inject_params(lua_State * L,
 // The `or 48000` fallback keeps every existing plugin working unchanged on
 // ACE. Only plugins that want to be model-aware need to read it.
 
+// YuE2 plan metadata (HOT-Step). Filled only on the YuE2 NAR plugin path and
+// exposed as model_context.yue2; every other backend leaves the pointer null
+// and the table is simply absent.
+struct LuaYue2Section {
+    std::string name;
+    int64_t     start_bar = 0, end_bar = 0;  // vocal-bar index, end exclusive
+    double      start_s = 0.0, end_s = 0.0;
+};
+struct LuaYue2Plan {
+    double      tempo = 0.0;          // quarter-note bpm from Q:, 0 if absent
+    std::string meter;                // M: text, e.g. "4/4" ("" if absent)
+    int         beats_per_bar = 4;
+    int64_t     bars = 0;             // vocal-voice bars (Z<n> counts n)
+    int64_t     vocal_bars = 0;       // of those, bars holding at least one note
+    double      total_s = 0.0;        // bars * beats * 60 / tempo, 0 without tempo
+    std::vector<LuaYue2Section> sections;  // from "% name" comment markers
+    double      frame_rate = 25.0;    // NAR latent frames per second
+    int         song = 0;             // batch song index
+    int         chunk_index = 0;      // 0-based chunk index within the song
+    int         chunk_count = 1;
+    int64_t     chunk_start_frame = 0, chunk_end_frame = 0;  // end exclusive
+    int64_t     song_frames = 0;
+};
+
 struct LuaModelContext {
     int          native_sr       = 48000;  // audio sample rate (48000 ACE, 44100 MM3/SA3)
     int          latent_fps      = 25;     // latent frames per second
     int          latent_channels = 64;     // Oc (64 ACE, 128 MM3, 256 SA3)
-    const char * model_id        = "ace";  // "ace", "mm3", "sa3"
+    const char * model_id        = "ace";  // "ace", "mm3", "sa3", "yue2"
     // Measured RMS of this model's clean latent -- the number every
     // rms_target / latent-pressure servo should default to. A plugin tuned
     // against ACE's ~2.0 that is dropped onto SA3 (measured 0.685 on a 24-step
@@ -626,7 +650,45 @@ struct LuaModelContext {
     // itself (SA3 pingpong); stochastic solvers should skip their own noise
     // injection when set. (HOT-Step)
     bool         engine_renoise  = false;
+    // YuE2 plan metadata; null everywhere except the YuE2 NAR path.
+    const LuaYue2Plan * yue2     = nullptr;
 };
+
+static void lua_inject_yue2_plan(lua_State * L, const LuaYue2Plan & p) {
+    const double fr = p.frame_rate > 0.0 ? p.frame_rate : 25.0;
+    lua_newtable(L);
+    lua_pushnumber(L, p.tempo);                        lua_setfield(L, -2, "tempo");
+    lua_pushstring(L, p.meter.c_str());                lua_setfield(L, -2, "meter");
+    lua_pushinteger(L, p.beats_per_bar);               lua_setfield(L, -2, "beats_per_bar");
+    lua_pushinteger(L, (lua_Integer) p.bars);          lua_setfield(L, -2, "bars");
+    lua_pushinteger(L, (lua_Integer) p.vocal_bars);    lua_setfield(L, -2, "vocal_bars");
+    lua_pushnumber(L, p.bars > 0 ? 100.0 * (double) p.vocal_bars / (double) p.bars : 0.0);
+    lua_setfield(L, -2, "vocal_pct");
+    lua_pushnumber(L, p.total_s);                      lua_setfield(L, -2, "total_s");
+    lua_pushnumber(L, fr);                             lua_setfield(L, -2, "frame_rate");
+    lua_pushinteger(L, (lua_Integer) p.song_frames);   lua_setfield(L, -2, "song_frames");
+    lua_pushinteger(L, p.song);                        lua_setfield(L, -2, "song");
+    lua_newtable(L);
+    for (size_t i = 0; i < p.sections.size(); i++) {
+        const LuaYue2Section & s = p.sections[i];
+        lua_newtable(L);
+        lua_pushstring(L, s.name.c_str());               lua_setfield(L, -2, "name");
+        lua_pushnumber(L, s.start_s);                    lua_setfield(L, -2, "start_s");
+        lua_pushnumber(L, s.end_s);                      lua_setfield(L, -2, "end_s");
+        lua_pushinteger(L, (lua_Integer) s.start_bar);   lua_setfield(L, -2, "start_bar");
+        lua_pushinteger(L, (lua_Integer) s.end_bar);     lua_setfield(L, -2, "end_bar");
+        lua_rawseti(L, -2, (lua_Integer) i + 1);
+    }
+    lua_setfield(L, -2, "sections");
+    lua_newtable(L);
+    lua_pushinteger(L, p.chunk_index);                    lua_setfield(L, -2, "index");
+    lua_pushinteger(L, p.chunk_count);                    lua_setfield(L, -2, "count");
+    lua_pushinteger(L, (lua_Integer) p.chunk_start_frame); lua_setfield(L, -2, "start_frame");
+    lua_pushinteger(L, (lua_Integer) p.chunk_end_frame);   lua_setfield(L, -2, "end_frame");
+    lua_pushnumber(L, (double) p.chunk_start_frame / fr);  lua_setfield(L, -2, "start_s");
+    lua_pushnumber(L, (double) p.chunk_end_frame / fr);    lua_setfield(L, -2, "end_s");
+    lua_setfield(L, -2, "chunk");
+}
 
 static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx) {
     lua_newtable(L);
@@ -636,6 +698,10 @@ static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx)
     lua_pushstring(L, ctx.model_id);         lua_setfield(L, -2, "model_id");
     lua_pushnumber(L, ctx.latent_rms);       lua_setfield(L, -2, "latent_rms");
     lua_pushboolean(L, ctx.engine_renoise);  lua_setfield(L, -2, "engine_renoise");
+    if (ctx.yue2) {
+        lua_inject_yue2_plan(L, *ctx.yue2);
+        lua_setfield(L, -2, "yue2");
+    }
     lua_setglobal(L, "model_context");
 }
 
@@ -1176,13 +1242,22 @@ static int lua_call_postprocess(
             return 2;
         }
 
-        // Return audio as Lua table (1-indexed, [B * C_aud * T_audio])
+        // Return audio as Lua table (1-indexed, [B * C_aud * T_audio], contiguous
+        // per channel: ch0 at [1, T_audio], ch1 at [T_audio+1, 2*T_audio]).
+        // Source aud_buf is planar at stride max_T (ch0 in [0, max_T), ch1 in
+        // [max_T, 2*max_T)) -- the decode_fn contract used by both the native
+        // tiled decoders and the Lua-plugin decode_fn wrappers. T_audio may be
+        // less than max_T, so treating aud_buf as a flat 2*T_audio block would
+        // read channel 1's samples out of channel 0's tail region. Index each
+        // channel explicitly instead.
         lua_newtable(Ls);
-        int total = 2 * T_audio;
-        for (int i = 0; i < total; i++) {
-            lua_pushinteger(Ls, i + 1);
-            lua_pushnumber(Ls, (double) aud_buf[i]);
-            lua_settable(Ls, -3);
+        for (int c = 0; c < 2; c++) {
+            for (int i = 0; i < T_audio; i++) {
+                int lua_idx = c * T_audio + i + 1;
+                lua_pushinteger(Ls, lua_idx);
+                lua_pushnumber(Ls, (double) aud_buf[(size_t) c * max_T + i]);
+                lua_settable(Ls, -3);
+            }
         }
         lua_pushinteger(Ls, T_audio);
         return 2;
@@ -1208,17 +1283,24 @@ static int lua_call_postprocess(
         return -1;
     }
 
-    // Copy audio from Lua table to output buffer (1-indexed)
-    int total = 2 * T_audio;
+    // Copy audio from Lua table to output buffer (1-indexed).
+    // The Lua process() table is planar at stride final_samples (== max_T_audio,
+    // the arg6 passed into process() above): ch0 in [1, max_T_audio], ch1 in
+    // [max_T_audio+1, 2*max_T_audio]. T_audio may be less than max_T_audio, so
+    // reading it as a flat 2*T_audio block (the old assumption) pulls channel
+    // 1's data from channel 0's tail -- same bug as the decode_fn readback
+    // above. Index each channel at its real stride instead.
     if (T_audio > max_T_audio) {
         T_audio = max_T_audio;
-        total   = 2 * T_audio;
     }
-    for (int i = 0; i < total; i++) {
-        lua_pushinteger(L, i + 1);
-        lua_gettable(L, -3);
-        audio_out[i] = (float) lua_tonumber(L, -1);
-        lua_pop(L, 1);
+    for (int c = 0; c < 2; c++) {
+        for (int i = 0; i < T_audio; i++) {
+            int lua_idx = c * max_T_audio + i + 1;
+            lua_pushinteger(L, lua_idx);
+            lua_gettable(L, -3);
+            audio_out[(size_t) c * max_T_audio + i] = (float) lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
     }
 
     lua_pop(L, 2);

@@ -15,6 +15,7 @@
 
 import { useGlobalParamsStore, scopedKey, normalizeModelSelection } from '../stores/globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
+import { mergeProfileField } from './profileMerge';
 
 // ── Content fields (CreatePanel state, persisted via usePersistedState) ──
 // profile key → localStorage key
@@ -64,6 +65,14 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
       'lssStrength', 'lssVarThresh', 'lssDcRemove',
       'pluginParams',
     ],
+  },
+  {
+    // Backend-declared knobs (capabilities().extensions), e.g. the YuE2 NAR
+    // solver/scheduler, CADS and plan-strength sliders. Per backend, like
+    // pluginParams. Merged on apply (see applyProfileData), so a profile
+    // saved before this group existed leaves the live knobs untouched.
+    title: 'Backend Knobs',
+    fields: ['backendParams'],
   },
   {
     title: 'LM / Thinking',
@@ -197,13 +206,15 @@ export function applyProfileData(raw: ProfileData): void {
   }
 
   const partial: Record<string, unknown> = {};
+  const live = useGlobalParamsStore.getState() as unknown as Record<string, unknown>;
   for (const field of PROFILE_FIELDS) {
     if (p[field] !== undefined) {
-      const value = field === 'vaeModel'
+      let value: unknown = field === 'vaeModel'
         ? normalizeModelSelection('vaeModel', p[field])
         : field === 'stableStepBackend'
           ? normalizeModelSelection('stableStepBackend', p[field])
           : p[field];
+      value = mergeProfileField(field, value, live[field], p._mergeMaps === true);
       partial[field] = value;
       try { localStorage.setItem(fieldStorageKey(field), JSON.stringify(value)); } catch { /* full */ }
     }

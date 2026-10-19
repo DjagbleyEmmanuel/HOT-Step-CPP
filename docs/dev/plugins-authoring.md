@@ -409,6 +409,70 @@ of treating it as "unset". Compare against `0` explicitly, the way
 `model_context` is always present with sane ACE-matching defaults, so a
 plugin that never reads it behaves exactly as before.
 
+### `model_context.yue2` (YuE2 NAR solvers and schedulers only)
+
+On the YuE2 NAR path (a Lua `infer_method` or `scheduler` on `/yue2/synth`),
+`model_context.yue2` carries the song plan (the ABC score the LM wrote or the
+user supplied) plus the chunk being solved. It is `nil` on every other path
+(ACE, MM3, SA3, YuE2 postprocess), so guard with
+`local y = model_context and model_context.yue2`.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `tempo` | number | quarter-note bpm from the plan's `Q:` line, 0 if missing |
+| `meter`, `beats_per_bar` | string, int | `M:` text (e.g. `"4/4"`) and its numerator |
+| `bars` | int | vocal-voice bars (`Z4` counts as 4) |
+| `vocal_bars`, `vocal_pct` | int, number | bars with at least one sung note, and that as a percent of `bars` |
+| `total_s` | number | `bars * beats_per_bar * 60 / tempo` (0 without a tempo) |
+| `sections` | array | `{name, start_s, end_s, start_bar, end_bar}` from the plan's `% name` comment lines (lowercased, e.g. `"chorus"`, `"pre-chorus"`), empty if the plan has none |
+| `frame_rate` | number | NAR latent frames per second (25) |
+| `song`, `song_frames` | int | batch song index and its total latent frames |
+| `chunk` | table | `{index, count, start_frame, end_frame, start_s, end_s}`; index is 0-based, end is exclusive |
+
+Section times are plan time at a constant tempo; the rendered audio can run a
+little long or short of them, and a preview render (`preview_max_frames`)
+only covers the start. Schedulers run once per chunk, so a scheduler can shape
+each chunk differently:
+
+```lua
+local y = model_context and model_context.yue2
+local dense = false
+if y then
+    for _, s in ipairs(y.sections) do
+        if s.name == "chorus" and s.start_s < y.chunk.end_s and s.end_s > y.chunk.start_s then
+            dense = true
+        end
+    end
+end
+local gamma = dense and 2.5 or 1.0
+for i = 0, num_steps - 1 do output[i] = 1.0 - (i / num_steps) ^ gamma end
+```
+
+`plugins/schedulers/md_plan_aware_yue2.lua` is the full version, and it logs
+the table once per chunk.
+
+#### `plan_strength` (YuE2 NAR schedulers only)
+
+A YuE2 NAR scheduler may also set a global array `plan_strength` with one
+number per step (1-indexed, length `num_steps`). After `schedule()` returns,
+the engine reads it, clears it, and scales the plan conditioning (the AR-prefix
+V the NAR decoder attends to) by `plan_strength[i + 1]` during step `i`.
+1 = stock, below 1 loosens the plan, above 1 leans on it harder (clamped to
+0..4). If it is missing or the wrong length, the engine uses the
+`yue2:plan_w_start` / `yue2:plan_w_end` / `yue2:plan_w_curve` (linear or
+cosine) params instead, which default to 1 (off, bit-identical).
+
+```lua
+local w = {}
+for i = 0, num_steps - 1 do
+  output[i] = 1.0 - i / num_steps
+  w[i + 1] = math.min(1.0, 0.5 + i / num_steps)  -- loose early, locked later
+end
+plan_strength = w
+```
+
+`plugins/schedulers/md_plan_loose_yue2.lua` is the full version.
+
 ---
 
 ## Sandbox

@@ -328,8 +328,13 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const odeRaw = Number(params.yue2OdeSteps);
   const ode_steps = Number.isFinite(odeRaw) && odeRaw > 0 ? Math.round(odeRaw) : 32;
 
-  const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2' : undefined;
-  const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3' : undefined;
+  const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2'
+    : params.yue2NarSolver === 'ancestral' ? 'md_ancestral_yue2'
+    : undefined;
+  const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3'
+    : params.yue2NarScheduler === 'plan_aware' ? 'md_plan_aware_yue2'
+    : params.yue2NarScheduler === 'plan_loose' ? 'md_plan_loose_yue2'
+    : undefined;
   const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
   const copyNumbers = (plugin: string, fields: Record<string, string>) => {
     for (const [field, key] of Object.entries(fields)) {
@@ -363,12 +368,75 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
       plugin_params[`${narScheduler}:snr_space`] = params.yue2HtSnr;
     }
   }
+  // CADS conditioning noise on the NAR plan conditioning (engine-side, works
+  // with any solver/scheduler). Strength 0 sends nothing: bit-identical output.
+  const cadsStrength = Number(params.yue2CadsStrength);
+  if (Number.isFinite(cadsStrength) && cadsStrength > 0) {
+    plugin_params['yue2:cads_strength'] = Math.min(1, cadsStrength);
+    copyNumbers('yue2', { yue2CadsT1: 'cads_t1', yue2CadsT2: 'cads_t2' });
+    if (typeof params.yue2CadsRescale === 'boolean') {
+      plugin_params['yue2:cads_rescale'] = params.yue2CadsRescale;
+    }
+  }
+  // Plan-strength curve w(step) on the NAR plan conditioning. w = 1 at both
+  // ends sends nothing: bit-identical output.
+  const wStart = Number(params.yue2PlanWStart), wEnd = Number(params.yue2PlanWEnd);
+  const wS = Number.isFinite(wStart) ? wStart : 1, wE = Number.isFinite(wEnd) ? wEnd : 1;
+  if (wS !== 1 || wE !== 1) {
+    plugin_params['yue2:plan_w_start'] = Math.min(2, Math.max(0, wS));
+    plugin_params['yue2:plan_w_end'] = Math.min(2, Math.max(0, wE));
+    if (params.yue2PlanWCurve === 'cosine') plugin_params['yue2:plan_w_curve'] = 'cosine';
+  }
+  // Plan CFG: 1 = off (nothing sent, identical output, no extra pass).
+  const planCfg = Number(params.yue2PlanCfg);
+  if (Number.isFinite(planCfg) && planCfg > 1) {
+    plugin_params['yue2:plan_cfg'] = Math.min(8, planCfg);
+    copyNumbers('yue2', { yue2PlanCfgT1: 'plan_cfg_t1', yue2PlanCfgT2: 'plan_cfg_t2', yue2PlanCfgRescale: 'plan_cfg_rescale' });
+    if (typeof params.yue2PlanCfgLevelMatch === 'boolean') {
+      plugin_params['yue2:plan_cfg_level_match'] = params.yue2PlanCfgLevelMatch;
+    }
+  }
   if (params.yue2NarSolver && params.yue2NarSolver !== 'stock' && !narSolver) {
     notes.push(`Unknown YuE2 NAR solver "${params.yue2NarSolver}" — using midpoint`);
   }
   if (params.yue2NarScheduler && params.yue2NarScheduler !== 'stock' && !narScheduler) {
     notes.push(`Unknown YuE2 NAR scheduler "${params.yue2NarScheduler}" — using uniform steps`);
   }
+  // Generic plugin params passthrough (e.g. NAR solver/scheduler params sent
+  // as "pluginName:key" entries -- same convention the explicit mappings above
+  // use). Keys already set by the explicit solver/scheduler mapping above are
+  // left untouched so that the explicit mapping always wins over a generic
+  // override.
+  //
+  // The global ACE postprocess plugin (params.postprocessPlugin, e.g.
+  // "md_audio_tiled V2") is NOT forwarded here. YuE2 has no postprocess picker
+  // in its UI, so inheriting the ACE global would silently attach a tile-decode
+  // pass to every YuE2 render -- the 156 s seam issue. The engine hook in
+  // yue2-pipeline.h stays intact for future use; wire it up when a
+  // yue2PostprocessPlugin UI field exists. Until then, drop any pluginParams
+  // key whose prefix matches the global postprocess plugin name (they are
+  // postprocess-specific and meaningless to the NAR/VAE path here).
+  const globalPpPlugin = typeof params.postprocessPlugin === 'string'
+    ? params.postprocessPlugin.trim() : '';
+  if (params.pluginParams && typeof params.pluginParams === 'object') {
+    for (const [k, v] of Object.entries(params.pluginParams as Record<string, unknown>)) {
+      if (k in plugin_params) continue; // explicit mapping takes precedence
+      // Drop postprocess-plugin params that leaked from the global ACE setting.
+      if (globalPpPlugin && k.startsWith(globalPpPlugin + ':')) continue;
+      if (v === null || v === undefined || v === '') continue;
+      if (typeof v === 'boolean') { plugin_params[k] = v; continue; }
+      if (typeof v === 'number') { if (Number.isFinite(v)) plugin_params[k] = v; continue; }
+      if (typeof v === 'string') {
+        const n = Number(v);
+        plugin_params[k] = Number.isFinite(n) ? n : v;
+      }
+    }
+  }
+  // Postprocess plugin: YuE2 has no UI picker for postprocess, so the global
+  // ACE setting (params.postprocessPlugin) is intentionally NOT forwarded.
+  // The yue2-pipeline.h hook exists for future use; a yue2PostprocessPlugin
+  // field can re-enable it when that UI is added.
+  const postprocess_plugin: string | undefined = undefined;
   // Step-level velocity caching for the NAR midpoint solver (see
   // yue2-nar-graph.h). 0/unset = off, every step computed for real -- the
   // UI slider (index.ts's yue2NarCacheRatio extension) clamps to [0, 0.9],
@@ -526,6 +594,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     ...(narSolver ? { infer_method: narSolver } : {}),
     ...(narScheduler ? { scheduler: narScheduler } : {}),
     ...(Object.keys(plugin_params).length ? { plugin_params } : {}),
+    ...(postprocess_plugin ? { postprocess_plugin } : {}),
     vae_variant,
     seed,
   };

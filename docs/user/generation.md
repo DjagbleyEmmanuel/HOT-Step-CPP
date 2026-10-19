@@ -388,8 +388,10 @@ are stored by the server.
 - The import icon in the header loads a profile from a JSON file. A name that already
   exists asks before overwriting.
 
-A profile does not include the VST chain, the LM repetition penalty settings, the planner
-adapter, or the knobs other backends add to the bar. Applying a profile while another
+A profile does not include the VST chain, the LM repetition penalty settings or the planner
+adapter. Knobs a backend adds to the bar (`backendParams`) are saved too and merged
+over the live ones on apply. Importable YuE2 presets live in
+[presets/yue2-plan-play](presets/yue2-plan-play/README.md). Applying a profile while another
 backend is active writes the solver, schedule and guidance picks into that backend's
 settings, since those are kept per backend.
 

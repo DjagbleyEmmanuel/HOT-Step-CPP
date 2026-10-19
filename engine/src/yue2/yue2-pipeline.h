@@ -37,6 +37,13 @@
 #include "yue2-vae-graph.h"
 #include "train/yue2-loudness.h"  // yue2_peak_scale
 
+// ---- HOT-Step: Lua postprocess hook (fork addition) ----
+// The SAME registry, plugins and dispatch entry points ACE/MM3/SA3 use for
+// their own postprocess hooks (see sa3-refine.h's identical include for
+// precedent). Nothing in engine/plugins/ knows YuE2 exists.
+#include "lua-plugin-registry.h"
+// ---- end HOT-Step: Lua postprocess hook ----
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -45,6 +52,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <numeric>
@@ -515,6 +523,101 @@ static int64_t yue2_plan_seconds(const std::string & abc) {
     }
     if (bars <= 0 || !(tempo > 0.0)) return 0;
     return (int64_t) std::llround((double) bars * beats * 60.0 / tempo);
+}
+
+// Plan metadata for Lua NAR plugins (model_context.yue2). Same bar counting as
+// yue2_plan_seconds above (vocal voice, Z<n> = n bars, chord-only segments
+// count), plus: "% name" comment lines open a section, and a vocal bar counts
+// toward vocal_bars when its quote-stripped text holds a note letter. Section
+// times assume a constant tempo and meter (the last Q:/M: seen).
+static LuaYue2Plan yue2_plan_info(const std::string & abc) {
+    LuaYue2Plan info;
+    bool in_vocal = false;
+    auto lower = [](std::string s) {
+        for (char & ch : s) ch = (char) std::tolower((unsigned char) ch);
+        return s;
+    };
+    size_t pos = 0;
+    while (pos <= abc.size()) {
+        size_t nl = abc.find('\n', pos);
+        if (nl == std::string::npos) nl = abc.size();
+        std::string line = abc.substr(pos, nl - pos);
+        pos = nl + 1;
+        const size_t a = line.find_first_not_of(" \t\r");
+        if (a == std::string::npos) continue;
+        line = line.substr(a, line.find_last_not_of(" \t\r") - a + 1);
+        if (line[0] == '%') {
+            if (line.size() > 1 && line[1] == '%') continue;  // %% directives
+            const size_t n0 = line.find_first_not_of(" \t", 1);
+            if (n0 == std::string::npos) continue;
+            if (!info.sections.empty()) info.sections.back().end_bar = info.bars;
+            LuaYue2Section sec;
+            sec.name      = lower(line.substr(n0));
+            sec.start_bar = info.bars;
+            sec.end_bar   = info.bars;
+            info.sections.push_back(sec);
+            continue;
+        }
+        if (line.size() >= 2 && line[1] == ':' && std::isalpha((unsigned char) line[0])) {
+            if (line[0] == 'Q') {
+                const size_t eq = line.find('=');
+                if (eq != std::string::npos) {
+                    const char * p = line.c_str() + eq + 1;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (std::isdigit((unsigned char) *p)) info.tempo = std::strtod(p, nullptr);
+                }
+            } else if (line[0] == 'M') {
+                const size_t m0 = line.find_first_not_of(" \t", 2);
+                info.meter = m0 == std::string::npos ? "" : line.substr(m0);
+                const int n = std::atoi(line.c_str() + 2);
+                info.beats_per_bar = n > 0 ? n : 4;
+            } else if (line[0] == 'V') {
+                const std::string rest  = line.substr(2);
+                const size_t      s0    = rest.find_first_not_of(" \t");
+                const std::string first = s0 == std::string::npos ? "" : rest.substr(s0, rest.find_first_of(" \t", s0) - s0);
+                in_vocal = lower(first).find("vocal") != std::string::npos ||
+                           lower(line).find("name=\"vocal") != std::string::npos;
+            }
+            continue;
+        }
+        if (!in_vocal) continue;
+        size_t s = 0;
+        while (s <= line.size()) {
+            size_t e = line.find('|', s);
+            if (e == std::string::npos) e = line.size();
+            std::string seg;
+            bool        quoted = false;
+            for (size_t i = s; i < e; i++) {
+                if (line[i] == '"') quoted = !quoted;
+                else if (!quoted) seg += line[i];
+            }
+            const size_t t0 = seg.find_first_not_of(" \t");
+            if (line.find_first_not_of(" \t", s) < e) {
+                int64_t n = 1;
+                if (t0 != std::string::npos) {
+                    const std::string t = seg.substr(t0, seg.find_last_not_of(" \t") - t0 + 1);
+                    if (t[0] == 'Z' && t.find_first_not_of("0123456789", 1) == std::string::npos && t.size() > 1) {
+                        n = std::max<int64_t>(1, std::atoll(t.c_str() + 1));
+                    }
+                }
+                bool note = false;
+                for (char ch : seg) {
+                    if ((ch >= 'A' && ch <= 'G') || (ch >= 'a' && ch <= 'g')) { note = true; break; }
+                }
+                info.bars += n;
+                if (note) info.vocal_bars += n;
+            }
+            s = e + 1;
+        }
+    }
+    if (!info.sections.empty()) info.sections.back().end_bar = info.bars;
+    const double spb = info.tempo > 0.0 ? (double) info.beats_per_bar * 60.0 / info.tempo : 0.0;
+    info.total_s = (double) info.bars * spb;
+    for (auto & sec : info.sections) {
+        sec.start_s = (double) sec.start_bar * spb;
+        sec.end_s   = (double) sec.end_bar * spb;
+    }
+    return info;
 }
 
 // Where a stream counts as a runaway: plan_cutoff x the plan's length + 20 s,
@@ -1192,6 +1295,19 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         progress({ YUE2_STAGE_NAR, 0, nar_steps_total });
     }
 
+    // Plan metadata for Lua plugins (model_context.yue2), parsed once per song.
+    std::vector<LuaYue2Plan> plan_info;
+    std::vector<int>         chunk_seen((size_t) B, 0), chunk_total((size_t) B, 0);
+    if (plugins) {
+        plan_info.reserve((size_t) B);
+        for (int b = 0; b < B; b++) {
+            plan_info.push_back(yue2_plan_info(songs[(size_t) b].score_abc));
+            plan_info.back().song        = b;
+            plan_info.back().song_frames = (int64_t) songs[(size_t) b].codec_ids.size();
+        }
+        for (const auto & cp : plan) chunk_total[(size_t) cp.song]++;
+    }
+
     for (size_t ci = 0; ci < plan.size(); ci++) {
         if (cancel && cancel->load()) {
             if (err) *err = "cancelled";
@@ -1199,6 +1315,14 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         }
         const Yue2ChunkPlan & cp = plan[ci];
         const int64_t chunk_len  = cp.b - cp.a;
+        LuaYue2Plan * chunk_info = nullptr;
+        if (plugins) {
+            chunk_info = &plan_info[(size_t) cp.song];
+            chunk_info->chunk_index       = chunk_seen[(size_t) cp.song]++;
+            chunk_info->chunk_count       = chunk_total[(size_t) cp.song];
+            chunk_info->chunk_start_frame = cp.a;
+            chunk_info->chunk_end_frame   = cp.b;
+        }
         double nar_solve_ms = 0.0, velocity_ms = 0.0;
         int    velocity_calls = 0;
         for (int j0 = 0; j0 < n_var; j0 += group) {
@@ -1206,6 +1330,39 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
             Yue2NarChunk chunk;
             if (!yue2_nar_chunk_bind(nar_cache, cp.set, chunk_len, M, &chunk, err)) {
                 return false;
+            }
+            // CADS conditioning noise (plugin_params yue2:cads_*); strength 0 = off.
+            {
+                auto pf = [&](const char * k, float d) {
+                    auto it = req.plugin_params.find(k);
+                    if (it == req.plugin_params.end()) return d;
+                    try { return std::stof(it->second); } catch (...) { return d; }
+                };
+                chunk.cads_strength = std::clamp(pf("yue2:cads_strength", 0.0f), 0.0f, 1.0f);
+                chunk.cads_t1       = std::clamp(pf("yue2:cads_t1", 0.6f), 0.0f, 1.0f);
+                chunk.cads_t2       = std::clamp(pf("yue2:cads_t2", 0.9f), 0.0f, 1.0f);
+                const auto rs       = req.plugin_params.find("yue2:cads_rescale");
+                chunk.cads_rescale  = rs == req.plugin_params.end() ||
+                                      !(rs->second == "0" || rs->second == "false");
+                chunk.plan_w_start  = pf("yue2:plan_w_start", 1.0f);
+                chunk.plan_w_end    = pf("yue2:plan_w_end", 1.0f);
+                const auto pc       = req.plugin_params.find("yue2:plan_w_curve");
+                chunk.plan_cfg      = std::clamp(pf("yue2:plan_cfg", 1.0f), 1.0f, 8.0f);
+                chunk.plan_cfg_t1   = std::clamp(pf("yue2:plan_cfg_t1", 0.0f), 0.0f, 1.0f);
+                chunk.plan_cfg_t2   = std::clamp(pf("yue2:plan_cfg_t2", 1.0f), 0.0f, 1.0f);
+                chunk.plan_cfg_rescale = std::clamp(pf("yue2:plan_cfg_rescale", 0.7f), 0.0f, 1.0f);
+                if (chunk.plan_cfg_t1 > chunk.plan_cfg_t2) {
+                    fprintf(stderr, "[YuE2-NAR] WARNING: plan_cfg_t1 %.2f > plan_cfg_t2 %.2f, swapping\n",
+                            chunk.plan_cfg_t1, chunk.plan_cfg_t2);
+                    std::swap(chunk.plan_cfg_t1, chunk.plan_cfg_t2);
+                }
+                if (chunk.plan_cfg > 1.0f) {
+                    fprintf(stderr, "[YuE2-NAR] plan CFG %.2f for t in [%.2f, %.2f], rescale %.2f (2 forwards per velocity call)\n",
+                            chunk.plan_cfg, chunk.plan_cfg_t1, chunk.plan_cfg_t2, chunk.plan_cfg_rescale);
+                }
+                chunk.plan_w_cosine = pc != req.plugin_params.end() && pc->second == "cosine";
+                chunk.cads_seed     = (uint64_t) yue2_chunk_solver_seed(
+                    (songs[(size_t) cp.song].noise_seed + (uint64_t) j0) ^ 0xCAD5CAD5CAD5CAD5ull, (uint64_t) cp.a);
             }
             std::vector<float> noise_slice;
             noise_slice.reserve((size_t) (M * chunk_len * LD));
@@ -1233,8 +1390,13 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                 : yue2_nar_solve_plugins(m, chunk, noise_slice, req.ode_steps,
                                          req.nar_solver, req.nar_scheduler, req.plugin_params, &solve, err,
                                          on_step,
-                                         // Plugin RNG seed: the same seed this variation's NAR noise uses.
-                                         (int64_t) (songs[(size_t) cp.song].noise_seed + (uint64_t) j0));
+                                         // Plugin RNG seed: this variation's NAR noise seed, mixed with
+                                         // the chunk's start frame so each chunk draws its own solver
+                                         // noise (a shared seed repeated churn noise every chunk).
+                                         // Keyed on cp.a, not ci, so batch coalescing can't shift it.
+                                         yue2_chunk_solver_seed(songs[(size_t) cp.song].noise_seed + (uint64_t) j0,
+                                                                (uint64_t) cp.a),
+                                         chunk_info);
             nar_solve_ms += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - nar_solve_start).count();
             velocity_ms += solve.total_velocity_ms;
@@ -1257,6 +1419,41 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         fprintf(stderr, "[YuE2-NAR-Chunk] song=%d index=%zu frames=%lld prefix_tokens=%lld solve_ms=%.1f velocity_ms=%.1f calls=%d variations=%d\n",
                 cp.song, ci, (long long) chunk_len, (long long) nar_cache.filled[(size_t) cp.set], nar_solve_ms,
                 velocity_ms, velocity_calls, n_var);
+    }
+
+    // ---- HOT-Step: plan CFG level match (fork addition) ----
+    // Plan CFG (even std-rescaled) pushes the NAR latent RMS well above the
+    // no-CFG level (1.33 vs ~0.935 at cfg 2), which the VAE turns into
+    // +3.6 LU (cfg 2) / +9 LU (cfg 3). With yue2:plan_cfg_level_match on
+    // (default) and plan_cfg > 1, scale each finished song/variation latent by
+    // one scalar so its whole-song RMS equals YUE2_NOCFG_LATENT_RMS, the
+    // measured no-CFG level. Whole-song, not per chunk: one gain keeps the
+    // chunk-to-chunk dynamics the model produced. cfg 1 never enters this
+    // block, so that path stays byte-identical.
+    {
+        auto it_cfg = req.plugin_params.find("yue2:plan_cfg");
+        float cfg = 1.0f;
+        if (it_cfg != req.plugin_params.end()) { try { cfg = std::stof(it_cfg->second); } catch (...) {} }
+        const auto it_lm = req.plugin_params.find("yue2:plan_cfg_level_match");
+        const bool lm = it_lm == req.plugin_params.end() ||
+                        !(it_lm->second == "0" || it_lm->second == "false");
+        constexpr float YUE2_NOCFG_LATENT_RMS = 0.935f;  // same measurement as YUE2_LATENT_RMS (VAE stage)
+        if (cfg > 1.0f && lm) {
+            for (int b = 0; b < B; b++) {
+                for (int j = 0; j < n_var; j++) {
+                    auto & lat = (*latents_out)[(size_t) b][(size_t) j];
+                    if (lat.empty()) continue;
+                    double s2 = 0.0;
+                    for (float v : lat) s2 += (double) v * (double) v;
+                    const double rms = std::sqrt(s2 / (double) lat.size());
+                    if (!(rms > 1e-6)) continue;
+                    const float g = (float) (YUE2_NOCFG_LATENT_RMS / rms);
+                    for (float & v : lat) v *= g;
+                    fprintf(stderr, "[YuE2-NAR] plan CFG level match: song=%d var=%d rms %.4f -> %.4f (gain %.2f dB)\n",
+                            b, j, rms, (double) YUE2_NOCFG_LATENT_RMS, 20.0 * std::log10((double) g));
+                }
+            }
+        }
     }
     return true;
 }
@@ -1296,15 +1493,125 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
     const int64_t core = std::min<int64_t>((int64_t) m.vae_cfg.decode_core_frames, 512);
     const int64_t halo = (int64_t) m.vae_cfg.decode_halo_frames;
     const int64_t n_tiles = core > 0 ? (total_frames + core - 1) / core : 1;
-    if (progress) {
-        progress({ YUE2_STAGE_VAE, 0, n_tiles });
+
+    // ---- HOT-Step: Lua postprocess hook (fork addition) ----
+    // Routes the latent->audio decode through a Lua postprocess plugin
+    // instead of the built-in yue2_vae_decode_tiled path below. Mirrors
+    // sa3-refine.h's identical hook (grep "lua_call_postprocess" there) and
+    // ACE's ops_vae_decode_postprocess (pipeline-synth-ops.cpp). Gated
+    // entirely on req.postprocess_plugin being non-empty; runs BEFORE the
+    // native decode so the native path is skipped whenever the plugin
+    // succeeds (pp_ok). When no plugin is requested (or it fails), pp_ok
+    // stays false and the native path below runs exactly as upstream did,
+    // same relative progress() order, byte-identical for that path.
+    bool pp_ok = false;
+    if (!req.postprocess_plugin.empty()) {
+        LuaPlugin * pp_plugin = PluginRegistry::instance().postprocess_lookup(req.postprocess_plugin.c_str());
+        if (!pp_plugin) {
+            fprintf(stderr, "[YuE2] Postprocess WARNING: plugin '%s' not found, keeping native decode\n",
+                    req.postprocess_plugin.c_str());
+        } else {
+            // yue2_ctx.latent_rms: measured 2026-09-28 from [YuE2-Latent] logs
+            // over three renders (rms 0.9358, 0.9285, 0.9402; 64-ch NAR
+            // latents before VAE decode). Mean ~0.935. Compare SA3 (0.685)
+            // and MM3 (2.35).
+            constexpr float YUE2_LATENT_RMS = 0.935f;
+
+            LuaModelContext yue2_ctx;
+            yue2_ctx.native_sr       = 48000;
+            yue2_ctx.latent_fps      = 25;
+            yue2_ctx.latent_channels = (int) LD;
+            yue2_ctx.model_id        = "yue2";
+            yue2_ctx.latent_rms      = YUE2_LATENT_RMS;
+
+            // song_latents is already time-major [T][LD] -- the exact layout
+            // lua_call_postprocess expects (unlike SA3, which is native
+            // channel-major and must transpose first; see sa3-refine.h
+            // CONVENTION 2). No transpose needed for this call.
+            //
+            // decode_fn: yue2_vae_decode_tiled only decodes a whole latent
+            // buffer handed to it, with no separate "sub-range of an
+            // already-loaded song" mode -- so a plugin-requested tile
+            // [T_lat][LD] is decoded by transposing that slice to
+            // channel-major and running it through the SAME tiled decode
+            // path as the whole-song call above, into a fresh output buffer.
+            PostprocessVaeDecodeFn decode_fn =
+                [&m, core, halo, LD](const float * latent_tm, int T_lat, float * aud_out, int max_T) -> int {
+                    // Short-tile diagnostic (mirrors sa3-refine.h's identical check):
+                    // below core+halo, the tiled decode has no cross-tile context to
+                    // draw on for this slice.
+                    if ((int64_t) T_lat < core + halo) {
+                        fprintf(stderr,
+                                "[YuE2] Postprocess tile decode: T_lat=%lld below core+halo (%lld), "
+                                "no cross-tile context\n",
+                                (long long) T_lat, (long long) (core + halo));
+                    }
+                    std::vector<float> slice_ct((size_t) (LD * T_lat));
+                    for (int64_t t = 0; t < T_lat; t++) {
+                        for (int64_t c = 0; c < LD; c++) {
+                            slice_ct[(size_t) (c * T_lat + t)] = latent_tm[(size_t) (t * LD + c)];
+                        }
+                    }
+                    std::vector<float> slice_audio;
+                    int64_t             slice_samples = 0;
+                    std::string         decode_err;
+                    if (!yue2_vae_decode_tiled(m, slice_ct.data(), T_lat, core, halo, &slice_audio, &slice_samples,
+                                               nullptr, &decode_err)) {
+                        fprintf(stderr, "[YuE2] Postprocess tile decode failed: %s\n", decode_err.c_str());
+                        return -1;
+                    }
+                    int t_audio = (int) slice_samples;
+                    if (t_audio > max_T) {
+                        t_audio = max_T;
+                    }
+                    memcpy(aud_out,         slice_audio.data(),                 sizeof(float) * (size_t) t_audio);
+                    memcpy(aud_out + max_T, slice_audio.data() + slice_samples, sizeof(float) * (size_t) t_audio);
+                    // Zero-fill the tail beyond t_audio (up to max_T) per channel,
+                    // so the lua-plugin.h bridge and any plugin that ignores the
+                    // returned count both read clean silence, not stale heap data.
+                    if (t_audio < max_T) {
+                        std::fill(aud_out + t_audio, aud_out + max_T, 0.0f);
+                        std::fill(aud_out + max_T + t_audio, aud_out + 2 * max_T, 0.0f);
+                    }
+                    return t_audio;
+                };
+
+            const int          max_T_audio = (int) (total_frames * 1920);
+            std::vector<float> pp_audio((size_t) 2 * max_T_audio);
+            int T_audio = lua_call_postprocess(*pp_plugin, song_latents.data(), (int) total_frames, (int) LD, 2,
+                                               pp_audio.data(), max_T_audio, decode_fn, req.plugin_params, yue2_ctx);
+            if (T_audio > 0) {
+                int n = T_audio < max_T_audio ? T_audio : max_T_audio;
+                audio_planar_out->assign((size_t) 2 * n, 0.0f);
+                memcpy(audio_planar_out->data(),     pp_audio.data(),               sizeof(float) * (size_t) n);
+                memcpy(audio_planar_out->data() + n, pp_audio.data() + max_T_audio, sizeof(float) * (size_t) n);
+                *samples_out = n;
+                pp_ok = true;
+                fprintf(stderr, "[YuE2] Postprocess '%s' decode: T_audio=%lld (T_latent=%lld)\n",
+                        req.postprocess_plugin.c_str(), (long long) n, (long long) total_frames);
+            } else {
+                fprintf(stderr, "[YuE2] Postprocess '%s' failed, keeping native decode\n",
+                        req.postprocess_plugin.c_str());
+            }
+        }
     }
-    if (!yue2_vae_decode_tiled(m, latent_ct.data(), total_frames, core, halo, audio_planar_out, samples_out, nullptr,
-                               err)) {
-        return false;
-    }
-    if (progress) {
-        progress({ YUE2_STAGE_VAE, n_tiles, n_tiles });
+    // ---- end HOT-Step: Lua postprocess hook ----
+
+    // Native tiled VAE decode -- skipped when the plugin above already
+    // produced audio (pp_ok). Same two progress() calls in the same
+    // relative order around the decode as upstream, so the no-plugin path
+    // (pp_ok always false) is byte-identical to before this hook existed.
+    if (!pp_ok) {
+        if (progress) {
+            progress({ YUE2_STAGE_VAE, 0, n_tiles });
+        }
+        if (!yue2_vae_decode_tiled(m, latent_ct.data(), total_frames, core, halo, audio_planar_out, samples_out,
+                                   nullptr, err)) {
+            return false;
+        }
+        if (progress) {
+            progress({ YUE2_STAGE_VAE, n_tiles, n_tiles });
+        }
     }
     return true;
 }

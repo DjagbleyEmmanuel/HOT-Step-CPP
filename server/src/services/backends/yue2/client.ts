@@ -279,8 +279,8 @@ export interface Yue2SynthRequest {
   nar_chunk_frames?: number;
   ode_method?: 'midpoint';
   /** Optional NAR Lua overrides. Absent fields keep the checkpoint's midpoint path. */
-  infer_method?: 'md_wasserstein_yue2';
-  scheduler?: 'md_ht_scheduler V3';
+  infer_method?: 'md_wasserstein_yue2' | 'md_ancestral_yue2';
+  scheduler?: 'md_ht_scheduler V3' | 'md_plan_aware_yue2' | 'md_plan_loose_yue2';
   plugin_params?: Record<string, string | number | boolean>;
   vae_variant?: 'standard' | 'legacy' | 'dec2x';
   /** Validator-only per the plan; never sent by this backend's own mapping. */
@@ -330,6 +330,12 @@ export interface Yue2SynthRequest {
    *  and optionally its score lines, from the composer until its first Vocal
    *  note. Absent = off. Needs abc, one prompt for the batch and cfg_scale 1. */
   lyric_schedule?: Yue2LyricScheduleWire;
+  /** HOT-Step: name of a registered Lua postprocess plugin to route the VAE
+   *  decode through (yue2-pipeline.h's yue2_run_vae_stage hook). Absent/empty =
+   *  built-in tiled decode, byte-identical to before this field existed. The
+   *  plugin's params arrive via plugin_params using the "pluginName:key" prefix
+   *  the engine's shared plugin_params map expects. */
+  postprocess_plugin?: string;
 }
 
 export interface Yue2StageDefaults {
