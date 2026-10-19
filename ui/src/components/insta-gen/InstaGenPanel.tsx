@@ -36,6 +36,7 @@ import {
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
@@ -56,6 +57,9 @@ type Phase = 'input' | 'inspiring' | 'preview' | 'generating';
  *  server freezes its active backend at POST time for the accepted job. */
 const isMm3Render = (): boolean =>
   useBackendStore.getState().activeBackendId === MM3_BACKEND_ID;
+/** YuE2 hides the duration control too and trims to any duration it is sent. */
+const isAutoDurationRender = (): boolean =>
+  isMm3Render() || useBackendStore.getState().activeBackendId === YUE2_BACKEND_ID;
 
 interface InstaGenPanelProps {
   onSongCreated?: (song: any) => void;
@@ -168,7 +172,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     return {
       caption: computedCaption, genres: [...selectedGenres], lyricMode, subject: subject.trim(),
       randomSubject, provider: selectedProvider, model: selectedModel, vocalLanguage, thinking,
-      engineParams: { ...globalParams.getGlobalParams(), duration: resolveInstaDuration(isMm3Render()) },
+      engineParams: { ...globalParams.getGlobalParams(), duration: resolveInstaDuration(isAutoDurationRender()) },
       expectedBackend: useBackendStore.getState().activeBackendId,
       coResident: typeof settings.coResident === 'boolean' ? settings.coResident : false,
       cacheLmCodes: typeof settings.cacheLmCodes === 'boolean' ? settings.cacheLmCodes : true,
@@ -280,7 +284,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
       if (inspireResult.bpm) localStorage.setItem('hs-bpm', JSON.stringify(inspireResult.bpm));
       // Not in MM3 mode: the Create panel hides its duration control there, so
       // writing one would leave a number in a box nobody can see or clear.
-      if (inspireResult.duration && !isMm3Render()) {
+      if (inspireResult.duration && !isAutoDurationRender()) {
         localStorage.setItem('hs-duration', JSON.stringify(inspireResult.duration));
       }
       if (inspireResult.keyScale) localStorage.setItem('hs-keyScale', JSON.stringify(inspireResult.keyScale));

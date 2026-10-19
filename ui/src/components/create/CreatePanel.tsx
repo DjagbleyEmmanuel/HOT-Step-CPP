@@ -459,7 +459,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     const params = createContentParams({
       caption, lyrics, negativePrompt, instrumental, loraTrigger, beatIntro, introBars,
       title, artist, subject, bpm, keyScale, timeSignature, duration, vocalLanguage, sourceLatentUrl,
-    }, { mm3Mode, resolvedCaption, resolvedLyrics });
+    }, { mm3Mode, yue2Active: activeBackendId === YUE2_BACKEND_ID, resolvedCaption, resolvedLyrics });
     // A pasted lead sheet (#181) is the score; previewing would plan a new one
     // and throw it away.
     if (yue2Mode && yue2PreviewScore && !yue2AbcSupplied) {

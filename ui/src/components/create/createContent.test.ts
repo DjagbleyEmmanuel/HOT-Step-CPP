@@ -98,6 +98,12 @@ test('resumed Create drafts reproduce every captured Create request', async () =
   }
 });
 
+test('YuE2 sends auto duration because its control is hidden', () => {
+  const c = createContentFromDraft({ 'hs-duration': 90 });
+  assert.equal(createContentParams(c, { mm3Mode: false, yue2Active: true }).duration, -1);
+  assert.equal(createContentParams(c, { mm3Mode: false }).duration, 90);
+});
+
 test('a resumed draft composes the trigger and beat intro exactly as the form does', () => {
   const content = createContentParams(createContentFromDraft({ 'hs-caption': 'warm synths', 'hs-lora-trigger': 'trig',
     'hs-beat-intro': true, 'hs-intro-bars': 4, 'hs-duration': 90 }), { mm3Mode: true });

@@ -25,7 +25,7 @@ export function composeCaption(base: string, loraTrigger: string, beatIntro: boo
 
 /** The content part of a Create request. `resolvedCaption`/`resolvedLyrics`
  *  are the wildcard-expanded texts when auto-expand ran. */
-export function createContentParams(c: CreateContent, opts: { mm3Mode: boolean; resolvedCaption?: string; resolvedLyrics?: string }): Partial<GenerationParams> {
+export function createContentParams(c: CreateContent, opts: { mm3Mode: boolean; yue2Active?: boolean; resolvedCaption?: string; resolvedLyrics?: string }): Partial<GenerationParams> {
   const params: Partial<GenerationParams> = {
     caption: composeCaption(opts.resolvedCaption ?? c.caption, c.loraTrigger, c.beatIntro, c.introBars),
     lyrics: c.instrumental ? '[Instrumental]' : (opts.resolvedLyrics ?? c.lyrics),
@@ -37,7 +37,9 @@ export function createContentParams(c: CreateContent, opts: { mm3Mode: boolean; 
     // control is hidden in MM3 mode (MetadataSection), and this stops the
     // persisted ACE value riding along behind it. The backend enforces the
     // same thing, so a stale row or a direct API call cannot reinstate a cap.
-    duration: opts.mm3Mode ? -1 : c.duration,
+    // YuE2 hides the control too (duration.editable: false) and its backend
+    // trims to any duration it is sent, so it gets -1 for the same reason.
+    duration: opts.mm3Mode || opts.yue2Active ? -1 : c.duration,
     // vocalGender is deliberately NOT sent: neither backend has a wire field
     // for it. It reaches the model only by being written into the caption's
     // Vocal Details section by Mm3ComposeButton, and the caption is what
