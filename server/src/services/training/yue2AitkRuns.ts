@@ -540,15 +540,21 @@ function assignBlindLabels(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpoi
   return true;
 }
 
-/** A base-matched run (2026-09-27) has no KL rungs: its ladder is every
- *  complete checkpoint, so each one is flagged as a rung for the Review page,
- *  the best-rung pick and the ladder cards. Other runs keep meters.json's flag. */
+/** A base-matched (2026-09-27) or fixed-recipe run has no KL rungs: its
+ *  ladder is every complete checkpoint, picked by ear, with no NAR follow-up. */
+export function isCheckpointLadder(options: { method?: unknown } | undefined): boolean {
+  return options?.method === 'base-matched' || options?.method === 'fixed-recipe';
+}
+
+/** A checkpoint-ladder run's complete checkpoints are each flagged as a rung
+ *  for the Review page, the best-rung pick and the ladder cards. Other runs
+ *  keep meters.json's flag. */
 function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
   const o = run.options as Record<string, unknown> | undefined;
   // Legacy saving every KL step: past the freeze the decoder-phase saves are
   // the rungs (they get the previews), since the KL no longer moves.
   if (Number(o?.klCheckpointEvery) > 0 && o?.refinePlanner !== true) return checkpoints.map(c => c.frozen ? { ...c, rung: true } : c);
-  if (o?.method !== 'base-matched') return checkpoints;
+  if (!isCheckpointLadder(o)) return checkpoints;
   return checkpoints.map(c => c.arPath && c.narPath ? { ...c, rung: true } : c);
 }
 

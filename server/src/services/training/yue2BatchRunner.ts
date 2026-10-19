@@ -20,7 +20,7 @@ import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
-import { listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { isCheckpointLadder, listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { YUE2_CACHE_LUFS } from './yue2Train.js';
 import { listPreparedCaches } from './preparedDataReset.js';
@@ -236,8 +236,8 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
       const bad = pickedCheckpointError(runs, e.refineRun, e.pickStep);
       if (bad) return { error: bad };
     }
-    // A base-matched ladder is picked as it is: no decoder follow-up.
-    const baseMatched = (runs.find(r => r.jobId === e.refineRun)?.options as Record<string, unknown> | undefined)?.method === 'base-matched';
+    // A checkpoint ladder is picked as it is: no decoder follow-up.
+    const baseMatched = isCheckpointLadder(runs.find(r => r.jobId === e.refineRun)?.options);
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, refineRun: e.refineRun, ...(e.pickStep !== undefined ? { pickStep: e.pickStep } : {}),
       narKnee: opts.knee !== false, status: 'pending', currentStage: null, error: null,
       stages: (baseMatched ? ['finish'] as const : ['nar', 'finish'] as const).map(stage => ({ stage, jobId: '', status: 'pending' as const, error: null, startedAt: null, finishedAt: null })) });

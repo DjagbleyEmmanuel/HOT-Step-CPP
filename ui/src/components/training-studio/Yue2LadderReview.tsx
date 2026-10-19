@@ -32,7 +32,7 @@ const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 borde
  *  step order just because every label reads empty — no ladder renders, no
  *  scoring, until the labels land. Pure so it's unit-testable without React. */
 export function ladderVisibility(run: Yue2AitkRunRecord | undefined, blindRungs: boolean) {
-  const jointLadder = run?.options.method === 'base-matched';
+  const jointLadder = run?.options.method === 'base-matched' || run?.options.method === 'fixed-recipe';
   const labelsPending = !!jointLadder && blindRungs && run != null && !run.blindLabels;
   const blind = !!jointLadder && blindRungs && !labelsPending;
   const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';

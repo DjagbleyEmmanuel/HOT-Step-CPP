@@ -8,7 +8,7 @@ import { readPreview } from '../auditionStore.js';
 import { createTrainingCreateDraft, getTrainingCreateDraft, mirroredGenerationDraft } from './auditionDraft.js';
 import { getUserId } from '../../../routes/auth.js';
 import { narContinuationRequest, reviewUseDecision } from './reviewPolicy.js';
-import { listYue2AitkRuns, yue2RunFinished } from '../yue2AitkRuns.js';
+import { isCheckpointLadder, listYue2AitkRuns, yue2RunFinished } from '../yue2AitkRuns.js';
 import { listYue2JointPreviews } from '../yue2JointPreview.js';
 import { listYue2RungScores } from '../yue2RungScores.js';
 import { bestReviewFact, reviewRevision, reviewRungFacts, reviewSelectionError } from '../yue2BestRung.js';
@@ -89,7 +89,7 @@ export function mountTrainingReview(router: Router, deps: TrainingOperationDeps)
       if (deps.datasetRevision(pick.datasetId) !== pick.datasetRevision) throw stale('Dataset changed since finish was prepared');
       assertRunSource(snapshot.sources, pick);
       const current = chosen(pick, true);
-      if (current.run.origin && current.run.options.method !== 'base-matched')
+      if (current.run.origin && !isCheckpointLadder(current.run.options))
         throw stale('NAR further training is unavailable for a mirrored worker run');
       if (listBatches().some(batch => (batch.status === 'running' || batch.status === 'paused')
           && batch.items.some(item => item.refineRun === pick.runId && (item.status === 'pending' || item.status === 'running'))))

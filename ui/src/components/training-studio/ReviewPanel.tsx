@@ -46,8 +46,9 @@ export const ReviewPanel: React.FC = () => {
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setSyncing(false); }
   };
-  // "Reviewing complete" on the Refine tab counts as scored.
-  const awaiting = (r: Yue2ReviewRow) => r.unscored > 0 && r.previews > 0 && !r.reviewed;
+  // "Reviewing complete" on the Refine tab counts as scored; a finished
+  // (linked and cleaned up) ladder has nothing left to review.
+  const awaiting = (r: Yue2ReviewRow) => r.unscored > 0 && r.previews > 0 && !r.reviewed && !r.finished;
   const pending = rows.filter(awaiting);
   const rest = rows.filter(r => !awaiting(r));
   // Scored ladders can be finished in one go on the server: NAR further

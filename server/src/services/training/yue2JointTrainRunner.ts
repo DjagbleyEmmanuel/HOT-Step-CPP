@@ -8,7 +8,7 @@ import { buildGpuEnv, selectedGpuMemoryMB } from '../gpuDevices.js';
 
 const PARALLEL_PREVIEW_MIN_VRAM_MB = 28 * 1024;
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
-import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun, yue2JointWeight } from './yue2AitkRuns.js';
+import { checkpointRecords, isCheckpointLadder, listYue2AitkRuns, recordYue2AitkRun, yue2JointWeight } from './yue2AitkRuns.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
@@ -598,7 +598,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
         loss: state.lastLoss, path: saved.dir });
       // KL rungs preview on kl_mark; once the planner is frozen the KL stops
       // moving, so the decoder phase previews every step-cadence save.
-      if (saved && (opts.method === 'base-matched' || !(opts.klCheckpointEvery! > 0) || state.frozenAt !== undefined)) state.onRung?.(step);
+      if (saved && (isCheckpointLadder(opts) || !(opts.klCheckpointEvery! > 0) || state.frozenAt !== undefined)) state.onRung?.(step);
       if (thinning?.pendingDrop?.step === step) {
         // The folder exists under its final name now (see pendingDrop).
         if (saved) thinning.disposable = { step, dir: saved.dir, recon: thinning.pendingDrop.recon };
@@ -750,7 +750,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     // rung: a KL rung of a planner refinement, or, for a run without KL rungs
     // (base-matched, or Legacy without a refinement), every saved checkpoint,
     // which the relay fires onRung for (2026-09-27, Legacy 2026-10-06).
-    const preview = withGeneratedPreviewLyrics(job, o.preview?.enabled && (o.preview.everySteps > 0 || o.preview.parallel || (o.klCheckpointEvery ?? 0) > 0 || o.method === 'base-matched') ? o.preview : undefined);
+    const preview = withGeneratedPreviewLyrics(job, o.preview?.enabled && (o.preview.everySteps > 0 || o.preview.parallel || (o.klCheckpointEvery ?? 0) > 0 || isCheckpointLadder(o)) ? o.preview : undefined);
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
     const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;

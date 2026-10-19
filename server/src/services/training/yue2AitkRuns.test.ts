@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { checkpointRecords } from './yue2AitkRuns.js';
+import { checkpointRecords, isCheckpointLadder } from './yue2AitkRuns.js';
 import { readYue2ArRun } from './yue2ArRuns.js';
 import { readYue2Run } from './yue2Runs.js';
 import { uniqueDatasetTrigger } from './datasetTrigger.js';
@@ -271,4 +271,11 @@ test('startup reconcile only interrupts a local running row, never a remote-orig
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('base-matched and fixed-recipe runs are checkpoint ladders; tuned runs are not', () => {
+  assert.equal(isCheckpointLadder({ method: 'base-matched' }), true);
+  assert.equal(isCheckpointLadder({ method: 'fixed-recipe' }), true);
+  assert.equal(isCheckpointLadder({ method: 'tuned' }), false);
+  assert.equal(isCheckpointLadder(undefined), false);
 });
