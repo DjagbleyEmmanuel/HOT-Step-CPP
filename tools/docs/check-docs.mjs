@@ -80,6 +80,8 @@ try {
   skipWorktree = new Set(execFileSync('git', ['ls-files', '-v', '*.md', '**/*.md'], { cwd: ROOT, encoding: 'utf8' })
     .split(/\r?\n/).filter((line) => line.startsWith('S ')).map((line) => line.slice(2)));
 } catch { /* Without git metadata, read the working files as before. */ }
+const trackedSet = new Set(tracked);
+const isDanglingSymlink = (p) => { try { return fs.lstatSync(p).isSymbolicLink() && !fs.existsSync(p); } catch { return false; } };
 const linkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 for (const file of [...tracked, ...untrackedNew]) {
   let raw;
@@ -88,7 +90,8 @@ for (const file of [...tracked, ...untrackedNew]) {
       ? execFileSync('git', ['show', `:${file}`], { cwd: ROOT, encoding: 'utf8' })
       : fs.readFileSync(path.join(ROOT, file), 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') { warn.push(`${file}: unreadable (skipped - broken symlink?)`); continue; }
+    // Only an untracked dangling symlink is skipped; a missing tracked doc is a real failure.
+    if (e.code === 'ENOENT' && !trackedSet.has(file) && isDanglingSymlink(path.join(ROOT, file))) { warn.push(`${file}: unreadable (skipped - broken symlink)`); continue; }
     throw e;
   }
   const text = raw.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
