@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import archiver from 'archiver';
-import type { Writable } from 'stream';
+import type { Readable, Writable } from 'stream';
 
 export const MAX_ZIP_IDS = 500;
 /** Total size of the source files in one export. Checked before any header is sent. */
@@ -83,18 +83,33 @@ export function planZipEntries(songs: ExportSongRow[], audioDir: string): ZipPla
   return { entries, totalBytes };
 }
 
-/** Pipe the entries into `res` as a zip. If the client disconnects before the
- *  archive ends, abort it so the open file streams are released. */
+/** Pipe the entries into `res` as a zip, one source stream open at a time.
+ *  If the client disconnects before the archive ends, destroy the open source
+ *  stream and the archive: abort() alone leaves a backpressured file open. */
 export function streamZip(
   res: Writable & { destroy(err?: Error): unknown },
   entries: ZipEntry[],
   onError: (err: Error) => void,
+  open: (file: string) => Readable = f => fs.createReadStream(f),
 ): archiver.Archiver {
   const archive = archiver('zip', { zlib: { level: 1 } });
+  let current: Readable | null = null;
+  let i = 0;
+  const next = () => {
+    if (i >= entries.length) { void archive.finalize(); return; }
+    const e = entries[i++];
+    current = open(e.file);
+    archive.append(current, { name: e.name });
+  };
+  archive.on('entry', next);
   archive.on('error', err => { onError(err); res.destroy(err); });
-  res.on('close', () => { if (!res.writableFinished) archive.abort(); });
+  res.on('close', () => {
+    if (res.writableFinished) return;
+    archive.abort();
+    current?.destroy();
+    archive.destroy();
+  });
   archive.pipe(res);
-  for (const e of entries) archive.file(e.file, { name: e.name });
-  void archive.finalize();
+  next();
   return archive;
 }

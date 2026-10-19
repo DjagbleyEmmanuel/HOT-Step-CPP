@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { planZipEntries, parseZipIds, streamZip, MAX_ZIP_IDS, MAX_ZIP_BYTES } from './exportZip.js';
 
@@ -68,11 +69,32 @@ test('a symlink pointing outside the audio dir is not exported', (t) => {
   assert.equal(entries.length, 0);
 });
 
-test('client disconnect aborts the archive', async () => {
-  const dir = audioDirWith({ "a.wav": 1024 });
-  const { entries } = planZipEntries([{ id: '1', audio_url: '/audio/a.wav' }], dir);
+test('mid-transfer disconnect closes the open source file', async () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'big.wav'), crypto.randomBytes(8 * 1024 * 1024));
+  const { entries } = planZipEntries([{ id: '1', audio_url: '/audio/big.wav' }], dir);
   const res = new PassThrough({ highWaterMark: 1 });
-  const archive = streamZip(res, entries, () => {});
-  res.emit('close');
+  let src: fs.ReadStream | undefined;
+  const archive = streamZip(res, entries, () => {}, f => (src = fs.createReadStream(f)));
+  await new Promise<void>(r => src!.once('data', () => r()));
+  const closed = new Promise<void>(r => src!.once('close', () => r()));
+  res.destroy();
+  await closed;
+  assert.equal(src!.destroyed, true);
   assert.equal((archive as any)._state.aborted, true);
+});
+
+test('a full zip still writes every entry', async () => {
+  const dir = audioDirWith({ 'a.wav': 10, 'b.wav': 10 });
+  const { entries } = planZipEntries([
+    { id: '1', title: 'x', audio_url: '/audio/a.wav' },
+    { id: '2', title: 'y', audio_url: '/audio/b.wav' },
+  ], dir);
+  const res = new PassThrough();
+  const chunks: Buffer[] = [];
+  res.on('data', c => chunks.push(c));
+  streamZip(res, entries, () => {});
+  await new Promise(r => res.once('end', r));
+  const zip = Buffer.concat(chunks).toString('latin1');
+  assert.ok(zip.includes('x.wav') && zip.includes('y.wav'));
 });
