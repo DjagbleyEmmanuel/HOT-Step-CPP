@@ -18,7 +18,7 @@ import { logGeneration, failGenerationLog } from '../services/logger.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
-import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
+import { getBackend, getActiveBackendId, listBackends } from '../services/backends/registry.js';
 import { awaitBackendRelease, trackBackendRelease } from '../services/generation/backendRelease.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
@@ -148,9 +148,21 @@ function finalizeAttempt(
     ?? (job.status === 'cancelled' || thrownError?.includes('Cancelled') ? 'cancelled' : 'failed');
 }
 
-/** The family whose generation last started on the GPU lane, so the only one
- *  that can still hold weights. Unknown until the first job runs. */
-let laneFamily: string | undefined;
+/** Free every other family's VRAM and wait until each one confirms, before
+ *  `family` loads weights on the lane. Run on every lane task that loads a
+ *  family, not only on a family change: a per-job backendOverride switches
+ *  family without a selector change, and a YuE2 score preview under
+ *  keep-loaded leaves its LM resident without being a generation. Releasing a
+ *  family with nothing loaded is a cheap no-op. */
+async function evictOtherFamilies(family: string): Promise<void> {
+  for (const other of listBackends()) {
+    if (other.id === family || !other.releaseVram) continue;
+    trackBackendRelease(other.id, () => other.releaseVram!()).catch(err => {
+      console.warn(`[Generate] releaseVram not confirmed for '${other.id}' before '${family}':`, err?.message || err);
+    });
+  }
+  await awaitBackendRelease();
+}
 
 /** Run the full generation pipeline */
 async function runGeneration(
@@ -165,20 +177,8 @@ async function runGeneration(
   if (!backend) throw new Error(`Captured generation backend '${backendId ?? '(missing)'}' is not registered`);
   if (!lease.isCurrent()) return emptyOutcome(job, 'reset');
   // A backend switch evicts the outgoing family in the background; no family
-  // loads weights until that eviction is confirmed. A per-job backendOverride
-  // changes family without a switch, so the lane schedules the same release
-  // itself when this job's family differs from the last one it ran.
-  if (laneFamily !== undefined && laneFamily !== backendId) {
-    const outgoingId = laneFamily;
-    const outgoing = getBackend(outgoingId);
-    if (outgoing?.releaseVram) {
-      trackBackendRelease(outgoingId, () => outgoing.releaseVram!()).catch(err => {
-        console.warn(`[Generate] releaseVram not confirmed for '${outgoingId}' before '${backendId}':`, err?.message || err);
-      });
-    }
-  }
-  await awaitBackendRelease();
-  laneFamily = backendId;
+  // loads weights until that eviction, and every other family's, is confirmed.
+  await evictOtherFamilies(backendId);
   return backend.generate(job, {
     envelope: job.envelope,
     attempt,
@@ -312,7 +312,10 @@ router.post('/yue2/plan', async (req, res) => {
   res.on('close', () => { if (!res.writableFinished) abort.abort(); });
   try {
     noteEnqueued('yue2');
-    const preview = await runOnGpuLane(() => runYue2PlanPreview(params, abort.signal), { label: 'yue2 score preview', family: 'yue2' });
+    const preview = await runOnGpuLane(async () => {
+      await evictOtherFamilies('yue2');
+      return runYue2PlanPreview(params, abort.signal);
+    }, { label: 'yue2 score preview', family: 'yue2' });
     res.json(preview);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -373,9 +376,12 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
   // switch fails loudly instead of training/rendering on the wrong one.
   // With a backendOverride, `expectedBackend` is checked against the override
   // (the backend the job will run on); without one, against the active
-  // backend. A malformed or unknown override skips this and gets its 400 below.
+  // backend. A malformed override is a 400 here; an unknown one skips this and
+  // gets its 400 below.
   let checkedOverride: string | undefined;
-  try { checkedOverride = readBackendOverride(raw); } catch { /* 400 below */ }
+  try { checkedOverride = readBackendOverride(raw); } catch (err) {
+    return { ok: false, status: 400, body: { error: err instanceof Error ? err.message : 'Invalid backendOverride' } };
+  }
   if (checkedOverride === undefined || getBackend(checkedOverride)) {
     const mismatch = expectedBackendMismatch(
       isGenerationIntent(raw) ? raw.input : raw,

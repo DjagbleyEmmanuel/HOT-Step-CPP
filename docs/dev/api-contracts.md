@@ -69,8 +69,9 @@ is captured before intent resolution when dev capture is enabled.
   non-empty string naming a registered backend, or the request fails with `400`. A copy inside an
   intent's `params` or `input` is ignored. The override must support the requested operation
   (`taskType`, default `text2music`): sending a repaint to YuE2 is a `400`, not a text2music
-  render. When the job's backend differs from the last one that ran, the GPU lane frees the
-  previous backend's VRAM and waits for the engine to confirm before loading the next one.
+  render. Before any job (or YuE2 score preview) loads weights, the GPU lane frees every other
+  backend's VRAM and waits for the engine to confirm. A release that cannot be confirmed fails
+  the job rather than loading next to the other backend.
 - `expectedBackend` (optional, sent by the MCP server, never by the UI) makes the request fail
   with `409` when it differs from the backend the job will run on: the `backendOverride` when one
   is given, otherwise the active backend (`submitGeneration` in `server/src/routes/generate.ts`).

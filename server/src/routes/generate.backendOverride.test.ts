@@ -14,7 +14,22 @@ const database = await import('../db/database.js');
 database.initDb();
 const { setEngineReady } = await import('../engineState.js');
 const registry = await import('../services/backends/registry.js');
-const { submitGeneration, getGenerationJob } = await import('./generate.js');
+const { submitGeneration, getGenerationJob, default: generateRouter } = await import('./generate.js');
+const { default: authRouter } = await import('./auth.js');
+const { trackBackendRelease, awaitBackendRelease, _resetBackendReleases } = await import('../services/generation/backendRelease.js');
+
+// Engine transport: every engine call goes through `engineFetch`, which fails
+// unless a test installs a handler, so no test can reach a live engine.
+type EngineHandler = (url: string, init?: RequestInit) => Response | Promise<Response>;
+let engineFetch: EngineHandler | undefined;
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: any, init?: RequestInit) => {
+  const url = String(input instanceof Request ? input.url : input);
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost):8085\//.test(url)) return realFetch(input, init);
+  if (!engineFetch) throw new Error(`test: no engine (${url})`);
+  return engineFetch(url, init);
+}) as typeof fetch;
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 const { gpuLaneBusy } = await import('../services/generation/gpuLane.js');
 
@@ -43,11 +58,22 @@ for (const id of ['ace', 'yue2']) {
     throw new Error('Cancelled: stub backend, no engine in tests');
   };
 }
-// Never let a test reach a live engine's unload endpoint.
+// Unloads are recorded stubs; `realRelease` keeps ACE's own implementation for
+// the cases that drive it through the mocked transport above.
+const realRelease: Record<string, () => Promise<void>> = {};
+const useRealRelease = new Set<string>();
 for (const backend of registry.listBackends() as any[]) {
   if (!backend.releaseVram) continue;
-  backend.releaseVram = async () => { await holdRelease[backend.id]; events.push(`released:${backend.id}`); };
+  realRelease[backend.id] = backend.releaseVram.bind(backend);
+  backend.releaseVram = async () => {
+    if (useRealRelease.has(backend.id)) await realRelease[backend.id]();
+    await holdRelease[backend.id];
+    events.push(`released:${backend.id}`);
+  };
 }
+// The families the override cases switch between; MM3's release runs too but
+// is not part of what these assert.
+const aceYue2 = () => events.filter(e => !e.includes('minimax'));
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -182,6 +208,8 @@ test('10. expectedBackend is checked against the override when there is one, els
     ['flat no override, expected!=active', { ...flat, expectedBackend: 'yue2' }, 409],
     ['intent no override, expected!=active', intent({ input: { expectedBackend: 'yue2' } }), 409],
     ['unknown override wins over expectedBackend', { ...flat, backendOverride: 'nope', expectedBackend: 'ace' }, 400],
+    ['flat malformed override wins over expectedBackend', { ...flat, backendOverride: 42, expectedBackend: 'yue2' }, 400],
+    ['intent malformed override wins over expectedBackend', intent({ backendOverride: 42, input: { expectedBackend: 'yue2' } }), 400],
   ];
   for (const [name, raw, want] of cases) {
     const r = await submit(raw);
@@ -217,6 +245,7 @@ for (const [first, second] of [['yue2', 'ace'], ['ace', 'yue2']]) {
     hold[first] = firstHeld.promise;
     holdRelease[first] = releaseHeld.promise;
     try {
+      events.length = 0;
       queuedBackend(await submit({ ...flat, backendOverride: first }));
       await until(() => events.at(-1) === `generate:${first}`, `${first} to start`);
       events.length = 0;
@@ -224,10 +253,10 @@ for (const [first, second] of [['yue2', 'ace'], ['ace', 'yue2']]) {
       firstHeld.resolve();
       // The unload is scheduled but unconfirmed: the next family must not load.
       await new Promise(r => setTimeout(r, 50));
-      assert.equal(events.join(), '', `${second} started before ${first}'s unload was confirmed`);
+      assert.equal(aceYue2().join(), '', `${second} started before ${first}'s unload was confirmed`);
       releaseHeld.resolve();
       await until(() => events.includes(`generate:${second}`), `${second} to start`);
-      assert.deepEqual(events, [`released:${first}`, `generate:${second}`]);
+      assert.deepEqual(aceYue2(), [`released:${first}`, `generate:${second}`]);
       assert.equal(registry.getActiveBackendId(), first, 'the selector must not change');
     } finally {
       firstHeld.resolve(); releaseHeld.resolve();
@@ -237,15 +266,19 @@ for (const [first, second] of [['yue2', 'ace'], ['ace', 'yue2']]) {
   });
 }
 
-test('13. same-family queued jobs do not unload anything', async () => {
+test('13. every job evicts the other families, even between two jobs of the same family', async () => {
+  // Something other than a generation (a score preview under keep-loaded) can
+  // leave YuE2 resident between two ACE jobs, so no job trusts what last ran.
   await laneIdle();
-  queuedBackend(await submit({ ...flat, backendOverride: 'yue2' }));
+  assert.equal(registry.setActiveBackendId('ace'), true);
+  queuedBackend(await submit({ ...flat, backendOverride: 'ace' }));
   await laneIdle();
   events.length = 0;
-  queuedBackend(await submit({ ...flat, backendOverride: 'yue2' }));
-  queuedBackend(await submit({ ...flat, backendOverride: 'yue2' }));
+  queuedBackend(await submit({ ...flat, backendOverride: 'ace' }));
+  queuedBackend(await submit({ ...flat, backendOverride: 'ace' }));
   await laneIdle();
-  assert.deepEqual(events, ['generate:yue2', 'generate:yue2']);
+  assert.deepEqual(aceYue2(), ['released:yue2', 'generate:ace', 'released:yue2', 'generate:ace']);
+  assert.equal(events.filter(e => e === 'released:minimax-m3').length, 2);
 });
 
 test('14. active backend switched during capability lookup: an override keeps its backend, no override is a 409', async () => {
@@ -261,5 +294,96 @@ test('14. active backend switched during capability lookup: an override keeps it
     duringCapabilities = undefined;
     registry.setActiveBackendId('ace');
     await laneIdle();
+  }
+});
+
+/** Call a router's handler directly with a minimal req/res. */
+async function callRoute(router: any, method: string, routePath: string, body: unknown, headers: Record<string, string> = {}) {
+  const layer = router.stack.find((l: any) => l.route?.path === routePath && l.route.methods[method]);
+  assert.ok(layer, `route ${method.toUpperCase()} ${routePath} not found`);
+  const out: { status: number; body?: any } = { status: 200 };
+  const res: any = {
+    writableFinished: false,
+    status(code: number) { out.status = code; return res; },
+    json(value: unknown) { out.body = value; res.writableFinished = true; return res; },
+    on() { return res; },
+  };
+  await layer.route.stack.at(-1).handle({ body, headers, query: {}, params: {} }, res, () => {});
+  return out;
+}
+
+test('15. a YuE2 score preview evicts the other families before it loads, and the next ACE job evicts YuE2', async () => {
+  await laneIdle();
+  const { body: auth } = await callRoute(authRouter, 'get', '/auto', undefined);
+  assert.equal(registry.setActiveBackendId('yue2'), true);
+  try {
+    events.length = 0;
+    // An empty caption fails inside the preview, after the lane work has begun.
+    const r = await callRoute(generateRouter, 'post', '/yue2/plan', { caption: '', lyrics: '' }, { authorization: `Bearer ${auth.token}` });
+    realLog(`  preview -> ${r.status} ${JSON.stringify(r.body)}`);
+    assert.equal(r.status, 500);
+    assert.deepEqual(aceYue2(), ['released:ace']);
+    events.length = 0;
+    queuedBackend(await submit({ ...flat, backendOverride: 'ace' }));
+    await laneIdle();
+    assert.deepEqual(aceYue2(), ['released:yue2', 'generate:ace']);
+  } finally {
+    registry.setActiveBackendId('ace');
+  }
+});
+
+test('16. ACE release rejects unless the engine confirms nothing is left resident', async () => {
+  await laneIdle();
+  const unloads: string[] = [];
+  const probe = (answers: Array<() => Response>) => {
+    let n = 0;
+    engineFetch = (url, init) => {
+      if (url.endsWith('/models/loaded')) return answers[Math.min(n++, answers.length - 1)]();
+      if (url.endsWith('/models/unload')) {
+        const label = JSON.parse(String(init?.body)).label;
+        unloads.push(label);
+        return json({ unloaded: label !== 'stuck', label });
+      }
+      throw new Error(`unexpected engine call ${url}`);
+    };
+  };
+  const loaded = (...labels: Array<string | [string, boolean]>) => () => json({
+    loaded: labels.map(l => Array.isArray(l) ? { label: l[0], in_use: l[1] } : { label: l, in_use: false }),
+  });
+  const cases: Array<[string, () => void, RegExp | null]> = [
+    ['probe 503', () => probe([() => json({ error: 'busy' }, 503)]), /HTTP 503/],
+    ['engine unreachable', () => { engineFetch = () => { throw new TypeError('fetch failed'); }; }, /fetch failed/],
+    ['unload did not take', () => probe([loaded('dit', 'stuck'), loaded('stuck')]), /still resident after unload: stuck/],
+    ['module in use', () => probe([loaded('dit', ['vae', true]), loaded(['vae', true])]), /still resident after unload: vae \(in use\)/],
+    ['all freed', () => probe([loaded('dit', 'vae'), loaded()]), null],
+    ['nothing loaded', () => probe([loaded()]), null],
+  ];
+  try {
+    for (const [name, setup, want] of cases) {
+      setup();
+      unloads.length = 0;
+      _resetBackendReleases();
+      trackBackendRelease('ace', realRelease.ace).catch(() => {});
+      if (want) await assert.rejects(awaitBackendRelease(), want, name);
+      else await awaitBackendRelease();
+      if (name === 'all freed') assert.deepEqual(unloads, ['dit', 'vae']);
+      if (name === 'module in use') assert.deepEqual(unloads, ['dit'], 'an in-use module is not unloaded');
+    }
+
+    // Through the lane: a YuE2 job never starts while ACE cannot confirm.
+    useRealRelease.add('ace');
+    probe([() => json({ error: 'busy' }, 503)]);
+    events.length = 0;
+    const r = await submit({ ...flat, backendOverride: 'yue2' });
+    queuedBackend(r);
+    await laneIdle();
+    assert.equal(events.includes('generate:yue2'), false, 'YuE2 loaded beside unconfirmed ACE weights');
+    const job = r.ok ? getGenerationJob(r.jobId) : undefined;
+    assert.equal(job?.status, 'failed');
+    assert.match(String(job?.error), /previous backend \(ace\) has not confirmed/);
+  } finally {
+    useRealRelease.delete('ace');
+    engineFetch = undefined;
+    _resetBackendReleases();
   }
 });
