@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFile } from 'child_process';
-import { __setCaller, __setConverter, startUnderstand, getUnderstand, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp } from './dawFacade.js';
+import { __setCaller, __setConverter, startUnderstand, getUnderstand, __setPollMs, __setRetryDelays, __test, cancelJob, convertOnce, fitPlan, getJob, isInsideDir, isLoopback, sniffAudio, checkUploadMagic, submitGenerate, sweepTmp, dawAuthError } from './dawFacade.js';
 import { getFFmpegPath } from '../../config.js';
 import { DawError, parseDawRequest } from './dawSchema.js';
 import { estimate, getFigures, getLoaded, resetEta, setLoaded } from './dawEta.js';
@@ -601,4 +601,40 @@ test('fast sync understand response carries analysis_id equal to id', async () =
     assert.equal(result.id, id);
     assert.equal(getUnderstand(id).analysis_id, id);
   } finally { __setCaller(prevC); }
+});
+
+test('auth: a configured key is required from loopback and proxied callers too', () => {
+  const lo = '127.0.0.1';
+  assert.equal(dawAuthError('k', undefined, lo), 'X-DAW-Key is missing or wrong');
+  assert.equal(dawAuthError('k', 'wrong', lo), 'X-DAW-Key is missing or wrong');
+  assert.equal(dawAuthError('k', 'k', lo), null);
+  assert.equal(dawAuthError('k', 'k', '10.0.0.9'), null);
+  assert.equal(dawAuthError('k', undefined, '::1', { xff: '127.0.0.1' }), 'X-DAW-Key is missing or wrong');
+});
+
+test('auth: with no key only demonstrably local callers pass; forwarded hops count', () => {
+  const lo = '127.0.0.1';
+  assert.equal(dawAuthError('', undefined, lo), null);
+  assert.equal(dawAuthError('', undefined, '::ffff:127.0.0.1', { xff: '127.0.0.1, ::1' }), null);
+  assert.equal(dawAuthError('', undefined, '::1', { forwarded: 'for="[::1]:4711"' }), null);
+  assert.notEqual(dawAuthError('', undefined, '192.168.1.20'), null);
+  assert.notEqual(dawAuthError('', undefined, lo, { xff: '192.168.1.20' }), null);
+  assert.notEqual(dawAuthError('', undefined, lo, { xff: '127.0.0.1, 8.8.8.8' }), null);
+  assert.notEqual(dawAuthError('', undefined, lo, { xff: '127.0.0.1,' }), null);
+  assert.notEqual(dawAuthError('', undefined, lo, { realIp: '10.1.1.1' }), null);
+  assert.notEqual(dawAuthError('', undefined, lo, { forwarded: 'for=10.1.1.1;proto=http' }), null);
+  assert.notEqual(dawAuthError('', undefined, undefined), null);
+});
+
+test('YuE2 sequential takes carry trimTo like the batched branch', async () => {
+  const up = fakeUpstream('yue2', 0, { batchMax: 1 });
+  const prevC = __setCaller(up.caller); const prevP = __setPollMs(1);
+  try {
+    await submitGenerate('yue2-seq-trim', { mode: 'text2music', caption: 'x', takes: 2, seed: 9, duration_s: 10 } as any, { batchSize: 2, seed: 9, duration: 10 });
+    await __test.getJob('yue2-seq-trim')!.seq?.done;
+    const r = await getJob('yue2-seq-trim') as any;
+    console.log('yue2 sequential takes:', JSON.stringify(r.takes.map((t: any) => [t.duration_s, t.trimmed_from_s])));
+    assert.equal(r.takes.length, 2);
+    assert.ok(r.takes.every((t: any) => t.duration_s === 10 && t.trimmed_from_s === 63.2));
+  } finally { __setCaller(prevC); __setPollMs(prevP); }
 });

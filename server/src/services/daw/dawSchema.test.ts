@@ -125,3 +125,29 @@ test('model field: turbo, base, exact name, unknown 400, turbo+lego 400', async 
   const p = s.toGenerateParams({ ...s.parseDawRequest(t2m), dit_model: turbo });
   assert.equal(p.ditModel, 'acestep-v15-turbo-Q8_0.gguf');
 });
+
+test('typed fields are checked: strings, booleans, seed ranges, 0..1 fractions', () => {
+  const bad = (extra: Record<string, unknown>, field: string) => {
+    assert.throws(() => parseDawRequest({ mode: 'text2music', caption: 'x', ...extra }),
+      (e) => e instanceof DawError && e.status === 400 && e.code === 'bad_request' && e.message.includes(field), JSON.stringify(extra));
+  };
+  bad({ caption: 5 }, 'caption');
+  bad({ lyrics: ['a'] }, 'lyrics');
+  bad({ key: 3 }, 'key');
+  bad({ expected_backend: {} }, 'expected_backend');
+  bad({ skip_lm: 'false' }, 'skip_lm');
+  bad({ seed: -1 }, 'seed');
+  bad({ seed: 1.5 }, 'seed');
+  bad({ seed: 4294967296 }, 'seed');
+  bad({ seed: true }, 'seed');
+  bad({ seed_b: -3 }, 'seed_b');
+  bad({ seed_blend: 1.5 }, 'seed_blend');
+  bad({ cover_strength: -0.1 }, 'cover_strength');
+  bad({ steps: 0 }, 'steps');
+  bad({ steps: 2.5 }, 'steps');
+  bad({ guidance: -1 }, 'guidance');
+  bad({ bpm: 0 }, 'bpm');
+  bad({ bpm: [120] }, 'bpm');
+  const ok = parseDawRequest({ mode: 'text2music', caption: 'x', seed: '42', seed_b: 0, seed_blend: 1, steps: 8, skip_lm: false });
+  assert.equal(ok.seed, 42);
+});

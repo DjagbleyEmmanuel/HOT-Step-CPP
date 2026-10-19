@@ -23,6 +23,33 @@ export function isLoopback(addr: string | undefined): boolean {
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v4);
 }
 
+interface ForwardedHeaders { xff?: string; realIp?: string; forwarded?: string }
+
+/** Client addresses a proxy reported: X-Forwarded-For, X-Real-IP and Forwarded `for=`. */
+function forwardedHops(h: ForwardedHeaders): string[] {
+  const hops = [...(h.xff?.split(',') ?? []), ...(h.realIp?.split(',') ?? [])];
+  for (const m of (h.forwarded ?? '').matchAll(/for=("[^"]*"|[^;,\s]*)/gi)) {
+    hops.push(m[1].replace(/"/g, '').replace(/^\[([^\]]*)\](:\d+)?$/, '$1').replace(/^(\d+\.\d+\.\d+\.\d+):\d+$/, '$1'));
+  }
+  return hops.map((x) => x.trim());
+}
+
+/** Socket and every forwarded hop are loopback (a LAN browser on the Vite proxy arrives over
+ *  loopback but names its real address). A spoofed header can only add hops, so it only narrows this. */
+export function isLocalCaller(remote: string | undefined, h: ForwardedHeaders = {}): boolean {
+  return isLoopback(remote) && forwardedHops(h).every(isLoopback);
+}
+
+/** The facade's auth rule. A configured key is required from every caller, loopback and proxied
+ *  included; with none configured only demonstrably local callers pass. Returns the 401 message, or null. */
+export function dawAuthError(want: string, given: string | undefined, remote: string | undefined, h: ForwardedHeaders = {}): string | null {
+  if (want) {
+    const a = Buffer.from(given ?? ''), b = Buffer.from(want);
+    return a.length === b.length && crypto.timingSafeEqual(a, b) ? null : 'X-DAW-Key is missing or wrong';
+  }
+  return isLocalCaller(remote, h) ? null : 'DAW facade is local-only; set HOTSTEP_DAW_KEY to allow other callers';
+}
+
 /** Detect audio container from magic bytes: wav, flac, aiff, or null. */
 export function sniffAudio(head: Buffer): 'wav' | 'flac' | 'aiff' | null {
   if (head.length >= 12 && head.toString('latin1', 0, 4) === 'RIFF' && head.toString('latin1', 8, 12) === 'WAVE') return 'wav';
@@ -274,7 +301,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
     const seeds = Array.from({ length: takes }, (_, i) => req.seed !== undefined ? req.seed + i : randomSeed());
     const first = await submitOne(params, seeds[0]);
     const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
-    const j: FacadeJob = { id, upstreamId: first, seeds, backend, ditModel: req.dit_model ?? null, seq, eta, createdAt: Date.now() };
+    const j: FacadeJob = { id, upstreamId: first, seeds, backend, ditModel: req.dit_model ?? null, trimTo, seq, eta, createdAt: Date.now() };
     jobs.set(id, j);
     seq.done = runSequential(j, params).catch((e) => { seq.failed = e?.message ?? String(e); });
     return id;

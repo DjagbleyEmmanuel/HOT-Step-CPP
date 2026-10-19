@@ -1,16 +1,15 @@
 // routes/dawV1.ts - /api/v1/daw: a small, versioned facade for DAW clients.
 //
 // Every response carries api:1; errors use { api, error: { code, message } }.
-// Callers on another machine must send X-DAW-Key matching HOTSTEP_DAW_KEY;
-// with no key configured the facade only answers loopback callers.
+// With HOTSTEP_DAW_KEY set, every caller (loopback and proxied included) must send a
+// matching X-DAW-Key; with none set the facade answers only demonstrably local callers.
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import {
-  cancelJob, checkUploadMagic, dawKey, getDitInfo, getJob, getStatus, getUnderstand, isLoopback, newId, newTmpDir,
+  cancelJob, checkUploadMagic, dawAuthError, dawKey, getDitInfo, getJob, getStatus, getUnderstand, newId, newTmpDir,
   startSweeper, startUnderstand, submitGenerate, takeWavPath,
   jobEtaS,
 } from '../services/daw/dawFacade.js';
@@ -19,18 +18,20 @@ import { DawError, errorBody, modeNeedsSource, parseDawRequest, resolveDitModel,
 const router = Router();
 startSweeper();
 
-function keyMatches(given: string | undefined, want: string): boolean {
-  if (!given) return false;
-  const a = Buffer.from(given), b = Buffer.from(want);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
 router.use((req: Request, res: Response, next: NextFunction) => {
-  if (isLoopback(req.socket.remoteAddress)) { next(); return; }
-  const key = dawKey();
-  if (key && keyMatches(req.get('X-DAW-Key'), key)) { next(); return; }
-  res.status(401).json(errorBody('unauthorized', key ? 'X-DAW-Key is missing or wrong' : 'DAW facade is loopback-only; set HOTSTEP_DAW_KEY to allow remote callers'));
+  const err = dawAuthError(dawKey(), req.get('X-DAW-Key'), req.socket.remoteAddress,
+    { xff: req.get('x-forwarded-for'), realIp: req.get('x-real-ip'), forwarded: req.get('forwarded') });
+  if (err) { res.status(401).json(errorBody('unauthorized', err)); return; }
+  next();
 });
+
+/** Mounted by index.ts after the app-wide body parsers: a malformed or oversized body gets the DAW envelope. */
+export function dawBodyErrorHandler(err: any, _req: Request, res: Response, next: NextFunction): void {
+  if (res.headersSent) { next(err); return; }
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 400;
+  const message = err?.type === 'entity.parse.failed' ? 'request body is not valid JSON' : String(err?.message ?? 'bad request body');
+  res.status(status).json(errorBody('bad_request', message));
+}
 
 const AUDIO_EXTS = new Set(['.wav', '.flac', '.aiff', '.aif']);
 

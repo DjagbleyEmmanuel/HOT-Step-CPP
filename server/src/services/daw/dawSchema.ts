@@ -70,8 +70,15 @@ export function barsToDurationS(bars: number, bpm: number, timesig?: string): nu
   return (bars * beatsPerBar(timesig) * 60) / bpm;
 }
 
-const num = (v: unknown): number | undefined =>
-  v === undefined || v === null || v === '' ? undefined : (Number.isFinite(Number(v)) ? Number(v) : NaN);
+/** A number, or a non-blank numeric string (multipart fields arrive as text). Booleans, arrays and objects are NaN. */
+const num = (v: unknown): number | undefined => {
+  if (v === undefined || v === null || v === '') return undefined;
+  if (typeof v === 'string' ? !v.trim() : typeof v !== 'number') return NaN;
+  return Number.isFinite(Number(v)) ? Number(v) : NaN;
+};
+
+/** Forwarded text fields: a string when present. */
+const STRING_FIELDS = ['caption', 'lyrics', 'negative', 'timesig', 'key', 'track', 'solver', 'scheduler', 'guidance_mode', 'dit_model', 'expected_backend'] as const;
 
 /** Validate and normalise the DAW request. Throws DawError(400/422) on bad input. */
 /** Largest seed the engine honours (it consumes the low 32 bits). */
@@ -89,12 +96,27 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
     // and the app UI never submits 'complete', so the source would be dropped.
     throw new DawError(400, 'unsupported_mode', "mode 'complete' is not supported yet (the server does not pass the source clip for it)");
   }
+  for (const k of STRING_FIELDS) {
+    if (r[k] !== undefined && typeof r[k] !== 'string') throw new DawError(400, 'bad_request', `${k} must be a string`);
+  }
+  if (r.skip_lm !== undefined && typeof r.skip_lm !== 'boolean') throw new DawError(400, 'bad_request', 'skip_lm must be a boolean');
   const out: DawGenerateRequest = { ...(r as object), mode, caption: typeof r.caption === 'string' ? r.caption : '' } as DawGenerateRequest;
   for (const k of ['duration_s', 'bars', 'bpm', 'seed', 'seed_b', 'seed_blend', 'seed_blend_end', 'takes', 'cover_strength', 'steps', 'guidance'] as const) {
     const v = num(r[k]);
     if (Number.isNaN(v)) throw new DawError(400, 'bad_request', `${k} must be a number`);
     (out as any)[k] = v;
   }
+  for (const k of ['seed', 'seed_b'] as const) {
+    if (out[k] !== undefined && !(Number.isInteger(out[k]) && out[k]! >= 0 && out[k]! <= SEED_MAX)) {
+      throw new DawError(400, 'bad_request', `${k} must be an integer 0..${SEED_MAX}`);
+    }
+  }
+  for (const k of ['seed_blend', 'seed_blend_end', 'cover_strength'] as const) {
+    if (out[k] !== undefined && !(out[k]! >= 0 && out[k]! <= 1)) throw new DawError(400, 'bad_request', `${k} must be between 0 and 1`);
+  }
+  if (out.steps !== undefined && !(Number.isInteger(out.steps) && out.steps >= 1)) throw new DawError(400, 'bad_request', 'steps must be a positive integer');
+  if (out.guidance !== undefined && !(out.guidance >= 0)) throw new DawError(400, 'bad_request', 'guidance must be 0 or more');
+  if (out.bpm !== undefined && !(out.bpm > 0)) throw new DawError(400, 'bad_request', 'bpm must be positive');
   if (out.duration_s === undefined && out.bars !== undefined) {
     if (!(out.bars > 0) || !(out.bpm && out.bpm > 0)) throw new DawError(400, 'bad_request', 'bars needs a positive bpm');
     out.duration_s = barsToDurationS(out.bars, out.bpm, out.timesig);
