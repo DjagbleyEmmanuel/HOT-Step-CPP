@@ -75,8 +75,7 @@ local function channel_gains(ch)
     local any = false
     local per = math.max(1, math.floor(ch / GROUPS))
     local function set_group(g, gain)
-        if gain == 1 then return end
-        any = true
+        if gain ~= 1 then any = true end
         if g < 0 then
             for c = 0, ch - 1 do gs[c] = gain end
         else

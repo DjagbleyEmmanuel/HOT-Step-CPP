@@ -100,6 +100,19 @@ int main() {
     Run c = run(eq, { { "md_latent_eq_yue2:group", "-1" }, { "md_latent_eq_yue2:gain", "2" } });
     assert(c.ok);
     expect_euler(c, 2.0);
+    // A later unity entry resets its group: gains "-1=2,3=1" leaves channels 24..31 at 1.
+    Run c2 = run(eq, { { "md_latent_eq_yue2:gains", "-1=2,3=1" } });
+    assert(c2.ok);
+    for (int i = 0; i < N; i++) {
+        const int ch = i % CH;
+        const double rate = (ch >= 24 && ch < 32) ? 1.0 : 2.0;
+        double want = start_state()[i];
+        for (int s = 0; s < STEPS; s++) want -= want * rate / STEPS;
+        if (std::fabs(c2.x[i] - want) > 1e-5) {
+            std::fprintf(stderr, "gains x[%d] = %g, want %g\n", i, c2.x[i], want);
+            assert(false);
+        }
+    }
 
     // Model error on the 3rd call: stops, keeps the model's message, no more calls.
     Run d = run(tlie, {}, /*fail_call=*/3);
