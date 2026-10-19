@@ -1232,7 +1232,9 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                                           req.nar_cache_ratio, on_step)
                 : yue2_nar_solve_plugins(m, chunk, noise_slice, req.ode_steps,
                                          req.nar_solver, req.nar_scheduler, req.plugin_params, &solve, err,
-                                         on_step);
+                                         on_step,
+                                         // Plugin RNG seed: the same seed this variation's NAR noise uses.
+                                         (int64_t) (songs[(size_t) cp.song].noise_seed + (uint64_t) j0));
             nar_solve_ms += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - nar_solve_start).count();
             velocity_ms += solve.total_velocity_ms;
