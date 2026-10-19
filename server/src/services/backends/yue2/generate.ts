@@ -330,10 +330,13 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
 
   const narSolver = params.yue2NarSolver === 'wasserstein' ? 'md_wasserstein_yue2'
     : params.yue2NarSolver === 'ancestral' ? 'md_ancestral_yue2'
+    : params.yue2NarSolver === 'latent_eq' ? 'md_latent_eq_yue2'
+    : params.yue2NarSolver === 'tlie' ? 'md_tlie_yue2'
     : undefined;
   const narScheduler = params.yue2NarScheduler === 'ht_v3' ? 'md_ht_scheduler V3'
     : params.yue2NarScheduler === 'plan_aware' ? 'md_plan_aware_yue2'
     : params.yue2NarScheduler === 'plan_loose' ? 'md_plan_loose_yue2'
+    : params.yue2NarScheduler === 'plan_overdrive' ? 'md_plan_overdrive_yue2'
     : undefined;
   const plugin_params: NonNullable<Yue2SynthRequest['plugin_params']> = {};
   const copyNumbers = (plugin: string, fields: Record<string, string>) => {
@@ -344,6 +347,32 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
       else notes.push(`Invalid ${field} — using the plugin default`);
     }
   };
+  // Text and select plugin params: strings only, capped so a pasted wall of
+  // text never reaches the Lua parser; a select must name a listed option.
+  const copyStrings = (plugin: string, fields: Record<string, string>, options: Record<string, string[]> = {}) => {
+    for (const [field, key] of Object.entries(fields)) {
+      const value = params[field];
+      if (value === undefined) continue;
+      if (typeof value === 'string' && value.length <= 200 && (!options[field] || options[field].includes(value))) {
+        plugin_params[`${plugin}:${key}`] = value;
+      } else {
+        notes.push(`Invalid ${field} — using the plugin default`);
+      }
+    }
+  };
+  if (narSolver === 'md_latent_eq_yue2') {
+    copyNumbers(narSolver, { yue2EqGroup: 'group', yue2EqGain: 'gain', yue2EqT1: 'eq_t1', yue2EqT2: 'eq_t2' });
+    copyStrings(narSolver, { yue2EqGains: 'gains', yue2EqSection: 'section_only' });
+  }
+  if (narSolver === 'md_tlie_yue2') {
+    copyNumbers(narSolver, { yue2LieAmount: 'lie', yue2LieT1: 'lie_t1', yue2LieT2: 'lie_t2' });
+    copyStrings(narSolver, { yue2LieCurve: 'lie_curve', yue2LieSections: 'section_lies' },
+      { yue2LieCurve: ['constant', 'early', 'late', 'sections'] });
+  }
+  if (narScheduler === 'md_plan_overdrive_yue2') {
+    copyNumbers(narScheduler, { yue2OdDrive: 'drive', yue2OdBase: 'base', yue2OdPeriod: 'pulse_period' });
+    copyStrings(narScheduler, { yue2OdShape: 'shape' }, { yue2OdShape: ['flat', 'late', 'early', 'pulse'] });
+  }
   if (narSolver) {
     copyNumbers(narSolver, {
       yue2WassTau: 'tau', yue2WassSpectral: 'spectral_weight',

@@ -267,3 +267,28 @@ test('planning keeps a pinned uint64 seed: engine plan request, then the render 
     assert.equal(m.req.seed, big, `render request, autoReplan ${yue2AutoReplan}`);
   }
 });
+
+test('the experimental full-loop solvers and Plan Overdrive map to their plugins and params', () => {
+  const lie = mapYue2Params({ caption: 'folk', yue2NarSolver: 'tlie', yue2LieAmount: -0.1, yue2LieCurve: 'sections',
+    yue2LieSections: 'chorus=0.25', yue2NarScheduler: 'plan_overdrive', yue2OdShape: 'pulse', yue2OdDrive: 2 }, pick);
+  assert.equal(lie.req.infer_method, 'md_tlie_yue2');
+  assert.equal(lie.req.scheduler, 'md_plan_overdrive_yue2');
+  assert.equal(lie.req.plugin_params?.['md_tlie_yue2:lie'], -0.1);
+  assert.equal(lie.req.plugin_params?.['md_tlie_yue2:lie_curve'], 'sections');
+  assert.equal(lie.req.plugin_params?.['md_tlie_yue2:section_lies'], 'chorus=0.25');
+  assert.equal(lie.req.plugin_params?.['md_plan_overdrive_yue2:shape'], 'pulse');
+  assert.equal(lie.req.plugin_params?.['md_plan_overdrive_yue2:drive'], 2);
+  const eq = mapYue2Params({ caption: 'folk', yue2NarSolver: 'latent_eq', yue2EqGains: '0=1.2', yue2EqSection: 'chorus' }, pick);
+  assert.equal(eq.req.infer_method, 'md_latent_eq_yue2');
+  assert.equal(eq.req.plugin_params?.['md_latent_eq_yue2:gains'], '0=1.2');
+  assert.equal(eq.req.plugin_params?.['md_latent_eq_yue2:section_only'], 'chorus');
+});
+
+test('an unlisted select value or an oversized text param falls back to the plugin default with a note', () => {
+  const { req, notes } = mapYue2Params({ caption: 'folk', yue2NarSolver: 'tlie', yue2LieCurve: 'sideways',
+    yue2LieSections: 'x'.repeat(201) }, pick);
+  assert.equal(req.plugin_params?.['md_tlie_yue2:lie_curve'], undefined);
+  assert.equal(req.plugin_params?.['md_tlie_yue2:section_lies'], undefined);
+  assert.ok(notes.includes('Invalid yue2LieCurve — using the plugin default'));
+  assert.ok(notes.includes('Invalid yue2LieSections — using the plugin default'));
+});

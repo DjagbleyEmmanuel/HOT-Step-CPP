@@ -248,8 +248,9 @@ What sets it apart:
   After the render, songs whose post-processing is CPU only (a VST chain, mastering, the
   normaliser) finish at once and side by side; only StableStep, Whisper, the aligner and
   cover art wait for the GPU.
-- It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
-  or HT V3). Their tuning knobs sit in a collapsed "Controls" section under the picker.
+- It has its own NAR solver and scheduler choices (Midpoint, Wasserstein Flow, Ancestral
+  Euler, Latent Channel EQ or Timestep Lie; Uniform, HT V3, Plan-Aware, Plan-Loose or Plan
+  Overdrive). Their tuning knobs sit in a collapsed "Controls" section under the picker.
   The shared Lua plugins do not run on it.
 - Adapters load into two slots in the Adapters cluster, one for the AR half and one for
   the NAR half, each with its own strengths. An adapter is merged into the loaded model,
