@@ -19,5 +19,6 @@ check('topk50 temp1.5 untouched', { semantic_top_k: 50, semantic_temperature: 1.
 check('topk0.5 truncates to 0, clamps', { semantic_top_k: 0.5, semantic_temperature: 1.4 }, undefined, 1.0, true);
 check('topk0 unset temp, ckpt 1.3 clamps', { semantic_top_k: 0 }, 1.3, 1.0, true);
 check('topk0 unset temp, ckpt 0.8 untouched', { semantic_top_k: 0 }, 0.8, undefined, false);
+check('topk unset, temp1.5 untouched', { semantic_temperature: 1.5 }, 1.3, 1.5, false);
 if (fails) { console.log(`${fails} FAILED`); process.exit(1); }
 console.log('all passed');
