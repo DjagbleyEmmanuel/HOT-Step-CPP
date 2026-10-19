@@ -18,8 +18,7 @@ import { logGeneration, failGenerationLog } from '../services/logger.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
-import { getBackend, getActiveBackendId, listBackends } from '../services/backends/registry.js';
-import { awaitBackendRelease, trackBackendRelease } from '../services/generation/backendRelease.js';
+import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
   runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
@@ -34,7 +33,7 @@ import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/e
 import { isGenerationIntent, readBackendOverride } from '../contracts/generation.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 import { GenerationIntentError, resolveGenerationIntent } from '../services/generation/intent.js';
-import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
+import { evictOtherFamilies, noteEnqueued, noteFinished } from '../services/generation/residency.js';
 import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
 import {
   checkoutState, createGenerateCapture, generateCaptureDir, generateCaptureMode,
@@ -146,22 +145,6 @@ function finalizeAttempt(
   attempt.error = thrownError ?? outcome?.error ?? job.error;
   attempt.endReason = outcome?.endReason
     ?? (job.status === 'cancelled' || thrownError?.includes('Cancelled') ? 'cancelled' : 'failed');
-}
-
-/** Free every other family's VRAM and wait until each one confirms, before
- *  `family` loads weights on the lane. Run on every lane task that loads a
- *  family, not only on a family change: a per-job backendOverride switches
- *  family without a selector change, and a YuE2 score preview under
- *  keep-loaded leaves its LM resident without being a generation. Releasing a
- *  family with nothing loaded is a cheap no-op. */
-async function evictOtherFamilies(family: string): Promise<void> {
-  for (const other of listBackends()) {
-    if (other.id === family || !other.releaseVram) continue;
-    trackBackendRelease(other.id, () => other.releaseVram!()).catch(err => {
-      console.warn(`[Generate] releaseVram not confirmed for '${other.id}' before '${family}':`, err?.message || err);
-    });
-  }
-  await awaitBackendRelease();
 }
 
 /** Run the full generation pipeline */

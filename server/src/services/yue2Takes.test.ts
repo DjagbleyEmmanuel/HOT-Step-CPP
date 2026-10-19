@@ -9,6 +9,11 @@ import { config } from '../config.js';
 import { createBuildSession, generateBuildTakes, getBuildSession, cancelBuildTakes, keepBuildTake, mapTakeTracks } from './yue2Takes.js';
 import type { Yue2SynthRequest, Yue2TrackDetail } from './backends/yue2/client.js';
 import { resetGpuLane, runOnGpuLane } from './generation/gpuLane.js';
+import { listBackends } from './backends/registry.js';
+
+// Take and preview lanes evict the other families first; with no engine in
+// these tests, every other family's release is a confirmed no-op.
+for (const b of listBackends()) if (b.id !== 'yue2' && b.releaseVram) b.releaseVram = async () => {};
 
 const score = [
   'X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C',
