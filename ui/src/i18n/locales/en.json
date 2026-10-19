@@ -2999,6 +2999,15 @@
     "library.addToPlaylistCount": "Add {{count}} to playlist",
     "library.exportZipCount": "Zip {{count}}",
     "library.exportZipBusy": "Zipping…",
-    "library.exportZipFailed": "Zip export failed: {{error}}"
+    "library.exportZipFailed": "Zip export failed: {{error}}",
+    "player.fullScreen.title": "Now playing",
+    "player.fullScreen.nowPlaying": "Now playing",
+    "player.fullScreen.open": "Open the full-screen player",
+    "player.fullScreen.close": "Close the full-screen player",
+    "player.fullScreen.seek": "Seek",
+    "player.fullScreen.play": "Play",
+    "player.fullScreen.pause": "Pause",
+    "player.fullScreen.previous": "Previous",
+    "player.fullScreen.next": "Next"
   }
 }

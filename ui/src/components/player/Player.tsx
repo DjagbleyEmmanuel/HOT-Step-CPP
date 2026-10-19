@@ -15,6 +15,8 @@ import { isPitchShiftReady } from '../../audio/pitchShift';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { CoverImage } from '../shared/CoverImage';
+import { useIsMobile } from '../shared/BottomSheet';
+import { FullScreenPlayer } from './FullScreenPlayer';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -106,7 +108,7 @@ export const Player: React.FC<PlayerProps> = ({
   onStop,
   currentTime,
   duration,
-  onSeek: _onSeek,
+  onSeek,
   onNext,
   onPrevious,
   volume,
@@ -139,7 +141,9 @@ export const Player: React.FC<PlayerProps> = ({
 }) => {
   const { t } = useTranslation();
   const { isDisguised, disguiseTitle } = useDisguiseMode();
-
+  const isMobile = useIsMobile();
+  const [expanded, setExpanded] = React.useState(false);
+  React.useEffect(() => { if (!isMobile) setExpanded(false); }, [isMobile]);
 
   if (!currentSong) {
     return (
@@ -157,8 +161,30 @@ export const Player: React.FC<PlayerProps> = ({
       // Mobile: two rows stacked, auto height
       'max-[1023px]:flex max-[1023px]:flex-col max-[1023px]:py-1.5 max-[1023px]:gap-1',
     ].join(' ')}>
-      {/* Left: Song Info — row 1 on mobile */}
-      <div className="flex items-center gap-3 min-[1024px]:w-[240px] min-[1024px]:flex-shrink-0 max-[1023px]:w-full max-[1023px]:min-w-0">
+      {isMobile && expanded && (
+        <FullScreenPlayer
+          song={currentSong}
+          isPlaying={isPlaying}
+          currentTime={currentTime}
+          duration={duration}
+          onTogglePlay={onTogglePlay}
+          onNext={onNext}
+          onPrevious={onPrevious}
+          onSeek={onSeek}
+          isShuffle={isShuffle}
+          onToggleShuffle={onToggleShuffle}
+          repeatMode={repeatMode}
+          onToggleRepeat={onToggleRepeat}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+      {/* Left: Song Info, row 1 on mobile (tap opens the full-screen player on phones) */}
+      <div
+        className={`flex items-center gap-3 min-[1024px]:w-[240px] min-[1024px]:flex-shrink-0 max-[1023px]:w-full max-[1023px]:min-w-0${isMobile ? ' cursor-pointer' : ''}`}
+        onClick={isMobile ? () => setExpanded(true) : undefined}
+        role={isMobile ? 'button' : undefined}
+        aria-label={isMobile ? t('player.fullScreen.open') : undefined}
+      >
         <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0">
           <CoverImage url={currentSong.coverUrl} seed={currentSong.id} iconSize={20} />
         </div>

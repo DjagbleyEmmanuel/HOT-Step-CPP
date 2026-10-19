@@ -66,6 +66,12 @@ Above the transport, a collapsible area (only expands while something is
 playing, or trim mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
+On a phone, tap the song title or cover in the mini player to open the
+full-screen player: large cover art, title and backend, a big waveform you
+can tap to seek plus a scrub bar with a large thumb, and big transport
+buttons. Close it with the chevron at the top, by swiping down, or with the
+Android back button.
+
 ## Playlists
 
 The playlist is a play queue, not a saved collection. There is one queue, not
