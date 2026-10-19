@@ -7,9 +7,10 @@ import { aceModelsOptions } from '../../queries/global-models/options';
 // Sits full-width at the top of the entire window (above sidebar).
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark, AlertTriangle, Download, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark, AlertTriangle, Download, X, Menu, ChevronDown, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { BarSection, ToggleSwitch } from './BarSection';
+import { BarSection, ToggleSwitch, ACCENT_STYLES } from './BarSection';
 import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { useBackendStore } from '../../stores/backendStore';
@@ -59,7 +60,67 @@ const SectionSpacer: React.FC = () => (
   <div className="flex-1 min-w-0" aria-hidden="true" />
 );
 
-export const GlobalParamBar: React.FC = () => {
+// ── SheetSection — accordion wrapper for the mobile settings sheet ─────────
+// Renders inline (no absolute positioning) unlike BarSection. Shares the same
+// accent palette so section identity is visually consistent.
+
+interface SheetSectionProps {
+  label: string;
+  icon: React.ReactNode;
+  badge: React.ReactNode;
+  accentColor?: string;
+  children: React.ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
+  headerToggle?: React.ReactNode;
+}
+
+const SheetSection: React.FC<SheetSectionProps> = ({
+  label, icon, badge, accentColor = 'pink', children,
+  isOpen, onToggle, headerToggle,
+}) => {
+  const accent = ACCENT_STYLES[accentColor] || ACCENT_STYLES.pink;
+  return (
+    <div className="border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+        className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-150 border-b-2
+          ${isOpen ? `${accent.bgHover} ${accent.border}` : `${accent.bg} border-transparent ${accent.hoverBg}`}`}
+      >
+        <span className={`flex-shrink-0 transition-colors duration-150 ${isOpen ? accent.iconColor : 'text-zinc-500'}`}>
+          {icon}
+        </span>
+        <span className={`text-[12px] font-semibold uppercase tracking-wider flex-shrink-0 transition-colors duration-150 ${
+          isOpen ? 'text-zinc-800 dark:text-zinc-200' : 'text-zinc-600 dark:text-zinc-400'
+        }`}>
+          {label}
+        </span>
+        {headerToggle && (
+          <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+            {headerToggle}
+          </div>
+        )}
+        <div className="flex-1 min-w-0 flex justify-end items-center gap-2">
+          <div className="min-w-0 flex-1 flex justify-end">{badge}</div>
+          <ChevronDown
+            size={14}
+            className={`flex-shrink-0 text-zinc-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          />
+        </div>
+      </div>
+      {isOpen && (
+        <div className="p-4 space-y-3 bg-white dark:bg-zinc-900">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onOpenMobileNav }) => {
   const { t } = useTranslation();
   const [openSection, setOpenSection] = useState<SectionId>(null);
   const gp = useGlobalParams();
@@ -160,6 +221,30 @@ export const GlobalParamBar: React.FC = () => {
   // of the Model Manager modal state.
   const [showModelManager, setShowModelManager] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
+  const [showMobileSettings, setShowMobileSettings] = useState(false);
+  const [sheetOpenSection, setSheetOpenSection] = useState<SectionId>(null);
+  const mobileSheetRef = useRef<HTMLDivElement>(null);
+
+  // Settings sheet a11y: focus into the sheet on open, Escape closes, focus returns to the opener on close.
+  useEffect(() => {
+    if (!showMobileSettings) return;
+    const opener = document.activeElement as HTMLElement | null;
+    mobileSheetRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMobileSettings(false); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [showMobileSettings]);
+
+  // Close the sheet when the viewport crosses into the desktop layout (where its opener is hidden).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px) and (orientation: landscape)');
+    const onChange = (e: MediaQueryListEvent) => { if (e.matches) setShowMobileSettings(false); };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   const modelsQuery = useQuery(aceModelsOptions());
   const availableModels = modelsQuery.data;
@@ -227,10 +312,38 @@ export const GlobalParamBar: React.FC = () => {
     setOpenSection(prev => prev === id ? null : prev);
   }, []);
 
+  const toggleSheetSection = useCallback((id: SectionId) => {
+    setSheetOpenSection(prev => prev === id ? null : id);
+  }, []);
+
   return (
     <div className="flex-shrink-0 relative z-40 bg-white/95 dark:bg-zinc-900/95 border-b border-zinc-200 dark:border-white/5"
          style={{ backdropFilter: 'blur(20px)' }}>
-      <div className="flex items-stretch">
+
+      {/* Mobile compact bar — hamburger + logo + Settings button (hidden >= 1024px) */}
+      <div className="hidden max-[1023px]:flex portrait:flex items-center gap-3 px-3 py-2">
+        <button
+          onClick={onOpenMobileNav}
+          className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 transition-colors"
+          aria-label={t('app.openNav')}
+          title={t('app.openNav')}
+        >
+          <Menu size={20} />
+        </button>
+        <img src="/logo.webp" alt="HOT-Step" style={{ height: '28px' }} className="w-auto object-contain" draggable={false} />
+        <div className="flex-1" />
+        <button
+          onClick={() => setShowMobileSettings(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-white/10 hover:bg-zinc-200 dark:hover:bg-white/15 text-zinc-600 dark:text-zinc-400 transition-colors text-[12px] font-semibold"
+          aria-label={t('globalBar.mobileSettingsTitle')}
+        >
+          <Settings size={14} />
+          {t('globalBar.mobileSettingsTitle')}
+        </button>
+      </div>
+
+      {/* Desktop bar — full 5-section layout (hidden < 1024px) */}
+      <div className="flex max-[1023px]:hidden portrait:hidden items-stretch">
         {/* Logo */}
         <div className="flex items-center justify-center flex-shrink-0 border-r border-zinc-200 dark:border-white/5" style={{ width: '199px', backgroundColor: '#000' }}>
           <img src="/logo.webp" alt="HOT-Step" style={{ width: '140px' }} className="h-auto object-contain" draggable={false} />
@@ -412,6 +525,131 @@ export const GlobalParamBar: React.FC = () => {
           setShowModelManager(false);
           sessionStorage.setItem('mm-auto-dismissed', '1');
         }} />
+      )}
+
+      {/* Mobile Settings Sheet — full-height overlay for narrow screens */}
+      {showMobileSettings && createPortal(
+        <div
+          className="fixed inset-0 z-[55] flex"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('globalBar.mobileSettingsTitle')}
+        >
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowMobileSettings(false)}
+          />
+          {/* Sheet panel */}
+          <div
+            data-portal-layer
+            ref={mobileSheetRef}
+            tabIndex={-1}
+            className="outline-none relative ml-auto w-full max-w-[420px] h-full bg-white dark:bg-zinc-900 flex flex-col shadow-2xl shadow-black/40"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 dark:border-white/10 flex-shrink-0">
+              <Settings size={16} className="text-zinc-500" />
+              <span className="flex-1 text-[13px] font-semibold text-zinc-800 dark:text-zinc-200">
+                {t('globalBar.mobileSettingsTitle')}
+              </span>
+              <button
+                onClick={() => setShowMobileSettings(false)}
+                className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-white/10 text-zinc-500 transition-colors"
+                aria-label={t('globalBar.mobileSettingsClose')}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {/* Sections — scrollable */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {showModels && (
+                <SheetSection
+                  label={t('globalBar.models')}
+                  icon={<Cpu size={14} />}
+                  badge={useBackendModelPicker ? <BackendModelsBadge /> : <ModelsBadge />}
+                  accentColor="pink"
+                  isOpen={sheetOpenSection === 'models'}
+                  onToggle={() => toggleSheetSection('models')}
+                >
+                  {useBackendModelPicker ? <BackendModelsDropdown /> : <ModelsDropdown />}
+                </SheetSection>
+              )}
+              <SheetSection
+                label={t('globalBar.adapters')}
+                icon={<Plug size={14} />}
+                badge={adaptersSupported ? <AdaptersBadge />
+                     : lmAdaptersAreEngineState ? <Yue2LmAdapterBadge />
+                     : lmAdaptersSupported ? <Mm3LmAdapterBadge />
+                     : <UnsupportedBadge />}
+                accentColor="emerald"
+                isOpen={sheetOpenSection === 'adapters'}
+                onToggle={() => toggleSheetSection('adapters')}
+              >
+                {adaptersSupported
+                  ? <AdaptersDropdown />
+                  : lmAdaptersAreEngineState
+                  ? <Yue2LmAdapterDropdown />
+                  : lmAdaptersSupported
+                  ? <Mm3LmAdapterDropdown />
+                  : <NotYetPanel feature="Adapters" />}
+              </SheetSection>
+              {showGeneration && (
+                <SheetSection
+                  label={t('globalBar.generation')}
+                  icon={<Sliders size={14} />}
+                  badge={useBackendGenPicker ? <BackendGenerationBadge /> : <GenerationBadge />}
+                  accentColor="sky"
+                  isOpen={sheetOpenSection === 'generation'}
+                  onToggle={() => toggleSheetSection('generation')}
+                >
+                  {useBackendGenPicker ? <BackendGenerationDropdown /> : <GenerationDropdown />}
+                </SheetSection>
+              )}
+              {showLm && (
+                <SheetSection
+                  label={t('globalBar.lm')}
+                  icon={<Brain size={14} />}
+                  badge={aceLm ? <LmThinkingBadge /> : <BackendLmBadge />}
+                  accentColor="purple"
+                  isOpen={sheetOpenSection === 'lm'}
+                  onToggle={() => toggleSheetSection('lm')}
+                  headerToggle={aceLm ? (
+                    <ToggleSwitch
+                      checked={!gp.skipLm}
+                      onChange={(on) => gp.setSkipLm(!on)}
+                      accentColor="purple"
+                    />
+                  ) : undefined}
+                >
+                  {aceLm ? <LmThinkingDropdown /> : <BackendLmDropdown />}
+                </SheetSection>
+              )}
+              {showPostProcessing && (
+                <SheetSection
+                  label={t('globalBar.postProcessing')}
+                  icon={<AudioWaveform size={14} />}
+                  badge={postProcessingSupported ? <PostProcessingBadge /> : <UnsupportedBadge />}
+                  accentColor="amber"
+                  isOpen={sheetOpenSection === 'postprocessing'}
+                  onToggle={() => toggleSheetSection('postprocessing')}
+                  headerToggle={postProcessingSupported ? (
+                    <ToggleSwitch
+                      checked={gp.postProcessingEnabled}
+                      onChange={(on) => gp.setPostProcessingEnabled(on)}
+                      accentColor="amber"
+                    />
+                  ) : undefined}
+                >
+                  {postProcessingSupported
+                    ? <PostProcessingDropdown />
+                    : <NotYetPanel feature="Post-processing" />}
+                </SheetSection>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

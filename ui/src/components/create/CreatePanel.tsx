@@ -484,11 +484,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   });
 
   return (
-    <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
+    <div className="h-full min-w-0 flex flex-col bg-zinc-50 dark:bg-suno">
       <TrainingDraftBar />
       <StudioDraftPicker control={draft} textKey="hs-title" apply={applyDraft} refuse={refuseDraft} />
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
         <div className="flex items-center gap-2">
           <button
@@ -503,7 +503,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       </div>
 
       {/* Scrollable body — now much slimmer */}
-      <div className="flex-1 overflow-y-auto hide-scrollbar px-4 py-3 space-y-1">
+      {/* overflow-x-hidden alone still lets focus/shift-wheel set scrollLeft, which slides the
+          form's left edge out of view (looks like it is under the sidebar rail). Pin it to 0. */}
+      <div
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden hide-scrollbar px-4 py-3 space-y-1"
+        onScroll={(e) => { if (e.currentTarget.scrollLeft !== 0) e.currentTarget.scrollLeft = 0; }}
+      >
         <ContentSection
           caption={caption} onCaptionChange={setCaption}
           lyrics={lyrics} onLyricsChange={setLyrics}

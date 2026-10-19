@@ -98,7 +98,7 @@ export const ReviewPanel: React.FC = () => {
   const open = (r: Yue2ReviewRow) => { setRefineLadderRun(r.refineRun); void openDataset(r.datasetId).then(() => setPhase(r.baseMatched ? 'train' : 'refine')); };
   const Row: React.FC<{ r: Yue2ReviewRow }> = ({ r }) => (
     <button type="button" onClick={() => open(r)} className="w-full text-left rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 hover:bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-      <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 min-w-[180px]">{r.datasetName}</span>
+      <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 max-[1023px]:min-w-0 min-[1024px]:min-w-[180px]">{r.datasetName}</span>
       {r.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300" title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{r.origin}</span>}
       <span className="text-[11px] text-zinc-500">{new Date(r.createdAt).toLocaleString()}</span>
       <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{!(r.baseMatched && blindRungs) && r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
@@ -146,7 +146,7 @@ export const ReviewPanel: React.FC = () => {
         {finishOpen && <>
           {approved.map(({ pick, name, score, decoderOnly, baseMatched }) => <div key={pick.runId} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
             <Toggle size="sm" accent="amber" checked={!skip[pick.runId]} onChange={v => setSkip(prev => ({ ...prev, [pick.runId]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name }) as string} />
-            <span className="font-semibold min-w-[180px]">{name}</span>
+            <span className="font-semibold max-[1023px]:min-w-0 min-[1024px]:min-w-[180px]">{name}</span>
             <span className="text-zinc-500">{baseMatched && blindRungs && pick.blindLabel
               ? t('trainingStudio.review.finishBlindPick', 'Rung {{label}}, overall {{score}}', { label: pick.blindLabel, score: score.toFixed(2) })
               : t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: pick.step, score: score.toFixed(2) })}{decoderOnly || baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>

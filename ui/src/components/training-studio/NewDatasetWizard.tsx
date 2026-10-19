@@ -133,7 +133,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
         className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
-        <div className="w-[620px] max-h-[85vh] flex flex-col overflow-hidden rounded-xl border border-zinc-200 dark:border-white/10 bg-white dark:bg-suno-card shadow-2xl">
+        <div className="w-full max-[1023px]:max-w-full min-[1024px]:w-[620px] max-h-[85vh] max-[1023px]:max-h-[100dvh] flex flex-col overflow-hidden rounded-xl border border-zinc-200 dark:border-white/10 bg-white dark:bg-suno-card shadow-2xl">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-white/5">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.wizard.title')}</h3>
             <button onClick={onClose} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-white transition-colors">
