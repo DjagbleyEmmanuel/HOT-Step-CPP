@@ -346,6 +346,22 @@ async function aceFetch(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+/** POST to a synchronous engine route that runs on the worker thread
+ *  (/sa3-synth, /sa3-refine). Aborting the fetch closes the socket, which the
+ *  engine checks before every sampling step; it then returns early. GET
+ *  /worker-drain queues behind that call, so on abort we await it before
+ *  rethrowing: the caller's lane is released only once the engine has stopped. */
+async function workerPost(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await aceFetch(url, init);
+  } catch (err) {
+    if (init.signal?.aborted) {
+      await fetch(`${BASE}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) }).catch(() => {});
+    }
+    throw err;
+  }
+}
+
 async function aceGet(path: string, timeoutMs = TIMEOUT_QUICK): Promise<Response> {
   const res = await aceFetch(`${BASE}${path}`, {
     signal: AbortSignal.timeout(timeoutMs),
@@ -788,7 +804,7 @@ export const aceClient = {
     if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
-    const res = await aceFetch(`${BASE}/sa3-refine?${params.toString()}`, {
+    const res = await workerPost(`${BASE}/sa3-refine?${params.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: wavBuffer,
@@ -845,8 +861,9 @@ export const aceClient = {
       /** Diagnostic: bare filename; engine writes the final latent (flat f32,
        *  [256][L]) to models/sa3-latents/<name> and logs its RMS. */
       dumpLatent?: string;
-      /** Cancellation: combined with the TIMEOUT_SA3 timeout signal so a user
-       *  cancel aborts the in-flight fetch instead of waiting the render out. */
+      /** Cancellation: combined with the TIMEOUT_SA3 timeout signal. Aborting
+       *  stops the engine at its next sampling step; the call settles only
+       *  after the engine has stopped (see workerPost). */
       signal?: AbortSignal;
     },
   ): Promise<Buffer> {
@@ -875,7 +892,7 @@ export const aceClient = {
     if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
-    const res = await fetch(`${BASE}/sa3-synth?${params.toString()}`, {
+    const res = await workerPost(`${BASE}/sa3-synth?${params.toString()}`, {
       method: 'POST',
       signal: withTimeout(opts.signal, TIMEOUT_SA3),
     });

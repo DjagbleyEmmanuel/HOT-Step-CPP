@@ -43,6 +43,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -348,7 +349,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                                           std::vector<float> & out,
                                           const Sa3PluginParams * sp = nullptr,
                                           bool noise_only = false,
-                                          const char * dump_latent_path = nullptr) {
+                                          const char * dump_latent_path = nullptr,
+                                          const std::function<bool()> & cancelled = nullptr) {
     // noise_only (HOT-Step /sa3-synth): text-to-audio from pure gaussian noise.
     // `audio` is ignored (may be nullptr); T44 gives the requested output
     // length; strength is forced to 1.0 so the schedule runs the full
@@ -724,7 +726,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             g_ctx.dt       = t_curr - t_next;
             fprintf(stderr, "[SA3] step %d/%d t=%.4f->%.4f [lua-loop]\n",
                     step_idx + 1, steps, t_curr, t_next);
-            return false;  // never cancelled
+            return cancelled && cancelled();
         };
 
         if (!lua_call_solver_loop(*solver_plugin, tm_x.data(), tm_v.data(), sigmas.data(), steps,
@@ -732,6 +734,11 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                                   sp->plugin_params, sa3_lua_ctx)) {
             fprintf(stderr, "[SA3] FATAL: full-loop solver '%s' failed (Lua error or missing sample())\n",
                     solver_plugin->name.c_str());
+            return false;
+        }
+        // A cancel via on_step returns normally from sample(); stop here.
+        if (cancelled && cancelled()) {
+            fprintf(stderr, "[SA3] cancelled [lua-loop]\n");
             return false;
         }
 
@@ -749,6 +756,10 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         }
 
         for (int i = 0; i < steps; i++) {
+            if (cancelled && cancelled()) {
+                fprintf(stderr, "[SA3] cancelled before step %d/%d\n", i + 1, steps);
+                return false;
+            }
             float t_curr = sigmas[i], t_next = sigmas[i + 1];
             g_ctx.step_idx = i;
             g_ctx.t_curr   = t_curr;
@@ -1099,10 +1110,12 @@ static inline bool sa3_refine_run_ggml(Sa3GgmlRefine * m,
                                        float strength, int steps,
                                        bool pingpong, uint64_t seed, bool zero_noise,
                                        std::vector<float> & out,
-                                       const Sa3PluginParams * sp = nullptr) {
+                                       const Sa3PluginParams * sp = nullptr,
+                                       const std::function<bool()> & cancelled = nullptr) {
     if (!m || !m->loaded) return false;
     return sa3_refine_run_backend(m, audio, T44, token_ids, n_tokens,
-                                  strength, steps, pingpong, seed, zero_noise, out, sp);
+                                  strength, steps, pingpong, seed, zero_noise, out, sp,
+                                  /*noise_only=*/false, /*dump_latent_path=*/nullptr, cancelled);
 }
 
 // HOT-Step /sa3-synth: text-to-audio from noise on the GGML backend.
@@ -1113,10 +1126,11 @@ static inline bool sa3_synth_run_ggml(Sa3GgmlRefine * m,
                                       int steps, bool pingpong, uint64_t seed, bool zero_noise,
                                       std::vector<float> & out,
                                       const Sa3PluginParams * sp = nullptr,
-                                      const char * dump_latent_path = nullptr) {
+                                      const char * dump_latent_path = nullptr,
+                                      const std::function<bool()> & cancelled = nullptr) {
     if (!m || !m->loaded) return false;
     return sa3_refine_run_backend(m, nullptr, T44, token_ids, n_tokens,
                                   1.0f, steps, pingpong, seed, zero_noise, out, sp,
-                                  /*noise_only=*/true, dump_latent_path);
+                                  /*noise_only=*/true, dump_latent_path, cancelled);
 }
 #endif // SA3_REFINE_H

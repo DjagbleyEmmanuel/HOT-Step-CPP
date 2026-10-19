@@ -3436,6 +3436,13 @@ int main(int argc, char ** argv) {
     svr.Get("/health", [](const httplib::Request &, httplib::Response & res) {
         res.set_content("{\"status\":\"ok\"}", "application/json");
     });
+    // Answers once everything queued on the worker before it has finished. A
+    // client that dropped a synchronous worker route (/sa3-synth, /sa3-refine
+    // stop at the next sampling step when their socket closes) awaits this to
+    // know the engine has actually stopped before it starts other work.
+    svr.Get("/worker-drain", on_worker([](const httplib::Request &, httplib::Response & res) {
+        res.set_content("{\"status\":\"ok\"}", "application/json");
+    }));
     svr.Get("/props", handle_props);
     svr.Get("/logs", handle_logs);
     svr.Get("/jobs", handle_jobs_list);
@@ -4133,7 +4140,8 @@ int main(int argc, char ** argv) {
             ModelHandle guard(g_store, sa3);
             refine_timer.reset();
             ok = sa3_refine_run_ggml(sa3, p44, T44, ids.data(), n_tokens,
-                                     strength, steps, pingpong, seed, zero_noise, out44, sp_ptr);
+                                     strength, steps, pingpong, seed, zero_noise, out44, sp_ptr,
+                                     req.is_connection_closed);
         }
         fprintf(stderr, "[Server] SA3 refine compute (%s): %.0f ms\n",
                 "gguf", refine_timer.ms());
@@ -4609,7 +4617,8 @@ int main(int argc, char ** argv) {
             synth_timer.reset();
             ok = sa3_synth_run_ggml(sa3, T44, ids.data(), n_tokens,
                                     steps, pingpong, seed, zero_noise, out44, sp_ptr,
-                                    dump_latent_path.empty() ? nullptr : dump_latent_path.c_str());
+                                    dump_latent_path.empty() ? nullptr : dump_latent_path.c_str(),
+                                    req.is_connection_closed);
         }
         fprintf(stderr, "[Server] SA3 synth compute (gguf): %.0f ms\n",
                 synth_timer.ms());
