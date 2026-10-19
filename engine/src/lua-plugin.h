@@ -7,6 +7,7 @@
 //   - Plugin metadata + param schema extraction
 //   - Wrapper functions matching C solver/scheduler/guidance signatures
 
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -358,10 +359,7 @@ static std::string lua_js_number_string(double v) {
     v = std::fabs(v);
     // shortest round-trip digits: "d.ddde+N"
     char e[40];
-    for (int prec = 0; prec <= 16; prec++) {
-        snprintf(e, sizeof(e), "%.*e", prec, v);
-        if (std::strtod(e, nullptr) == v) break;
-    }
+    *std::to_chars(e, e + sizeof(e) - 1, v, std::chars_format::scientific).ptr = '\0';
     std::string digits;
     const char * c = e;
     for (; *c != 'e'; c++) if (*c != '.') digits += *c;

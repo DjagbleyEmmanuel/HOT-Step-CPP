@@ -47,6 +47,7 @@ int main() {
     check("1e21", "1e+21");       // first exponent-notation power
     check("1.5e21", "1.5e+21");
     check("-1e21", "-1e+21");
+    check("2^-24", "5.960464477539063e-8");  // 16-digit tie; must match Node, not %.16e
     check("5e-324", "5e-324");
     check("1.7976931348623157e308", "1.7976931348623157e+308");
     std::printf("ok\n");
