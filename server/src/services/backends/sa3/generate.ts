@@ -99,10 +99,6 @@ export function resolveSa3Sampler(params: any, plugins: { solver?: string }):
   return { sampler: 'pingpong' };
 }
 
-/** Same pattern as minimax's mapMinimaxSamplerPlugins: the solver / scheduler /
- *  guidance pickers are SHARED global UI state, so they only reach the wire
- *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
- *  render stays on the parity-tested native pingpong path. */
 /** Seed-breeding blend used when seed B is set but no blend is given (ear test b33/b34). */
 export const SA3_DEFAULT_SEED_BLEND = 0.5;
 
@@ -114,6 +110,10 @@ export function resolveSa3SeedBlend(v: unknown): number {
   return Math.min(1, Math.max(0, n));
 }
 
+/** Same pattern as minimax's mapMinimaxSamplerPlugins: the solver / scheduler /
+ *  guidance pickers are SHARED global UI state, so they only reach the wire
+ *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
+ *  render stays on the parity-tested native pingpong path. */
 function mapSa3SamplerPlugins(params: any): Pick<Sa3SynthWire,
   'solver' | 'scheduler' | 'guidanceMode' | 'guidanceScale' | 'pluginParams' | 'postprocessPlugin'> {
   if (!params.samplerPluginsEnabled) return {};
@@ -251,6 +251,8 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       ...(job.params.seedB !== undefined && job.params.seedB !== null && job.params.seedB !== ''
           && Number(job.params.seedB) >= 0
         ? { seedB: Math.floor(Number(job.params.seedB)),
+            // SA3 default: a shared seedB with no explicit blend breeds at 0.5
+            // (ACE omits the blend instead). See docs/user/backends.md.
             seedBlend: resolveSa3SeedBlend(job.params.seedBlend) }
         : {}),
       adapters,

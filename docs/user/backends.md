@@ -309,7 +309,8 @@ freely, including commercially, and that only companies need a commercial licenc
 
 Seed breeding only runs when a seed B is set. If you set seed B and leave the
 blend empty, the blend defaults to 0.5 (an even mix of the two seeds' noise).
-A blend of 0 turns breeding off.
+A blend of 0 turns breeding off. This differs from ACE-Step, where a shared
+seed B with no blend sends no blend at all.
 
 ## Capability matrix
 
