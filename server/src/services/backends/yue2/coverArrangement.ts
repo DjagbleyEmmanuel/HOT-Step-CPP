@@ -347,9 +347,13 @@ export function editPlan(session: ArrangedSession, upcoming: string[], finished:
     return { id: `o${counter++}`, section: id };
   }));
   if (!plan.length) throw new Error('The arrangement needs at least one section.');
-  // A kept take that ran to the end composed an ending; nothing follows it.
+  // A kept take that composed an ending locks what follows it. One that ran on
+  // into a lookahead section (a start recorded past its last occurrence) did
+  // not, even if the plan was marked as ending after it was made, so the song
+  // can still grow or stop ending there.
   const spine = session.takes.find(t => t.id === session.kept.at(-1));
-  if (spine && arrangement.finished && spine.to === arrangement.plan.length - 1 && (plan.length > built || !finished)) {
+  const ended = !!spine && spine.starts.length <= spine.to + 1;
+  if (spine && ended && arrangement.finished && spine.to === arrangement.plan.length - 1 && (plan.length > built || !finished)) {
     throw new Error('The kept build already ends the song; undo its last keep to change what follows.');
   }
   return { ...arrangement, plan, nextOccurrence: counter, finished };

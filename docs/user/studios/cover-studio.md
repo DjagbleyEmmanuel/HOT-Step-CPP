@@ -366,7 +366,10 @@ the top reads covering artist, then song, as the saved track is named.
    its last one in the source, so the next take has a seam to start from, and
    that section is not added to your song. Tick **Ends the song** before building
    the last section so its take composes an ending instead. A take of the score's
-   own last section ends there either way. Editing the plan is refused while
+   own last section ends there either way. Only a kept take that
+   really composed an ending locks the song; one that ran on into the next source
+   section does not, so you can still add sections or untick **Ends the song**
+   after removing what followed it. Editing the plan is refused while
    takes render, and takes made for an earlier plan can no longer be kept. The
    plan is saved with the build, so it survives a reload and is what **Render
    Final Song** renders.
@@ -431,7 +434,11 @@ the top reads covering artist, then song, as the saved track is named.
    starts there with a half-second fade in, and **Play build** starts there too.
    The audio before it still feeds the composer, so later takes are unaffected.
    A line under the Song bar shows a stored start or a cropped last keep, with
-   **Start from the top** and **Undo crop** to take either back. Takes made
+   **Start from the top** and **Undo crop** to take either back. The last kept take
+   also sits at the top of the Takes box, marked **Kept**, with its own **Crop**:
+   there **Done** applies the crop straight away, so you can shorten a section
+   after keeping it (dragging the red line back to the end undoes the crop).
+   Takes already made from it stop being keepable. Takes made
    before a crop can no longer be kept until the build they continued is back.
 4. Repeat for the remaining sections. Because takes hold only their own part,
    **Render the build so far** (on the Song bar) renders everything kept once,

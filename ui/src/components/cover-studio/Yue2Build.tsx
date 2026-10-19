@@ -719,6 +719,63 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <div className="min-h-0 flex flex-col p-4 gap-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Takes</p>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+            {/* The last kept take, to crop after keeping it: always cut from its uncropped original. */}
+            {spine && s && p.onCrop && (() => {
+              const base = s.takes.find(t => t.id === spine.cropOf) ?? spine;
+              const editing = cropEdit?.take === 'kept' ? cropEdit : null;
+              const current: TakeCrop = { in: base.from === 0 ? trimAt : null, out: spine.cropOf ? spine.frames / FPS : null, mode: null };
+              const full = takeWindow(base);
+              const win = takeWindow(spine, editing ? null : current);
+              const colour = colours[items[spine.to]?.section ?? -1] ?? '#06b6d4';
+              const point = editing?.out != null ? cropPoint(base, Math.round(editing.out * FPS)) : null;
+              const needsMode = !!editing && editing.out !== current.out && cropNeedsMode(base, editing);
+              const pointItem = point ? items[point.occurrence] : undefined;
+              const done = () => {
+                if (!editing) return;
+                setCropEdit(null);
+                stop();
+                if (editing.out !== current.out) p.onCrop?.(spine.id, editing.out === null ? null : Math.round(editing.out * FPS), editing.mode ?? undefined);
+                if (editing.in !== current.in) p.onTrim?.(base.id, editing.in);
+              };
+              return <div className="space-y-2 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-xs font-semibold text-zinc-700 dark:text-zinc-200" title="The last take you kept">
+                    Kept{spine.cropOf || trimAt !== null ? ' ✂' : ''}</span>
+                  <button type="button" onClick={() => toggle('kept', spine.audioUrl, win.from, win.to, (spine.audioStart ?? 0) / FPS)}
+                    aria-label={playing?.key === 'kept' && !paused ? 'Pause the kept take' : 'Play the kept take'}
+                    className="rounded-full bg-zinc-100 dark:bg-white/10 p-2 text-zinc-700 dark:text-zinc-200 hover:text-pink-500">
+                    {playing?.key === 'kept' && !paused ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}</button>
+                  {editing
+                    ? <CropWaveform peaks={base.peaks ?? []} from={full.from} to={full.to} crop={editing} canIn={cropLimits(base).inMax > 0} colour={colour}
+                      onMove={(edge, at) => setCropEdit(e => e && { ...e, ...moveCropEdge(base, e, edge, at) })} />
+                    : <Waveform peaks={spine.peaks ?? []} progress={playing?.key === 'kept' ? progress : null} colour={colour}
+                      onSeek={f => seek('kept', spine.audioUrl, win.from, win.to, f, (spine.audioStart ?? 0) / FPS)} />}
+                  <span className="w-10 text-right font-mono text-xs text-zinc-500" title="Length of its new part">{clock(win.newPart)}</span>
+                  {editing
+                    ? <button type="button" onClick={done} disabled={needsMode && !editing.mode}
+                      title={needsMode && !editing.mode ? 'Choose what the next take does first' : 'Apply the crop'}
+                      className="rounded-lg border border-cyan-500 px-3 py-1 text-xs font-semibold text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Done</button>
+                    : <button type="button" onClick={() => setCropEdit({ take: 'kept', ...current })} disabled={!editable}
+                      title="Crop the last kept take: where it ends (and, for the first section, where the song starts). Takes made from it stop being keepable."
+                      className="flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-white/10 px-3 py-1 text-xs text-zinc-700 dark:text-zinc-200 hover:border-cyan-500 disabled:opacity-40">
+                      <Scissors className="w-3 h-3" />Crop</button>}
+                </div>
+                {editing && <div className="space-y-1 text-xs text-zinc-500">
+                  <p>
+                    {cropLimits(base).inMax > 0 && <>Starts at {clock(editing.in ?? 0)} (green){editing.in !== null ? ', faded in over half a second in the saved song' : ''}. </>}
+                    Ends at {clock(editing.out ?? cropLimits(base).end)} (red){point && pointItem ? `, ${point.inside ? 'inside' : 'at the start of'} ${nameOf(pointItem)}` : ''}.
+                    {' '}Drag either line; Done applies it now. Drag the red line to the end to undo a crop.
+                  </p>
+                  {needsMode && pointItem && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
+                    <span>The next take:</span>
+                    {([['regenerate', `composes ${nameOf(pointItem)} again from the cut`],
+                      ['advance', items[point!.occurrence + 1] ? `moves on to ${nameOf(items[point!.occurrence + 1])}` : `keeps ${nameOf(pointItem)} cut short and ends the song`]] as const)
+                      .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={editing.mode === mode} onClick={() => setCropEdit(e => e && { ...e, mode })}
+                        className={`rounded-lg border px-2 py-1 ${editing.mode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
+                  </div>}
+                </div>}
+              </div>;
+            })()}
             {candidates.map((take, i) => {
               const editing = cropEdit?.take === take.id ? cropEdit : null;
               const set = crops[take.id] ?? null;

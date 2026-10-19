@@ -245,4 +245,8 @@ test('undo makes a spine\'s candidates keepable again; a kept ending locks the p
   assert.throws(() => editPlan(ending, ['s2'], true), /already ends the song/);
   assert.throws(() => editPlan(ending, [], false), /already ends the song/);
   assert.equal(editPlan(ending, [], true).plan.length, 5);
+  // A kept take that ran on into a lookahead composed no ending: the song can still grow, or stop ending.
+  const ranOn = { ...ending, takes: ending.takes.map(t => t.id === 'e' ? { ...t, starts: [0, 100, 200, 300, 400, 500] } : t) };
+  assert.equal(editPlan(ranOn, ['s2'], true).plan.length, 6);
+  assert.equal(editPlan(ranOn, [], false).finished, false);
 });
