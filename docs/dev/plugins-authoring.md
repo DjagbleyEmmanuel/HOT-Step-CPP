@@ -289,7 +289,7 @@ Parameters can be shown/hidden based on another parameter's value:
   hint = "Only visible when Mode is set to Quality" }
 ```
 
-> **Note:** Use string values for `equals` (e.g. `"true"`, `"2"`) for maximum compatibility. The engine also accepts Lua booleans (`true`/`false`) and numbers directly, so `equals = true` now works. Older builds only accept strings, so prefer strings if you distribute plugins for use with unpatched releases.
+> **Note:** Use string values for `equals` (e.g. `"true"`, `"2"`) for maximum compatibility. The engine also accepts Lua booleans (`true`/`false`) and numbers directly, so `equals = true` now works. Numbers are written the way JavaScript's `String()` writes them (`2`, `2.5`, `0.00001`, `1e+21`), since that is the form the UI compares against. Older builds only accept strings, so prefer strings if you distribute plugins for use with unpatched releases.
 
 ### Transform Expressions
 

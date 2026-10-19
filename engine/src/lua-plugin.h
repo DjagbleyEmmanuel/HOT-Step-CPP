@@ -348,6 +348,32 @@ static int lua_get_int(lua_State * L, int idx, const char * field, int def = 0) 
     return v;
 }
 
+// JS String(number) (ECMAScript Number::toString), so the UI's string compare
+// matches: 1e-5 -> "0.00001", 1e21 -> "1e+21", -0 -> "0", 2.5 -> "2.5".
+static std::string lua_js_number_string(double v) {
+    if (std::isnan(v)) return "NaN";
+    if (v == 0) return "0";
+    if (std::isinf(v)) return v < 0 ? "-Infinity" : "Infinity";
+    std::string sign = v < 0 ? "-" : "";
+    v = std::fabs(v);
+    // shortest round-trip digits: "d.ddde+N"
+    char e[40];
+    for (int prec = 0; prec <= 16; prec++) {
+        snprintf(e, sizeof(e), "%.*e", prec, v);
+        if (std::strtod(e, nullptr) == v) break;
+    }
+    std::string digits;
+    const char * c = e;
+    for (; *c != 'e'; c++) if (*c != '.') digits += *c;
+    int n = std::atoi(c + 1) + 1;  // decimal point position
+    int k = (int) digits.size();
+    if (k <= n && n <= 21) return sign + digits + std::string(n - k, '0');
+    if (0 < n && n <= 21)  return sign + digits.substr(0, n) + "." + digits.substr(n);
+    if (-6 < n && n <= 0)  return sign + "0." + std::string(-n, '0') + digits;
+    std::string exp = (n - 1 < 0 ? "-" : "+") + std::to_string(std::abs(n - 1));
+    return sign + digits.substr(0, 1) + (k > 1 ? "." + digits.substr(1) : "") + "e" + exp;
+}
+
 static ParamSchema lua_extract_param(lua_State * L, int idx) {
     ParamSchema p;
     p.key   = lua_get_string(L, idx, "key");
@@ -411,20 +437,7 @@ static ParamSchema lua_extract_param(lua_State * L, int idx) {
         if (lua_isboolean(L, -1)) {
             p.visible_when.equals = lua_toboolean(L, -1) ? "true" : "false";
         } else if (lua_type(L, -1) == LUA_TNUMBER) {
-            double v = lua_tonumber(L, -1);
-            char buf[32];
-            if (v == std::floor(v) && std::fabs(v) < 1e15) {
-                snprintf(buf, sizeof(buf), "%lld", (long long) v);
-            } else {
-                snprintf(buf, sizeof(buf), "%.17g", v);
-                // shortest round-trip form, like JS String(number)
-                for (int prec = 1; prec <= 17; prec++) {
-                    char t[32];
-                    snprintf(t, sizeof(t), "%.*g", prec, v);
-                    if (std::strtod(t, nullptr) == v) { memcpy(buf, t, sizeof(t)); break; }
-                }
-            }
-            p.visible_when.equals = buf;
+            p.visible_when.equals = lua_js_number_string(lua_tonumber(L, -1));
         }
         lua_pop(L, 1);
     }
