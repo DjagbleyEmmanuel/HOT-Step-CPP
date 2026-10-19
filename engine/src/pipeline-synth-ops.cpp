@@ -1754,10 +1754,16 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
 
         // Build the VAE decode callback for the Lua plugin
         // This wraps vae_ggml_decode_tiled with the engine's VAE and chunk params
+        // vae_ggml_decode_tiled packs ch1 at the returned count; the bridge
+        // contract is capacity stride, so move ch1 out to max_T.
         PostprocessVaeDecodeFn decode_fn = [&](const float * latent, int T_lat, float * aud_out, int max_T) -> int {
-            return vae_ggml_decode_tiled(vae, latent, T_lat, aud_out, max_T,
-                                         hs_vae_chunk(ctx), ctx->params.vae_overlap,
-                                         cancel, cancel_data);
+            int n = vae_ggml_decode_tiled(vae, latent, T_lat, aud_out, max_T,
+                                          hs_vae_chunk(ctx), ctx->params.vae_overlap,
+                                          cancel, cancel_data);
+            if (n > 0 && n < max_T) {
+                memmove(aud_out + max_T, aud_out + n, (size_t) n * sizeof(float));
+            }
+            return n;
         };
 
         // Allocate output buffer
@@ -1781,6 +1787,9 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
                 out[b].sample_rate = 48000;
                 continue;
             }
+        } else if (T_audio < T_audio_max) {
+            // The plugin path leaves ch1 at capacity stride; pack it like the fallback.
+            memmove(audio.data() + T_audio, audio.data() + T_audio_max, (size_t) T_audio * sizeof(float));
         }
         fprintf(stderr, "[Postprocess Batch%d] Decode: %.1f ms (T_audio=%d)\n", b, s.timer.ms(), T_audio);
 

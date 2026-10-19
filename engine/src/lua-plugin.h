@@ -1129,21 +1129,24 @@ static void lua_call_post_step(LuaPlugin & plugin,
 // ═══════════════════════════════════════════════════════════════════════════
 
 // VAE decode callback type for postprocess plugins:
-//   decode_fn(latent_data, T_latent) → (audio_data, T_audio)
-// latent_data is float* [T_latent, 64] time-major, audio_data is float* [2, T_audio]
+//   decode_fn(latent_data, T_latent, audio_out, max_T_audio) → T_audio
+// latent_data is float* [T_latent, C_lat] time-major. audio_out is planar at
+// capacity stride: ch0 in [0, T_audio), ch1 in [max_T_audio, max_T_audio + T_audio).
+// A decoder that packs ch1 at T_audio (vae_ggml_decode_tiled) must move it.
 using PostprocessVaeDecodeFn = std::function<int(const float * latent, int T_latent, float * audio_out, int max_T_audio)>;
 
 // Call a Lua postprocess plugin's process() function.
 // latents: [B * T * 64] time-major flat array (B batch items × T frames × 64 channels)
 // For each batch item, calls process() which internally calls vae_decode_fn.
-// Returns decoded audio via audio_out (caller-allocated [2 * T_audio_max] per batch item).
+// Returns decoded audio via audio_out (caller-allocated [2 * max_T_audio] per batch item),
+// planar at capacity stride like decode_fn: ch1 starts at audio_out + max_T_audio.
 static int lua_call_postprocess(
     LuaPlugin &   plugin,
     const float * latents,     // [T * 64] time-major for one batch item
     int           T_latent,    // number of latent frames
     int           C_lat,       // latent channels (64)
     int           C_aud,       // audio channels (2)
-    float *       audio_out,   // output: [2 * T_audio] interleaved by channel
+    float *       audio_out,   // output: [2 * max_T_audio], ch1 at max_T_audio
     int           max_T_audio,
     PostprocessVaeDecodeFn vae_decode_fn,
     const std::unordered_map<std::string, std::string> & params,
@@ -1244,12 +1247,8 @@ static int lua_call_postprocess(
 
         // Return audio as Lua table (1-indexed, [B * C_aud * T_audio], contiguous
         // per channel: ch0 at [1, T_audio], ch1 at [T_audio+1, 2*T_audio]).
-        // Source aud_buf is planar at stride max_T (ch0 in [0, max_T), ch1 in
-        // [max_T, 2*max_T)) -- the decode_fn contract used by both the native
-        // tiled decoders and the Lua-plugin decode_fn wrappers. T_audio may be
-        // less than max_T, so treating aud_buf as a flat 2*T_audio block would
-        // read channel 1's samples out of channel 0's tail region. Index each
-        // channel explicitly instead.
+        // Source aud_buf is planar at capacity stride max_T (the decode_fn
+        // contract above), so ch1 is read from max_T even when T_audio is short.
         lua_newtable(Ls);
         for (int c = 0; c < 2; c++) {
             for (int i = 0; i < T_audio; i++) {
@@ -1284,18 +1283,18 @@ static int lua_call_postprocess(
     }
 
     // Copy audio from Lua table to output buffer (1-indexed).
-    // The Lua process() table is planar at stride final_samples (== max_T_audio,
-    // the arg6 passed into process() above): ch0 in [1, max_T_audio], ch1 in
-    // [max_T_audio+1, 2*max_T_audio]. T_audio may be less than max_T_audio, so
-    // reading it as a flat 2*T_audio block (the old assumption) pulls channel
-    // 1's data from channel 0's tail -- same bug as the decode_fn readback
-    // above. Index each channel at its real stride instead.
+    // process() returns its table packed at the count it returns: ch0 in
+    // [1, T], ch1 in [T+1, 2T]. The shipped tiled plugins return T =
+    // final_samples; a pass-through returning vae_decode_fn's result returns
+    // the decoder's own (possibly shorter) count. Read at that stride, before
+    // clamping, and write audio_out at capacity stride.
+    const int T_lua = T_audio;
     if (T_audio > max_T_audio) {
         T_audio = max_T_audio;
     }
     for (int c = 0; c < 2; c++) {
         for (int i = 0; i < T_audio; i++) {
-            int lua_idx = c * max_T_audio + i + 1;
+            int lua_idx = c * T_lua + i + 1;
             lua_pushinteger(L, lua_idx);
             lua_gettable(L, -3);
             audio_out[(size_t) c * max_T_audio + i] = (float) lua_tonumber(L, -1);
