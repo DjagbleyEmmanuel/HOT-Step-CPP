@@ -214,9 +214,14 @@ them as `<song>.yue2-request.json`, so a later request can resume the stream. Ad
 `yue2-probe --continue-check <request.json>` checks prefix identity, cancellation and
 the context cap on any backend.
 
-NAR plugins and plan conditioning. `nar_solver` accepts `md_wasserstein_yue2` and
-`md_ancestral_yue2`; `nar_scheduler` accepts `md_ht_scheduler V3`,
-`md_plan_aware_yue2` and `md_plan_loose_yue2`. Any other name fails the request. A
+NAR plugins and plan conditioning. `nar_solver` accepts `md_wasserstein_yue2`,
+`md_ancestral_yue2`, and the full-loop solvers `md_latent_eq_yue2` and `md_tlie_yue2`;
+`nar_scheduler` accepts `md_ht_scheduler V3`, `md_plan_aware_yue2`,
+`md_plan_loose_yue2` and `md_plan_overdrive_yue2`. Any other name fails the request.
+Full-loop solvers run through `yue2_nar_run_loop_solver` (`engine/src/yue2/yue2-nar-loop.h`),
+which turns a model error, a cancel or non-finite latents into a failed chunk;
+`engine/tests/test-yue2-nar-loop.cpp` checks it. The Lua host has no instruction or
+time budget, so a plugin that loops without calling `on_step` cannot be cancelled. A
 Lua solver gets a seed mixed from the variation's noise seed and the chunk's start
 frame, so each chunk draws its own solver noise. `postprocess_plugin` names a Lua
 postprocess plugin that replaces the native tiled VAE decode; empty (the default) or

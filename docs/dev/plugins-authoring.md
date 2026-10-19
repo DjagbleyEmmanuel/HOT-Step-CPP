@@ -473,6 +473,22 @@ plan_strength = w
 
 `plugins/schedulers/md_plan_loose_yue2.lua` is the full version.
 
+#### Full-loop solvers on YuE2
+
+The YuE2 NAR runs `owns_loop = true` solvers through the same
+`sample(xt, vt_buf, schedule, n, model_fn)` contract as ACE, one chunk per
+call. `schedule` holds the chunk's descending `t` values (1 = noise) with no
+trailing 0, and the update after the last entry goes to `t = 0`.
+`model_fn(x, t)` writes the plan-conditioned velocity into `vt_buf`, with any
+plan strength, plan CFG and CADS applied, and `t` must lie in [0, 1]. Call
+`on_step(i, t, t_next)` after each step and return when it answers `true`: that
+is a cancel, a model error or non-finite latents, and every later `model_fn`
+call writes zeros without running the model. The latent is time-major,
+`n = frames * 64`. Multi-evaluation `step()` solvers (`needs_model` without
+`owns_loop`) are still refused on YuE2. Only names on the engine's YuE2
+allowlist run there; `docs/dev/engine.md` lists them.
+`plugins/solvers/md_tlie_yue2.lua` and `md_latent_eq_yue2.lua` are examples.
+
 ---
 
 ## Sandbox

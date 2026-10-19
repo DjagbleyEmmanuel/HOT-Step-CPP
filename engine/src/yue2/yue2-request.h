@@ -800,10 +800,12 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     // Keep the initial YuE2 bridge deliberately narrow. Other Lua plugins may
     // need model callbacks, channel conventions, or their own loop contract.
     if ((!out->nar_solver.empty() && out->nar_solver != "md_wasserstein_yue2" &&
-         out->nar_solver != "md_ancestral_yue2") ||
+         out->nar_solver != "md_ancestral_yue2" && out->nar_solver != "md_latent_eq_yue2" &&
+         out->nar_solver != "md_tlie_yue2") ||
         (!out->nar_scheduler.empty() && out->nar_scheduler != "md_ht_scheduler V3" &&
          out->nar_scheduler != "md_plan_aware_yue2" &&
-         out->nar_scheduler != "md_plan_loose_yue2")) {
+         out->nar_scheduler != "md_plan_loose_yue2" &&
+         out->nar_scheduler != "md_plan_overdrive_yue2")) {
         if (err) *err = "unsupported YuE2 NAR solver or scheduler plugin";
         yyjson_doc_free(doc);
         return false;

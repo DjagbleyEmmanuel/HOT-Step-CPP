@@ -90,6 +90,7 @@
 #include "yue2-imatrix.h"
 #include "yue2-lm-graph.h"
 #include "yue2-model.h"
+#include "yue2-nar-loop.h"
 
 #include "backend.h"
 #include "ggml.h"
@@ -1163,8 +1164,8 @@ static bool yue2_nar_solve_plugins(
         if (err) *err = "YuE2 NAR plugin was not loaded; check the plugin startup log";
         return false;
     }
-    if (solver && (solver->owns_loop || solver->needs_model)) {
-        if (err) *err = "YuE2 NAR supports only single-evaluation step() solvers";
+    if (solver && solver->needs_model && !solver->owns_loop) {
+        if (err) *err = "YuE2 NAR supports single-evaluation step() solvers and full-loop sample() solvers";
         return false;
     }
 
@@ -1237,7 +1238,27 @@ static bool yue2_nar_solve_plugins(
         return ok;
     };
 
-    for (int step = 0; step < steps; step++) {
+    // Full-loop solver: sample() drives every step through model_fn/on_step.
+    const bool loop_solver = solver && solver->owns_loop;
+    if (loop_solver) {
+        const Yue2NarVelocityFn velocity = [&](const float * x, float t, float * v_out) -> bool {
+            Yue2NarVelocityResult r;
+            if (!eval(std::vector<float>(x, x + n), t, &r)) return false;
+            if (r.velocity.size() != (size_t) n) {
+                if (err) *err = "YuE2 NAR velocity size mismatch";
+                return false;
+            }
+            std::copy(r.velocity.begin(), r.velocity.end(), v_out);
+            return true;
+        };
+        if (!yue2_nar_run_loop_solver(*solver, state, times, steps, (int) chunk.chunk_len,
+                                      (int) m.lm_cfg.latent_dim, velocity, on_step, plugin_params, ctx,
+                                      seed, err)) {
+            return false;
+        }
+    }
+
+    for (int step = 0; !loop_solver && step < steps; step++) {
         const float t = times[(size_t) step];
         const float next_t = times[(size_t) step + 1];
         const float dt = t - next_t;
