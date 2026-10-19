@@ -14,6 +14,7 @@ import { usePersistedState } from './hooks/usePersistedState';
 import { useTheme } from './hooks/useTheme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { songApi } from './services/api';
+import { useJobProgressWatcher, requestNotifyPermissionFromGesture } from './hooks/useJobProgress';
 import { bridgeEvents } from './queries/sseBridge';
 import { SONG_VIEWS, invalidateSongs, patchLibrary, patchSong, removeSongs, songOptions, songsOptions } from './queries/shell-queue/songs';
 import { Sidebar } from './components/sidebar/Sidebar';
@@ -555,6 +556,23 @@ const AppContent: React.FC = () => {
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
   }, [songs]);
 
+  // Tab title "(N) 43% · HOT-Step" + done notification while the tab is hidden.
+  const doneBody = useCallback((name: string) => t('jobs.doneBody', { name }), [t]);
+  useJobProgressWatcher(t('jobs.doneTitle'), doneBody);
+  // Notification click: open the finished song in the details panel.
+  useEffect(() => {
+    const onOpen = async (e: Event) => {
+      const songId = (e as CustomEvent).detail?.songId as string | undefined;
+      if (!songId) return;
+      try {
+        const { song } = await songApi.get(songId);
+        if (song) { setSelectedSong(song); setShowRightSidebar(true); }
+      } catch { /* song gone */ }
+    };
+    window.addEventListener('hotstep:open-song', onOpen);
+    return () => window.removeEventListener('hotstep:open-song', onOpen);
+  }, []);
+
   // Shared audio generation queue — resume on mount, subscribe only to active count
   useResumeQueue(token || undefined);
   const activeJobCount = useAudioGenQueueSelector(s =>
@@ -657,6 +675,8 @@ const AppContent: React.FC = () => {
   // Handle generation — merges content params (from CreatePanel) with global engine params (from context)
   const handleGenerate = useCallback((contentParams: Partial<GenerationParams>, contentIntent?: CreateIntent) => {
     if (!token) return;
+    // First Generate click is a user gesture: ask once for done notifications.
+    void requestNotifyPermissionFromGesture();
     // Merge: global engine params + content-specific params + settings
     const engineParams = globalParams.getGlobalParams();
     const enrichedParams = {

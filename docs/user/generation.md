@@ -450,6 +450,10 @@ An external agent (Claude Code, Codex) can also submit and poll generations thro
 `hotstep` MCP server, across all three backends. See [Driving HOT-Step with an
 agent](mcp.md).
 
+### Progress badge and done notifications
+
+While jobs run, the Create entry in the sidebar and the mobile header show a badge with the running count and the active job's percent, and the tab title reads like `(2) 43% · HOT-Step`. The first time you click Generate the browser asks whether HOT-Step may show notifications; if you allow it, a notification appears when a job finishes while the tab is in the background. Clicking it brings the tab forward and opens the song.
+
 ## Task modes
 
 The engine has one generation pipeline and several task modes. The studio picks the mode;

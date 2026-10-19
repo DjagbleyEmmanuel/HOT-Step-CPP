@@ -2916,6 +2916,9 @@
     "settings.dataFolder.size": "Managed transfer size: {{size}}",
     "settings.dataFolder.space": "Across drives: {{needed}} needed; {{free}} free.",
     "settings.dataFolder.unknown": "unknown",
-    "settings.dataFolder.confirm": "Confirm and restart"
+    "settings.dataFolder.confirm": "Confirm and restart",
+    "jobs.badgeAria": "{{count}} generation jobs running",
+    "jobs.doneTitle": "Generation finished",
+    "jobs.doneBody": "{{name}} is ready"
   }
 }

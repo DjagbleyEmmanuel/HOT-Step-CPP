@@ -106,6 +106,8 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | Quality evaluator | Spectral scoring of the unprocessed or processed audio, shown as a badge in the Library. |
 | Tiled decoder | A postprocess plugin can replace the built-in VAE decode. |
 
+- **Job progress badge and done notification**: running count and active % on the sidebar Create entry, mobile header and tab title; optional notification when a job finishes in a hidden tab (click opens the song).
+
 ## Auto-Gen
 
 Genre-first song creation that fills in everything else. Details: [Auto-Gen](docs/user/studios/insta-gen.md)
