@@ -61,9 +61,12 @@ function parsePlugin(file) {
   return { type: m[1], file, name: field('name') ?? path.basename(file, '.lua'), display: field('display') ?? '', description: field('description') ?? '',
     nfe: field('nfe'), order: field('order'), stochastic: field('stochastic'), stateful: field('stateful'), params };
 }
+export const isSkippedPluginPath = (relPath) =>
+  /_INTERNAL/i.test(path.basename(relPath)) || /[\\/](archive|debug)[\\/]/i.test(relPath);
+
 function pluginTables() {
   const sources = [['engine/plugins', 'built in'], ['plugins', 'community']];
-  const all = sources.flatMap(([dir, origin]) => walk(path.join(ROOT, dir), (p) => p.endsWith('.lua')).map(parsePlugin).filter(Boolean).map((p) => ({ ...p, origin })));
+  const all = sources.flatMap(([dir, origin]) => walk(path.join(ROOT, dir), (p) => p.endsWith('.lua') && !isSkippedPluginPath(path.relative(ROOT, p))).map(parsePlugin).filter(Boolean).map((p) => ({ ...p, origin })));
   const by = (t) => all.filter((p) => p.type === t).sort((a, b) => a.display.localeCompare(b.display) || a.name.localeCompare(b.name));
   const params = (p) => (p.params ? `${p.params}` : '');
   return {
