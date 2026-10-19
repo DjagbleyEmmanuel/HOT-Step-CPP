@@ -18,7 +18,7 @@ import type {
   GuiResponse, ProcessResponse, MonitorStartResponse, MonitorStopResponse, MonitorSwitchResponse,
   MonitorStatusResponse, MonitorSeekResponse, MonitorPauseResponse, MonitorResumeResponse, MonitorRestartResponse,
 } from '../contracts/vst.js';
-import { createControlWriter, createSerializer } from './vstControl.js';
+import { createControlWriter, createSerializer, releaseMonitor } from './vstControl.js';
 import { getSessionDir } from '../services/logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -442,9 +442,7 @@ router.post('/monitor/start', async (req, res) => {
 
     child.on('exit', (code) => {
       console.log(`[VST] Monitor exited (code ${code})`);
-      if (monitorProcess === child) monitorProcess = null;
-      // Clean up temp chain
-      try { fs.unlinkSync(tempChainFile); } catch {}
+      monitorProcess = releaseMonitor(child, monitorProcess, tempChainFile);
     });
 
     res.json({ ok: true, pid: child.pid, plugins: enabled.length } satisfies MonitorStartResponse);
@@ -620,8 +618,7 @@ router.post('/monitor/restart', async (_req, res) => {
 
     child.on('exit', (code) => {
       console.log(`[VST] Monitor exited (code ${code})`);
-      if (monitorProcess === child) monitorProcess = null;
-      try { fs.unlinkSync(tempChainFile); } catch {}
+      monitorProcess = releaseMonitor(child, monitorProcess, tempChainFile);
     });
 
     res.json({ ok: true, pid: child.pid, plugins: enabled.length } satisfies MonitorRestartResponse);

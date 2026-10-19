@@ -2,14 +2,15 @@
 // keep a pending track, a seek must keep a pending pause, seq must increase on
 // every write, and a seek must be tagged with its own seekSeq so the host can
 // apply it exactly once. Monitor start/restart/stop transitions must not
-// interleave across their awaits, or two hosts get spawned.
+// interleave across their awaits, or two hosts get spawned. A late exit from a
+// replaced host must not delete the chain file its replacement reads.
 
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createControlWriter, createSerializer, mergeControl } from './vstControl.js';
+import { createControlWriter, createSerializer, mergeControl, releaseMonitor } from './vstControl.js';
 
 test('pause merges into state and keeps the track', () => {
   const s1 = mergeControl({}, { track: 'a.wav', action: 'play' }, 1, true);
@@ -70,4 +71,16 @@ test('serializer runs overlapping transitions one at a time, in order', async ()
   assert.equal(results[0].status, 'fulfilled');
   assert.equal(results[1].status, 'rejected');      // a failed transition does not block the next
   assert.equal(results[2].status, 'fulfilled');
+});
+
+test('late exit of a replaced host keeps the new host and its chain file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vstctl-'));
+  const chain = path.join(dir, '_monitor_chain.json');
+  const oldHost = {}, newHost = {};
+  fs.writeFileSync(chain, '{}');
+  assert.equal(releaseMonitor(oldHost, newHost, chain), newHost);
+  assert.ok(fs.existsSync(chain), 'old exit deleted the replacement chain file');
+  assert.equal(releaseMonitor(newHost, newHost, chain), null);
+  assert.ok(!fs.existsSync(chain), 'last host exit must clean up the chain file');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

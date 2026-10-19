@@ -48,6 +48,16 @@ export function createSerializer() {
   };
 }
 
+/** Exit handler for a monitor host. Every host reads the same chain file, and
+ *  a host that ignored stop can exit after its replacement has rewritten it, so
+ *  remove the file only when no other host owns the slot. Returns the new value
+ *  for the current-host slot. */
+export function releaseMonitor<T>(child: T, current: T | null, chainFile: string): T | null {
+  if (current === child) current = null;
+  if (current === null) { try { fs.unlinkSync(chainFile); } catch {} }
+  return current;
+}
+
 /** Stateful writer: holds the current control state and the next seq. The seq
  *  starts at the current time so it keeps increasing across server restarts. */
 export function createControlWriter(fileFn: () => string) {
