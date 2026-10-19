@@ -19,6 +19,8 @@ import {
 } from '../services/generation/rePostProcess.js';
 import { importTrackFile, IMPORT_EXTENSIONS } from '../services/library/importTrack.js';
 import { SONG_EDITABLE_FIELDS } from '../contracts/songs.js';
+import archiver from 'archiver';
+import { planZipEntries } from '../services/library/exportZip.js';
 
 const router = Router();
 
@@ -426,6 +428,44 @@ router.post('/bulk-delete', (req, res) => {
   try { deleteAudioGenerationsByJobIds(ids); } catch { /* lireek DB may not be initialized */ }
 
   res.json({ success: true, deletedCount: result.changes });
+});
+
+// POST /api/songs/export-zip — stream the selected songs' audio as one zip
+router.post('/export-zip', (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const { ids } = req.body ?? {};
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500) {
+    res.status(400).json({ error: 'ids must be a non-empty array (max 500)' });
+    return;
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(`SELECT id, title, audio_url FROM songs WHERE id IN (${placeholders}) AND user_id = ?`)
+    .all(...ids, userId) as any[];
+  const order = new Map(ids.map((id: string, i: number) => [id, i]));
+  rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+  const entries = planZipEntries(rows, config.data.audioDir, p => fs.existsSync(p));
+  if (entries.length === 0) {
+    res.status(404).json({ error: 'No audio files found for the selected songs' });
+    return;
+  }
+
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="hotstep-library-${stamp}.zip"`);
+
+  const archive = archiver('zip', { zlib: { level: 1 } });
+  archive.on('error', err => {
+    console.error('[Songs] export-zip failed:', err);
+    res.destroy(err);
+  });
+  archive.pipe(res);
+  for (const e of entries) archive.file(e.file, { name: e.name });
+  archive.finalize();
 });
 
 // POST /api/songs/nuke-generations — delete ALL generated audio across both databases + disk

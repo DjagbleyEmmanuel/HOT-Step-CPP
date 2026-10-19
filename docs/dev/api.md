@@ -156,6 +156,7 @@ Total: <!-- generated:start route-count -->
 | `DELETE` | `/api/songs/:id` | `server/src/routes/songs.ts` |
 | `DELETE` | `/api/songs` | `server/src/routes/songs.ts` |
 | `POST` | `/api/songs/bulk-delete` | `server/src/routes/songs.ts` |
+| `POST` | `/api/songs/export-zip` | `server/src/routes/songs.ts` (body `{ ids }`, streams a zip of the songs' audio) |
 | `POST` | `/api/songs/nuke-generations` | `server/src/routes/songs.ts` |
 | `POST` | `/api/songs/:id/crop` | `server/src/routes/songs.ts` |
 | `POST` | `/api/songs/:id/retranscribe` | `server/src/routes/songs.ts` |

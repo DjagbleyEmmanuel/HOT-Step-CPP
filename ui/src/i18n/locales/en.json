@@ -2153,6 +2153,9 @@
     "library.downloadCount": "Download {{count}}",
     "library.deselectAll": "Deselect all",
     "library.selectAll": "Select all",
+    "library.selectAllVisible": "Select all visible",
+    "library.clearSelection": "Clear",
+    "library.rangeHint": "Long-press another song to select the range (Shift+click on desktop)",
     "library.noFilterSongs": "No {{filter}} songs",
     "library.all": "All",
     "library.create": "Custom-Gen",
@@ -2992,6 +2995,10 @@
     "compare.maxLsd": "max {{v}} dB LSD",
     "compare.diffPickOther": "Pick a take other than the baseline to see the trace",
     "library.compareCount": "Compare {{count}}",
-    "sidebar.compare": "Compare"
+    "sidebar.compare": "Compare",
+    "library.addToPlaylistCount": "Add {{count}} to playlist",
+    "library.exportZipCount": "Zip {{count}}",
+    "library.exportZipBusy": "Zipping…",
+    "library.exportZipFailed": "Zip export failed: {{error}}"
   }
 }
