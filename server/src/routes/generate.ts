@@ -31,7 +31,7 @@ import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
-import { isGenerationIntent } from '../contracts/generation.js';
+import { isGenerationIntent, readBackendOverride } from '../contracts/generation.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 import { GenerationIntentError, resolveGenerationIntent } from '../services/generation/intent.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
@@ -369,11 +369,20 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
   let submission = raw;
   if (isGenerationIntent(raw)) {
     try {
-      const backendId = getActiveBackendId();
+      // An opt-in `backendOverride` resolves the intent for that backend;
+      // otherwise the active one, as before.
+      let override: string | undefined;
+      try { override = readBackendOverride(raw); } catch (err) {
+        throw new GenerationIntentError(err instanceof Error ? err.message : 'Invalid backendOverride');
+      }
+      if (override !== undefined && !getBackend(override)) {
+        throw new GenerationIntentError(`Unknown backendOverride '${override}'`);
+      }
+      const backendId = override ?? getActiveBackendId();
       const backend = getBackend(backendId);
       if (!backend) throw new Error(`Active generation backend '${backendId}' is not registered`);
       const capabilities = await backend.capabilities();
-      if (getActiveBackendId() !== backendId) {
+      if (override === undefined && getActiveBackendId() !== backendId) {
         return { ok: false, status: 409, body: { error: `Active backend changed while resolving generation intent`, activeBackend: getActiveBackendId() } };
       }
       submission = resolveGenerationIntent(raw, backendId, capabilities.extensions);
