@@ -25,36 +25,86 @@ test('real progress (saving audio) replaces the loading stage', () => {
   assert.doesNotMatch(saving, FACADE_LOADING_RE);
 });
 
-test('an aborted SA3 render settles only after the engine worker drains', async () => {
-  const { aceClient } = await import('../../aceClient.js');
+// The lane must stay held until the engine's worker has provably finished the
+// SA3 call. Each test scripts the engine: the render POST, then the replies to
+// successive /worker-drain calls ('fail' = socket error, 'ok' = held until
+// released by the test).
+type DrainReply = 'fail' | 'ok';
+async function withScriptedEngine(
+  post: 'hang' | 'socket-error',
+  drains: DrainReply[],
+  body: (h: { calls: string[]; releaseDrain: () => void }) => Promise<void>,
+) {
   const realFetch = globalThis.fetch;
   const calls: string[] = [];
-  let releaseDrain!: () => void;
+  let releaseDrain: () => void = () => {};
+  const socketError = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } });
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
     calls.push(path);
     if (path === '/worker-drain') {
+      if ((drains.shift() ?? 'ok') === 'fail') throw socketError();
       await new Promise<void>(r => { releaseDrain = r; });
       return new Response('{"status":"ok"}');
     }
+    if (post === 'socket-error') throw socketError();
     return new Promise<Response>((_, reject) => {
       init!.signal!.addEventListener('abort',
         () => reject(new DOMException('aborted', 'AbortError')), { once: true });
     });
   }) as typeof fetch;
   try {
-    const ac = new AbortController();
-    let settled = false;
-    const p = aceClient.submitSa3Synth({ tokens: [1], nTokens: 1, durationSec: 1, signal: ac.signal })
-      .catch((e: Error) => { settled = true; return e; });
-    await new Promise(r => setImmediate(r));
-    ac.abort();
-    await new Promise(r => setTimeout(r, 20));
-    assert.deepEqual(calls, ['/sa3-synth', '/worker-drain']);
-    assert.equal(settled, false, 'must not settle while the engine is still stopping');
-    releaseDrain();
-    assert.equal(((await p) as Error).name, 'AbortError');
+    await body({ calls, releaseDrain: () => releaseDrain() });
   } finally {
     globalThis.fetch = realFetch;
   }
+}
+
+async function startSynth(signal?: AbortSignal) {
+  const { aceClient } = await import('../../aceClient.js');
+  const state = { settled: false };
+  const p = aceClient.submitSa3Synth({ tokens: [1], nTokens: 1, durationSec: 1, signal })
+    .catch((e: Error) => { state.settled = true; return e; });
+  return { p, state };
+}
+
+const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
+
+test('an aborted SA3 render settles only after the engine worker drains', async () => {
+  await withScriptedEngine('hang', ['ok'], async ({ calls, releaseDrain }) => {
+    const ac = new AbortController();
+    const { p, state } = await startSynth(ac.signal);
+    await tick(0);
+    ac.abort();
+    await tick();
+    assert.deepEqual(calls, ['/sa3-synth', '/worker-drain']);
+    assert.equal(state.settled, false, 'must not settle while the engine is still stopping');
+    releaseDrain();
+    assert.equal(((await p) as Error).name, 'AbortError');
+  });
+});
+
+test('a failed drain is retried, not taken as proof the engine stopped', async () => {
+  await withScriptedEngine('hang', ['fail', 'ok'], async ({ calls, releaseDrain }) => {
+    const ac = new AbortController();
+    const { p, state } = await startSynth(ac.signal);
+    await tick(0);
+    ac.abort();
+    await tick(1300);  // past the 1 s retry delay
+    assert.deepEqual(calls, ['/sa3-synth', '/worker-drain', '/worker-drain']);
+    assert.equal(state.settled, false, 'a socket error on the drain must keep the lane held');
+    releaseDrain();
+    assert.equal(((await p) as Error).name, 'AbortError');
+  });
+});
+
+test('a render POST that dies on a socket error drains before it rejects', async () => {
+  await withScriptedEngine('socket-error', ['ok'], async ({ calls, releaseDrain }) => {
+    const { p, state } = await startSynth();
+    await tick();
+    assert.deepEqual(calls, ['/sa3-synth', '/worker-drain']);
+    assert.equal(state.settled, false);
+    releaseDrain();
+    assert.equal(((await p) as Error).message, 'fetch failed');
+  });
 });

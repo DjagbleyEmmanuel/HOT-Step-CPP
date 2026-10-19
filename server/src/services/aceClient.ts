@@ -8,6 +8,7 @@
 // requests. All fetch calls need generous timeouts to survive these stalls.
 
 import { config } from '../config.js';
+import { engineCrashSeq } from './aceEngineProcess.js';
 
 const BASE = config.aceServer.url;
 
@@ -349,16 +350,35 @@ async function aceFetch(url: string, init?: RequestInit): Promise<Response> {
 /** POST to a synchronous engine route that runs on the worker thread
  *  (/sa3-synth, /sa3-refine). Aborting the fetch closes the socket, which the
  *  engine checks before every sampling step; it then returns early. GET
- *  /worker-drain queues behind that call, so on abort we await it before
- *  rethrowing: the caller's lane is released only once the engine has stopped. */
+ *  /worker-drain queues behind that call, so after any failed fetch (abort or
+ *  transport error alike) we await it before rethrowing: the caller's lane is
+ *  released only once the engine has stopped. */
 async function workerPost(url: string, init: RequestInit): Promise<Response> {
+  const crashSeqAtStart = engineCrashSeq();
   try {
     return await aceFetch(url, init);
   } catch (err) {
-    if (init.signal?.aborted) {
-      await fetch(`${BASE}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) }).catch(() => {});
-    }
+    await drainWorker(crashSeqAtStart);
     throw err;
+  }
+}
+
+/** Resolves only on proof that the worker is free: a 2xx from /worker-drain,
+ *  or the engine process having died since `crashSeqAtStart`. A drain that
+ *  fails or times out proves nothing, so it is retried. */
+async function drainWorker(crashSeqAtStart: number, retryMs = 1000): Promise<void> {
+  for (;;) {
+    try {
+      const res = await fetch(`${BASE}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) });
+      if (res.ok) return;
+      if (res.status === 404) {
+        // An engine older than the route answers 404 at once; waiting can't help.
+        console.warn('[aceClient] engine has no /worker-drain; releasing without confirming the stop');
+        return;
+      }
+    } catch { /* unreachable or timed out: not proof that it stopped */ }
+    if (engineCrashSeq() !== crashSeqAtStart) return;
+    await new Promise(r => setTimeout(r, retryMs));
   }
 }
 
