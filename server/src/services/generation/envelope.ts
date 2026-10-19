@@ -125,6 +125,18 @@ export function buildEnvelope(
 
   const submission = freezeDeep(clone(body));
   const resolved = clone(resolve(submission, backendId, backend));
+  // An override must not quietly change what was asked for: a backend whose
+  // resolver ignores `taskType` (YuE2, SA3) would turn a repaint into a
+  // text2music render. Without an override this stays as before.
+  if (override !== undefined) {
+    const requested = typeof body.taskType === 'string' && body.taskType ? body.taskType : 'text2music';
+    if (requested !== resolved.operation) {
+      throw new GenerationEnvelopeError(
+        'unsupported_operation',
+        `Backend '${backendId}' does not support generation operation '${requested}'`,
+      );
+    }
+  }
   const mismatch = typeof body.backend === 'string' && body.backend !== backendId
     ? body.backend : undefined;
   const envelope: GenerationEnvelope = {

@@ -62,10 +62,18 @@ is captured before intent resolution when dev capture is enabled.
 - `withTimeout` in `ui/src/services/api.ts:208-211` adds `generationTimeoutMinutes` from Settings when the caller
   did not set it.
 - The server, not the body, chooses the backend: the active backend from `/api/backends`
-  (`server/src/services/generation/envelope.ts:97-127`). `backend` in the body is log-only; a
-  mismatch is recorded on the job as `submittedBackendMismatch`.
+  (`buildEnvelope` in `server/src/services/generation/envelope.ts`). `backend` in the body is
+  log-only; a mismatch is recorded on the job as `submittedBackendMismatch`.
+- `backendOverride` (optional, top level of a flat body or an intent, never sent by the UI) runs
+  this one job on the named registered backend without changing the active one. It must be a
+  non-empty string naming a registered backend, or the request fails with `400`. A copy inside an
+  intent's `params` or `input` is ignored. The override must support the requested operation
+  (`taskType`, default `text2music`): sending a repaint to YuE2 is a `400`, not a text2music
+  render. When the job's backend differs from the last one that ran, the GPU lane frees the
+  previous backend's VRAM and waits for the engine to confirm before loading the next one.
 - `expectedBackend` (optional, sent by the MCP server, never by the UI) makes the request fail
-  with `409` when it differs from the active backend (`server/src/routes/generate.ts:70-76`).
+  with `409` when it differs from the backend the job will run on: the `backendOverride` when one
+  is given, otherwise the active backend (`submitGeneration` in `server/src/routes/generate.ts`).
 - Unknown fields are kept. The whole body is frozen into the job's envelope as `submission`, and
   each backend's `resolveRequest` reads what it understands. Backend-specific knobs travel as
   prefixed keys (`yue2*`, `mm3*`) or in `backendParams`.
@@ -89,9 +97,9 @@ Every error is JSON with an `error` string, and sometimes extra fields:
 
 | Status | When | Extra fields |
 |---|---|---|
-| `400` | Body is not an object, `backend` is not a string, the active backend does not support the requested operation, a missing timbre reference | none |
+| `400` | Body is not an object, `backend` is not a string, `backendOverride` is malformed or unknown, the job's backend does not support the requested operation, a missing timbre reference | none |
 | `401` | Missing or stale token | none |
-| `409` | `expectedBackend` differs from the active backend | `expectedBackend`, `activeBackend` |
+| `409` | `expectedBackend` differs from the active backend, or from `backendOverride` when one is given | `expectedBackend`, `activeBackend`, and `backendOverride` on the override case |
 | `500` | Request capture failed (dev only), or the active backend is not registered | none |
 | `503` | Engine still booting, or paused for training preprocessing | `detail` on the boot case |
 

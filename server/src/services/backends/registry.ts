@@ -30,7 +30,8 @@ const backends: Record<string, EngineBackend> = {
 
 /** Look up a backend by id, or undefined if unregistered. */
 export function getBackend(id: string): EngineBackend | undefined {
-  return backends[id];
+  // Own properties only: 'toString' and friends are not backends.
+  return Object.hasOwn(backends, id) ? backends[id] : undefined;
 }
 
 /** All registered backends, in registration order. */
@@ -42,12 +43,12 @@ export function listBackends(): EngineBackend[] {
  *  value doesn't name a registered backend (e.g. a backend was removed). */
 export function getActiveBackendId(): string {
   const id = getSetting(SETTING_KEY, DEFAULT_BACKEND_ID);
-  return backends[id] ? id : DEFAULT_BACKEND_ID;
+  return getBackend(id) ? id : DEFAULT_BACKEND_ID;
 }
 
 /** Set the active backend id. Returns false (no-op) if `id` isn't registered. */
 export function setActiveBackendId(id: string): boolean {
-  if (!backends[id]) return false;
+  if (!getBackend(id)) return false;
   setSetting(SETTING_KEY, id);
   return true;
 }

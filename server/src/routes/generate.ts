@@ -19,7 +19,7 @@ import { engineReady, engineBootStatus } from '../engineState.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
-import { awaitBackendRelease } from '../services/generation/backendRelease.js';
+import { awaitBackendRelease, trackBackendRelease } from '../services/generation/backendRelease.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
   runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
@@ -148,6 +148,10 @@ function finalizeAttempt(
     ?? (job.status === 'cancelled' || thrownError?.includes('Cancelled') ? 'cancelled' : 'failed');
 }
 
+/** The family whose generation last started on the GPU lane, so the only one
+ *  that can still hold weights. Unknown until the first job runs. */
+let laneFamily: string | undefined;
+
 /** Run the full generation pipeline */
 async function runGeneration(
   job: GenerationJob,
@@ -161,8 +165,20 @@ async function runGeneration(
   if (!backend) throw new Error(`Captured generation backend '${backendId ?? '(missing)'}' is not registered`);
   if (!lease.isCurrent()) return emptyOutcome(job, 'reset');
   // A backend switch evicts the outgoing family in the background; no family
-  // loads weights until that eviction is confirmed.
+  // loads weights until that eviction is confirmed. A per-job backendOverride
+  // changes family without a switch, so the lane schedules the same release
+  // itself when this job's family differs from the last one it ran.
+  if (laneFamily !== undefined && laneFamily !== backendId) {
+    const outgoingId = laneFamily;
+    const outgoing = getBackend(outgoingId);
+    if (outgoing?.releaseVram) {
+      trackBackendRelease(outgoingId, () => outgoing.releaseVram!()).catch(err => {
+        console.warn(`[Generate] releaseVram not confirmed for '${outgoingId}' before '${backendId}':`, err?.message || err);
+      });
+    }
+  }
   await awaitBackendRelease();
+  laneFamily = backendId;
   return backend.generate(job, {
     envelope: job.envelope,
     attempt,
@@ -355,15 +371,27 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
   // request for; the UI never sends this. `backend` stays log-only — only
   // `expectedBackend` can block a submit, so a caller that races a backend
   // switch fails loudly instead of training/rendering on the wrong one.
-  const mismatch = expectedBackendMismatch(
-    isGenerationIntent(raw) ? raw.input : raw,
-    getActiveBackendId(),
-  );
-  if (mismatch) {
-    return { ok: false, status: 409, body: {
-      error: `Expected backend '${mismatch.expectedBackend}' but the active backend is '${mismatch.activeBackend}'`,
-      ...mismatch,
-    } };
+  // With a backendOverride, `expectedBackend` is checked against the override
+  // (the backend the job will run on); without one, against the active
+  // backend. A malformed or unknown override skips this and gets its 400 below.
+  let checkedOverride: string | undefined;
+  try { checkedOverride = readBackendOverride(raw); } catch { /* 400 below */ }
+  if (checkedOverride === undefined || getBackend(checkedOverride)) {
+    const mismatch = expectedBackendMismatch(
+      isGenerationIntent(raw) ? raw.input : raw,
+      checkedOverride ?? getActiveBackendId(),
+    );
+    if (mismatch) {
+      return { ok: false, status: 409, body: checkedOverride === undefined ? {
+        error: `Expected backend '${mismatch.expectedBackend}' but the active backend is '${mismatch.activeBackend}'`,
+        ...mismatch,
+      } : {
+        error: `Expected backend '${mismatch.expectedBackend}' but backendOverride selects '${checkedOverride}'`,
+        expectedBackend: mismatch.expectedBackend,
+        backendOverride: checkedOverride,
+        activeBackend: getActiveBackendId(),
+      } };
+    }
   }
 
   let submission = raw;

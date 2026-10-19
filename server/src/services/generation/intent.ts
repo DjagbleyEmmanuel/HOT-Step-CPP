@@ -41,9 +41,13 @@ export function resolveGenerationIntent(
     }
   }
   state.backendParams = values;
-  return {
+  const resolved: Record<string, unknown> = {
     ...resolveGenerationParams(state, { backendId, settings: parsed.data.settings }),
     ...(parsed.data.input ?? {}),
-    ...(parsed.data.backendOverride === undefined ? {} : { backendOverride: parsed.data.backendOverride }),
   };
+  // Only the validated top-level override selects the job's backend; a copy
+  // in `params` or `input` must not outlive the resolution it didn't drive.
+  delete resolved.backendOverride;
+  if (parsed.data.backendOverride !== undefined) resolved.backendOverride = parsed.data.backendOverride;
+  return resolved;
 }
