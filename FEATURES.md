@@ -152,7 +152,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Three views | Grid with cover art, list, or table, remembered per browser. |
 | Source filters | Tabs per studio plus Imported, with counts. |
 | Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
-| Multi-select | Bulk download, zip export, add to playlist or delete. Shift+click range select, Ctrl/Cmd+click toggle, long-press range select on touch. |
+| Multi-select | Bulk download, zip export (up to 256 MB), add to playlist or delete. Shift+click range select, Ctrl/Cmd+click toggle, long-press range select on touch. |
 | Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
 | Metadata editor | Title, artist, album, year, genre, BPM, key, comment, lyrics and cover image; some fields are embed-only. |
