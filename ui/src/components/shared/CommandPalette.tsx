@@ -1,12 +1,12 @@
 // CommandPalette.tsx: Ctrl/Cmd+K quick jump to studios and songs.
-// Studios are ranked locally with utils/fuzzy; songs come from the compare
-// song search API (debounced) and are re-ranked with the same scorer.
+// Studios and the already-loaded library songs are ranked locally with
+// utils/fuzzy.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, LayoutGrid, Music } from 'lucide-react';
 import { fuzzyRank } from '../../utils/fuzzy';
-import { searchCompareSongs, type CompareSongHit } from '../../services/compareApi';
+import type { Song } from '../../types';
 
 /** Event any component can dispatch to open the palette (mobile search icon). */
 export const OPEN_PALETTE_EVENT = 'hs-open-palette';
@@ -31,47 +31,32 @@ export const PALETTE_VIEWS: ReadonlyArray<{ view: string; labelKey: string }> = 
 
 type Item =
   | { kind: 'view'; key: string; label: string; view: string }
-  | { kind: 'song'; key: string; label: string; sub: string; song: CompareSongHit };
+  | { kind: 'song'; key: string; label: string; sub: string; song: Song };
 
 interface Props {
   onClose: () => void;
   onNavigate: (view: string) => void;
   onPickSong: (songId: string) => void;
+  songs: Song[];
 }
 
-export const CommandPalette: React.FC<Props> = ({ onClose, onNavigate, onPickSong }) => {
+export const CommandPalette: React.FC<Props> = ({ onClose, onNavigate, onPickSong, songs }) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
-  const [songs, setSongs] = useState<CompareSongHit[]>([]);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Debounced song search.
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) { setSongs([]); return; }
-    let cancelled = false;
-    const h = window.setTimeout(() => {
-      searchCompareSongs(q, 20)
-        .then(r => { if (!cancelled) setSongs(r.songs); })
-        .catch(() => { if (!cancelled) setSongs([]); });
-    }, 200);
-    return () => { cancelled = true; window.clearTimeout(h); };
-  }, [query]);
-
   const items: Item[] = useMemo(() => {
     const views: Item[] = PALETTE_VIEWS.map(v => ({ kind: 'view', key: `v:${v.view}`, label: t(v.labelKey), view: v.view }));
     const rankedViews = fuzzyRank(views, query, i => i.label);
+    if (!query.trim()) return rankedViews;
     const songItems: Item[] = songs.map(s => ({
-      kind: 'song', key: `s:${s.id}`, label: s.title || 'Untitled', sub: [s.backend, s.style].filter(Boolean).join(' / '), song: s,
+      kind: 'song', key: `s:${s.id}`, label: s.title || 'Untitled', sub: s.style || '', song: s,
     }));
-    // Server already filtered; re-rank but keep server hits the scorer misses (style matches).
-    const ranked = fuzzyRank(songItems, query, i => i.label);
-    const rest = songItems.filter(i => !ranked.includes(i));
-    return [...rankedViews, ...ranked, ...rest];
+    return [...rankedViews, ...fuzzyRank(songItems, query, i => i.label).slice(0, 20)];
   }, [query, songs, t]);
 
   useEffect(() => { setActive(0); }, [query, songs]);

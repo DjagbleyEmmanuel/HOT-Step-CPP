@@ -76,7 +76,7 @@ On desktop these work anywhere in the app. Press `?` to see them in a small chea
 | J / L | Seek back / forward 10 s |
 | Up / Down | Move the focused row in the Library list (outlined in pink) |
 | Enter | Play the focused row |
-| Delete | Delete the selection, or the focused row if nothing is selected. The usual 6 s Undo toast applies. |
+| Delete | Delete the selection, or the focused row if nothing is selected. |
 | Esc | Clear the selection, then the focused row |
 | ? | Open the cheat sheet |
 | Ctrl+K (Cmd+K on Mac) | Open the command palette, also while typing in a field |

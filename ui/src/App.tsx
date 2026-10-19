@@ -1614,6 +1614,7 @@ const AppContent: React.FC = () => {
         <CommandPalette
           onClose={closePalette}
           onNavigate={navigateTo}
+          songs={songs}
           onPickSong={(id) => {
             const song = songs.find(s => s.id === id);
             if (song) {

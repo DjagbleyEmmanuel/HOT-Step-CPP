@@ -3008,7 +3008,7 @@
     "hotkeys.actions.focusPrev": "Move the focused library row up / down",
     "hotkeys.actions.focusNext": "Move the focused library row down",
     "hotkeys.actions.playFocused": "Play the focused row",
-    "hotkeys.actions.deleteSelection": "Delete the selection (undo available)",
+    "hotkeys.actions.deleteSelection": "Delete the selection",
     "hotkeys.actions.clearSelection": "Clear the selection",
     "hotkeys.actions.showHelp": "Show this cheat sheet",
     "hotkeys.actions.openPalette": "Open the command palette (jump to a studio or song)",

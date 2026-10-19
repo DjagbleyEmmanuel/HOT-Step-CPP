@@ -155,7 +155,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
 | Multi-select | Bulk download, zip export (up to 256 MB), add to playlist or delete. Shift+click range select, Ctrl/Cmd+click toggle, long-press range select on touch. |
 | Installable web app | Web app manifest, icons and an app-shell service worker (production builds only, never caches /api or audio), so the UI can be added to a phone home screen and run standalone. |
-| Keyboard shortcuts | Space/K play-pause, J/L seek 10 s, Up/Down/Enter to move and play a focused row, Delete with undo, Esc to clear, `?` for a cheat sheet. |
+| Keyboard shortcuts | Space/K play-pause, J/L seek 10 s, Up/Down/Enter to move and play a focused row, Delete, Esc to clear, `?` for a cheat sheet. |
 | Command palette | Ctrl+K / Cmd+K (or the search icon on phones) fuzzy-searches studios and library songs; arrows and Enter to jump or play. |
 | Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
