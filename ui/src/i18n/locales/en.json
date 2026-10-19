@@ -2133,6 +2133,8 @@
     "details.lyrics": "Lyrics",
     "songActions.postProcess": "Run Post-Processing",
     "songActions.removePostProcess": "Remove Post-Processed Version",
+    "songActions.downloadLeadSheet": "Download ABC Lead Sheet",
+    "songActions.downloadLeadSheetHint": "The ABC score YuE2 planned this track from",
     "songActions.postProcessHint": "Runs the full PP chain with your current settings, even if the global toggle is off",
     "songActions.postProcessAlready": "Already post-processed — running the chain again would overcook it",
     "songActions.retranscribe": "Retranscribe Lyrics",

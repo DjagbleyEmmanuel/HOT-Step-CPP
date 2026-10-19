@@ -22,8 +22,9 @@ import React, { useRef, useState, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import {
   MoreHorizontal, RotateCcw, Download, Disc3, Tags, Trash2, Upload,
-  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2,
+  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, FileMusic,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { Song, UnifiedRecentSong } from '../../types';
 import { songToTrack } from '../../stores/playbackStore';
@@ -35,6 +36,7 @@ import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
 import { queryClient } from '../../queries/client';
 import { invalidateSidecars } from '../../queries/keys';
 import { invalidateSongs } from '../../queries/shell-queue/songs';
+import { scoreAbcOptions } from '../../queries/shell-queue/lyrics';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -253,6 +255,16 @@ function exportParams(song: Song): void {
   URL.revokeObjectURL(url);
 }
 
+/** Download YuE2's ABC lead sheet for this song. */
+function downloadScoreAbc(song: Song, abc: string): void {
+  const url = URL.createObjectURL(new Blob([abc], { type: 'text/vnd.abc' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(song.title || 'song').slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_lead_sheet.abc`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function retranscribe(song: Song): Promise<void> {
   try {
     const { retranscribeLyrics } = await import('../../services/api');
@@ -323,6 +335,9 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   const act = (fn: () => void) => { fn(); close(); };
 
   const hasMastered = !!(song.masteredAudioUrl || (song as any).mastered_audio_url);
+  // Only YuE2 renders have a lead sheet; probe for it once the menu opens.
+  const audioUrl = song.audioUrl || song.audio_url || '';
+  const { data: scoreAbc } = useQuery({ ...scoreAbcOptions(audioUrl), enabled: open && !!audioUrl });
 
   const handleRevert = async () => {
     close();
@@ -398,6 +413,14 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
               onClick={handleRevert}
               title="Deletes the processed file so the chain can be run again. The raw render is untouched."
               tone="text-amber-400 hover:bg-amber-500/10"
+            />
+          )}
+          {scoreAbc && (
+            <Item
+              icon={<FileMusic size={14} />}
+              label={t('songActions.downloadLeadSheet', 'Download ABC Lead Sheet')}
+              onClick={() => act(() => downloadScoreAbc(song, scoreAbc))}
+              title={t('songActions.downloadLeadSheetHint', 'The ABC score YuE2 planned this track from')}
             />
           )}
           {ppFailed && (

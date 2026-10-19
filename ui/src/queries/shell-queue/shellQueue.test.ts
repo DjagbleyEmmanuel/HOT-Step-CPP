@@ -9,7 +9,7 @@ import {
 import { readAudioQueue, readGenerationStatus } from './queue';
 import { queriedPresetsApi, queriedSettingsApi } from './preferences';
 import { gpusOptions } from './settings';
-import { lrcOptions, lyricsJsonOptions } from './lyrics';
+import { lrcOptions, lyricsJsonOptions, scoreAbcOptions } from './lyrics';
 import { fetchPeaks, forgetPeaks, peaksCached } from '../../audio/peaksClient';
 import { invalidateSidecars } from '../keys';
 
@@ -222,6 +222,22 @@ test('lyric sidecars: missing is cached as none, failures throw, crop/retranscri
   await invalidateSidecars(c);
   assert.equal(c.getQueryState(lrcOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
   assert.equal(c.getQueryState(lyricsJsonOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
+});
+
+test('ABC lead sheet: read from the base render, missing or SPA shell is none', async () => {
+  const c = client();
+  const requests: string[] = [];
+  globalThis.fetch = async input => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes('missing')) return new Response('', { status: 404 });
+    if (url.includes('shell')) return new Response('<html>spa</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    return new Response('X:1\nK:C\nCDEF|\n', { status: 200 });
+  };
+  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/ok_mastered.wav?_t=1')), 'X:1\nK:C\nCDEF|');
+  assert.equal(requests[0], '/audio/ok.score.abc');
+  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/missing.wav')), null);
+  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/shell.wav')), null);
 });
 
 test('peaks: concurrent reads share a request, failures are not cached, forget drops the entry', async () => {

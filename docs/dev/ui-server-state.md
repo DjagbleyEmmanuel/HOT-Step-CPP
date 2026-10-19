@@ -123,6 +123,7 @@ consumer before making it, and adds invalidation for the events it handles.
 | `sharedKeys.peaks(audioUrl)` | `GET /api/audio/peaks?url=<audioUrl>`, 4xx/5xx thrown | raw `Peaks`, may carry `unsupported` | shell-queue |
 | `sharedKeys.lrc(sidecarUrl(audio, '.lrc'))` | `fetchLrc(audio, { signal })` | LRC text, or null when missing | shell-queue |
 | `sharedKeys.lyricsJson(sidecarUrl(audio, '.lyrics.json'))` | `fetchLyricsJson(audio, { signal })` | `LyricsJson`, or null when missing | shell-queue |
+| `sharedKeys.scoreAbc(sidecarUrl(audio, '.score.abc'))` | `fetchScoreAbc(audio, { signal })` | YuE2 ABC lead sheet text, or null when missing | shell-queue |
 
 Workflow keys always carry `after` in their filters, 0 for the whole history,
 so a resumed read never shares an entry with a full one. Both workflow reads
@@ -440,7 +441,7 @@ audit found, then files added since, counted when appended.
 | `utils/wordLrcUtils.ts` | shell-queue | - | 1 | - | - | Transport: canonical read for shared `lyrics-json`; lookup is client (R5) |
 | `utils/yue2CaptionSource.ts` | shell-queue | - | 1 | - | - | Query snapshot and captured command assembly |
 | `components/global-bar/VstChainDropdown.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/shared/SongActionsMenu.tsx` | shell-queue | - | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/shared/SongActionsMenu.tsx` | shell-queue | - | - | - | - | Query consumer (shared `score-abc` once open); forms/commands/streams stay client-owned |
 | `queries/cover-lyrics/reads.ts` | cover-lyrics | httpClient | - | - | - | Query owner/policy; area contract applies |
 | `queries/cover-lyrics/songs.ts` | cover-lyrics | api, httpClient | - | - | - | Query owner/policy; area contract applies |
 | `queries/cover-lyrics/workflows.ts` | cover-lyrics | httpClient, workflowApi | - | - | - | Query owner/policy; area contract applies |
@@ -462,4 +463,4 @@ audit found, then files added since, counted when appended.
 | `stores/playbackStore.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `utils/mm3CaptionSource.ts` | shell-queue | - | - | - | - | Query-backed lireek read; client caption assembly |
 | `utils/paramProfiles.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `queries/shell-queue/lyrics.ts` | shell-queue | - | - | - | - | Query owner for shared `lrc`/`lyrics-json` (R5) |
+| `queries/shell-queue/lyrics.ts` | shell-queue | - | 1 | - | - | Query owner for shared `lrc`/`lyrics-json` (R5); owner and transport for shared `score-abc` |

@@ -72,6 +72,10 @@ export const SHARED = {
    *  `sidecarUrl(audio, '.lyrics.json')` (`utils/wordLrcUtils.ts`
    *  fetchLyricsJson). Owner: shell-queue. */
   lyricsJson: 'lyrics-json',
+  /** YuE2's `.score.abc` lead sheet text or null when missing, id =
+   *  `sidecarUrl(audio, '.score.abc')` (`queries/shell-queue/lyrics.ts`
+   *  fetchScoreAbc). Owner: shell-queue. */
+  scoreAbc: 'score-abc',
 } as const;
 export type SharedResource = typeof SHARED[keyof typeof SHARED];
 export type Resource = SharedResource | `${Area}/${string}`;
@@ -170,6 +174,7 @@ export const sharedKeys = {
   peaks: (audioUrl: string) => serverKey(SHARED.peaks, { id: audioUrl }),
   lrc: (sidecar: string) => serverKey(SHARED.lrc, { id: sidecar }),
   lyricsJson: (sidecar: string) => serverKey(SHARED.lyricsJson, { id: sidecar }),
+  scoreAbc: (sidecar: string) => serverKey(SHARED.scoreAbc, { id: sidecar }),
 };
 
 /** Every cached view of song rows, across areas. A song write, delete,

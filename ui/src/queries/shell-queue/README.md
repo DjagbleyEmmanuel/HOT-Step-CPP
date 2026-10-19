@@ -69,6 +69,7 @@ disco stem extraction it starts) twice.
 | Workflow job (queue) | shared `workflow-job`, `after` 0 | Fresh per read, no retry |
 | Waveform peaks | shared `peaks` | `audio/peaksClient.ts`; never stale, `forgetPeaks` removes a rewritten file's entry, failures uncached |
 | Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop and retranscribe call `invalidateSidecars` |
+| YuE2 lead sheet | shared `score-abc` (`lyrics.ts`) | One entry per base render, read when a song actions menu opens; missing or the SPA shell caches null |
 | Presets and settings documents | `shell-queue/presets`, `shell-queue/setting` | Default adapters for `PresetCollection` and `SettingDocument`; fresh reads, dropped when unread (gcTime 0), writes invalidate |
 
 Create reads two other areas' snapshots through their exported options, so
