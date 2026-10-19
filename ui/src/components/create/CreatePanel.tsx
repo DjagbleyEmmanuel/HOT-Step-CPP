@@ -398,7 +398,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (gpData.cfgCutoffRatio !== undefined) gp.setCfgCutoffRatio(gpData.cfgCutoffRatio);
     if (gpData.lmCfgCutoffRatio !== undefined) gp.setLmCfgCutoffRatio(gpData.lmCfgCutoffRatio);
     if (gpData.cacheRatio !== undefined) gp.setCacheRatio(gpData.cacheRatio);
-    if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
+    // baseSeed (the typed seed) over the rendered one, so reusing variation
+    // 2.1 does not shift the base by one and re-roll the wildcard expansion.
+    if (gpData.baseSeed !== undefined) gp.setSeed(gpData.baseSeed);
+    else if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
     if (gpData.randomSeed !== undefined) gp.setRandomSeed(gpData.randomSeed);
     if (gpData.lmSeed !== undefined) gp.setLmSeed(gpData.lmSeed);
     if (gpData.lmSeedFollowsDit !== undefined) gp.setLmSeedFollowsDit(gpData.lmSeedFollowsDit);

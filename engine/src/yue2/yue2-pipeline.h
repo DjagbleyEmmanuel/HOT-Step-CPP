@@ -285,10 +285,6 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         sg.score_abc.clear();
     }
 
-    if (req.cot == YUE2_COT_OFF) {
-        for (auto & sg : songs) sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
-        return true;
-    }
     // Songs that brought a score skip the model; the rest plan together as one
     // batch, set p of the cache holding song plan_idx[p]. A coalesced batch
     // mixes both freely (an approved preview beside a fresh prompt).
@@ -296,7 +292,20 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
         if (!sg.abc_given) {
-            plan_idx.push_back(b);
+            // cot=off plans nothing; a song that brought an abc still gets its
+            // score_abc below so the Lua yue2 plan table is populated.
+            if (req.cot == YUE2_COT_OFF) {
+                sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
+            } else {
+                plan_idx.push_back(b);
+            }
+            continue;
+        }
+        if (req.cot == YUE2_COT_OFF) {
+            // cot=off has no ABC span: expose the supplied plan to Lua via
+            // score_abc only, without encoding or validating it.
+            sg.score_abc = sg.abc_text;
+            sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
             continue;
         }
         try {
@@ -759,7 +768,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     std::vector<int64_t> cap((size_t) B);
     int64_t              max_cap = 0;
     for (int b = 0; b < B; b++) {
-        cap[(size_t) b] = yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
+        // cot=off never caps on a plan (its score_abc is informational only).
+        cap[(size_t) b] = legacy_off ? sp.max_tokens : yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
         max_cap         = std::max(max_cap, cap[(size_t) b]);
     }
     for (int b = 0; resume && b < B; b++) {
@@ -1241,6 +1251,66 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
     const int     group   = (m.convrot || plugins) ? 1 : n_var;  // variations per graph
     const int     B       = (int) songs.size();
 
+    // ---- HOT-Step: one-line knob dump (fork addition) ----
+    // Every effective YuE2 NAR knob, with the same defaults/clamps the chunk
+    // loop applies, plus the solver/scheduler Lua params in effect (request
+    // value, else the plugin's schema default). Log only, no state change.
+    {
+        auto pv = [&](const char * k, const char * d) -> std::string {
+            auto it = req.plugin_params.find(k);
+            return it == req.plugin_params.end() ? std::string(d) : it->second;
+        };
+        auto pf = [&](const char * k, float d, float lo, float hi) {
+            auto it = req.plugin_params.find(k);
+            float v = d;
+            if (it != req.plugin_params.end()) { try { v = std::stof(it->second); } catch (...) {} }
+            return std::clamp(v, lo, hi);
+        };
+        const float cfg = pf("yue2:plan_cfg", 1.0f, 1.0f, 8.0f);
+        const std::string lm = pv("yue2:plan_cfg_level_match", "true");
+        fprintf(stderr,
+                "[YuE2-Knobs] plan_w start=%.3f end=%.3f curve=%s | cads strength=%.3f t1=%.2f t2=%.2f rescale=%s | "
+                "plan_cfg=%.2f t1=%.2f t2=%.2f rescale=%.2f level_match=%s | steps=%d songs=%d var=%d\n",
+                pf("yue2:plan_w_start", 1.0f, -1e9f, 1e9f), pf("yue2:plan_w_end", 1.0f, -1e9f, 1e9f),
+                pv("yue2:plan_w_curve", "linear").c_str(),
+                pf("yue2:cads_strength", 0.0f, 0.0f, 1.0f), pf("yue2:cads_t1", 0.6f, 0.0f, 1.0f),
+                pf("yue2:cads_t2", 0.9f, 0.0f, 1.0f), pv("yue2:cads_rescale", "true").c_str(),
+                cfg, pf("yue2:plan_cfg_t1", 0.0f, 0.0f, 1.0f), pf("yue2:plan_cfg_t2", 1.0f, 0.0f, 1.0f),
+                pf("yue2:plan_cfg_rescale", 0.7f, 0.0f, 1.0f),
+                cfg > 1.0f ? ((lm == "0" || lm == "false") ? "off" : "on") : "n/a",
+                req.ode_steps, B, n_var);
+        std::string pl;
+        auto & reg = PluginRegistry::instance();
+        auto dump = [&](const char * role, const std::string & name, LuaPlugin * p, const char * dflt) {
+            pl += std::string(" ") + role + "=" + (name.empty() ? dflt : name.c_str());
+            if (!p) return;
+            pl += "{";
+            bool first = true;
+            for (const auto & ps : p->params) {
+                auto it = req.plugin_params.find(name + ":" + ps.key);
+                std::string v;
+                if (it != req.plugin_params.end()) v = it->second;
+                else if (ps.type == ParamType::Slider) { char b[32]; snprintf(b, sizeof b, "%g", ps.default_num); v = b; }
+                else if (ps.type == ParamType::Toggle) v = ps.default_bool ? "true" : "false";
+                else v = ps.default_str;
+                pl += (first ? "" : ",") + ps.key + "=" + v + (it == req.plugin_params.end() ? "(d)" : "");
+                first = false;
+            }
+            pl += "}";
+        };
+        dump("solver", req.nar_solver,
+             req.nar_solver.empty() ? nullptr : reg.solver_lookup(req.nar_solver.c_str()), "midpoint");
+        dump("scheduler", req.nar_scheduler,
+             req.nar_scheduler.empty() ? nullptr : reg.scheduler_lookup(req.nar_scheduler.c_str()), "uniform");
+        for (int b = 0; b < B; b++) {
+            char sb[96];
+            snprintf(sb, sizeof sb, " song%d seed=%llu noise_seed=%llu", b,
+                     (unsigned long long) songs[(size_t) b].seed, (unsigned long long) songs[(size_t) b].noise_seed);
+            pl += sb;
+        }
+        fprintf(stderr, "[YuE2-Knobs]%s\n", pl.c_str());
+    }
+
     // Whole-song noise per (song, variation), drawn once and sliced per chunk.
     std::vector<std::vector<std::vector<float>>> noise((size_t) B);
     latents_out->assign((size_t) B, {});
@@ -1419,6 +1489,10 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         fprintf(stderr, "[YuE2-NAR-Chunk] song=%d index=%zu frames=%lld prefix_tokens=%lld solve_ms=%.1f velocity_ms=%.1f calls=%d variations=%d\n",
                 cp.song, ci, (long long) chunk_len, (long long) nar_cache.filled[(size_t) cp.set], nar_solve_ms,
                 velocity_ms, velocity_calls, n_var);
+        if (plugins) {
+            fprintf(stderr, "[YuE2-NAR-Chunk] song=%d index=%zu solver_seed=%lld (var0)\n", cp.song, ci,
+                    (long long) yue2_chunk_solver_seed(songs[(size_t) cp.song].noise_seed, (uint64_t) cp.a));
+        }
     }
 
     // ---- HOT-Step: plan CFG level match (fork addition) ----

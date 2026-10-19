@@ -1169,6 +1169,22 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       const early = entry.members.filter(e => (e.job.status as string) === 'cancelled').reduce((a, e) => a | e.bits, 0);
       if (early && !allCancelled()) await aceClient.dropSongs(sub.job_id, early).catch(() => {});
     }
+    // The seed the user typed, before re-plans and the per-song +i offset
+    // replace job.params.seed with the rendered one. Reuse-seed reads this so
+    // a reused variation does not shift the base (and the wildcard expansion).
+    // Seeds may arrive as exact decimal strings above 2^53 (ae21a09e).
+    if (job.params.baseSeed === undefined && !job.params.randomSeed
+        && (typeof job.params.seed === 'number' || typeof job.params.seed === 'string')
+        && Number(job.params.seed) >= 0) {
+      job.params.baseSeed = job.params.seed;
+    }
+    for (const m of members.slice(1)) {
+      if (m.job.params.baseSeed === undefined && !m.job.params.randomSeed
+          && (typeof m.job.params.seed === 'number' || typeof m.job.params.seed === 'string')
+          && Number(m.job.params.seed) >= 0) {
+        m.job.params.baseSeed = m.job.params.seed;
+      }
+    }
     if (Number(reqSeed) >= 0) {
       deps.attempt.effective.seed = reqSeed;
       job.params.seed = reqSeed;
