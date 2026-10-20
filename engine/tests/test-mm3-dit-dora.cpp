@@ -15,6 +15,14 @@
 //      nothing at all;
 //   7. a plain LoRA export still has no magnitude and merges as W0 + s*BA.
 //
+// And the MM3 LM runtime (mm3-lm-adapter.h / mm3-lm-dora.h), through the real
+// loader and norm pass on a fake one-layer LM:
+//
+//   8. at any dial, nrm is ||W + s*BA||_col for the effective s (the norm
+//      mm3_lm_merge_apply uses), and at the trained scale it is the pass's own
+//      value bit for bit;
+//   9. a use_dora file with a module missing its magnitude does not load.
+//
 // Build: configure engine/ with -DBUILD_TESTING=ON, target mm3-dit-dora-test.
 // Backend: GGML_BACKEND=CUDA0 / Vulkan0 / MTL0 / CPU, else ggml's best.
 
@@ -23,6 +31,7 @@
 #include "backend.h"
 #include "gguf-weights.h"
 #include "minimax/mm3-model.h"
+#include "minimax/mm3-lm-dora.h"
 #include "train/mm3-dit-train-run.h"
 
 #include "gguf.h"
@@ -30,6 +39,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 static int g_fail = 0;
@@ -251,6 +261,130 @@ static int merge_into(const std::string & gguf_path, const std::vector<std::stri
     wctx_free(&wctx);
     gf_close(&gf);
     return n;
+}
+
+// ── 8 + 9: the MM3 LM runtime's dials ──────────────────────────────────────
+
+static void lm_dial_checks() {
+    const int64_t LIN = 48, LOUT = 40, LR = 4;
+    const float   alpha = 8.0f;   // base_scale = alpha / r = 2
+
+    // Fake LM: 36 layers so the loader's layer bound is real, but only layer 0's
+    // q and k exist. Base F16, host copy F16-rounded.
+    static MM3Model m;
+    m.lm.blk.assign(MM3_LM_ADAPTER_LAYERS, MM3LmLayer{});
+    ggml_init_params wip = { ggml_tensor_overhead() * 4, nullptr, true };
+    ggml_context *   wc  = ggml_init(wip);
+    ggml_tensor *    wq  = ggml_new_tensor_2d(wc, GGML_TYPE_F16, LIN, LOUT);
+    ggml_tensor *    wk  = ggml_new_tensor_2d(wc, GGML_TYPE_F16, LIN, LOUT);
+    ggml_backend_buffer_t wb = ggml_backend_alloc_ctx_tensors(wc, g_bp.backend);
+    std::vector<float>    whost[2];
+    for (int k = 0; k < 2; k++) {
+        std::vector<ggml_fp16_t> h((size_t) (LIN * LOUT));
+        whost[k].resize(h.size());
+        for (size_t i = 0; i < h.size(); i++) {
+            h[i]        = ggml_fp32_to_fp16(0.2f * frand());
+            whost[k][i] = ggml_fp16_to_fp32(h[i]);
+        }
+        ggml_backend_tensor_set(k ? wk : wq, h.data(), 0, h.size() * sizeof(ggml_fp16_t));
+    }
+    m.lm.blk[0].attn_q = wq;
+    m.lm.blk[0].attn_k = wk;
+    m.lm_resident      = true;
+
+    // PEFT file: torch shapes A [r, in], B [out, r], magnitude [out].
+    auto rnd = [](size_t n, float sc) { std::vector<float> v(n); for (float & x : v) x = sc * frand(); return v; };
+    const std::string pre[2] = { "base_model.model.model.layers.0.self_attn.q_proj.",
+                                 "base_model.model.model.layers.0.self_attn.k_proj." };
+    std::vector<StEnt> ents;
+    for (int k = 0; k < 2; k++) {
+        ents.push_back({ pre[k] + "lora_A.weight", { LR, LIN }, rnd((size_t) (LR * LIN), 0.3f) });
+        ents.push_back({ pre[k] + "lora_B.weight", { LOUT, LR }, rnd((size_t) (LOUT * LR), 0.3f) });
+        std::vector<float> mag = rnd((size_t) LOUT, 0.2f);
+        for (float & x : mag) x += 1.0f;
+        ents.push_back({ pre[k] + "lora_magnitude_vector.weight", { LOUT }, mag });
+    }
+    const std::string dir = "mm3-lm-dora-test";
+    std::filesystem::create_directories(dir);
+    {
+        FILE * f = fopen((dir + "/adapter_config.json").c_str(), "wb");
+        GGML_ASSERT(f);
+        fprintf(f, "{\"peft_type\":\"LORA\",\"r\":%lld,\"lora_alpha\":%.1f,\"use_dora\":true}", (long long) LR,
+                (double) alpha);
+        fclose(f);
+    }
+    const std::string apath = dir + "/adapter_model.safetensors";
+
+    // 9 first: drop k's magnitude.
+    {
+        std::vector<StEnt> part(ents.begin(), ents.end() - 1);
+        st_write(apath, part, "\"format\":\"pt\"");
+        std::string    lerr;
+        MM3LmAdapter * bad = mm3_lm_adapter_load(apath.c_str(), &lerr);
+        CHECK(!bad, "LM: a use_dora file missing one magnitude loaded");
+        fprintf(stderr, "[mm3-dit-dora] LM partial-m refused: %s\n", lerr.c_str());
+        mm3_lm_adapter_free(bad);
+    }
+
+    st_write(apath, ents, "\"format\":\"pt\"");
+    std::string    err;
+    MM3LmAdapter * ad = mm3_lm_adapter_load(apath.c_str(), &err);
+    CHECK(ad, "LM: DoRA adapter did not load: %s", err.c_str());
+    if (!ad) {
+        return;
+    }
+    CHECK(mm3_lm_dora_prepare(m, ad, &err), "LM: norm pass: %s", err.c_str());
+
+    const MM3LmAdapterPair * ps[2] = { &ad->mods[0][MM3_LM_ADAPTER_Q], &ad->mods[0][MM3_LM_ADAPTER_K] };
+    const std::vector<float> base_q = get(ps[0]->nrm);
+
+    // Host ||W + s*BA|| from the adapter's own (F16) A and B, as the merge reads them.
+    auto host_nrm = [&](int k, double s) {
+        const MM3LmAdapterPair & p = *ps[k];
+        std::vector<ggml_fp16_t> ah((size_t) ggml_nelements(p.a)), bh((size_t) ggml_nelements(p.b));
+        ggml_backend_tensor_get(p.a, ah.data(), 0, ggml_nbytes(p.a));
+        ggml_backend_tensor_get(p.b, bh.data(), 0, ggml_nbytes(p.b));
+        std::vector<double> out((size_t) LOUT);
+        for (int64_t o = 0; o < LOUT; o++) {
+            double ss = 0.0;
+            for (int64_t i = 0; i < LIN; i++) {
+                double d = 0.0;
+                for (int64_t r = 0; r < LR; r++) {
+                    d += (double) ggml_fp16_to_fp32(ah[(size_t) (r * LIN + i)]) * ggml_fp16_to_fp32(bh[(size_t) (o * LR + r)]);
+                }
+                const double v = whost[k][(size_t) (o * LIN + i)] + s * d;
+                ss += v * v;
+            }
+            out[(size_t) o] = std::sqrt(ss);
+        }
+        return out;
+    };
+
+    MM3LmAdapterScales sc;
+    const float        dials[][2] = { { 0.5f, 0.7f }, { 1.3f, 1.0f }, { 1.0f, 0.25f } };  // global, attn
+    double             worst      = 0.0;
+    for (const auto & d : dials) {
+        sc.global = d[0];
+        sc.attn   = d[1];
+        mm3_lm_dora_set_scales(ad, sc);
+        for (int k = 0; k < 2; k++) {
+            const float               s   = ad->effective(0, k == 0 ? MM3_LM_ADAPTER_Q : MM3_LM_ADAPTER_K, sc);
+            const std::vector<float>  got = get(ps[k]->nrm);
+            const std::vector<double> ref = host_nrm(k, s);
+            for (size_t o = 0; o < got.size(); o++) track_worst(worst, std::fabs(got[o] - ref[o]) / ref[o]);
+        }
+    }
+    CHECK(worst < 1e-5, "LM: dialled nrm vs ||W + s*BA|| worst rel err %.3g", worst);
+    sc = MM3LmAdapterScales{};
+    mm3_lm_dora_set_scales(ad, sc);
+    CHECK(get(ps[0]->nrm) == base_q, "LM: back at dial 1, nrm is not the norm pass's own bytes");
+    fprintf(stderr, "[mm3-dit-dora] LM dialled nrm vs ||W + s*BA|| worst rel err %.3g; dial 1 bit-identical\n",
+            worst);
+
+    mm3_lm_adapter_free(ad);
+    ggml_backend_buffer_free(wb);
+    ggml_free(wc);
+    std::filesystem::remove_all(dir);
 }
 
 int main() {
@@ -602,6 +736,8 @@ int main() {
 
     remove(apath.c_str());
     remove(gpath.c_str());
+
+    lm_dial_checks();
     ggml_backend_buffer_free(abuf);
     ggml_backend_buffer_free(wbuf);
     ggml_free(actx);

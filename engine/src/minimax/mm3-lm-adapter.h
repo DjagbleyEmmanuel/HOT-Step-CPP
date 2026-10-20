@@ -42,6 +42,7 @@
 #include <ggml-backend.h>
 #include <ggml.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -133,6 +134,14 @@ struct MM3LmAdapterPair {
     // before any graph is built (see MM3LmAdapter::dora_pending).
     ggml_tensor * m          = nullptr;
     ggml_tensor * nrm        = nullptr;
+    // Host-side, filled by mm3_lm_dora_prepare, so nrm can follow the dials:
+    //   ||W + s*BA||^2 = n0 + 2s*n1 + s^2*n2   per output row,
+    //   n0 = ||W||^2, n1 = <W, BA>, n2 = ||BA||^2.
+    // nrm_base is the pass's own ||W + base_scale*BA||, re-uploaded verbatim at
+    // the trained scale so an undialled render is bit-identical to before.
+    // nrm_s is the scale nrm currently holds (mm3_lm_dora_set_scales).
+    std::vector<float> dora_n0, dora_n1, dora_n2, dora_nrm_base;
+    mutable float      dora_nrm_s = 0.0f;
 
     // ── LoHa: delta = (A1 B1) (.) (A2 B2) ──────────────────────────────────
     // The second pair shares a/b's shapes. MERGE MODE ONLY — the delta is a
@@ -232,6 +241,45 @@ struct MM3LmAdapter {
         return v;
     }
 };
+
+// Point every DoRA module's nrm at ||W + s*BA||_col for the request's effective
+// scale s, so the runtime is m * (W + s*BA) / ||W + s*BA|| at any dial — the
+// same W' mm3_lm_merge_apply writes. Host maths from the pass's row terms, one
+// [out] upload per module whose scale changed; nothing when it did not. At the
+// trained scale the pass's own nrm goes back verbatim (bit-identical renders).
+// s == 0 is skipped: the graph applies neither delta nor rescale there.
+//
+// Writes tensor data, so call it only between generations (mm3_lm_set_adapter's
+// contract); `ad` is const there, hence the mutable nrm_s.
+static void mm3_lm_dora_set_scales(const MM3LmAdapter * ad, const MM3LmAdapterScales & sc) {
+    if (!ad || ad->dora_n == 0 || ad->dora_pending) {
+        return;
+    }
+    std::vector<float> nr;
+    for (int l = 0; l < MM3_LM_ADAPTER_LAYERS; l++) {
+        for (int mod = 0; mod < MM3_LM_ADAPTER_MODULES; mod++) {
+            const MM3LmAdapterPair & p = ad->mods[l][mod];
+            if (!p.has_dora() || !p.has_lora() || p.dora_nrm_base.empty()) {
+                continue;
+            }
+            const float s = ad->effective(l, mod, sc);
+            if (s == 0.0f || s == p.dora_nrm_s) {
+                continue;
+            }
+            if (s == p.base_scale) {
+                nr = p.dora_nrm_base;
+            } else {
+                nr.resize(p.dora_n0.size());
+                for (size_t o = 0; o < nr.size(); o++) {
+                    const double v = (double) p.dora_n0[o] + 2.0 * s * p.dora_n1[o] + (double) s * s * p.dora_n2[o];
+                    nr[o]          = (float) std::sqrt(std::max(v, 0.0));
+                }
+            }
+            ggml_backend_tensor_set(p.nrm, nr.data(), 0, nr.size() * sizeof(float));
+            p.dora_nrm_s = s;
+        }
+    }
+}
 
 static void mm3_lm_adapter_free(MM3LmAdapter * ad) {
     if (!ad) {
@@ -1059,6 +1107,24 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err, 
         }
         mm3_lm_adapter_free(ad);
         return nullptr;
+    }
+    // ...and DoRA is all or nothing. A module without its magnitude would
+    // apply as plain LoRA inside a DoRA adapter; the exporter never writes
+    // that, so a file that does is malformed.
+    if (ad->dora_n > 0) {
+        for (int l = 0; l < MM3_LM_ADAPTER_LAYERS; l++) {
+            for (int mod = 0; mod < MM3_LM_ADAPTER_MODULES; mod++) {
+                const MM3LmAdapterPair & p = ad->mods[l][mod];
+                if (p.has_lora() && !p.m) {
+                    if (err) {
+                        *err = "DoRA adapter has no lora_magnitude_vector for layer " + std::to_string(l) +
+                               " module " + std::to_string(mod);
+                    }
+                    mm3_lm_adapter_free(ad);
+                    return nullptr;
+                }
+            }
+        }
     }
     // The norms need the resident base weights, which this loader does not
     // have. Until mm3_lm_dora_prepare() runs, nrm is UNINITIALISED and no graph
