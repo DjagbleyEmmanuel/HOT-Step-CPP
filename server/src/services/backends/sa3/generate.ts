@@ -77,6 +77,28 @@ interface Sa3SynthWire {
   postprocessPlugin?: string;
 }
 
+/** Default SA3 step count (ear-tested 2026-10-02: 8 beats 12 and 24). */
+export const SA3_DEFAULT_STEPS = 8;
+
+/** Lua solver used when sa3Sampler is 'md_pingpong_blend' (the default). */
+export const SA3_DEFAULT_SOLVER = 'md_pingpong_blend';
+
+/**
+ * Resolve the SA3 sampler pick. 'pingpong' and 'euler' are the native loops;
+ * 'md_pingpong_blend' (default when unset) runs the Lua solver of that name
+ * on top of the native pingpong wire value. A solver chosen through the
+ * Sampler Plugins pickers always wins over this default.
+ */
+export function resolveSa3Sampler(params: any, plugins: { solver?: string }):
+    { sampler: 'pingpong' | 'euler'; solver?: string } {
+  const pick = params.sa3Sampler ?? SA3_DEFAULT_SOLVER;
+  if (pick === 'euler') return { sampler: 'euler' };
+  if (pick === SA3_DEFAULT_SOLVER && !plugins.solver) {
+    return { sampler: 'pingpong', solver: SA3_DEFAULT_SOLVER };
+  }
+  return { sampler: 'pingpong' };
+}
+
 /** Same pattern as minimax's mapMinimaxSamplerPlugins: the solver / scheduler /
  *  guidance pickers are SHARED global UI state, so they only reach the wire
  *  when the user has opted in (params.samplerPluginsEnabled). Otherwise the
@@ -154,10 +176,9 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
   if (durationSec > SA3_MAX_DURATION_SEC) durationSec = SA3_MAX_DURATION_SEC;
 
   let steps = Number(job.params.sa3Steps);
-  if (!Number.isFinite(steps) || steps < 1) steps = 24;
+  if (!Number.isFinite(steps) || steps < 1) steps = SA3_DEFAULT_STEPS;
   if (steps > 64) steps = 64;
 
-  const sampler: 'pingpong' | 'euler' = job.params.sa3Sampler === 'euler' ? 'euler' : 'pingpong';
 
   // Seed: honour a fixed one, otherwise draw and WRITE IT BACK so the row is
   // reproducible — same discipline as the ACE and MM3 paths.
@@ -170,6 +191,8 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
 
   const adapters = mapSa3Adapters(job.params);
   const plugins  = mapSa3SamplerPlugins(job.params);
+  const { sampler, solver: defaultSolver } = resolveSa3Sampler(job.params, plugins);
+  if (defaultSolver) plugins.solver = defaultSolver;
 
   // /sa3-synth is one long synchronous fetch — the shared lane's abort signal
   // (deps.signal) is what makes a user cancel actually stop it rather than
