@@ -13,7 +13,10 @@
 //   5. dL/dm is zero on masked rows, matches a finite difference elsewhere;
 //   6. a malformed DoRA file (missing / NaN / mis-sized magnitude) merges
 //      nothing at all;
-//   7. a plain LoRA export still has no magnitude and merges as W0 + s*BA.
+//   7. a plain LoRA export still has no magnitude and merges as W0 + s*BA;
+//  10. adapter_config.json's use_dora must agree with the magnitudes;
+//  11. Q8_0 / Q4_0 bases merge in place within one quant step, or are
+//      refused whole on a backend that cannot dequantize them.
 //
 // And the MM3 LM runtime (mm3-lm-adapter.h / mm3-lm-dora.h), through the real
 // loader and norm pass on a fake one-layer LM:
@@ -234,7 +237,8 @@ static std::vector<StEnt> st_read_all(const std::string & path, std::string * me
 // merge `path` at `scale`. Returns the merge count; `merged` gets each site's
 // resulting weight as F32, in `names` order.
 static int merge_into(const std::string & gguf_path, const std::vector<std::string> & names, const std::string & path,
-                      float scale, std::vector<std::vector<float>> * merged, bool * untouched) {
+                      float scale, std::vector<std::vector<float>> * merged, bool * untouched,
+                      std::vector<ggml_type> * types = nullptr) {
     GGUFModel gf = {};
     GGML_ASSERT(gf_load(&gf, gguf_path.c_str()));
     WeightCtx wctx;
@@ -257,9 +261,14 @@ static int merge_into(const std::string & gguf_path, const std::vector<std::stri
             const WeightCtx::PendingCopy & pc = wctx.pending[i];
             const int64_t                  ne = ggml_nelements(pc.tensor);
             std::vector<float>             v((size_t) ne);
-            GGML_ASSERT(pc.tensor->type == GGML_TYPE_F16 && pc.nbytes == (size_t) ne * sizeof(ggml_fp16_t));
-            ggml_fp16_to_fp32_row((const ggml_fp16_t *) pc.src, v.data(), ne);
+            // Whatever type the merge wrote back, read it through that type's
+            // own dequantizer. The size must still be the native encoding.
+            GGML_ASSERT(pc.nbytes == ggml_row_size(pc.tensor->type, pc.tensor->ne[0]) * (size_t) pc.tensor->ne[1]);
+            ggml_get_type_traits(pc.tensor->type)->to_float(pc.src, v.data(), ne);
             merged->push_back(std::move(v));
+            if (types) {
+                types->push_back(pc.tensor->type);
+            }
         }
     }
     wctx_free(&wctx);
@@ -542,7 +551,10 @@ int main() {
     // only through the mask, which zeroes them).
     const float sc = 8.0f / (float) R;
     // bf16_ab: round A and B through BF16 first, as the merge does.
-    auto host_wprime = [&](const Site & st, bool bf16_ab) {
+    // base: W0 to build on (default the site's F16 base; the quantized
+    // round trip passes its dequantized one).
+    auto host_wprime = [&](const Site & st, bool bf16_ab, const std::vector<float> * base = nullptr) {
+        const std::vector<float> & w0 = base ? *base : st.w;
         std::vector<float> a = get(st.lo->a), b = get(st.lo->b);
         const std::vector<float> mm = get(st.lo->m);
         if (bf16_ab) {
@@ -556,7 +568,7 @@ int main() {
             for (int64_t i = 0; i < st.in; i++) {
                 double d = 0.0;
                 for (int64_t r = 0; r < R; r++) d += (double) a[(size_t) (r * st.in + i)] * b[(size_t) (o * R + r)];
-                const double v           = st.w[(size_t) (o * st.in + i)] + (masked ? 0.0 : sc * d);
+                const double v           = w0[(size_t) (o * st.in + i)] + (masked ? 0.0 : sc * d);
                 w1[(size_t) (o * st.in + i)] = (float) v;
                 ss += v * v;
             }
@@ -626,20 +638,27 @@ int main() {
     // Base GGUF for the loader, written from the same F16 bytes.
     const std::string dir  = ".";
     const std::string gpath = dir + "/mm3-dit-dora-test-base.gguf";
-    {
+    // Every site F16, except ffn_out (site 3) in `qt` when it is a quant type.
+    auto write_base = [&](const std::string & path, ggml_type qt) {
         gguf_context *   g   = gguf_init_empty();
         ggml_init_params hip = { ggml_tensor_overhead() * 8 + (size_t) 64 * 1024, nullptr, false };
         ggml_context *   hc  = ggml_init(hip);
         for (size_t k = 0; k < sites.size(); k++) {
-            ggml_tensor * t = ggml_new_tensor_2d(hc, GGML_TYPE_F16, sites[k].in, sites[k].out);
+            const ggml_type ty = (k == 3) ? qt : GGML_TYPE_F16;
+            ggml_tensor *   t  = ggml_new_tensor_2d(hc, ty, sites[k].in, sites[k].out);
             ggml_set_name(t, sites[k].gguf);
-            ggml_fp32_to_fp16_row(sites[k].w.data(), (ggml_fp16_t *) t->data, ggml_nelements(t));
+            if (ty == GGML_TYPE_F16) {
+                ggml_fp32_to_fp16_row(sites[k].w.data(), (ggml_fp16_t *) t->data, ggml_nelements(t));
+            } else {
+                ggml_quantize_chunk(ty, sites[k].w.data(), t->data, 0, sites[k].out, sites[k].in, nullptr);
+            }
             gguf_add_tensor(g, t);
         }
-        GGML_ASSERT(gguf_write_to_file(g, gpath.c_str(), false));
+        GGML_ASSERT(gguf_write_to_file(g, path.c_str(), false));
         gguf_free(g);
         ggml_free(hc);
-    }
+    };
+    write_base(gpath, GGML_TYPE_F16);
     std::vector<std::string> names;
     for (const Site & st : sites) names.push_back(st.gguf);
 
@@ -768,6 +787,85 @@ int main() {
             CHECK(worst < 4e-3, "%s: plain LoRA merge is not W0 + s*BA (max %.3g)", sites[k].gguf, worst);
         }
         remove(p.c_str());
+    }
+
+
+    // 10: adapter_config.json declares DoRA. A PEFT directory saying
+    // use_dora:true with no magnitudes, or use_dora:false over a file that has
+    // them, merges nothing; a config that agrees with the tensors merges.
+    {
+        const std::string pd = dir + "/mm3-dit-dora-test-peft";
+        std::filesystem::create_directories(pd);
+        auto cfg = [&](const char * v) {
+            FILE * f = fopen((pd + "/adapter_config.json").c_str(), "wb");
+            GGML_ASSERT(f);
+            fprintf(f, "{\"peft_type\":\"LORA\",\"r\":%d,\"lora_alpha\":8,\"use_dora\":%s}", (int) R, v);
+            fclose(f);
+        };
+        std::vector<StEnt> lora_only;
+        for (const StEnt & e : exported) {
+            if (e.name.find("magnitude") == std::string::npos) lora_only.push_back(e);
+        }
+        bool untouched = false;
+        st_write(pd + "/adapter_model.safetensors", lora_only, "\"format\":\"pt\"");
+        cfg("true");
+        int n = merge_into(gpath, names, pd, 1.0f, nullptr, &untouched);
+        CHECK(n == -1 && untouched, "config use_dora=true, no magnitudes: merged %d, untouched %d", n, (int) untouched);
+        st_write(pd + "/adapter_model.safetensors", exported, "\"format\":\"pt\"");
+        cfg("false");
+        n = merge_into(gpath, names, pd, 1.0f, nullptr, &untouched);
+        CHECK(n == -1 && untouched, "config use_dora=false over magnitudes: merged %d, untouched %d", n,
+              (int) untouched);
+        cfg("true");
+        n = merge_into(gpath, names, pd, 1.0f, nullptr, nullptr);
+        CHECK(n == 4, "config use_dora=true with magnitudes: merged %d, want 4", n);
+        fprintf(stderr, "[mm3-dit-dora] config   use_dora declaration checked against the tensors (3 cases)\n");
+        std::filesystem::remove_all(pd);
+    }
+
+    // 11: quantized bases. ffn_out (in = FI = 32, one block per row) is stored
+    // Q8_0 and then Q4_0, the rest F16. The merge reads the quantized W0,
+    // writes W' back in the same type, and lands within one quantization step
+    // of DoRA(dequant(W0)). A backend that cannot dequantize the type in-graph
+    // must refuse the whole adapter instead.
+    for (ggml_type qt : { GGML_TYPE_Q8_0, GGML_TYPE_Q4_0 }) {
+        const Site &         st = sites[3];
+        std::vector<uint8_t> q(ggml_row_size(qt, st.in) * (size_t) st.out);
+        ggml_quantize_chunk(qt, st.w.data(), q.data(), 0, st.out, st.in, nullptr);
+        std::vector<float> w0q(st.w.size());
+        ggml_get_type_traits(qt)->to_float(q.data(), w0q.data(), (int64_t) w0q.size());
+
+        const std::string qpath = dir + "/mm3-dit-dora-test-base-q.gguf";
+        write_base(qpath, qt);
+        std::vector<std::vector<float>> qm;
+        std::vector<ggml_type>          qtypes;
+        bool                            untouched = false;
+        const int n = merge_into(qpath, names, apath, 1.0f, &qm, &untouched, &qtypes);
+        if (!mm3_backend_can_cast_f32(g_bp.backend, qt)) {
+            CHECK(n == -1 && untouched, "%s base on a backend that cannot cast it: merged %d", ggml_type_name(qt), n);
+            fprintf(stderr, "[mm3-dit-dora] quant    %-6s refused (backend cannot dequantize it in-graph)\n",
+                    ggml_type_name(qt));
+        } else {
+            CHECK(n == 4, "%s base: merged %d, want 4", ggml_type_name(qt), n);
+            if (qm.size() == sites.size()) {
+                CHECK(qtypes[3] == qt, "%s base came back as %s", ggml_type_name(qt), ggml_type_name(qtypes[3]));
+                const std::vector<float> ref = host_wprime(st, true, &w0q);
+                double                   worst = 0.0, scale = 0.0, dmax = 0.0;
+                for (size_t i = 0; i < ref.size(); i++) {
+                    track_worst(worst, std::fabs(qm[3][i] - ref[i]));
+                    scale = std::max(scale, (double) std::fabs(ref[i]));
+                    dmax  = std::max(dmax, (double) std::fabs(ref[i] - w0q[i]));
+                }
+                // One quant step of the largest block (Q8_0: max/127, Q4_0:
+                // max/8) plus the BF16 round of W' - W0.
+                const double tol = scale / (qt == GGML_TYPE_Q8_0 ? 127.0 : 8.0) + dmax / 256.0 + 1e-6;
+                CHECK(worst < tol, "%s base: merged W' vs DoRA(W0q) max err %.3g, bound %.3g", ggml_type_name(qt),
+                      worst, tol);
+                fprintf(stderr, "[mm3-dit-dora] quant    %-6s ffn_out merged in place, max |W'-ref| %.3g (bound %.3g)\n",
+                        ggml_type_name(qt), worst, tol);
+            }
+        }
+        remove(qpath.c_str());
     }
 
     remove(apath.c_str());

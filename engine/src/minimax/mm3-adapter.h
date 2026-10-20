@@ -267,6 +267,45 @@ static std::string mm3_read_meta_str(const STFile & st, const char * key) {
     return out;
 }
 
+// adapter_config.json's use_dora in `dir`: 1 / 0, or -1 when the file or the
+// key is absent (a bare safetensors, or a config that never mentions DoRA).
+static int mm3_read_cfg_use_dora(const std::string & dir) {
+    FILE * f = hs_fopen(dir + "/adapter_config.json", "rb");
+    if (!f) {
+        return -1;
+    }
+    std::string buf;
+    char        chunk[4096];
+    size_t      n;
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0) {
+        buf.append(chunk, n);
+    }
+    fclose(f);
+    int          out = -1;
+    yyjson_doc * doc = yyjson_read(buf.data(), buf.size(), 0);
+    yyjson_val * v   = doc ? yyjson_obj_get(yyjson_doc_get_root(doc), "use_dora") : nullptr;
+    if (v && yyjson_is_bool(v)) {
+        out = yyjson_get_bool(v) ? 1 : 0;
+    }
+    yyjson_doc_free(doc);
+    return out;
+}
+
+// Whether `backend` can turn a `type` tensor into F32 with ggml_cast: what the
+// DoRA build needs to read W0 in-graph. Same probe adapter-merge.h uses to
+// pick its split path, sized to one block so quant types are well formed.
+static bool mm3_backend_can_cast_f32(ggml_backend_t backend, enum ggml_type type) {
+    if (type == GGML_TYPE_F32) {
+        return true;
+    }
+    ggml_init_params ip  = { ggml_tensor_overhead() * 4 + 1024, nullptr, true };
+    ggml_context *   ctx = ggml_init(ip);
+    ggml_tensor *    src = ggml_new_tensor_1d(ctx, type, ggml_blck_size(type));
+    const bool       ok  = ggml_backend_supports_op(backend, ggml_cast(ctx, src, GGML_TYPE_F32));
+    ggml_free(ctx);
+    return ok;
+}
+
 // ── The merge ───────────────────────────────────────────────────────────────
 //
 // ── DoRA (ace-train mm3-train-dit --dora, or PEFT use_dora) ──
@@ -343,7 +382,18 @@ static int mm3_adapter_merge_st(WeightCtx *         wctx,
         else if (which == 'B') { b_by_module[mod] = &e; }
         else if (which == 'M') { m_by_module[mod] = &e; }
     }
-    const bool dora = !m_by_module.empty() || mm3_read_meta_str(st, "use_dora") == "true";
+    // DoRA is declared by safetensors metadata or a PEFT adapter_config.json,
+    // and carried by magnitude tensors. A declaration with no magnitudes is
+    // refused below (every factor must have one); a config that says
+    // use_dora=false over a file that has them is refused here. Either way
+    // nothing has been touched yet.
+    const int  cfg_dora = mm3_read_cfg_use_dora(cfg_dir);
+    const bool dora     = !m_by_module.empty() || cfg_dora == 1 || mm3_read_meta_str(st, "use_dora") == "true";
+    if (cfg_dora == 0 && !m_by_module.empty()) {
+        fprintf(stderr, "[MM3-Adapter] ERROR: adapter_config.json says use_dora=false but the file carries %zu "
+                        "lora_magnitude_vector tensor(s), refusing the adapter\n", m_by_module.size());
+        return -1;
+    }
     for (const auto & kv : m_by_module) {
         if (!a_by_module.count(kv.first) || !b_by_module.count(kv.first) ||
             mm3_lora_target(kv.first).gguf_name.empty()) {
@@ -407,8 +457,13 @@ static int mm3_adapter_merge_st(WeightCtx *         wctx,
                     ttype = wctx->pending[i].tensor->type;   // stacked onto an earlier adapter
                 }
             }
-            if (ttype != GGML_TYPE_F32 && ttype != GGML_TYPE_F16 && ttype != GGML_TYPE_BF16) {
-                why = name + " is " + ggml_type_name(ttype) + "; DoRA merges into F32/F16/BF16 bases only";
+            // The DoRA build reads W0 in-graph, so the backend must cast this
+            // type to F32 (F16/BF16 and the Q/K quants on CPU and CUDA). The
+            // merged result then goes back through the shared pipeline's
+            // encode or host requant, which cannot do imatrix-only types.
+            if (!mm3_backend_can_cast_f32(backend, ttype) || ggml_quantize_requires_imatrix(ttype)) {
+                why = name + " is " + ggml_type_name(ttype) +
+                      ", which this backend cannot dequantize in-graph or requantize without an imatrix";
                 break;
             }
             const bool sliced = kv.second.size() > 1 || kv.second[0].slot != MM3_QKV_WHOLE;
