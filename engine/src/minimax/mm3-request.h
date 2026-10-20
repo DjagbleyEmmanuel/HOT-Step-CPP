@@ -1111,13 +1111,13 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         // into g_hotstep_params, so one switch covers both engines; absent or
         // false keeps the legacy render.
         {
-            yyjson_val * v = yyjson_obj_get(root, "adapter_runtime_dora");
-            if (v && !yyjson_is_null(v)) {
-                if (!yyjson_is_bool(v)) {
+            yyjson_val * dv = yyjson_obj_get(root, "adapter_runtime_dora");
+            if (dv && !yyjson_is_null(dv)) {
+                if (!yyjson_is_bool(dv)) {
                     if (err) *err = "\"adapter_runtime_dora\" must be a boolean";
                     return false;
                 }
-                out->lm_adapter_scales.dora_renorm = yyjson_get_bool(v);
+                out->lm_adapter_scales.dora_renorm = yyjson_get_bool(dv);
             }
         }
     }

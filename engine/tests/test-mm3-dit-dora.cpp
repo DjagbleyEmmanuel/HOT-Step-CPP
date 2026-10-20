@@ -42,6 +42,10 @@
 #include <filesystem>
 #include <vector>
 
+// train/lm-common.h declares the trainer's JSONL sink and ace-train.cpp defines
+// it; MSVC rejects a declared-but-undefined static, so the test supplies one.
+static void jl(const char *, ...) {}
+
 static int g_fail = 0;
 
 #define CHECK(cond, ...)                           \
@@ -500,7 +504,18 @@ int main() {
         plain.m = plain.nrm = plain.keep = nullptr;
         const std::vector<float> y  = trainer_forward(wts[k], *st.lo, xs);
         const std::vector<float> yp = trainer_forward(wts[k], plain, xs);
-        CHECK(y == yp, "%s: B=0, m=||W|| is not bit-identical to the plain LoRA forward", st.gguf);
+        double                   wd = 0.0, sy = 0.0;
+        for (size_t i = 0; i < y.size(); i++) {
+            track_worst(wd, std::fabs(y[i] - yp[i]));
+            sy = std::max(sy, (double) std::fabs(yp[i]));
+        }
+        // CPU: m/nrm is exactly 1 and the outputs are bit-identical. CUDA
+        // builds with fast-math division, so the ratio can sit an ulp off 1;
+        // allow a few float ulps of the output, and say which it was.
+        CHECK(wd <= 4.0 * FLT_EPSILON * sy, "%s: B=0, m=||W|| vs plain LoRA max diff %.3g (|y| max %.3g)", st.gguf,
+              wd, sy);
+        fprintf(stderr, "[mm3-dit-dora] neutral  %-30s max |y_dora - y_lora| %.3g (%s)\n", st.gguf, wd,
+                wd == 0.0 ? "bit-identical" : "within float ulps");
     }
 
     // Now a trained-looking adapter: random B, m = nrm * (1 + 0.2*rand). B is

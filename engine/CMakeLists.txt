@@ -994,6 +994,14 @@ if(BUILD_TESTING)
     target_link_libraries(dora-runtime-test PRIVATE yyjson)
     add_test(NAME dora-runtime COMMAND dora-runtime-test)
 
+    # MM3 flow-DiT DoRA trainer/merge parity and the MM3 LM DoRA dial switch.
+    # luajit only for its include path: mm3-model.h reaches lua-plugin.h, as
+    # ace-train's comment explains.
+    add_executable(mm3-dit-dora-test tests/test-mm3-dit-dora.cpp)
+    link_ggml_backends(mm3-dit-dora-test)
+    target_link_libraries(mm3-dit-dora-test PRIVATE yyjson luajit)
+    add_test(NAME mm3-dit-dora COMMAND mm3-dit-dora-test)
+
     add_executable(sa3-dora-load-test tests/test-sa3-dora-load.cpp)
     link_ggml_backends(sa3-dora-load-test)
     target_link_libraries(sa3-dora-load-test PRIVATE yyjson)
