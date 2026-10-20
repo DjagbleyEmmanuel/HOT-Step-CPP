@@ -907,6 +907,8 @@ function mediaSessionSync(): void {
   const track = s.currentTrack;
   if (!track) {
     if (_msTrackId !== null) { ms.metadata = null; ms.playbackState = 'none'; _msTrackId = null; }
+    _msPlaying = null;
+    _msLastPos = -10;
     return;
   }
   if (track.id !== _msTrackId) {

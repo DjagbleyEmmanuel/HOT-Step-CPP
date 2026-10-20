@@ -31,6 +31,9 @@ const fmt = (s: number) => {
   return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 };
 
+let nextHistoryOwner = 0;
+let pendingHistoryBack: Promise<void> | undefined;
+
 export const FullScreenPlayer: React.FC<Props> = ({
   song, isPlaying, currentTime, duration, onTogglePlay, onNext, onPrevious, onSeek,
   isShuffle, onToggleShuffle, repeatMode, onToggleRepeat, onClose,
@@ -39,21 +42,46 @@ export const FullScreenPlayer: React.FC<Props> = ({
   const { isDisguised, disguiseTitle } = useDisguiseMode();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const poppedRef = useRef(false);
+  const historyRef = useRef({ owner: ++nextHistoryOwner, generation: 0 });
   const touchY = useRef<number | null>(null);
 
   // Push a history entry so the Android back button closes the view.
   useEffect(() => {
-    window.history.pushState({ hsFullPlayer: true }, '');
-    const onPop = () => { poppedRef.current = true; closeRef.current(); };
+    const lease = historyRef.current;
+    const generation = ++lease.generation;
+    let active = true;
+    let acquired = false;
+    const acquire = () => {
+      if (!active) return;
+      const state = { ...window.history.state, hsFullPlayer: lease.owner };
+      // Reclaim an entry left by an immediately closed instance or Forward.
+      if (window.history.state?.hsFullPlayer) window.history.replaceState(state, '');
+      else window.history.pushState(state, '');
+      acquired = true;
+    };
+    // A previous close may already have queued an asynchronous browser Back.
+    if (pendingHistoryBack) void pendingHistoryBack.then(acquire);
+    else acquire();
+    const onPop = () => { if (acquired) closeRef.current(); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
     window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey);
     return () => {
+      active = false;
       window.removeEventListener('popstate', onPop);
       window.removeEventListener('keydown', onKey);
-      // Closed by chevron or swipe: drop our history entry.
-      if (!poppedRef.current && window.history.state?.hsFullPlayer) window.history.back();
+      // StrictMode replays setup before this runs. Only the final cleanup owns
+      // the return, and navigation must never pop someone else's new entry.
+      queueMicrotask(() => {
+        if (lease.generation !== generation || window.history.state?.hsFullPlayer !== lease.owner) return;
+        pendingHistoryBack = new Promise<void>(resolve => {
+          window.addEventListener('popstate', () => {
+            pendingHistoryBack = undefined;
+            resolve();
+          }, { once: true });
+        });
+        window.history.back();
+      });
     };
   }, []);
 

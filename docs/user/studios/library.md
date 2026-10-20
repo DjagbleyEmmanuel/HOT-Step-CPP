@@ -67,6 +67,16 @@ Above the transport, a collapsible area (only expands while something is
 playing, or trim mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
+On a phone, tap the song title or cover in the mini player to open the
+full-screen player: large cover art, title and backend, a big waveform you
+can tap to seek plus a scrub bar with a large thumb, and big transport
+buttons. Close it with the chevron at the top, by swiping down, or with the
+Android back button. Closing and reopening keeps Back within the app;
+switching studios does not navigate back during player cleanup.
+
+Clearing the current track removes its lock-screen metadata. Selecting a
+paused track afterwards restores its media controls and playback position.
+
 ## Keyboard shortcuts
 
 On desktop these work anywhere in the app. Press `?` to see them in a small cheat sheet.
@@ -92,12 +102,6 @@ letters of a studio name ("trn" finds Training Studio) or a song title;
 the list ranks studios first, then songs from your library. Use Up and
 Down to move, Enter to open, Esc to close. Picking a song opens Library and
 plays it.
-
-On a phone, tap the song title or cover in the mini player to open the
-full-screen player: large cover art, title and backend, a big waveform you
-can tap to seek plus a scrub bar with a large thumb, and big transport
-buttons. Close it with the chevron at the top, by swiping down, or with the
-Android back button.
 
 ## Playlists
 
