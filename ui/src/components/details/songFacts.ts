@@ -220,10 +220,11 @@ function mm3Facts(gp: any): FactGroup[] {
 function yue2Facts(gp: any): FactGroup[] {
   const y = gp.yue2 || {};
   const req = gp.yue2Request || {};
+  const cot = req.cot ?? gp.yue2Cot;
   const groups: FactGroup[] = [];
 
   const plan: Fact[] = [];
-  if (gp.yue2Cot || req.cot) add(plan, 'Chain of thought', pretty(String(gp.yue2Cot || req.cot)));
+  if (cot) add(plan, 'Chain of thought', pretty(String(cot)));
   if (y.abc_supplied !== undefined) add(plan, 'Score', y.abc_supplied ? 'Supplied (ABC)' : 'Planned by LM');
   const health = y.score_health;
   if (health?.verdict) {
@@ -273,7 +274,7 @@ function yue2Facts(gp: any): FactGroup[] {
     // skipped result describes only its own job; abc_supplied records whether
     // the score came from the caller before that separate planning pass.
     if (stage === 'plan' && reason === 'skipped' && y.abc_supplied === false
-      && req.abc && (req.cot ?? gp.yue2Cot) !== 'off') {
+      && req.abc && cot !== 'off') {
       add(outcome, 'Plan stage', 'Planned by LM');
       continue;
     }
