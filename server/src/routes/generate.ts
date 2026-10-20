@@ -16,7 +16,7 @@ import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { logGeneration, failGenerationLog } from '../services/logger.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
-import { isEngineSuspended } from '../services/aceEngineProcess.js';
+import { isEngineSuspended, engineCrashSeq } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
@@ -29,7 +29,7 @@ import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
 import { tokenizeForSa3 } from '../services/sa3Tokenizer.js';
-import { buildSlotRequest, renderSlotOnLane } from '../services/storm/slot.js';
+import { buildSlotRequest, renderSlotOnLane, waitForSlotJob, type SlotJobEnd } from '../services/storm/slot.js';
 import { initDrift, updateDriftPressure, resolveStartDrift, defaultDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
 import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
@@ -904,34 +904,26 @@ router.post('/storm/stream', async (req, res) => {
           ? (await yue2Synth(slotResult.yue2Req)).job_id
           : await aceClient.submitSynth(slotResult.aceReq, 'wav32', coResident);
 
-        // Inline poll — checks streamRunning every 300 ms so stop/disconnect
-        // cancels mid-render, then keeps polling until the engine settles.
+        // Stop/disconnect cancels mid-render; the wait still lasts until the
+        // engine settles (poll errors are retried), so the lane is held.
         streamAceJob.set(streamId, synthJobId);
-        const slotStart = Date.now();
-        let cancelSent = false;
+        let end: SlotJobEnd;
         try {
-          for (;;) {
-            if (!cancelSent && !streamRunning.get(streamId)) {
-              cancelSent = true;
-              await aceClient.cancelJob(synthJobId).catch(() => {});
-              console.log(`[STORM ${streamId}] slot ${slotIdx}: cancelled mid-render`);
-            }
-            if (!cancelSent && Date.now() - slotStart > STREAM_SLOT_TIMEOUT_MS) {
-              cancelSent = true;
-              await aceClient.cancelJob(synthJobId).catch(() => {});
-              console.warn(`[STORM ${streamId}] slot ${slotIdx}: render timeout -- stopping stream`);
-              streamRunning.set(streamId, false);
-            }
-            const status = await aceClient.pollJob(synthJobId);
-            if (status.status === 'done') break;
-            if (status.status === 'failed' || status.status === 'cancelled') {
-              if (!cancelSent) console.warn(`[STORM ${streamId}] slot ${slotIdx}: ${status.status}`);
-              return null;
-            }
-            await new Promise(r => setTimeout(r, 300));
-          }
+          end = await waitForSlotJob({
+            poll: () => aceClient.pollJob(synthJobId),
+            cancel: () => aceClient.cancelJob(synthJobId),
+            isRunning: () => streamRunning.get(streamId) === true,
+            onTimeout: () => streamRunning.set(streamId, false),
+            engineCrashSeq,
+            timeoutMs: STREAM_SLOT_TIMEOUT_MS,
+            log: msg => console.warn(`[STORM ${streamId}] slot ${slotIdx}: ${msg}`),
+          });
         } finally {
           streamAceJob.delete(streamId);
+        }
+        if (end !== 'done') {
+          console.warn(`[STORM ${streamId}] slot ${slotIdx}: ${end}`);
+          return null;
         }
         if (!streamRunning.get(streamId)) return null;
 

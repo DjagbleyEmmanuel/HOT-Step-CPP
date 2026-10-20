@@ -237,7 +237,63 @@ export async function renderSlotOnLane(opts: {
   const buf = await runOnGpuLane(async () => {
     if (!opts.isRunning()) return null;
     await opts.evict();
+    if (!opts.isRunning()) return null;   // stopped while eviction was awaited
     return opts.render();
   }, { label: opts.label, family: opts.family });
   return opts.isRunning() ? buf : null;
+}
+
+/** How an ACE/YuE2 slot job ended. 'lost' = the engine crashed or restarted
+ *  under it (crash counter moved, or it no longer knows the job id). */
+export type SlotJobEnd = 'done' | 'failed' | 'cancelled' | 'lost';
+
+/**
+ * Poll an engine slot job until the engine is finished with it, so the caller
+ * can hold the GPU lane until then. Stop (isRunning false) or the watchdog
+ * cancels the job once, then polling continues to a terminal state. A failing
+ * poll means "can't see the job", not "the job stopped", so it is retried;
+ * only a terminal status or confirmed engine loss ends the wait. Same loss
+ * signals as services/generation/pollUntilDone.ts.
+ */
+export async function waitForSlotJob(o: {
+  poll: () => Promise<{ status: string }>;
+  cancel: () => Promise<void>;
+  isRunning: () => boolean;
+  /** Called once when the watchdog fires; the stream should stop. */
+  onTimeout: () => void;
+  engineCrashSeq: () => number;
+  timeoutMs: number;
+  intervalMs?: number;
+  log?: (msg: string) => void;
+}): Promise<SlotJobEnd> {
+  const log = o.log ?? (() => {});
+  const crashSeqAtStart = o.engineCrashSeq();
+  const start = Date.now();
+  let cancelWanted = false;
+  let cancelSent = false;
+  let notFoundRun = 0;
+  for (;;) {
+    if (!cancelWanted && !o.isRunning()) {
+      cancelWanted = true;
+      log('stopped -- cancelling mid-render');
+    }
+    if (!cancelWanted && Date.now() - start > o.timeoutMs) {
+      cancelWanted = true;
+      o.onTimeout();
+      log('render timeout -- cancelling and stopping stream');
+    }
+    // Retry a cancel that did not reach the engine.
+    if (cancelWanted && !cancelSent) cancelSent = await o.cancel().then(() => true, () => false);
+    if (o.engineCrashSeq() !== crashSeqAtStart) return 'lost';
+    try {
+      const { status } = await o.poll();
+      notFoundRun = 0;
+      if (status === 'done' || status === 'failed' || status === 'cancelled') return status;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err);
+      if (/\(404\)/.test(msg) && ++notFoundRun >= 3) return 'lost';
+      log(`poll error: ${msg} (will retry)`);
+    }
+    await new Promise(r => setTimeout(r, o.intervalMs ?? 300));
+  }
 }

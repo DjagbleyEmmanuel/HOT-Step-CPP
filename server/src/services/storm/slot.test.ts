@@ -17,7 +17,7 @@ const database = await import('../../db/database.js');
 database.initDb();
 after(() => { database.closeDb(); fs.rmSync(DATA_DIR, { recursive: true, force: true }); });
 
-const { buildSlotRequest, renderSlotOnLane } = await import('./slot.js');
+const { buildSlotRequest, renderSlotOnLane, waitForSlotJob } = await import('./slot.js');
 const { initDrift, YUE2_PARAM_SPECS } = await import('./drift.js');
 const { gpuLaneBusy, runOnGpuLane } = await import('../generation/gpuLane.js');
 const { SA3_DEFAULT_STEPS, SA3_DEFAULT_SOLVER, SA3_DEFAULT_SEED_BLEND } = await import('../backends/sa3/generate.js');
@@ -146,6 +146,44 @@ describe('renderSlotOnLane', () => {
     assert.equal(gpuLaneBusy(), false);
   });
 
+  it('Stop during eviction does not render', async () => {
+    let running = true;
+    let rendered = false;
+    const buf = await renderSlotOnLane({
+      label: 't', family: 'yue2', isRunning: () => running,
+      evict: async () => { await tick(); running = false; },
+      render: async () => { rendered = true; return Buffer.from('wav'); },
+    });
+    assert.equal(buf, null);
+    assert.equal(rendered, false, 'rendered after Stop during eviction');
+    assert.equal(gpuLaneBusy(), false);
+  });
+
+  it('a failing poll keeps the lane until the engine job is terminal', async () => {
+    const statuses: Array<string | Error> = [new Error('timeout'), new Error('timeout'), 'running', 'done'];
+    let laneHeldOnEveryPoll = true;
+    const buf = await renderSlotOnLane({
+      label: 't', family: 'ace', isRunning: () => true, evict: async () => {},
+      render: async () => {
+        const end = await waitForSlotJob({
+          poll: async () => {
+            laneHeldOnEveryPoll &&= gpuLaneBusy();
+            const s = statuses.shift()!;
+            if (s instanceof Error) throw s;
+            return { status: s };
+          },
+          cancel: async () => {}, isRunning: () => true, onTimeout: () => {},
+          engineCrashSeq: () => 0, timeoutMs: 60_000, intervalMs: 0,
+        });
+        return end === 'done' ? Buffer.from('wav') : null;
+      },
+    });
+    assert.equal(statuses.length, 0, 'stopped polling before the job was terminal');
+    assert.ok(laneHeldOnEveryPoll);
+    assert.equal(buf?.toString(), 'wav');
+    assert.equal(gpuLaneBusy(), false);
+  });
+
   it('Stop while queued for the lane starts no next slot', async () => {
     let running = true;
     const blocker = deferred<void>();
@@ -163,5 +201,79 @@ describe('renderSlotOnLane', () => {
     assert.equal(await p, null);
     assert.equal(touched, false, 'slot rendered after Stop');
     assert.equal(gpuLaneBusy(), false);
+  });
+});
+
+describe('waitForSlotJob', () => {
+  const base = {
+    cancel: async () => {}, isRunning: () => true, onTimeout: () => {},
+    engineCrashSeq: () => 0, timeoutMs: 60_000, intervalMs: 0,
+  };
+
+  it('after Stop, cancels once and keeps polling through errors to a terminal state', async () => {
+    const statuses: Array<string | Error> = ['running', new Error('timeout'), 'running', 'cancelled'];
+    let running = true;
+    let cancels = 0;
+    const end = await waitForSlotJob({
+      ...base,
+      isRunning: () => running,
+      cancel: async () => { cancels++; },
+      poll: async () => {
+        running = false;
+        const s = statuses.shift()!;
+        if (s instanceof Error) throw s;
+        return { status: s };
+      },
+    });
+    assert.equal(end, 'cancelled');
+    assert.equal(cancels, 1);
+    assert.equal(statuses.length, 0);
+  });
+
+  it('retries a cancel that failed to reach the engine', async () => {
+    let cancels = 0;
+    let polls = 0;
+    const end = await waitForSlotJob({
+      ...base,
+      isRunning: () => false,
+      cancel: async () => { if (++cancels === 1) throw new Error('timeout'); },
+      poll: async () => ({ status: ++polls < 3 ? 'running' : 'cancelled' }),
+    });
+    assert.equal(end, 'cancelled');
+    assert.equal(cancels, 2);
+  });
+
+  it('watchdog stops the stream, cancels and waits for the engine', async () => {
+    let timeouts = 0;
+    let cancels = 0;
+    const statuses = ['running', 'running', 'cancelled'];
+    const end = await waitForSlotJob({
+      ...base,
+      timeoutMs: -1,
+      onTimeout: () => { timeouts++; },
+      cancel: async () => { cancels++; },
+      poll: async () => ({ status: statuses.shift()! }),
+    });
+    assert.equal(end, 'cancelled');
+    assert.deepEqual([timeouts, cancels, statuses.length], [1, 1, 0]);
+  });
+
+  it('ends as lost only on confirmed engine loss', async () => {
+    let seq = 0;
+    let polls = 0;
+    const crashed = await waitForSlotJob({
+      ...base,
+      engineCrashSeq: () => seq,
+      poll: async () => { if (++polls === 2) seq++; throw new Error('ECONNREFUSED'); },
+    });
+    assert.equal(crashed, 'lost');
+
+    let n = 0;
+    const gone = await waitForSlotJob({
+      ...base,
+      poll: async () => { n++; throw new Error('ace-server GET /job failed (404)'); },
+    });
+    assert.equal(gone, 'lost');
+    assert.equal(n, 3);
   });
 });
