@@ -33,6 +33,7 @@ import { EMPTY_COVER_SCORE_ERROR, hasSoundingVocalBar } from './scoreHealth.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload, TIMEOUT_DRAIN,
+  yue2AssetReason, yue2ValidateAssets, yue2Preflight,
 } from './client.js';
 import type { Yue2AdapterRef, Yue2AdapterScales, Yue2Props, Yue2Selection } from './client.js';
 import type {
@@ -425,6 +426,8 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   // pick meant for ordinary generation. An explicit yue2Pick on the cover
   // submission still wins (resolveSlots), same as any other job.
   const picked = yue2ResolvePick(submission, cover ? yue2CoverPickBase(yue2PersistedSelection()) : undefined);
+  const manifest = yue2PropsCached();
+  if (manifest) yue2ValidateAssets(manifest, { lm_type: picked.lm, vae_variant: picked.vae_variant });
   // BackendModelSelection is string-valued, so the dials are stringified rather
   // than dropped: the snapshot records what the request was resolved against,
   // and how hard each merged adapter pushed is part of that. A slot holding
@@ -1252,6 +1255,11 @@ async function models(): Promise<BackendModels> {
   const v = props?.variants;
 
   const meta: NonNullable<BackendModels['meta']> = {};
+  meta.vae = {};
+  for (const variant of ['standard', 'legacy', 'dec2x'] as const) {
+    const file = props?.files?.[`vae_${variant}`];
+    meta.vae[variant] = { label: file?.name, bytes: file?.bytes, disabledReason: yue2AssetReason(props, file) };
+  }
   if (v?.lm?.available?.length) {
     meta.lm = {};
     for (const f of v.lm.available) meta.lm[f.type] = { label: f.filename, bytes: f.bytes };
@@ -1263,10 +1271,8 @@ async function models(): Promise<BackendModels> {
   return {
     buckets: {
       lm: (v?.lm?.available ?? []).map(f => f.type),
-      // The shipped pair, plus the local dec2x only when its file was found.
-      // modelsMissing/props.files is what tells the user whether a shipped
-      // variant is actually installed.
-      vae: ['standard', 'legacy', ...(props?.files?.vae_dec2x?.found ? ['dec2x'] : [])],
+      // Keep a saved dec2x visible even if its file was removed, with a reason.
+      vae: ['standard', 'legacy', ...(props?.files?.vae_dec2x?.found || persisted.vae_variant === 'dec2x' ? ['dec2x'] : [])],
     },
     adapters: [],
     lmAdapters: adapters.paths,
@@ -1647,6 +1653,10 @@ export const yue2Backend: EngineBackend = {
   operations: YUE2_OPERATIONS,
   resolveRequest,
   async generate(job: GenerationJob, ctx: GenerationContext): Promise<GenerationOutcome> {
+    if (!job.coalescedInto && job.status !== 'cancelled') {
+      const pick = yue2PickFromModels(job.envelope.models);
+      await yue2Preflight({ lm_type: pick.lm, vae_variant: pick.vae_variant });
+    }
     // A job another job already rendered inside its batch comes back as it
     // is; runYue2Generation returns at once when coalescedInto is set.
     await runYue2Generation(job, {

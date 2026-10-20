@@ -133,6 +133,7 @@ export const BackendModelsDropdown: React.FC = () => {
               // Short, fixed list — a filter box would be furniture.
               filterable={false}
               disabled={busy !== null || !catalogue.selectable}
+              disabledReason={(opt) => meta[opt]?.disabledReason}
               formatLabel={(opt) =>
                 `${opt === 'convrot' ? 'INT8 ConvRot (CUDA)' : opt}${meta[opt]?.bytes ? ` — ${formatBytes(meta[opt].bytes)}` : ''}`}
               placeholder={busy === bucket ? 'Switching…' : 'Select model…'}

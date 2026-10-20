@@ -226,8 +226,8 @@ export interface BackendModelCatalogue {
   }>;
   /** What is actually in force right now, per bucket. */
   defaults?: Record<string, unknown>;
-  /** Optional cosmetic per-option metadata, bucket -> option -> {label,bytes}. */
-  meta?: Record<string, Record<string, { label?: string; bytes?: number }>>;
+  /** Optional per-option metadata. A disabledReason prevents selection. */
+  meta?: Record<string, Record<string, { label?: string; bytes?: number; disabledReason?: string }>>;
 }
 
 interface BackendState {

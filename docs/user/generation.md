@@ -64,6 +64,11 @@ captured with the job. See [Cover Studio](studios/cover-studio.md).
 | Text Encoder | Only shown when more than one text encoder is installed. |
 | Get More Models | Opens the Model Manager. |
 
+YuE2 keeps its standard and legacy VAE choices visible. Missing files or failed metadata
+probes disable the affected choice and show the reason beneath it. Download the model
+in Model Manager or choose an installed VAE. Generation checks the captured model
+selection before planning starts, including files removed while a job was queued.
+
 Any empty slot is filled with the first installed model of that type. On first launch, if
 no models are found after the engine has had a few seconds to start, the Model Manager
 opens by itself. When the active backend reports its own weights missing, a banner under

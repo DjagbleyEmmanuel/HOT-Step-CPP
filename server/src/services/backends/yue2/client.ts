@@ -38,6 +38,8 @@
 // matching minimax/client.ts's own workaround.
 
 import { config } from '../../../config.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Yue2AlignWord } from './align.js';
 import type { Yue2LyricScheduleWire } from './lyricSchedule.js';
 
@@ -66,6 +68,10 @@ export const TIMEOUT_DRAIN = 30 * 60_000;
 
 export interface Yue2PropsFile {
   found?: boolean;
+  probe_ok?: boolean;
+  name?: string;
+  bytes?: number;
+  error?: string;
   path?: string;
   [k: string]: unknown;
 }
@@ -449,6 +455,55 @@ export async function yue2Props(timeoutMs = TIMEOUT_PROPS): Promise<Yue2PropsRes
 /** The cached manifest without touching the engine (never blocks). */
 export function yue2PropsCached(): Yue2Props | null {
   return lastGoodProps;
+}
+
+/** Recheck disk even with a cached manifest: files can disappear while queued.
+ * Older engines may omit probe_ok, name and models_dir; retain their found flag. */
+export function yue2AssetReason(props: Yue2Props | null, file: Yue2PropsFile | undefined): string | undefined {
+  if (!props || !file) return 'Asset availability could not be verified. Refresh the model list.';
+  if (file.found !== true) return 'Not installed. Download it in Model Manager or choose an installed model.';
+  if (file.probe_ok === false) return `Metadata probe failed${file.error ? `: ${file.error}` : '.'}`;
+  const candidates = file.path ? [file.path] : props.models_dir && file.name
+    ? [path.join(props.models_dir, 'yue2', file.name), path.join(props.models_dir, file.name)] : [];
+  if (candidates.length && !candidates.some(p => {
+    try { const st = fs.statSync(p); return st.isFile() && st.size > 0; } catch { return false; }
+  })) return 'Not installed or empty on disk. Download it in Model Manager or choose an installed model.';
+  return undefined;
+}
+
+export type Yue2AssetPick = Pick<Yue2SynthRequest, 'lm_type' | 'plan_only' | 'semantic_only'> & { vae_variant?: string };
+
+/** Validate the captured pick, before planning can spend any GPU time. */
+export function yue2ValidateAssets(props: Yue2Props | null, pick: Yue2AssetPick): void {
+  const requireAsset = (label: string, file: Yue2PropsFile | undefined) => {
+    const reason = yue2AssetReason(props, file);
+    if (reason) throw new Error(`Cannot start generation: YuE2 ${label} ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`);
+  };
+  const lm = pick.lm_type;
+  if (lm === 'convrot') {
+    // ConvRot still uses the GGUF for configuration and tokenization.
+    requireAsset('base LM', props?.files?.lm);
+    requireAsset('ConvRot LM', props?.files?.convrot);
+  } else if (lm && props?.variants?.lm) {
+    const variant = props.variants.lm.available.find(v => v.type === lm);
+    const file = props.variants.lm.selected === lm ? props.files?.lm
+      : variant ? { found: true, name: variant.filename } : { found: false };
+    requireAsset(`LM (${lm})`, file);
+  } else {
+    requireAsset('base LM', props?.files?.lm);
+  }
+  if (!pick.plan_only && !pick.semantic_only) {
+    const vae = pick.vae_variant || 'standard';
+    if (vae !== 'standard' && vae !== 'legacy' && vae !== 'dec2x') {
+      throw new Error(`Cannot start generation: unknown YuE2 VAE variant (${vae}). Choose standard, legacy or dec2x.`);
+    }
+    requireAsset(`VAE (${vae})`, props?.files?.[`vae_${vae}`]);
+  }
+}
+
+export async function yue2Preflight(pick: Yue2AssetPick): Promise<void> {
+  const { props } = await yue2Props();
+  yue2ValidateAssets(props, pick);
 }
 
 // ── Residency ──
