@@ -31,8 +31,8 @@ the server, and is hidden when there is only one.
   LM / Thinking clusters show that backend's own controls, and controls that do nothing
   on it are hidden.
 - The sidebar lists only the studios the active backend can use. Cover Studio is listed
-  under ACE-Step and YuE2; Repaint, Stem Builder, Song Builder and STORM under ACE-Step
-  only; Training under every backend except Stable Audio 3. The rest are always listed.
+  under ACE-Step and YuE2; Repaint, Stem Builder and Song Builder under ACE-Step
+  only; STORM under ACE-Step and YuE2; Training under every backend except Stable Audio 3. The rest are always listed.
   If the open studio is not listed for the backend you switch to, the app moves to
   Custom-Gen.
 - If the active backend's model files are not installed, the bar says so and shows a
@@ -57,7 +57,7 @@ A small text encoder model conditions the DiT on the caption.
 What sets it apart from the other two:
 
 - It is the only backend with source-audio-conditioned covers, repaint
-  (Repaint), stem generation (Stem Builder) and continuous streaming (STORM).
+  (Repaint) and stem generation (Stem Builder). It also supports continuous streaming in STORM.
 - BPM, key, time signature and duration are real input fields. Duration is a target the
   planner aims for, from 10 to 600 seconds.
 - It runs the full set of Lua [plugins](plugins.md): solvers, schedulers, guidance modes
@@ -323,6 +323,12 @@ stream at every re-noise step. StableStep refinement does not use seed breeding.
 This differs from ACE-Step, where a shared
 seed B with no blend sends no blend at all.
 
+Stable Audio 3 also supports STORM slots and Directed Drift for guidance, steps
+and duration. Open `/storm` directly; its capability manifest currently hides the
+sidebar entry. Stop finishes the current slot, then stops; no next slot starts.
+The completed output is discarded after Stop, and GPU ownership is retained until
+the slot finishes. See [STORM](studios/storm.md).
+
 ## Capability matrix
 
 "Yes" and "No" come from each backend's capability manifest in the server and the
@@ -340,7 +346,8 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Extend | ? | No | No |
 | Adapters at generation | DiT LoRA and LoKr, planner LM LoRA | Planner LM LoRA, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import |
 | Training in Training Studio | Yes | Yes | Yes |
-| Streaming playback | Continuous streaming in STORM; no per-render preview | Play While Rendering | No |
+| Streaming playback | Continuous streaming in STORM; no per-render preview | Play While Rendering | Continuous streaming in STORM |
+| STORM Directed Drift | Caption, seed, guidance, LSS, steps, BPM and duration | No | Caption, seed, CFG scale, ODE steps and NAR cache ratio |
 | Lua plugins (solvers, schedulers, guidance) | Yes, plus postprocess plugins | Yes, opt-in and experimental; no postprocess plugins | No (own NAR solver and scheduler) |
 | Lyric timestamps (LRC) | Yes, from the DiT | Yes, from the planner | Yes, forced alignment after the render |
 | Post-processing (VST chain, mastering, StableStep, Whisper) | Yes | Yes | Yes |

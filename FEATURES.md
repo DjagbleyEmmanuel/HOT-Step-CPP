@@ -286,11 +286,13 @@ Build a song section by section with variant auditioning. Requires the ACE-Step 
 
 ## STORM
 
-Live streaming performance with crossfaded slots. Requires the ACE-Step backend. Details: [STORM](docs/user/studios/storm.md)
+Live streaming performance with crossfaded slots on ACE-Step, YuE2 and Stable Audio 3. Stable Audio 3 currently requires opening `/storm` directly. Details: [STORM](docs/user/studios/storm.md)
 
 | Feature | What it does |
 |---|---|
 | Continuous mode | Renders back-to-back slots that crossfade into one endless stream. |
+| Directed Drift | Steer caption tags and backend-specific parameter targets with Pull, Rate and Jitter, parameter locks, seed evolution, macros and saved tag sets. |
+| Stop | Finishes the current slot, then stops; no next slot starts. Output completed after Stop is discarded. |
 | Live controls | Change style, lyrics, seed, BPM, guidance, steps and length for the next slot without stopping. |
 | Sticky fields | Pin a style or lyric change so it stays for every following slot. |
 | Lyric advance | Loop, cycle or shuffle through lyric sections as slots play. |

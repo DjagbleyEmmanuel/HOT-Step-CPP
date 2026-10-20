@@ -4,6 +4,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import type { useStreamAudio } from '../../hooks/useStreamAudio';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ---------------------------------------------------------------------------
 // Types mirrored from server/src/services/storm/drift.ts
@@ -81,6 +83,18 @@ const PARAM_LABELS: Record<string, string> = {
   sa3Steps:           'SA3 Steps',
 };
 
+const PARAM_INFO: Record<string, string> = {
+  guidanceScale: 'Target prompt guidance for future slots. Higher values follow the caption more strongly.',
+  lssStrength: 'Target latent self-similarity strength for future slots.',
+  inferenceSteps: 'Target diffusion step count. More steps take longer to render.',
+  bpm: 'Target tempo in beats per minute for future slots.',
+  duration: 'Target slot length in seconds. Longer slots take longer to render.',
+  yue2CfgScale: 'Target YuE2 guidance scale for future slots. Higher values follow the caption more strongly.',
+  yue2OdeSteps: 'Target YuE2 NAR solver step count. More steps take longer to render.',
+  yue2NarCacheRatio: 'Target YuE2 NAR cache ratio. Higher values reuse more cached computation.',
+  sa3Steps: 'Target Stable Audio 3 diffusion step count. More steps take longer to render.',
+};
+
 // ---------------------------------------------------------------------------
 // Mood presets (mirrors server/src/services/storm/drift.ts)
 // ---------------------------------------------------------------------------
@@ -133,6 +147,7 @@ function fmtVal(spec: ParamSpec, u: number): string {
 
 function SliderRow({
   label,
+  info,
   value,
   min = 0,
   max = 1,
@@ -141,6 +156,7 @@ function SliderRow({
   fmt,
 }: {
   label: string;
+  info: string;
   value: number;
   min?: number;
   max?: number;
@@ -150,9 +166,10 @@ function SliderRow({
 }) {
   return (
     <div className="flex items-center gap-2 min-w-0">
-      <span className="text-[11px] text-zinc-400 w-20 shrink-0 truncate">{label}</span>
+      <ParamLabel label={label} info={info} className="text-[11px] text-zinc-400" rootClassName="!w-20 shrink-0" />
       <input
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
@@ -365,11 +382,6 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
     setNewSetTags('');
   }, [newSetName, newSetTags, pressure, update]);
 
-  // Lock toggle
-  const toggleLock = useCallback((key: string) => {
-    update({ locks: { ...pressure.locks, [key]: !pressure.locks[key] } });
-  }, [pressure, update]);
-
   // Target slider change
   const setTarget = useCallback((key: string, u: number) => {
     update({ targets: { ...pressure.targets, [key]: u } });
@@ -393,9 +405,10 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
 
             {/* Target Caption */}
             <div className={sectionCls}>
-              <div className={labelCls}>Target Caption</div>
+              <ParamLabel label="Target Caption" info="Comma-separated tags to steer future slots toward. Tags gain weight as the stream drifts." className={labelCls} />
               <textarea
                 rows={3}
+                aria-label="Target caption"
                 value={captionInput}
                 onChange={e => setCaptionInput(e.target.value)}
                 onBlur={commitCaption}
@@ -446,10 +459,12 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 ))}
               </div>
               {/* Genre */}
+              <ParamLabel label="Genre tags" info="Comma-separated tags. Genre replaces the target caption with these tags." className="text-[11px] text-zinc-400" />
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={genreInput}
+                  aria-label="Genre tags"
                   onChange={e => setGenreInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') applyGenre(); }}
                   placeholder="Genre tags..."
@@ -466,7 +481,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
 
             {/* Custom tag sets */}
             <div className={sectionCls}>
-              <div className={labelCls}>Custom tag sets</div>
+              <ParamLabel label="Custom tag sets" info="Save named groups of comma-separated tags. Click a saved set to use it as the target caption." className={labelCls} />
               {Object.entries(pressure.customTagSets ?? {}).map(([name, tags]) => (
                 <div key={name} className="flex items-center gap-2 mb-1">
                   <button
@@ -492,6 +507,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 <input
                   type="text"
                   value={newSetName}
+                  aria-label="Tag set name"
                   onChange={e => setNewSetName(e.target.value)}
                   placeholder="Name"
                   className="w-20 bg-zinc-800/60 border border-zinc-700 rounded-md px-1.5 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-600"
@@ -499,6 +515,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 <input
                   type="text"
                   value={newSetTags}
+                  aria-label="Tag set tags"
                   onChange={e => setNewSetTags(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') addCustomSet(); }}
                   placeholder="tag1, tag2..."
@@ -524,18 +541,21 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
               <div className="space-y-2.5">
                 <SliderRow
                   label="Pull"
+                  info="How strongly each slot moves toward your targets. Zero lets it wander; one pulls directly toward the targets."
                   value={pressure.pull}
                   onChange={v => update({ pull: v })}
                   fmt={v => v.toFixed(2)}
                 />
                 <SliderRow
                   label="Rate"
+                  info="How far parameters and caption weights move per slot. Higher values change the stream faster."
                   value={pressure.rate}
                   onChange={v => update({ rate: v })}
                   fmt={v => v.toFixed(2)}
                 />
                 <SliderRow
                   label="Jitter"
+                  info="Random variation added to each slot's drift. Higher values make the path less predictable."
                   value={pressure.jitter}
                   onChange={v => update({ jitter: v })}
                   fmt={v => v.toFixed(2)}
@@ -554,19 +574,21 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                   return (
                     <div key={spec.key} className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <span className={`text-[11px] w-24 shrink-0 truncate ${locked ? 'text-zinc-600' : 'text-zinc-300'}`}>
-                          {PARAM_LABELS[spec.key] ?? spec.key}
-                        </span>
-                        <button
-                          onClick={() => toggleLock(spec.key)}
-                          title={locked ? 'Locked -- click to unlock' : 'Unlocked -- click to lock'}
-                          className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 transition-colors ${locked ? 'bg-yellow-700/60 text-yellow-200' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
-                        >
-                          {locked ? 'Locked' : 'Free'}
-                        </button>
+                        <ParamLabel
+                          label={PARAM_LABELS[spec.key] ?? spec.key}
+                          info={`${PARAM_INFO[spec.key]} Turn on the lock to exclude this parameter from drift and use its stream setting.`}
+                          meta={`Range ${spec.min} to ${spec.max}`}
+                          rootClassName="!w-24 shrink-0"
+                          className={`text-[11px] ${locked ? 'text-zinc-600' : 'text-zinc-300'}`}
+                        />
+                        <Toggle size="sm" accent="amber" checked={locked}
+                          onChange={checked => update({ locks: { ...pressure.locks, [spec.key]: checked } })}
+                          aria-label={`Lock ${PARAM_LABELS[spec.key] ?? spec.key}`}
+                        />
                         {!locked && (
                           <input
                             type="range"
+                            aria-label={`${PARAM_LABELS[spec.key] ?? spec.key} target`}
                             min={0}
                             max={1}
                             step={0.01}
@@ -601,7 +623,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
 
             {/* Seed mode */}
             <div className={sectionCls}>
-              <div className={labelCls}>Seed evolution</div>
+              <ParamLabel label="Seed evolution" info="Lock leaves the stream seed unchanged. Walk advances it each slot, with larger jumps at higher jitter. Jump occasionally picks a random seed; higher jitter makes jumps more likely." className={labelCls} />
               <div className="flex gap-2">
                 {(['lock', 'walk', 'jump'] as SeedMode[]).map(m => (
                   <button
@@ -627,15 +649,11 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
             {/* Plugin drift toggle */}
             <div className={sectionCls}>
               <div className="flex items-center gap-3">
-                <span className="text-[11px] text-zinc-400 flex-1">Drift plugin choice (solver/scheduler/guidance)</span>
-                <button
-                  onClick={() => update({ pluginDrift: !pressure.pluginDrift })}
-                  className={`text-xs px-2 py-0.5 rounded transition-colors ${
-                    pressure.pluginDrift ? 'bg-purple-700 text-white' : 'bg-zinc-800 text-zinc-500'
-                  }`}
-                >
-                  {pressure.pluginDrift ? 'On' : 'Off'}
-                </button>
+                <Toggle size="sm" accent="purple" checked={!!pressure.pluginDrift}
+                  onChange={checked => update({ pluginDrift: checked })}
+                  label="Drift plugin choice (solver/scheduler/guidance)"
+                  info="Allow random solver, scheduler or guidance changes on supported backends. The chance per slot increases with jitter and rate."
+                />
               </div>
               {pressure.pluginDrift && (
                 <p className="text-[10px] text-zinc-600 mt-1">
