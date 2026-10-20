@@ -589,7 +589,17 @@ Debug:
   --no-batch-cfg          Split DiT CFG into two separate forwards
   --clamp-fp16            Clamp hidden states to FP16 range
   --dump <dir>            Dump intermediate tensors
+  --check                 Check output for NaN/Inf, silence, DC and clipping;
+                          exit 2 if any track fails
 ```
+
+`--check` measures each track's raw float buffer before it is encoded (the WAV and
+MP3 writers replace NaN/Inf with 0 and clamp to full scale, which would hide a
+broken render) and prints one `[Check BatchN] PASS|FAIL` line with the values. A
+track fails on any non-finite sample, a peak below -60 dBFS, a per-channel mean
+above 0.02, or more than 0.1% of samples past full scale. The env var
+`HOTSTEP_CHECK_INJECT` (a comma list, one of `none`, `nan`, `silence`, `dc`, `clip`
+per track) corrupts tracks before the check so the checks themselves can be tested.
 
 The first request picks the models: `synth_model` for the DiT (empty takes the first),
 `adapter` or `adapters` from `--adapters`, and `output_format` for the output. The

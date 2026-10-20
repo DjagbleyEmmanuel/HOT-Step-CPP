@@ -218,6 +218,33 @@ loss into a build failure.
 
 ## Procedure 4 — Smoke-testing after a rebuild
 
+**Required receipt for every engine hand-off: the headless render check.** It needs
+no app and no UI, only a built `ace-synth` and the models folder:
+
+```powershell
+node tools\engine-smoke.mjs              # exit 0 = PASS, 1 = FAIL
+node tools\engine-smoke.mjs --self-test  # proves each check can fail; run after touching the checker
+```
+
+It renders a 10 s fixed-seed (42) instrumental through `ace-synth --check`, which
+measures the raw float buffer **before** the WAV writer's NaN-to-zero sanitiser
+(`audio-io.h` `wav_sanitize`) can hide a broken render. Pass needs zero non-finite
+samples, peak above -60 dBFS, |DC| at most 0.02 per channel, and at most 0.1% of
+samples past full scale. Paste the `[Check Batch0] ...` line and the
+`ENGINE SMOKE: PASS|FAIL` verdict into the hand-off. Request, WAV and full log land
+in `logs/engine-smoke/`. Run it with the GPU idle (check `GET :8085/jobs` for a
+`running` job first); it loads its own models, so the app can stay up.
+
+Measured 2026-10-20 on the RTX 5090, turbo BF16 DiT: 6.4 s end to end (4.2 s for
+the five-track self-test straight after); peak -1.1 dBFS, rms 0.102, DC about 3e-4,
+nothing past full scale. Normal values sit far inside every threshold.
+
+If you only changed `ace-synth.cpp` or a header it uses, building just that target
+leaves a running app alone: `cmake --build engine/build --config Release --target ace-synth`.
+Anything ace-server links still goes through the full rebuild above.
+
+Then the live-app checks:
+
 Relaunch with `pwsh -NoProfile -File tools\detach.ps1 dev.bat` (a plain `dev.bat` or `Start-Process` launch dies when your agent run ends; see AGENTS.md), confirm the app answers at `http://localhost:3000/api/health`,
 then probe the engine directly. **ace-server takes a few seconds to come up after `dev.bat` returns** (the script just `start`s detached windows) — retry `/health`
 for up to ~30 s; connection refused immediately after launch is normal, not a build failure.

@@ -84,6 +84,7 @@ tools/*
 tools/codegraph/node_modules/
 !tools/listening-save.mjs
 !tools/listening-save.test.mjs
+!tools/engine-smoke.mjs
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
 !tools/yue2-vae-train/

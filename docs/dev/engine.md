@@ -646,6 +646,18 @@ Routes `ace-server` adds on top of upstream's `/lm`, `/synth`, `/understand`,
 | `POST /yue2/synth` | YuE2 generation (progress and result through `/job`) |
 | `POST /yue2/tokenize-check`, `POST /yue2/imatrix`, `POST /yue2/align` | YuE2 prompt check, imatrix collection, lyric forced alignment |
 
+## Headless smoke test
+
+`node tools/engine-smoke.mjs` renders a 10-second fixed-seed instrumental with
+`ace-synth --check` and exits 1 unless the output passes. No app, server or UI is
+involved. It resolves the models folder through `server/scripts/data-paths.ts`
+(override with `--models <dir>`), uses `acestep-v15-turbo-BF16.gguf` (override with
+`--dit <file>`), and writes the request, WAV and full log to `logs/engine-smoke/`.
+`--self-test` renders five tracks, corrupts four inside ace-synth, and passes only if
+each check catches its fault. The checks and thresholds are in
+[engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md#ace-synth-reference).
+Engine hand-offs carry its `[Check Batch0]` line as the render receipt.
+
 ## Related
 
 - [engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md): request JSON, generation modes, CLI flags, endpoints
