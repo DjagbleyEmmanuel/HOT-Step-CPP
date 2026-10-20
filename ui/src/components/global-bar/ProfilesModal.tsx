@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '../../utils/paramProfiles';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
+import { useBackendStore } from '../../stores/backendStore';
 
 interface ProfilesModalProps {
   onClose: () => void;
@@ -26,7 +27,11 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
   const client = useQueryClient();
-  const options = localOptions<{ profiles: ParamProfile[] }>('profiles', '/profiles');
+  // Profiles belong to the engine they were saved on; this lists, saves and
+  // edits the active engine's only.
+  const backend = useBackendStore(s => s.activeBackendId) || 'ace';
+  const engineName = useBackendStore(s => s.backends.find(b => b.id === backend)?.displayName) || backend;
+  const options = localOptions<{ profiles: ParamProfile[] }>('profiles', `/profiles?backend=${encodeURIComponent(backend)}`, { backend });
   const query = useQuery(options);
   const profiles = query.data?.profiles ?? [];
   const loading = query.isPending;
@@ -40,14 +45,14 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(() => client.invalidateQueries({ queryKey: options.queryKey }), [client]);
+  const refresh = useCallback(() => client.invalidateQueries({ queryKey: options.queryKey }), [client, backend]);
   useEffect(() => { if (query.error) setError(query.error.message); }, [query.error]);
 
   const saveAs = useCallback((name: string) => {
-    profileApi.save(name, collectProfileData(includeContent))
+    profileApi.save(backend, name, collectProfileData(includeContent, backend === 'ace'))
       .then(() => { setNewName(''); refresh(); })
       .catch(e => setError(e.message));
-  }, [refresh, includeContent]);
+  }, [refresh, includeContent, backend]);
 
   const handleSaveNew = useCallback(() => {
     const name = newName.trim();
@@ -65,10 +70,10 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   }, []);
 
   const handleDelete = useCallback((name: string) => {
-    profileApi.remove(name)
+    profileApi.remove(backend, name)
       .then(() => refresh())
       .catch(e => setError(e.message));
-  }, [refresh]);
+  }, [refresh, backend]);
 
   const startRename = useCallback((p: ParamProfile) => {
     setRenamingName(p.name);
@@ -84,7 +89,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
       setError(t('profiles.renameCollision', { name: to }));
       return;
     }
-    profileApi.rename(from, to)
+    profileApi.rename(backend, from, to)
       .then(() => {
         if (appliedName === from) setAppliedName(to);
         if (expandedName === from) setExpandedName(to);
@@ -92,7 +97,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
         refresh();
       })
       .catch(e => setError(e.message));
-  }, [renamingName, renameValue, profiles, appliedName, expandedName, refresh, t]);
+  }, [renamingName, renameValue, profiles, appliedName, expandedName, refresh, t, backend]);
 
   // ── JSON export/import (same preset format as saved profiles) ──
 
@@ -107,10 +112,10 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   }, []);
 
   const importAs = useCallback((name: string, data: Record<string, unknown>) => {
-    profileApi.save(name, data)
+    profileApi.save(backend, name, data)
       .then(() => refresh())
       .catch(e => setError(e.message));
-  }, [refresh]);
+  }, [refresh, backend]);
 
   const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -150,7 +155,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-white/5">
           <div className="flex items-center gap-2">
             <Bookmark size={16} className="text-pink-500" />
-            <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{t('profiles.title')}</h2>
+            <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{t('profiles.title')} · {engineName}</h2>
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => fileInputRef.current?.click()} title={t('profiles.import')}

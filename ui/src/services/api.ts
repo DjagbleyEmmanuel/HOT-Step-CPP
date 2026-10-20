@@ -479,18 +479,20 @@ export const settingsApi = {
 // re-exported under this file's existing public name for it.
 export type ParamProfile = ProfileFile;
 
+// Profiles are per engine: `backend` is the backend id they belong to.
 export const profileApi = {
-  /** List all saved profiles (full data inline) */
-  list: (opts?: ReadOptions) => get<ListProfilesResponse>('/profiles', undefined, opts),
+  /** List one engine's saved profiles (full data inline) */
+  list: (backend: string, opts?: ReadOptions) =>
+    get<ListProfilesResponse>(`/profiles?backend=${encodeURIComponent(backend)}`, undefined, opts),
   /** Save or overwrite a named profile */
-  save: (name: string, data: Record<string, unknown>) =>
-    post<SaveProfileResponse>('/profiles', { name, data }),
+  save: (backend: string, name: string, data: Record<string, unknown>) =>
+    post<SaveProfileResponse>('/profiles', { name, data, backend }),
   /** Rename a profile (data unchanged) */
-  rename: (name: string, newName: string) =>
-    patch<RenameProfileResponse>(`/profiles/${encodeURIComponent(name)}`, { newName }),
+  rename: (backend: string, name: string, newName: string) =>
+    patch<RenameProfileResponse>(`/profiles/${encodeURIComponent(name)}?backend=${encodeURIComponent(backend)}`, { newName }),
   /** Delete a profile */
-  remove: (name: string) =>
-    del<DeleteProfileResponse>(`/profiles/${encodeURIComponent(name)}`),
+  remove: (backend: string, name: string) =>
+    del<DeleteProfileResponse>(`/profiles/${encodeURIComponent(name)}?backend=${encodeURIComponent(backend)}`),
 };
 
 // ── Model Manager ───────────────────────────────────────────

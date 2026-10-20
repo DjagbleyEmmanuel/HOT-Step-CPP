@@ -8,6 +8,9 @@
 export interface ProfileFile {
   name: string;
   saved_at: string;
+  /** The engine the profile belongs to (backend id). Absent = 'ace': every
+   *  profile saved before profiles were per engine is an ACE-Step one. */
+  backend?: string;
   data: Record<string, unknown>;
 }
 

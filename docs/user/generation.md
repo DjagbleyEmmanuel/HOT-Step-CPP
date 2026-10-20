@@ -380,7 +380,10 @@ per-layer group scales. Everything about it is in [Adapters](adapters.md).
 ## Profiles
 
 Profiles, at the right of the bar, saves every setting in the bar under a name. Profiles
-are stored by the server.
+are stored by the server, separately for each engine: the list, save, rename and delete
+work on the active engine's profiles only, and the header names that engine. A profile
+saved on MiniMax-Music3, YuE2 or Stable Audio 3 leaves out ACE-Step's models, adapters, DiT
+sampling and LM settings. Profiles saved before this change belong to ACE-Step.
 
 - Type a name and click Save. "Include caption and lyrics" (on by default) also stores the
   Custom-Gen content fields: caption, lyrics, negative prompt, instrumental, BPM, duration,

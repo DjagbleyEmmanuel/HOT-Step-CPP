@@ -40,13 +40,21 @@ const CONTENT_KEYS: Record<string, string> = {
 // localStorage key is `hs-<field>` unless overridden in FIELD_KEY_OVERRIDES.
 // This grouping is the single source of truth for collect/apply AND the
 // profile inspector, so a field added here shows up in every path at once.
-export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
+// `ace`: the group is ACE-Step's own (its DiT, adapters and LM), so a profile
+// saved on another engine leaves it out.
+export const PARAM_GROUPS: { title: string; fields: string[]; ace?: true }[] = [
   {
     title: 'Models',
+    ace: true,
     fields: ['ditModel', 'lmModel', 'vaeModel', 'embeddingModel'],
   },
   {
+    title: 'Seed & Batch',
+    fields: ['seed', 'randomSeed', 'batchSize'],
+  },
+  {
     title: 'Adapters',
+    ace: true,
     fields: [
       'adapter', 'adapterScale', 'adapterStack', 'adapterStackMode', 'adapterStackBudget',
       'adapterSectionAlignAt', 'adapterSectionIsolation', 'adapterMode', 'adapterRuntimeQuant',
@@ -55,10 +63,10 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
   },
   {
     title: 'DiT Sampling',
+    ace: true,
     fields: [
       'inferenceSteps', 'guidanceScale', 'cfgCutoffRatio', 'lmCfgCutoffRatio', 'cacheRatio',
-      'shift', 'inferMethod', 'scheduler', 'guidanceMode', 'seed', 'randomSeed',
-      'batchSize', 'storkSubsteps', 'beatStability', 'frequencyDamping', 'temporalSmoothing',
+      'shift', 'inferMethod', 'scheduler', 'guidanceMode', 'storkSubsteps', 'beatStability', 'frequencyDamping', 'temporalSmoothing',
       'apgMomentum', 'apgNormThreshold', 'dcwEnabled', 'dcwMode', 'dcwLowScaler', 'dcwHighScaler',
       'latentShift', 'latentRescale', 'customTimesteps',
       'denoiseStrength', 'denoiseSmoothing', 'denoiseMix',
@@ -76,6 +84,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
   },
   {
     title: 'LM / Thinking',
+    ace: true,
     fields: [
       'lmSeed', 'lmSeedFollowsDit', 'skipLm', 'skipLrc', 'useCotCaption',
       'lmTemperature', 'lmCfgScale', 'lmTopK', 'lmTopP', 'lmNegativePrompt', 'lmCodesStrength',
@@ -149,7 +158,7 @@ function readLS<T>(key: string, fallback: T): T {
  * untouched when it's absent from the data, so an old profile (which always
  * has these keys) still applies exactly as before.
  */
-export function collectProfileData(includeContent = true): ProfileData {
+export function collectProfileData(includeContent = true, ace = true): ProfileData {
   const s = useGlobalParamsStore.getState();
   const out: ProfileData = { _format: 'hot-step-preset', _version: 2 };
   if (includeContent) {
@@ -157,8 +166,11 @@ export function collectProfileData(includeContent = true): ProfileData {
       out[field] = readLS(lsKey, undefined);
     }
   }
-  for (const field of PROFILE_FIELDS) {
-    out[field] = s[field];
+  // Another engine's profile carries no ACE-Step groups, so applying it
+  // leaves ACE's DiT, adapters and LM exactly as they are.
+  for (const g of PARAM_GROUPS) {
+    if (g.ace && !ace) continue;
+    for (const field of g.fields) out[field] = s[field];
   }
   return out;
 }
