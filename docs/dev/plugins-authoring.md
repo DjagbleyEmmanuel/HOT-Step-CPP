@@ -358,14 +358,22 @@ Read-only arrays (like `pred_cond` and `pred_uncond` in guidance) will raise an 
 | `params` | table | Plugin parameters |
 
 **Stochastic solvers and reproducibility.** Before the first `step()` of a
-generation (and before every `sample()` of a full-loop solver) the engine calls
-`math.randomseed(seed)` on the plugin's Lua state, so `math.random()` is a pure
+generation (and before every `sample()` of a full-loop solver) the engine seeds
+the plugin's host RNG directly, so `math.random()` is a pure
 function of the job seed and identical payloads render identically. Do **not**
 re-seed from a clock or leave the RNG unseeded: the engine seeds `math.random`
 from the clock when the state is created, and plugin states live for the whole
 ace-server process, so an unseeded plugin makes every render irreproducible.
-Deriving your own stream from the `seed` global is fine (and recommended if you
-want a stream that is independent of what else the plugin drew).
+For an independent stream, call `local random_b = math.randomstream(seed_b)`.
+The returned function accepts the same arguments as `math.random` and uses a
+separate host-backed xoshiro256** state, initially equivalent to
+`math.randomseed(seed_b, 0)`. Seeds must be finite integers within JavaScript's
+safe integer range. Creating or drawing from this stream leaves the main RNG
+unchanged. Create it again at `step_index == 0` to replay a generation, and reset
+any cached Gaussian spare there too; a Lua wrapper around `math.randomseed`
+does not observe the host's direct reseed. LuaJIT's Lua bit operators are
+32-bit and `math.tointeger` is unavailable, so do not use them to emulate this
+64-bit generator.
 
 ### Guidance globals
 

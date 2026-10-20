@@ -27,13 +27,13 @@
 -- the job seed, so a fixed seed gives a fixed render.
 -- v1.2: seed breeding. When the engine sets seed_b >= 0 and seed_blend > 0
 -- (SA3 /sa3-synth), each renoise draw mixes a lockstep seed-B stream with
--- cos/sin weights, like the native pingpong path. The B stream is a pure-Lua
--- copy of Lua 5.4's math.random (xoshiro256**, same seeding), so blend 1.0
+-- cos/sin weights, like the native pingpong path. The B stream uses the host's
+-- independent xoshiro256** generator with the same seeding, so blend 1.0
 -- reproduces a plain seed-B render exactly.
 
 solver = {
     name = "md_pingpong_blend",
-    version = "1.2",
+    version = "1.3",
     display = "MD Pingpong Blend",
     description = "Pingpong sampler (full fresh renoise each step). Recommended default for SA3 at 8 steps.",
     nfe = 1,
@@ -44,14 +44,6 @@ solver = {
 }
 
 local spare = nil
-
-do
-    local raw_randomseed = math.randomseed
-    math.randomseed = function(...)
-        spare = nil
-        return raw_randomseed(...)
-    end
-end
 
 local function gauss()
     if spare then
@@ -68,34 +60,10 @@ local function gauss()
     return r * math.cos(a)
 end
 
--- Seed-B stream: xoshiro256** exactly as Lua 5.4 math.random/randomseed.
-local bs0, bs1, bs2, bs3 = 0, 0, 0, 0
+-- Keep 64-bit RNG operations in the host; LuaJIT's Lua shifts are 32-bit.
+local brandom = nil
 local bspare = nil
 local b_seeded_for = nil
-
-local function rotl(x, k) return (x << k) | (x >> (64 - k)) end
-
-local function bnext()
-    local r = rotl(bs1 * 5, 7) * 9
-    local t = bs1 << 17
-    bs2 = bs2 ~ bs0
-    bs3 = bs3 ~ bs1
-    bs1 = bs1 ~ bs2
-    bs0 = bs0 ~ bs3
-    bs2 = bs2 ~ t
-    bs3 = rotl(bs3, 45)
-    return r
-end
-
-local function bseed(n)
-    bs0, bs1, bs2, bs3 = n, 0xff, 0, 0
-    for _ = 1, 16 do bnext() end
-    bspare = nil
-end
-
-local function brandom()
-    return (bnext() >> 11) * (0.5 / (1 << 52))
-end
 
 local function gauss_b()
     if bspare then
@@ -114,12 +82,15 @@ end
 
 function step(xt, vt, t_curr, t_next, n)
     if n <= 0 then return end
+    -- The host re-seeds A directly, without calling Lua's math.randomseed.
+    if step_index == 0 then spare = nil end
 
     local sb = seed_b or -1
     local bt = seed_blend or 0.0
     local breeding = sb >= 0 and bt > 0.0
     if breeding and (step_index == 0 or b_seeded_for ~= sb) then
-        bseed(math.tointeger(sb) or 0)
+        brandom = math.randomstream(sb)
+        bspare = nil
         b_seeded_for = sb
     end
     local wa, wb = 1.0, 0.0

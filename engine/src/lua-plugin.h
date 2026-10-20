@@ -164,6 +164,19 @@ static int lua_math_randomseed(lua_State * L) {
 
 static const char * LUA_RAND_KEY = "hot_step.rand_state";
 
+// Independent stream with the same seed mapping as math.randomseed(seed, 0).
+// Keep uint64_t arithmetic in C++ rather than LuaJIT's 32-bit Lua operators.
+static int lua_math_randomstream(lua_State * L) {
+    const double seed = luaL_checknumber(L, 1);
+    luaL_argcheck(L, std::isfinite(seed) && seed >= -9007199254740991.0 &&
+                     seed <= 9007199254740991.0, 1, "seed must be a finite safe integer");
+    luaL_argcheck(L, std::floor(seed) == seed, 1, "seed must be an integer");
+    LuaRandState * st = (LuaRandState *) lua_newuserdata(L, sizeof(LuaRandState));
+    lua_rand_seed(st, (uint64_t) (int64_t) seed, 0);
+    lua_pushcclosure(L, lua_math_random, 1);
+    return 1;
+}
+
 static void lua_register_random(lua_State * L) {
     LuaRandState * st = (LuaRandState *) lua_newuserdata(L, sizeof(LuaRandState));
     lua_rand_seed(st, (uint64_t) time(nullptr), (uint64_t) (size_t) L);
@@ -176,6 +189,8 @@ static void lua_register_random(lua_State * L) {
     lua_pushvalue(L, -2);
     lua_pushcclosure(L, lua_math_randomseed, 1);
     lua_setfield(L, -2, "randomseed");
+    lua_pushcfunction(L, lua_math_randomstream);
+    lua_setfield(L, -2, "randomstream");
     lua_pop(L, 2);
 }
 

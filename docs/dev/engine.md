@@ -445,10 +445,17 @@ Seed breeding is limited to noise-only synthesis. `seed_b` selects a second
 noise stream and `seed_blend` mixes it into the initial latent and each pingpong
 re-noise draw. Node resolves an omitted or blank blend to 0.5 when seed B is set;
 explicit 0 disables breeding and 1 selects seed B's noise. The native loop
-advances both streams together. The Lua solver uses its own matching seed-B
-stream through the shared `SolverState.seed_b` and `seed_blend` globals. Other
+advances both streams together. The Lua solver uses `math.randomstream(seed_b)`
+for an independent host-backed 64-bit stream, selected through the shared
+`SolverState.seed_b` and `seed_blend` globals. Other
 solver callers retain disabled defaults of -1 and 0, including ACE-Step.
 StableStep refinement does not enable breeding.
+
+`engine/tests/test-sa3-seed-blend.cpp` exercises the real LuaJIT bridge without
+models or GPU work. Its header gives the standalone compile command. It checks
+blend 0/default/1, an analytic first-step noise mix, replay across reused plugin
+states and seed-B equivalence, including odd latent lengths and seeds above
+32 bits.
 
 ## Adapters at runtime
 
