@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { lyricsThrough, sectionStarts, YUE2_FPS } from './yue2Takes.js';
+import { fillStarts, lyricsThrough, sectionStarts, YUE2_FPS } from './yue2Takes.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { composeArrangement } from './backends/yue2/coverArrangement.js';
 import fs from 'node:fs';
@@ -51,6 +51,25 @@ test('squashed words, or a section past the take\'s end, give no start', () => {
 test('a take that stops early is aligned only against lyrics up to the next section', () => {
   assert.equal(lyricsThrough(lyrics, spans, 1), '[intro]\n\n[verse]\nfirst line here\n\n');
   assert.equal(lyricsThrough(lyrics, spans, 3), lyrics);
+});
+
+test('a start that comes far sooner than the score allows falls back to the score clock', () => {
+  // Intro 372 frames on the score; the aligner read the verse at 223.
+  const misread: Array<number | null> = [0, 223];
+  fillStarts(misread, [0, 372, 1366], 0, 1, 0, 584);
+  assert.deepEqual(misread, [0, 372]);
+  // A take a little faster than the score keeps its own reading.
+  const fast: Array<number | null> = [0, 300];
+  fillStarts(fast, [0, 372, 1366], 0, 1, 0, 584);
+  assert.deepEqual(fast, [0, 300]);
+  // Resumed at 223: a chorus read at 831 is too soon after the verse's 994 frames.
+  const verse: Array<number | null> = [0, 223, 831];
+  fillStarts(verse, [0, 372, 1366], 1, 2, 223, 1615);
+  assert.deepEqual(verse, [0, 223, 1217]);
+  // Past the take's end the estimate is not given.
+  const short: Array<number | null> = [0, 100];
+  fillStarts(short, [0, 372, 1366], 0, 1, 0, 300);
+  assert.deepEqual(short, [0, null]);
 });
 
 test('a start at or before the previous section\'s is dropped', () => {

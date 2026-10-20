@@ -246,9 +246,29 @@ export function lyricsThrough(lyrics: string, spans: Spans, through: number): st
   return end === undefined ? lyrics : Array.from(lyrics).slice(0, end).join('');
 }
 
+/** An aligned start this much shorter than the score's length for the
+ *  section before it is a misread (words squashed early), not a fast take. */
+const EARLY_START = 0.75;
+
+/** Checks a take's aligned starts for occurrences (from, through] against the
+ *  score clock: a start that comes too soon after the one before it is
+ *  dropped, and a missing start is the score clock's estimate from
+ *  `sectionStart` while it is inside the take. Edits `starts` in place. */
+export function fillStarts(starts: Array<number | null>, clock: number[], from: number, through: number,
+  sectionStart: number, frames: number): void {
+  for (let i = from + 1; i <= through; i++) {
+    const prev = starts[i - 1], own = starts[i];
+    if (own !== null && prev !== null && own - prev < EARLY_START * (clock[i] - clock[i - 1])) starts[i] = null;
+    const estimate = sectionStart + clock[i] - clock[from];
+    if (starts[i] === null && estimate < frames) starts[i] = estimate;
+  }
+}
+
 // A take that stops early is aligned against the lyrics only up to the
 // block of the occurrence after its own: words it never sang would be
-// squashed into its tail and drag the earlier ones with them.
+// squashed into its tail and drag the earlier ones with them. Fewer words
+// fail the other way (the aligner spreads them to fill the audio), so
+// fillStarts checks the result against the score clock.
 /** Each occurrence's start frame in a take, from aligning its lyrics to its audio.
  *  A take's audio starts at codec frame `audioStart`, so only the lyrics from
  *  occurrence `from` on are aligned, and the words are moved back onto the
@@ -463,10 +483,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
               const starts = await alignStarts(lyrics, spans, wav, ids.length, last ? undefined : to + 1, from, audioStart);
               checkCancelled();
               for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
-              for (let i = from + 1; i <= Math.min(to + 1, occurrences - 1); i++) {
-                const estimate = sectionStart + clock[i] - clock[from];
-                if (starts[i] === null && estimate < ids.length) starts[i] = estimate;
-              }
+              fillStarts(starts, clock, from, Math.min(to + 1, occurrences - 1), sectionStart, ids.length);
               const takeId = randomUUID().slice(0, 8);
               const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)) - audioStart / YUE2_FPS, (ids.length - audioStart) / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
