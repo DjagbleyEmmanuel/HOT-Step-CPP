@@ -65,9 +65,12 @@ interface Dials {
   early: number;
   mid: number;
   late: number;
+  /** Planner strength (AR only): the master while the score is written.
+   *  null = follow `scale`. */
+  plan: number | null;
 }
 
-const UNITY: Dials = { scale: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
+const UNITY: Dials = { scale: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1, plan: null };
 
 /** Selection keys the server reads, per slot. Kept in one place because the
  *  spelling has to match backends/yue2/index.ts exactly — a typo here is a
@@ -82,6 +85,7 @@ function keysFor(kind: SlotKind) {
     early: `lmAdapter${Slot}ScaleEarly`,
     mid: `lmAdapter${Slot}ScaleMid`,
     late: `lmAdapter${Slot}ScaleLate`,
+    plan: `lmAdapter${Slot}ScalePlan`,
     inForce: `lmAdapter${Slot}InForce`,
   };
 }
@@ -100,7 +104,7 @@ function shortName(p: string): string {
 
 function sameDials(a: Dials, b: Dials): boolean {
   return a.scale === b.scale && a.attn === b.attn && a.mlp === b.mlp
-    && a.early === b.early && a.mid === b.mid && a.late === b.late;
+    && a.early === b.early && a.mid === b.mid && a.late === b.late && a.plan === b.plan;
 }
 
 /** The catalogue rows the picker renders, plus what the engine says is
@@ -134,6 +138,7 @@ function useYue2Adapters() {
     return {
       scale: num(k.scale), attn: num(k.attn), mlp: num(k.mlp),
       early: num(k.early), mid: num(k.mid), late: num(k.late),
+      plan: defaults[k.plan] === undefined ? null : num(k.plan),
     };
   };
 
@@ -174,7 +179,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
   // something different — another tab, a reconcile after an engine restart,
   // this panel's own successful commit — the draft is replaced rather than
   // merged: a half-dragged slider is not a change anyone asked to keep.
-  useEffect(() => { setDraft(dials); }, [dials.scale, dials.attn, dials.mlp, dials.early, dials.mid, dials.late]);
+  useEffect(() => { setDraft(dials); }, [dials.scale, dials.attn, dials.mlp, dials.early, dials.mid, dials.late, dials.plan]);
 
   const entry = selected ? meta[selected] : undefined;
   const dirty = !sameDials(draft, dials);
@@ -269,10 +274,26 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
           </div>
 
           {/* ── Strength dials ── */}
+          {kind === 'ar' && (
+            <Slider
+              label={t('globalBar.yue2AdapterPlannerStrength', 'Planner Strength')}
+              info={t('globalBar.yue2AdapterPlannerStrengthHint',
+                'Strength while the AR writes the score: the lead sheet of melody, chords and sections it plans before any audio. Lower it to keep the base model\'s songwriting while the adapter still shapes the sound. It follows Composer Strength until you move it; Reset makes it follow again. Only used with Chain of Thought on. When it differs from Composer Strength, planning and rendering each load the model at their own strength, so every generation pays an extra reload.')}
+              value={draft.plan ?? draft.scale}
+              onChange={v => setDraft(d => ({ ...d, plan: v }))}
+              min={0} max={2} step={0.05} showInput
+              defaultValue={UNITY.scale}
+            />
+          )}
           <Slider
-            label={t('globalBar.yue2AdapterStrength', 'Strength')}
-            info={t('globalBar.yue2AdapterStrengthHint',
-              'Master strength for this half. Every other dial multiplies on top of it, so 0 here turns the adapter off without clearing the pick.')}
+            label={kind === 'ar'
+              ? t('globalBar.yue2AdapterComposerStrength', 'Composer Strength')
+              : t('globalBar.yue2AdapterStrength', 'Strength')}
+            info={kind === 'ar'
+              ? t('globalBar.yue2AdapterComposerStrengthHint',
+                'Strength while the AR writes the audio tokens: it turns the score into the actual performance, arrangement and sound. Every other dial below multiplies on top of both strengths, so 0 here turns the adapter off for the render without clearing the pick.')
+              : t('globalBar.yue2AdapterStrengthHint',
+                'Master strength for this half. Every other dial multiplies on top of it, so 0 here turns the adapter off without clearing the pick.')}
             value={draft.scale}
             onChange={v => setDraft(d => ({ ...d, scale: v }))}
             min={0} max={2} step={0.05} showInput
@@ -456,6 +477,8 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
       [k.early]: String(dials.early),
       [k.mid]: String(dials.mid),
       [k.late]: String(dials.late),
+      // '' = follow the master strength.
+      [k.plan]: dials.plan === null ? '' : String(dials.plan),
     }, activeBackendId);
     setBusy(false);
     const half = kind.toUpperCase();

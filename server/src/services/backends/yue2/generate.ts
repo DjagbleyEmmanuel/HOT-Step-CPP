@@ -52,7 +52,7 @@ import { applyYue2DurationCap, YUE2_TRIM_FADE_SEC } from './durationCap.js';
 import { buildYue2LyricSchedule } from './lyricSchedule.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
 import {
-  yue2PickFromModels, yue2ResolvePick, yue2StackFrom, yue2CoverFromSubmission,
+  yue2PickFromModels, yue2ResolvePick, yue2StackFrom, yue2PlanStackFrom, yue2PlanScaleDiffers, yue2CoverFromSubmission,
   type Yue2PersistedSelection, type Yue2CoverSubmission,
 } from './index.js';
 
@@ -812,13 +812,15 @@ function activeStyleNorms(pick: Yue2PersistedSelection): Yue2StyleNorms | null {
 /** Whether a job plans its score before rendering. 'replan': auto-replan,
  *  redrawing bad plans. 'once': re-planning is off, but an instrumental still
  *  needs its score in hand so the melody can move off Vocal (instrumentalScore.ts);
- *  the one plan renders whatever it is. null: the engine plans and renders in
- *  one call, or there is nothing to plan (a supplied score, which
- *  mapYue2Params has already moved, or Chain of Thought off). */
-export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'abc' | 'lyrics'>): 'replan' | 'once' | null {
+ *  the one plan renders whatever it is; also when the planner strength
+ *  differs from the composer's, since the two strengths need two loads.
+ *  null: the engine plans and renders in one call, or there is nothing to
+ *  plan (a supplied score, which mapYue2Params has already moved, or Chain of
+ *  Thought off). */
+export function yue2PlanMode(params: any, req: Pick<Yue2SynthRequest, 'cot' | 'abc' | 'lyrics'>, splitPlan = false): 'replan' | 'once' | null {
   if (req.cot === 'off' || req.abc) return null;
   if (params.yue2AutoReplan !== false) return 'replan';
-  return params.instrumental === true || !req.lyrics ? 'once' : null;
+  return params.instrumental === true || !req.lyrics || splitPlan ? 'once' : null;
 }
 
 /** Plan attempt k's seed (k from 1): the base itself, then fixed steps from it
@@ -838,7 +840,7 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   const pending: Pending[] = [];
   for (const m of members) {
     const { job, req } = m;
-    const mode = yue2PlanMode(job.params, req);
+    const mode = yue2PlanMode(job.params, req, yue2PlanScaleDiffers(jobPick(job).adapters));
     if (!mode) continue;
     m.autoReplan = { attempts: [], accepted: false };
     // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
@@ -894,7 +896,7 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
 
     let plans: Array<{ abc: string; end_reason: string }>;
     try {
-      plans = await runYue2PlanBatch(live[0].m.req, draws.map(d => ({
+      plans = await runYue2PlanBatch(live[0].m.req, jobPick(live[0].m.job), draws.map(d => ({
         style: d.p.m.req.style, ...(d.p.m.req.lyrics ? { lyrics: d.p.m.req.lyrics } : {}), seed: d.seed,
       })));
     } catch (err: any) {
@@ -1703,7 +1705,10 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
   // params.semantic: run the semantic stage too and return its codec ids
   // (about a minute) instead of stopping at the lead sheet (seconds).
   const semantic = params?.semantic === true;
-  const planReq: Yue2SynthRequest = semantic ? { ...req, semantic_only: true } : { ...req, plan_only: true };
+  // A score-only preview plans at the planner strength; the semantic preview
+  // runs both stages in one load, so it keeps the composer's.
+  const planReq: Yue2SynthRequest = semantic ? { ...req, semantic_only: true }
+    : { ...req, plan_only: true, lm_adapter: yue2AdapterWire(yue2PlanStackFrom(pick.adapters)) };
   delete planReq.abc;
 
   const sub = await yue2Synth(planReq);
@@ -1747,8 +1752,9 @@ async function waitYue2PlanJob(jobId: string, signal?: AbortSignal): Promise<voi
 /** One plan_only pass over several songs (up to props.max_plan_batch), each
  *  with its own prompt and seed, sharing `req`'s settings. Scores come back
  *  in entry order. */
-async function runYue2PlanBatch(req: Yue2SynthRequest, songs: NonNullable<Yue2SynthRequest['songs']>): Promise<Array<{ abc: string; end_reason: string }>> {
-  const planReq: Yue2SynthRequest = { ...req, plan_only: true, songs };
+async function runYue2PlanBatch(req: Yue2SynthRequest, pick: Yue2PersistedSelection, songs: NonNullable<Yue2SynthRequest['songs']>): Promise<Array<{ abc: string; end_reason: string }>> {
+  // Planner strength: the score is written under its own adapter load.
+  const planReq: Yue2SynthRequest = { ...req, plan_only: true, songs, lm_adapter: yue2AdapterWire(yue2PlanStackFrom(pick.adapters)) };
   for (const k of ['lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'synth_batch_size'] as const) delete planReq[k];
   const sub = await yue2Synth(planReq);
   await waitYue2PlanJob(sub.job_id);

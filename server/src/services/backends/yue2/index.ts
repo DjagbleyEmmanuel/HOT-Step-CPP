@@ -125,6 +125,7 @@ function yue2ReadScales(key: string): Yue2AdapterScales {
       early: yue2Dial(parsed.early, base.early),
       mid: yue2Dial(parsed.mid, base.mid),
       late: yue2Dial(parsed.late, base.late),
+      ...(parsed.plan === undefined ? {} : { plan: yue2Dial(parsed.plan, base.global) }),
     };
   } catch {
     return base;
@@ -260,6 +261,18 @@ export function yue2StackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedS
     if (slot.path) out.push({ path: slot.path, scales: slot.scales });
   }
   return out;
+}
+
+/** The stack a plan_only job loads: each slot's planner strength in place of
+ *  its master. Equal to yue2StackFrom when no slot sets one. */
+export function yue2PlanStackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedSlot>): Yue2AdapterRef[] {
+  return yue2StackFrom(adapters).map(a => ({ ...a, scales: { ...a.scales, global: a.scales.plan ?? a.scales.global } }));
+}
+
+/** Does planning need its own load? Only when some slot's planner strength
+ *  differs from its master. */
+export function yue2PlanScaleDiffers(adapters: Record<Yue2LmAdapterKind, Yue2PersistedSlot>): boolean {
+  return yue2StackFrom(adapters).some(a => a.scales.plan !== undefined && a.scales.plan !== a.scales.global);
 }
 
 /** An adapter reference the engine can actually open, or null.
@@ -427,6 +440,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     pickedModels[`lm_adapter_${kind}_scale_early`] = String(slot.scales.early);
     pickedModels[`lm_adapter_${kind}_scale_mid`] = String(slot.scales.mid);
     pickedModels[`lm_adapter_${kind}_scale_late`] = String(slot.scales.late);
+    if (slot.scales.plan !== undefined) pickedModels[`lm_adapter_${kind}_scale_plan`] = String(slot.scales.plan);
   }
   return {
     operation: 'text2music',
@@ -1311,6 +1325,7 @@ function slotDefaults(
     out[`lmAdapter${Slot}ScaleEarly`] = slot.scales.early;
     out[`lmAdapter${Slot}ScaleMid`] = slot.scales.mid;
     out[`lmAdapter${Slot}ScaleLate`] = slot.scales.late;
+    if (slot.scales.plan !== undefined) out[`lmAdapter${Slot}ScalePlan`] = slot.scales.plan;
     out[`lmAdapter${Slot}InForce`] = !!slot.path && inForce;
   }
   return out;
@@ -1335,6 +1350,11 @@ function readSlotSelection(
     selection[`lmAdapter${Slot}Scale${suffix}`] === undefined
       ? fallback
       : yue2Dial(selection[`lmAdapter${Slot}Scale${suffix}`], fallback);
+  // Planner strength: absent keeps the persisted one, '' clears it back to
+  // "same as the master".
+  const planRaw = selection[`lmAdapter${Slot}ScalePlan`];
+  const plan = planRaw === undefined ? persisted.scales.plan
+    : String(planRaw).trim() === '' ? undefined : yue2Dial(planRaw, persisted.scales.global);
   return {
     given,
     ref: given ? selection[pathKey].trim() : persisted.path,
@@ -1347,6 +1367,7 @@ function readSlotSelection(
       early: dial('Early', persisted.scales.early),
       mid: dial('Mid', persisted.scales.mid),
       late: dial('Late', persisted.scales.late),
+      ...(plan === undefined ? {} : { plan }),
     },
   };
 }
@@ -1447,6 +1468,7 @@ export function yue2PickFromModels(models: Readonly<Record<string, string>>): Yu
         early: num(`${key}_scale_early`, d.early),
         mid: num(`${key}_scale_mid`, d.mid),
         late: num(`${key}_scale_late`, d.late),
+        ...(models[`${key}_scale_plan`] === undefined ? {} : { plan: num(`${key}_scale_plan`, d.global) }),
       },
     };
   };

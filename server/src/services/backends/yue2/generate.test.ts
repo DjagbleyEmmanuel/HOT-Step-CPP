@@ -184,6 +184,9 @@ test('yue2PlanMode: every auto-replan, instrumental, cot and supplied-score comb
   }
   // Empty lyrics without the Instrumental switch is an instrumental too.
   assert.equal(yue2PlanMode({ yue2AutoReplan: false }, { cot: 'melody', lyrics: '' }), 'once');
+  // A planner strength of its own needs a plan job apart from the render.
+  assert.equal(yue2PlanMode({ yue2AutoReplan: false }, { cot: 'full', lyrics }, true), 'once');
+  assert.equal(yue2PlanMode({ yue2AutoReplan: false }, { cot: 'off', lyrics }, true), null);
 });
 
 test('a supplied score is moved for an instrumental whatever re-planning is, and left alone for a vocal cover', () => {

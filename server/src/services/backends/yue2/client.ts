@@ -167,6 +167,10 @@ export interface Yue2AdapterScales {
   early: number;
   mid: number;
   late: number;
+  /** Planner strength: stands in for `global` on the jobs that only write the
+   *  score (plan_only), so the AR can plan at one strength and compose at
+   *  another. Server-side only, never a dial on the wire. Absent = `global`. */
+  plan?: number;
 }
 
 /** One adapter in a stack, with its own dials. The engine merges AR and NAR

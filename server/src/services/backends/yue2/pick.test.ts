@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   yue2ResolvePick, yue2PickFromModels, yue2CoverFromSubmission, yue2CoverPickBase,
+  yue2PlanStackFrom, yue2PlanScaleDiffers,
   type Yue2PersistedSelection,
 } from './index.js';
 import { yue2CoalesceKey } from './generate.js';
@@ -72,6 +73,20 @@ test('the pick survives the trip through envelope.models', () => {
     models[`lm_adapter_${kind}_scale_late`] = String(slot.scales.late);
   }
   assert.deepEqual(yue2PickFromModels(models), pick);
+});
+
+test('planner strength: travels with the pick, plans at its own strength, and clears to the master', () => {
+  const pick = yue2ResolvePick({ yue2Pick: { lmAdapterNarScalePlan: 0.4 } }, defaults);
+  assert.equal(pick.adapters.nar.scales.plan, 0.4);
+  assert.equal(yue2PlanScaleDiffers(pick.adapters), true);
+  assert.equal(yue2PlanStackFrom(pick.adapters)[0].scales.global, 0.4);
+  assert.equal(pick.adapters.nar.scales.global, 0.8);  // the composer keeps the master
+  assert.equal(yue2PickFromModels({ lm_adapter_nar: fileA, lm_adapter_nar_scale: '0.8', lm_adapter_nar_scale_plan: '0.4' })
+    .adapters.nar.scales.plan, 0.4);
+  const cleared = yue2ResolvePick({ yue2Pick: { lmAdapterNarScalePlan: '' } }, { ...defaults, adapters: pick.adapters });
+  assert.equal(cleared.adapters.nar.scales.plan, undefined);
+  assert.equal(yue2PlanScaleDiffers(defaults.adapters), false);
+  assert.equal(yue2PlanStackFrom(defaults.adapters)[0].scales.global, 0.8);
 });
 
 test('only jobs with the same pick coalesce', () => {
