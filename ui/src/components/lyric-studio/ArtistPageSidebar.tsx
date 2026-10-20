@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Clock, Shuffle, Brain } from 'lucide-react';
+import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Clock, Shuffle, Brain, Disc3 } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
 import { TripleProviderSelector, type ModelSelections } from './ProviderSelector';
 import { LLM_DURATION_KEY } from '../../utils/estimateDuration';
 import { USE_LM_ADAPTER_KEY } from '../../utils/lmAdapterPref';
+import { MASTER_TO_ALBUM_KEY } from '../../utils/masterToAlbumPref';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -61,6 +62,7 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
   // Off by default: a trained DiT adapter on the stock planner has been
   // sounding better than the same DiT adapter paired with its LM adapter.
   const [useLmAdapter, setUseLmAdapter] = useLocalPersistedState<boolean>(USE_LM_ADAPTER_KEY, false);
+  const [masterToAlbum, setMasterToAlbum] = useLocalPersistedState<boolean>(MASTER_TO_ALBUM_KEY, false);
   // Timbre reference and the preset's LM adapter are read by ACE-Step alone
   // (features.lm marks it); on the other engines both toggles do nothing.
   const { capabilities } = useCapabilities();
@@ -160,6 +162,19 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
             />
           </span>
           <Toggle size="sm" accent="pink" checked={useLlmDuration} onChange={setUseLlmDuration} aria-label={t('lyric.llmDuration')} />
+        </div>
+
+        {/* ── Master to Album Track ───────────────────────────── */}
+        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+          <span className="flex items-center gap-1.5">
+            <Disc3 className="w-3 h-3 text-zinc-500" />
+            <ParamLabel
+              label={t('lyric.masterToAlbum')}
+              info={t('lyric.masterToAlbumInfo')}
+              className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold"
+            />
+          </span>
+          <Toggle size="sm" accent="pink" checked={masterToAlbum} onChange={setMasterToAlbum} aria-label={t('lyric.masterToAlbum')} />
         </div>
 
         {/* ── Randomize Timbre Reference ────────────────────────── */}

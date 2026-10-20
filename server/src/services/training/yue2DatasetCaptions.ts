@@ -55,6 +55,15 @@ export interface Yue2DatasetCaptions {
 /** One of `dataset` (id), `lyricsSet` (resolved through
  *  training_datasets.lyrics_set_id) or `adapter` (resolved through the run that
  *  trained it). Every failure answers all-empty. */
+/** Audio files of the training dataset made from one Lyric Studio album
+ *  (its lyrics set), excluded and missing tracks left out. [] when the album
+ *  has no dataset. */
+export async function albumDatasetAudio(lyricsSetId: number): Promise<string[]> {
+  const ds = repo.listDatasets().find(d => Number(d.lyricsSetId) === Number(lyricsSetId));
+  if (!ds) return [];
+  return (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing).map(s => s.audioPath);
+}
+
 export async function yue2DatasetCaptions(
   by: { dataset?: string; lyricsSet?: number; adapter?: string },
 ): Promise<Yue2DatasetCaptions> {

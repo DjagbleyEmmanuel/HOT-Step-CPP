@@ -112,6 +112,9 @@ export const writtenSongIntentSchema = z.object({
     triggerUseFilename: z.boolean().optional(),
     triggerPlacement: z.enum(['prepend', 'append', 'replace']).optional(),
     randomizeTimbreRef: z.boolean().optional(),
+    /** Master each render to a random track of the album's training dataset,
+     *  with the VST chain off (Lyric Studio "Master to album track"). */
+    masterToAlbumTrack: z.boolean().optional(),
     /** Create's stored time signature and language, used when params lack them. */
     timeSignature: z.string().optional(),
     vocalLanguage: z.string().optional(),

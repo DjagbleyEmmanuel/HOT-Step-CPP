@@ -308,6 +308,16 @@ test('written: preset reference without a dedicated timbre uses the reference it
   assert.equal(r.request.randomizeTimbreRef, undefined);
 });
 
+test('written: Master to Album Track turns mastering on and names the album; off leaves both alone', () => {
+  const on = resolveWrittenSongIntent({ ...base, params: { ...snapshot, postProcessingEnabled: false }, settings: { masterToAlbumTrack: true } },
+    'yue2', { gen, preset: null });
+  assert.equal(on.request.postProcessingEnabled, true);
+  assert.equal(on.request.masteringEnabled, true);
+  assert.equal(on.request.masterToAlbumLyricsSet, base.lyricsSetId);
+  const off = resolveWrittenSongIntent(base, 'yue2', { gen, preset: null });
+  assert.equal(off.request.masterToAlbumLyricsSet, undefined);
+});
+
 test('written: MM3 takes the preset adapter or none, auto duration, album-track caption', () => {
   const r = resolveWrittenSongIntent({ ...base, params: { ...snapshot, mm3LmAdapter: 'global' } }, 'minimax-m3',
     { gen, preset: null, mm3Tracks });

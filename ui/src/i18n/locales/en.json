@@ -2491,6 +2491,8 @@
     "lyric.randomizeTimbreOn": "Picks a random track from the reference folder as timbre conditioner — prevents riff leakage from a single reference.",
     "lyric.randomizeTimbreOff": "Uses the exact reference track set in the album preset for timbre conditioning.",
     "lyric.randomizeTimbreInfo": "Chooses which reference track conditions the voice timbre. On: picks a random track from the reference folder on each render, which prevents riff leakage from a single reference. Off: always uses the exact reference track set in the album preset.",
+    "lyric.masterToAlbum": "Master to Album Track",
+    "lyric.masterToAlbumInfo": "Masters every render to a random track from this album's training dataset, a different one each time, so the generations sit close to the album's own sound. Turns Mastering on and skips the VST chain for these renders; your post-processing settings are left as they are. If the album has no training dataset, the mastering reference stays as set.",
     "lyric.useLmAdapter": "Use LM Adapter",
     "lyric.useLmAdapterOn": "Applies the album preset's planner-LM adapter alongside the DiT adapter.",
     "lyric.useLmAdapterOff": "Skips the planner-LM adapter entirely — the DiT adapter alone, on the stock planner.",

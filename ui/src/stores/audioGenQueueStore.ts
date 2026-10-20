@@ -30,6 +30,7 @@ import {
 import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
 import { normalizeKeyScale } from '../utils/keyScale';
 import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
+import { masterToAlbumEnabled } from '../utils/masterToAlbumPref';
 import { useBackendStore } from './backendStore';
 import type { CreateIntent, WrittenSongIntent } from '../../../server/src/contracts/resolution';
 import { readMm3CaptionSelection } from '../utils/mm3CaptionSource';
@@ -462,6 +463,7 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
       triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
         ? appSettings.triggerPlacement : 'prepend',
       randomizeTimbreRef: localStorage.getItem('lireek-randomizeTimbreRef') === 'true',
+      masterToAlbumTrack: masterToAlbumEnabled(),
       timeSignature: readSetting('hs-timeSignature', ''),
       vocalLanguage: readSetting('hs-vocalLanguage', 'en'), app: appSettings,
     },
@@ -2095,6 +2097,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
           try { return JSON.parse(localStorage.getItem('lireek-randomizeTimbreRef') || 'false') === true; }
           catch { return false; }
         })(),
+        masterToAlbumTrack: masterToAlbumEnabled(),
         timeSignature: storedSetting('hs-timeSignature', ''),
         vocalLanguage: storedSetting('hs-vocalLanguage', 'en'),
         app: appSettings,
@@ -2323,6 +2326,14 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
         params.randomizeTimbreRef = true;
       }
     } catch { /* ignore */ }
+  }
+
+  // 4b) Master to Album Track: mastering on, VST chain off; the server draws
+  // the album track at render time (same as resolveIntent.ts).
+  if (masterToAlbumEnabled()) {
+    params.postProcessingEnabled = true;
+    params.masteringEnabled = true;
+    params.masterToAlbumLyricsSet = item.lyricsSetId;
   }
 
   // 5) Submit generation

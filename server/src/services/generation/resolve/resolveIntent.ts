@@ -255,6 +255,14 @@ export function resolveWrittenSongIntent(intent: WrittenSongIntent, engine: stri
     if (settings.randomizeTimbreRef === true) params.randomizeTimbreRef = true;
   }
 
+  // The track itself is drawn at render time (postProcessing.ts), so every
+  // render gets its own and a queued item's request stays the same.
+  if (settings.masterToAlbumTrack === true) {
+    params.postProcessingEnabled = true;
+    params.masteringEnabled = true;
+    params.masterToAlbumLyricsSet = intent.lyricsSetId;
+  }
+
   params.taskType = 'text2music';
   params.source = 'lyric-studio';
   pinEngine(params, engine);

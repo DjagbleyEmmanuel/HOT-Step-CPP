@@ -84,8 +84,9 @@ export function requestedPpStages(params: PostProcessParams): string[] {
   if (params.spectralLifterEnabled) stages.push('Spectral Lifter');
   if (params.vocalNaturalizerEnabled && !params.instrumental) stages.push('Vocal Naturalizer');
   if ((params.gainOffsetDb ?? 0) !== 0) stages.push('Gain Offset');
-  if (vstChainActive()) stages.push('VST chain');
-  if (params.masteringEnabled && params.masteringReference) stages.push('Mastering');
+  const albumMaster = params.masterToAlbumLyricsSet !== undefined && params.masterToAlbumLyricsSet !== null;
+  if (!albumMaster && vstChainActive()) stages.push('VST chain');
+  if (params.masteringEnabled && (params.masteringReference || albumMaster)) stages.push('Mastering');
   if (params.lufsEnabled && params.lufsTarget !== undefined) stages.push('Final Normalizer');
   return stages;
 }
