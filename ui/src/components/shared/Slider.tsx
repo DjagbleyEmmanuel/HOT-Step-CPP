@@ -36,15 +36,18 @@ interface SliderProps {
    *  clicked. For a server-default overlay form, resetting means deleting
    *  the edit key rather than writing a value — the caller supplies that. */
   onReset?: () => void;
+  /** Classes for the row holding the range input (e.g. a fixed height to line
+   *  up with a select beside it). */
+  controlClassName?: string;
 }
 
 export const Slider: React.FC<SliderProps> = ({
   label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
-  info, infoMeta, defaultValue, onReset, onCommit,
+  info, infoMeta, defaultValue, onReset, onCommit, controlClassName,
 }) => {
   return (
     <div>
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex items-center justify-between min-h-6 mb-1.5">
         <ParamLabel
           label={label}
           info={info}
@@ -71,17 +74,19 @@ export const Slider: React.FC<SliderProps> = ({
         {headerRight}
         </div>
       </div>
-      <input
-        type="range"
-        value={value}
-        onChange={e => onChange(parseFloat(e.target.value))}
-        onPointerUp={onCommit}
-        onKeyUp={onCommit}
-        min={min}
-        max={max}
-        step={step}
-        className="w-full"
-      />
+      <div className={controlClassName}>
+        <input
+          type="range"
+          value={value}
+          onChange={e => onChange(parseFloat(e.target.value))}
+          onPointerUp={onCommit}
+          onKeyUp={onCommit}
+          min={min}
+          max={max}
+          step={step}
+          className="w-full"
+        />
+      </div>
     </div>
   );
 };

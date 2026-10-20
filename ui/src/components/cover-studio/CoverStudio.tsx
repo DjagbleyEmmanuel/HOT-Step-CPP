@@ -39,6 +39,7 @@ import {
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
+import { Fold } from '../shared/Fold';
 import { exportPrepare, structureHash, type PrepareV2 } from '../../utils/yue2Prepare';
 import { normalizeAbc } from '../../../../server/src/contracts/yue2Prepare';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
@@ -1671,12 +1672,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
 
 
+  // Drafts sit under Generate in whichever settings column is showing.
+  const draftsFold = (
+    <Fold title="Drafts" storageKey="cover-studio-fold-drafts">
+      <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} namedSave={yue2Mode} inline />
+    </Fold>
+  );
+
   // ── Render ──
   return (
     <BackendCapabilityGate feature="cover">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {/* Toast */}
-      {!yue2Mode && <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} />}
       {toast && (
         <div className="absolute top-16 right-6 z-50 max-w-[500px] px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2 whitespace-normal break-words">
           {toast}
@@ -1875,7 +1882,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} />
         {/* Right: Artist + Settings */}
         {yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
-          <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} namedSave />
           <Yue2CoverPanel
           caption={artistCaption} onCaptionChange={value => { setArtistCaption(value); setCaptionMode('custom'); }}
           captionMode={captionMode} onCaptionMode={selectCaptionSource}
@@ -1901,6 +1907,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           arStrength={coverArStrength} onArStrength={v => setCoverArStrength(clampCoverAr(v))}
           lyricSchedule={coverLyricSchedule} onLyricSchedule={setCoverLyricSchedule}
           canGenerate={canGenerate} isGenerating={isGenerating} onGenerate={handleGenerate}
+          footer={draftsFold}
         />
         </div> : <ArtistSettingsPanel
           artists={artists} isLoadingArtists={isLoadingArtists}
@@ -1921,7 +1928,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           artistCaption={artistCaption} onArtistCaptionChange={setArtistCaption}
           canGenerate={canGenerate}
           isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
-          onGenerate={handleGenerate} onCancel={handleCancel}
+          onGenerate={handleGenerate} onCancel={handleCancel} footer={draftsFold}
           isGeneratingCaption={isGeneratingCaption}
           onRegenerateCaption={handleRegenerateCaption}
         />}

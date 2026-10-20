@@ -25,7 +25,9 @@ export const StudioDraftPicker: React.FC<{
   /** A reason this studio cannot take a draft, shown instead of loading it. */
   refuse?: (body: StudioDraftBody) => string;
   namedSave?: boolean;
-}> = ({ control, textKey, apply, refuse, namedSave }) => {
+  /** Inside a Drafts fold at the bottom of a column: no own padding. */
+  inline?: boolean;
+}> = ({ control, textKey, apply, refuse, namedSave, inline }) => {
   const { t } = useTranslation();
   const [drafts, setDrafts] = useState<StudioDraftDocument[]>([]);
   const [name, setName] = useState('');
@@ -40,8 +42,8 @@ export const StudioDraftPicker: React.FC<{
     // With a named save, the picker, name and button share the row in thirds,
     // the picker growing past its third to fit its placeholder, all three the
     // select's height and level with the centre column's header row.
-    <div className={`${namedSave ? 'grid grid-cols-[minmax(max-content,1fr)_1fr_1fr] items-stretch pt-3' : 'flex items-center py-1'} gap-2 px-4 text-[11px]`}>
-      <div className={namedSave ? 'min-w-0' : 'max-w-[18rem]'} onPointerDownCapture={refresh}>
+    <div className={`${namedSave ? `grid grid-cols-[minmax(max-content,1fr)_1fr_1fr] items-stretch${inline ? '' : ' pt-3'}` : `flex items-center${inline ? '' : ' py-1'}`} gap-2${inline ? '' : ' px-4'} text-[11px]`}>
+      <div className={namedSave ? 'min-w-0' : inline ? 'flex-1 min-w-0' : 'max-w-[18rem]'} onPointerDownCapture={refresh}>
         <StyledSelect<string> value="" size="sm" options={drafts.map(doc => ({ value: doc.id, label: labelOf(doc, textKey) }))}
           onChange={id => { void control.load(id, apply, refuse); }}
           placeholder={`${t('studioDrafts.load', 'Load saved draft')}…`}

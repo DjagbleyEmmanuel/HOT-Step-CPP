@@ -22,7 +22,7 @@ MiniMax-Music3 or YuE2), chosen with the engine picker at the top of the sidebar
 
 ## Workflow
 
-1. Write a **Style Description** — or pick a **Style preset** for a ready-made ensemble
+1. Write a **Style Description** — or pick one from **Presets** for a ready-made ensemble
    description and edit it from there — optionally add a **LoRA** trigger word and turn on
    **Beat I/O** for a percussive intro/outro. Both `{a|b|c}` wildcard syntax and the LoRA trigger
    prefix apply here. YuE2 shows neither: its adapters carry their own trigger word.
@@ -53,8 +53,10 @@ The form's content, metadata and caption-source choices (MiniMax-Music3 track pi
 dataset and track pick) also save to a server draft, together with the active backend. Saving
 and **Load a saved draft** follow the same rules as Cover and Repaint: the draft belongs to this
 browser, a conflicting edit elsewhere becomes a new draft, and a failed save keeps your edits
-here. On YuE2 the draft row also has a name box and **Save named draft**, as in Cover Studio, and
-a named draft is listed under its name. Training Studio's **Send to Custom-Gen** drafts keep
+here. The draft controls sit in the **Drafts** fold under the Generate button, collapsed by
+default. On YuE2 they also have a name box and **Save named draft**, as in Cover Studio, and a
+named draft is listed under its name. Every fold in this column (Song Info, Negative Prompt,
+Dataset Caption Options, Drafts) remembers whether it was open. Training Studio's **Send to Custom-Gen** drafts keep
 working as before, including the reset trigger, the cleared adapter stack and LM code caching
 turned off.
 
@@ -63,7 +65,7 @@ turned off.
 | Control | What it does |
 |---|---|
 | Style Description | The caption sent to the model. Supports `{a|b|c}` wildcards, the `{·} expand` button resolves them once in place, `auto` resolves them at Generate time instead, using the DiT seed (or a fresh draw when the seed is randomised); `auto` is not offered on YuE2. Drag its bottom edge to resize it, like Lyrics. Read-only, with a dataset caption showing through it, while a MiniMax-Music3 or YuE2 caption source below is locked to something other than Custom. |
-| Style preset | A dropdown of twelve ready-made ensemble descriptions — one sentence of instrumentation and mood each, from a smoky jazz quartet to a heavy metal band. Picking one writes it into the Style Description, replacing what was there; typing in the box afterwards clears the selection. Hidden while a caption source is locked. Handy with a lead sheet, where the melody and chords are already fixed and only the arrangement is left to say. |
+| Presets | A button at the right of the Style Description title that opens a list of twelve ready-made ensemble descriptions — one sentence of instrumentation and mood each, from a smoky jazz quartet to a heavy metal band. Picking one writes it into the Style Description, replacing what was there; typing in the box afterwards clears the selection. Hidden while a caption source is locked. Handy with a lead sheet, where the melody and chords are already fixed and only the arrangement is left to say. |
 | LoRA | A trigger word prepended to the style description before it is sent, for adapters that need one typed rather than embedded in the file. If the description already starts with that complete trigger, it is not added again when you reuse a song. Not shown on YuE2: a YuE2 adapter without an embedded trigger takes one in the Adapters dropdown instead (see [Adapters](../adapters.md)). |
 | Beat I/O | Appends a request for a clean percussive intro and outro (1, 2, 4 or 8 bars) to the style description, for DJ mixing. Not shown on YuE2. |
 | Song Info (Artist / Title / Subject) | Optional metadata, collapsed by default. Auto-populates and expands when a song is sent here from Lyric Studio or Auto-Gen. |
@@ -72,7 +74,7 @@ turned off.
 | Negative Prompt | Free-text description of what to avoid, for example "jazz, acoustic, slow, ambient, piano". YuE2 does not use it, so there it sits in a fold, collapsed by default. |
 | Caption source (MiniMax-Music3) | Only shown for a song sent from Lyric Studio with its album's captioned tracks attached. Automatic from dataset picks the track whose BPM is closest to yours; a named Track uses that track's own Structured Caption verbatim; Custom uses this song's own caption, editable. Dismiss removes the picker for this panel. |
 | Compose Caption (MiniMax-Music3) | Turns the plain-English Style Description into a MiniMax-Music3 Structured Caption, assembled from MiniMax's own 1,000 reference captions, no external AI model or API key involved. Reports the genre and family it routed to, how many reference captions it drew from, and any warnings (unrecognised genre, a control that conflicts with the prompt, or a control MiniMax-Music3 cannot express). The dice button composes again with a new seed. Hidden while a Caption source above is locked in. |
-| Dataset Caption Options (YuE2) | A fold under the Style Description, open by default. Dataset picks which training dataset's captions this panel offers, defaulting to the dataset the active YuE2 adapter was trained on. Once that dataset has captioned tracks, Caption source offers the same Custom / Automatic / named-Track choice as MiniMax-Music3. |
+| Dataset Caption Options (YuE2) | A fold under the Style Description, open by default. The tag chips sit in a box four rows tall that scrolls, and a leading "and" is dropped from each tag. Dataset picks which training dataset's captions this panel offers, defaulting to the dataset the active YuE2 adapter was trained on. Once that dataset has captioned tracks, Caption source offers the same Custom / Automatic / named-Track choice as MiniMax-Music3. |
 | BPM | Target tempo. 0 means Auto, letting the model pick. |
 | Duration | Target length in seconds. Hidden entirely on MiniMax-Music3, whose planner decides when the song ends, so a length there could only cut the ending off early. Where the active backend supports an explicit end-of-song token, an Auto chip lets the model end the song itself instead of aiming for a fixed length. |
 | Key | Musical key, or blank for Auto. |

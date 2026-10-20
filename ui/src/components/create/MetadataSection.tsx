@@ -60,6 +60,10 @@ interface MetadataSectionProps {
   onVocalGenderChange: (v: string) => void;
 }
 
+// Every cell is a 24px label row over a 34px control row (a small select's
+// height), so a slider beside a select lines up.
+const CONTROL_ROW = 'h-[34px] flex items-center';
+
 export const MetadataSection: React.FC<MetadataSectionProps> = ({
   bpm, onBpmChange, keyScale, onKeyScaleChange,
   timeSignature, onTimeSignatureChange,
@@ -100,6 +104,9 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
       {t('metadataSection.auto')}
     </button>
   );
+  // "0 = Auto", said beside the number rather than under the slider, so the
+  // cell keeps the same height as its neighbour.
+  const autoHint = <span className="text-[10px] text-zinc-500">{t('metadataSection.auto')}</span>;
   return (
     <div className="space-y-3 pt-3 border-t border-zinc-200 dark:border-white/5">
       <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('metadataSection.musicParameters')}</h4>
@@ -108,9 +115,9 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         {/* BPM */}
         <div>
           <Slider label={t('metadataSection.bpm')} value={bpm} onChange={onBpmChange}
-            min={0} max={240} step={1} showInput suffix="" defaultValue={0}
+            min={0} max={240} step={1} showInput suffix="" defaultValue={0} controlClassName={CONTROL_ROW}
+            headerRight={bpm === 0 ? autoHint : undefined}
             info={t('metadataSection.bpmInfo')} infoMeta={t('metadataSection.bpmMeta')} />
-          {bpm === 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
         </div>
 
         {/* Duration — hidden in MM3 mode.
@@ -123,7 +130,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         <div>
           {durationAuto ? (
             isAutoDuration ? (
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between h-6 mb-1.5">
                 <ParamLabel
                   label={t('metadataSection.duration')}
                   info={t('metadataSection.durationAutoHint', { max: durationMax })}
@@ -133,15 +140,15 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
               </div>
             ) : (
               <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
-                min={1} max={durationMax} step={1} suffix="s" showInput headerRight={autoChip}
+                min={1} max={durationMax} step={1} suffix="s" showInput controlClassName={CONTROL_ROW} headerRight={autoChip}
                 info={t('metadataSection.durationInfo')} />
             )
           ) : (
             <>
               <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
-                min={-1} max={durationMax} step={1} suffix="s" showInput
+                min={-1} max={durationMax} step={1} suffix="s" showInput controlClassName={CONTROL_ROW}
+                headerRight={duration <= 0 ? autoHint : undefined}
                 info={t('metadataSection.durationInfo')} infoMeta={t('metadataSection.durationMeta')} />
-              {duration <= 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
             </>
           )}
         </div>
@@ -154,11 +161,12 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             info={t('metadataSection.keyInfo')}
             meta={t('metadataSection.keyMeta')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-            rootClassName="block mb-1.5"
+            rootClassName="flex items-center h-6 mb-1.5"
             onReset={keyScale !== '' ? () => onKeyScaleChange('') : undefined}
           />
           <StyledSelect
             accent="pink"
+            size="sm"
             value={keyScale}
             onChange={onKeyScaleChange}
             className="w-full"
@@ -174,11 +182,12 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
               info={t('metadataSection.timeSigInfo')}
               meta={t('metadataSection.timeSigMeta')}
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-              rootClassName="block mb-1.5"
+              rootClassName="flex items-center h-6 mb-1.5"
               onReset={timeSignature !== '' ? () => onTimeSignatureChange('') : undefined}
             />
             <StyledSelect
               accent="pink"
+              size="sm"
               value={timeSignature}
               onChange={onTimeSignatureChange}
               className="w-full"
@@ -195,11 +204,12 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             label={t('metadataSection.vocalGender')}
             info={t('metadataSection.vocalGenderInfo')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-            rootClassName="block mb-1.5"
+            rootClassName="flex items-center h-6 mb-1.5"
             onReset={vocalGender !== '' ? () => onVocalGenderChange('') : undefined}
           />
           <StyledSelect
             accent="pink"
+            size="sm"
             value={vocalGender}
             onChange={onVocalGenderChange}
             className="w-full"
@@ -221,11 +231,12 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             label={mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
             info={mm3Mode ? t('metadataSection.lyricsLanguageHint') : t('metadataSection.vocalLanguageInfo')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-            rootClassName="block mb-1.5"
+            rootClassName="flex items-center h-6 mb-1.5"
             onReset={vocalLanguage !== 'en' ? () => onVocalLanguageChange('en') : undefined}
           />
           <StyledSelect
             accent="pink"
+            size="sm"
             value={vocalLanguage}
             onChange={onVocalLanguageChange}
             className="w-full"

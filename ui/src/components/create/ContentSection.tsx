@@ -7,6 +7,8 @@ import { useTranslation } from 'react-i18next';
 import { hasWildcards, expandInPlace, randomWildcardSeed } from '../../utils/wildcardUtils';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Fold } from '../shared/Fold';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { StylePresetSelect } from './StylePresetSelect';
 
 interface ContentSectionProps {
@@ -48,24 +50,6 @@ interface ContentSectionProps {
   afterStyle?: React.ReactNode;
 }
 
-/** A titled fold in the Song Info style. */
-export const Fold: React.FC<{ title: React.ReactNode; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, defaultOpen = false, children }) => {
-  const [open, setOpen] = React.useState(defaultOpen);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors mb-1.5"
-      >
-        {open ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
-        {title}
-      </button>
-      {open && children}
-    </div>
-  );
-};
-
 export const ContentSection: React.FC<ContentSectionProps> = ({
   caption, onCaptionChange, lyrics, onLyricsChange,
   instrumental, onInstrumentalChange,
@@ -82,7 +66,7 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
 }) => {
   const { t } = useTranslation();
   const hasMetadata = !!(title || artist || subject);
-  const [showMetadata, setShowMetadata] = React.useState(hasMetadata);
+  const [showMetadata, setShowMetadata] = usePersistedState('hs-create-fold-songInfo', hasMetadata);
   const styleRef = React.useRef<HTMLTextAreaElement>(null);
   const lyricsRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -142,6 +126,8 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
               </button>
             )}
             {!yue2Mode && autoExpandBtn}
+            {/* Style presets write an ensemble description straight into the caption. */}
+            {!captionReadOnly && <StylePresetSelect caption={caption} onCaptionChange={onCaptionChange} />}
           </div>
         </div>
         <textarea
@@ -158,12 +144,6 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           rows={captionReadOnly ? 8 : 3}
         />
 
-        {/* Style presets write an ensemble description straight into the caption. */}
-        {!captionReadOnly && (
-          <div className="mt-1.5">
-            <StylePresetSelect caption={caption} onCaptionChange={onCaptionChange} />
-          </div>
-        )}
       </div>
 
       {afterStyle}
@@ -340,7 +320,7 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
 
       {/* Negative Prompt — folded away on YuE2 */}
       {yue2Mode ? (
-        <Fold title="Negative Prompt">
+        <Fold title="Negative Prompt" storageKey="hs-create-fold-negative">
           <textarea
             className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none resize-none transition-colors"
             placeholder="jazz, acoustic, slow, ambient, piano, soft, classical..."

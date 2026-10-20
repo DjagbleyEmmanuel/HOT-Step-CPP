@@ -13,7 +13,8 @@ import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParam
 import { useAuth } from '../../context/AuthContext';
 import { generateApi } from '../../services/api';
 import { Yue2ScorePreviewModal, type Yue2ScorePreviewData } from './Yue2ScorePreviewModal';
-import { ContentSection, Fold } from './ContentSection';
+import { ContentSection } from './ContentSection';
+import { Fold } from '../shared/Fold';
 import { MetadataSection } from './MetadataSection';
 import { LatentImport } from '../shared/LatentImport';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
@@ -496,7 +497,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // YuE2: dataset, caption source and tag chips, folded under the Style
   // Description (ContentSection's afterStyle slot).
   const yue2DatasetFold = yue2DatasetBlockVisible ? (
-    <Fold title={t('createPanel.yue2DatasetCaptionOptions', 'Dataset Caption Options')} defaultOpen>
+    <Fold title={t('createPanel.yue2DatasetCaptionOptions', 'Dataset Caption Options')} storageKey="hs-create-fold-datasetCaption" defaultOpen>
       <div className="space-y-1">
         <ParamLabel
           label={t('createPanel.yue2Dataset', 'Dataset')}
@@ -558,7 +559,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider block"
                   info={t('createPanel.yue2TagsInfo', 'These phrases come from the selected training dataset. Click a tag to add it to your Custom caption; click it again to remove it.')}
                 />
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 max-h-[7.75rem] overflow-y-auto pr-1">
                   {yue2CaptionTags.map(phrase => {
                     const selected = hasCaptionTag(phrase);
                     return (
@@ -592,7 +593,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   return (
     <div className="h-full min-w-0 flex flex-col bg-zinc-50 dark:bg-suno">
       <TrainingDraftBar />
-      <StudioDraftPicker control={draft} textKey="hs-title" apply={applyDraft} refuse={refuseDraft} namedSave={yue2Ui} />
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
@@ -755,6 +755,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
             </>
           )}
         </button>
+        <Fold title={t('studioDrafts.title', 'Drafts')} storageKey="hs-create-fold-drafts">
+          <StudioDraftPicker control={draft} textKey="hs-title" apply={applyDraft} refuse={refuseDraft} namedSave={yue2Ui} inline />
+        </Fold>
       </div>
 
       {/* AI Generate Modal */}

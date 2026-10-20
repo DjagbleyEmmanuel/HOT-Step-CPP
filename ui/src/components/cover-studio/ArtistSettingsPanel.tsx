@@ -43,6 +43,8 @@ interface ArtistSettingsPanelProps {
   genProgress: number;
   genStage: string;
   onGenerate: () => void;
+  /** Under the Generate button (the Drafts fold). */
+  footer?: React.ReactNode;
   onCancel: () => void;
   isGeneratingCaption: boolean;
   onRegenerateCaption: () => void;
@@ -281,6 +283,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
           <Disc3 className="w-4 h-4" />
           {isGenerating ? t('cover.addToQueue', 'Add to Queue') : t('cover.generateCover')}
         </button>
+        {props.footer}
       </div>
     </div>
   );

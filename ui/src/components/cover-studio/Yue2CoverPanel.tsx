@@ -59,6 +59,8 @@ interface Props {
   canGenerate: boolean;
   isGenerating: boolean;
   onGenerate: () => void;
+  /** Under the Generate button (the Drafts fold). */
+  footer?: React.ReactNode;
 }
 
 /** Cover Studio's own AR strength, 0 to 10. It replaces the adapter picker's
@@ -184,6 +186,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
       <button type="button" onClick={p.onOpenBuild} className="text-cyan-700 dark:text-cyan-300">Open</button>
       {p.onStartOverBuild && <> · <button type="button" onClick={p.onStartOverBuild} className="text-red-500">Start over</button></>}</p>}
     {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
+    {p.footer}
   </div>;
 
   return (

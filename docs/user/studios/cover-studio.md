@@ -32,12 +32,13 @@ have to make.
    overwrites your fields. If that happens, your next change is saved as a
    new draft and a short note under the header says so. If a save fails, a
    note says the draft wasn't saved; your edits stay in this browser, and the
-   next change tries again. To go back to a saved draft, open **Load a saved
-   draft** under the header and pick one; if the form has edits not yet saved
+   next change tries again. To go back to a saved draft, open the **Drafts**
+   fold under the Generate button (collapsed by default) and pick one from
+   **Load a saved draft**; if the form has edits not yet saved
    to a draft, you are asked first. A draft whose uploaded source has gone
    missing is reported as unavailable, so you can reupload it. Loading a
    draft never starts a job.
-   In YuE2 mode, the draft controls sit above the YuE2 settings. Enter a name
+   In YuE2 mode, the Drafts fold also has a name box. Enter a name
    and choose **Save named draft** to keep a separate snapshot of the current
    score and settings. **Load a saved draft** restores that snapshot. Leaving
    Cover Studio and returning also restores the current browser's score,
