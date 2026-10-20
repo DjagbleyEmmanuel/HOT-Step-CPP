@@ -21,7 +21,9 @@ Streaming and the normal generation queue can't run at the same time: starting a
 4. Click **Generate** (Sequential) or **Start** (Continuous). Sequential queues one song through the normal job queue, the same as any other studio, and STORM's live controls don't apply to it. Continuous opens the audio stream and starts playing slot 1 as soon as it renders.
 5. While a Continuous stream plays, use the Live Controls column on the right to change the style, lyrics, seed, key, BPM or per-slot sliders for the *next* slot, then click **Send** (or drag a slider, which sends after you stop moving it). Changes land on the slot after the one currently rendering.
 6. Click **Record** to start capturing the master output to a downloadable `.webm` file; click it again to stop and download. Recording only happens in the browser, nothing is saved to the library automatically.
-7. Click **Stop** (or navigate away from the page) to end playback. The engine finishes the current slot, then stops; no next slot starts. Output completed after Stop is discarded. Other GPU work waits until that slot finishes.
+7. Click **Stop** (or navigate away from the page) to end playback. No next slot starts. An in-flight ACE-Step or YuE2 slot is cancelled; Stable Audio 3 finishes the current slot, then stops. Output is discarded either way, and the GPU lane stays held until the engine finishes.
+
+Each slot takes the shared GPU lane. Queued generations can run between slots.
 
 For DJ mode: start Deck A and Deck B independently from their own panels, each with its own caption, lyrics and Start/Stop. The center column shows each deck's detected key on the Camelot wheel with a compatibility read-out, a crossfader, cut buttons, per-deck nudge buttons, and Quantize A→B to line up Deck B's next slot to Deck A's next beat.
 

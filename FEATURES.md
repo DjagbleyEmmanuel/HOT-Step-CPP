@@ -292,7 +292,7 @@ Live streaming performance with crossfaded slots on ACE-Step, YuE2 and Stable Au
 |---|---|
 | Continuous mode | Renders back-to-back slots that crossfade into one endless stream. |
 | Directed Drift | Steer caption tags and backend-specific parameter targets with Pull, Rate and Jitter, parameter locks, seed evolution, macros and saved tag sets. |
-| Stop | Finishes the current slot, then stops; no next slot starts. Output completed after Stop is discarded. |
+| Stop | No next slot starts. ACE-Step and YuE2 cancel the current slot; Stable Audio 3 finishes it, then stops. Output is discarded, and the GPU lane stays held until the engine finishes. |
 | Live controls | Change style, lyrics, seed, BPM, guidance, steps and length for the next slot without stopping. |
 | Sticky fields | Pin a style or lyric change so it stays for every following slot. |
 | Lyric advance | Loop, cycle or shuffle through lyric sections as slots play. |
