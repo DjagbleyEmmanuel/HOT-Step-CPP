@@ -83,9 +83,10 @@ The response is `Content-Type: audio/wav`, and the stream's Node session is name
   - `next_*`, `seed`, `prompt` and `lyrics` apply to one slot.
   - `stick_prompt` and `stick_lyrics` persist until set to `null`.
   - `stream_pause: true` holds generation, for when the player's buffer is full.
+  - `drift` is a `Partial<DriftPressure>` patch merged into the stream's Directed Drift pressure, or held for the next stream when none is running. Invalid fields are ignored.
   - Fields of the wrong type are ignored.
 - `GET /api/generate/storm/control?streamId=` reads the live state back.
-- Stop: `POST /api/generate/storm/stop` with `{ streamId }` cancels the slot in flight and ends the response. Closing the connection does the same.
+- Stop: `POST /api/generate/storm/stop` with `{ streamId }` starts no further slot and ends the response. An in-flight ACE-Step or YuE2 slot is cancelled; a Stable Audio 3 slot runs to completion. Its output is discarded either way, and the GPU lane stays held until the engine settles. Closing the connection does the same.
 - Errors after audio has started have no error frame: the response just ends.
 
 **MM3.**
