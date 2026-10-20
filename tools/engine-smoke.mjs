@@ -14,7 +14,7 @@
 // (HOTSTEP_CHECK_INJECT), then forces a write failure; it passes only if every
 // fault is caught.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,22 +34,19 @@ if (!models) {
   if (!models) { console.error('engine-smoke: could not resolve the models folder; pass --models <dir>\n' + (r.stderr || '')); process.exit(1); }
 }
 
-const outDir = join(root, 'logs', 'engine-smoke');
-mkdirSync(outDir, { recursive: true });
-
-// Every run shares the files in outDir, so a second run would delete the first
-// one's WAVs and squat directory. Hold a lock; take it over only from a dead pid.
-const lock = join(outDir, '.lock');
-for (;;) {
-  try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
-  const owner = Number(readFileSync(lock, 'utf8'));
-  let alive = !owner; // empty: the owner is between create and write
-  if (owner) try { process.kill(owner, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; }
-  if (alive) { console.error(`engine-smoke: another run (pid ${owner}) is using logs/engine-smoke; wait for it to finish`); process.exit(1); }
-  rmSync(lock, { force: true });
+// Each run gets its own folder, so overlapping runs never share a WAV, log or
+// squat path. Folders from runs older than a day are pruned.
+const smokeDir = join(root, 'logs', 'engine-smoke');
+mkdirSync(smokeDir, { recursive: true });
+for (const d of readdirSync(smokeDir)) {
+  const p = join(smokeDir, d);
+  if (/^\d{14}-\d+$/.test(d) && statSync(p).mtimeMs < Date.now() - 86_400_000) rmSync(p, { recursive: true, force: true });
 }
-process.on('exit', () => rmSync(lock, { force: true }));
-console.log(`engine-smoke: ${exe}\n  models  ${models}`);
+const runId = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
+const outDir = join(smokeDir, runId);
+mkdirSync(outDir);
+const rel = `logs/engine-smoke/${runId}`;
+console.log(`engine-smoke: ${exe}\n  models  ${models}\n  output  ${rel}`);
 
 // frames = floor(duration * 25) rounded up to the DiT patch (2); 1920 samples per frame.
 const expectSamples = (duration) => Math.ceil(Math.floor(duration * 25) / 2) * 2 * 1920;
@@ -94,7 +91,7 @@ function render(name, req, { env = {}, extra = [] } = {}) {
   writeFileSync(join(outDir, `${name}.log`), log);
   const lines = log.split(/\r?\n/).filter((l) => l.startsWith('[Check Batch') || l.includes('FATAL'));
   const times = stageTimes(log);
-  console.log(`\n[${name}] exit ${r.status ?? r.error?.message} after ${secs.toFixed(1)}s (log logs/engine-smoke/${name}.log)`);
+  console.log(`\n[${name}] exit ${r.status ?? r.error?.message} after ${secs.toFixed(1)}s (log ${rel}/${name}.log)`);
   lines.forEach((l) => console.log('  ' + l));
   console.log('  stages: ' + (Object.entries(times).map(([k, v]) => `${k} ${v.toFixed(0)} ms`).join(', ') || 'none found'));
   return { status: r.status, lines, log, times, secs, t0 };
