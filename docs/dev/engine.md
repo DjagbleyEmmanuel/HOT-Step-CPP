@@ -433,6 +433,23 @@ to guidance plugins.
 New plugins need no C++ rebuild. Writing one is covered in
 [plugins-authoring.md](plugins-authoring.md).
 
+## Stable Audio 3 sampling
+
+`POST /sa3-synth` generates from caption tokens using the same SA3 model and
+adapter path as StableStep. The Node backend defaults to 8 steps and the
+`md_pingpong_blend` Lua solver over the native `pingpong` wire sampler. Explicit
+`pingpong` or `euler` selects a native loop; an opted-in solver plugin takes
+precedence over the default Lua solver.
+
+Seed breeding is limited to noise-only synthesis. `seed_b` selects a second
+noise stream and `seed_blend` mixes it into the initial latent and each pingpong
+re-noise draw. Node resolves an omitted or blank blend to 0.5 when seed B is set;
+explicit 0 disables breeding and 1 selects seed B's noise. The native loop
+advances both streams together. The Lua solver uses its own matching seed-B
+stream through the shared `SolverState.seed_b` and `seed_blend` globals. Other
+solver callers retain disabled defaults of -1 and 0, including ACE-Step.
+StableStep refinement does not enable breeding.
+
 ## Adapters at runtime
 
 ACE-Step DiT adapters (LoRA and LoKr, PEFT directories or single `.safetensors`

@@ -311,9 +311,16 @@ freely, including commercially, and that only companies need a commercial licenc
 
 ## Stable Audio 3
 
+SA3 generation defaults to 8 steps with the MD Pingpong Blend Lua sampler.
+You can select native Pingpong or Euler instead, or enable a solver in Sampler
+Plugins to override the default solver.
+
 Seed breeding only runs when a seed B is set. If you set seed B and leave the
 blend empty, the blend defaults to 0.5 (an even mix of the two seeds' noise).
-A blend of 0 turns breeding off. This differs from ACE-Step, where a shared
+A blend of 0 turns breeding off; 1 uses seed B's noise throughout sampling.
+Both the native Pingpong and MD Pingpong Blend paths mix the second noise
+stream at every re-noise step. StableStep refinement does not use seed breeding.
+This differs from ACE-Step, where a shared
 seed B with no blend sends no blend at all.
 
 ## Capability matrix
