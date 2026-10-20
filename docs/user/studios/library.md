@@ -56,6 +56,7 @@ across every view, not just Library.
 | Spectrum toggle | Shows/hides the frequency analyzer above the waveform. |
 | Disco mode | Cosmetic pulse visualization synced to the track. |
 | Playback speed | Cycles 0.5x / 0.75x / 1x / 1.25x / 1.5x / 2x. |
+| Lock screen / media keys | The current track (title, artist or backend, cover art) shows in the OS media overlay and phone lock screen. Play, pause, previous, next and seeking work from there and from headset or keyboard media keys. |
 | 48k / 44.1k | Previews how the 48 kHz render sounds clocked out at 44.1 kHz, pitched down about 1.47 semitones with tempo unchanged. A quick way to A/B a resample artifact without actually resampling. |
 | Variant switch (No Adapter / Unmastered / Mastered) | Only shown when a track has that variant. Each segment plays it and carries its own small download button for that exact render. |
 | Trim/crop | Toggles trim mode; the waveform below becomes clickable to set in/out points. |
@@ -91,6 +92,12 @@ letters of a studio name ("trn" finds Training Studio) or a song title;
 the list ranks studios first, then songs from your library. Use Up and
 Down to move, Enter to open, Esc to close. Picking a song opens Library and
 plays it.
+
+On a phone, tap the song title or cover in the mini player to open the
+full-screen player: large cover art, title and backend, a big waveform you
+can tap to seek plus a scrub bar with a large thumb, and big transport
+buttons. Close it with the chevron at the top, by swiping down, or with the
+Android back button.
 
 ## Playlists
 

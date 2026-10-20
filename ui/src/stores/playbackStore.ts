@@ -32,6 +32,7 @@ import {
 import { setPitchRatio } from '../audio/pitchShift';
 import { forgetPeaks } from '../audio/peaksClient';
 import * as engine from '../audio/engine';
+import i18n from '../i18n';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -892,3 +893,68 @@ export function usePlaybackSelector<T>(selector: (state: PlaybackState) => T): T
 
   return useSyncExternalStore(subscribe, getSelectedSnapshot);
 }
+
+// ── Media Session (lock screen, headset keys, OS media overlay) ──
+// Mirrors the current track into navigator.mediaSession and routes the OS
+// transport buttons back into this store.
+let _msTrackId: string | null = null;
+let _msPlaying: boolean | null = null;
+let _msLastPos = -10;
+
+function mediaSessionSync(): void {
+  const ms = navigator.mediaSession;
+  const s = _state;
+  const track = s.currentTrack;
+  if (!track) {
+    if (_msTrackId !== null) { ms.metadata = null; ms.playbackState = 'none'; _msTrackId = null; }
+    return;
+  }
+  if (track.id !== _msTrackId) {
+    _msTrackId = track.id;
+    _msLastPos = -10;
+    const backend = track.generationParams?.backend as string | undefined;
+    ms.metadata = new MediaMetadata({
+      title: track.title || i18n.t('player.mediaSession.defaultTitle'),
+      artist: track.artistName || backend || i18n.t('player.mediaSession.unknownArtist'),
+      album: backend && track.artistName ? backend : undefined,
+      artwork: track.coverUrl
+        ? [{ src: new URL(track.coverUrl, window.location.href).href, sizes: '512x512' }]
+        : [],
+    });
+  }
+  if (s.isPlaying !== _msPlaying) {
+    _msPlaying = s.isPlaying;
+    ms.playbackState = s.isPlaying ? 'playing' : 'paused';
+    _msLastPos = -10;
+  }
+  // Position updates are throttled; the OS extrapolates between them.
+  if (Math.abs(s.currentTime - _msLastPos) >= 1 && s.duration > 0 && Number.isFinite(s.duration)) {
+    _msLastPos = s.currentTime;
+    try {
+      ms.setPositionState({
+        duration: s.duration,
+        position: Math.min(Math.max(0, s.currentTime), s.duration),
+        playbackRate: s.playbackRate > 0 ? s.playbackRate : 1,
+      });
+    } catch { /* invalid state during track switch */ }
+  }
+}
+
+function installMediaSession(): void {
+  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+  const ms = navigator.mediaSession;
+  const set = (action: MediaSessionAction, handler: MediaSessionActionHandler) => {
+    try { ms.setActionHandler(action, handler); } catch { /* unsupported action */ }
+  };
+  set('play', () => { if (!_state.isPlaying) togglePlay(); });
+  set('pause', () => { if (_state.isPlaying) togglePlay(); });
+  set('previoustrack', () => previous());
+  set('nexttrack', () => next());
+  set('seekto', (d) => { if (d.seekTime != null) seek(d.seekTime); });
+  set('seekbackward', (d) => seek(Math.max(0, _state.currentTime - (d.seekOffset ?? 10))));
+  set('seekforward', (d) => seek(Math.min(_state.duration || Infinity, _state.currentTime + (d.seekOffset ?? 10))));
+  subscribe(mediaSessionSync);
+  mediaSessionSync();
+}
+
+installMediaSession();
