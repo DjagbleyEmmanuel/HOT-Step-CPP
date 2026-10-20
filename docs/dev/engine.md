@@ -648,15 +648,20 @@ Routes `ace-server` adds on top of upstream's `/lm`, `/synth`, `/understand`,
 
 ## Headless smoke test
 
-`node tools/engine-smoke.mjs` renders a 10-second fixed-seed instrumental with
-`ace-synth --check` and exits 1 unless the output passes. No app, server or UI is
+`node tools/engine-smoke.mjs` renders two fixed-seed instrumentals with
+`ace-synth --check`, one 10 s and one 7.33 s (patch padding and ragged VAE tiles), and
+exits 1 unless both pass, each WAV is fresh and exactly frames x 1920 samples long, and
+the engine log yields per-stage times. No app, server or UI is
 involved. It resolves the models folder through `server/scripts/data-paths.ts`
 (override with `--models <dir>`), uses `acestep-v15-turbo-BF16.gguf` (override with
-`--dit <file>`), and writes the request, WAV and full log to `logs/engine-smoke/`.
-`--self-test` renders five tracks, corrupts four inside ace-synth, and passes only if
-each check catches its fault. The checks and thresholds are in
+`--dit <file>`), and writes requests, WAVs and logs to `logs/engine-smoke/`.
+`--self-test` renders six tracks, corrupts five inside ace-synth (NaN, subnormal,
+silence, DC, clip), forces a write failure, and passes only if every fault is caught.
+The block-based monitor chain has its own test, `engine/tests/test-monitor-chain.cpp`
+(odd block sizes, decaying tail, subnormal count); how to run it is in the
+engine-dev-loop skill. The checks and thresholds are in
 [engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md#ace-synth-reference).
-Engine hand-offs carry its `[Check Batch0]` line as the render receipt.
+Engine hand-offs carry its `[Check Batch0]`, `stages:` and `wav:` lines as the render receipt.
 
 ## Related
 

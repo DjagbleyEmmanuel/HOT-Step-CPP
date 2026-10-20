@@ -226,23 +226,52 @@ node tools\engine-smoke.mjs              # exit 0 = PASS, 1 = FAIL
 node tools\engine-smoke.mjs --self-test  # proves each check can fail; run after touching the checker
 ```
 
-It renders a 10 s fixed-seed (42) instrumental through `ace-synth --check`, which
-measures the raw float buffer **before** the WAV writer's NaN-to-zero sanitiser
-(`audio-io.h` `wav_sanitize`) can hide a broken render. Pass needs zero non-finite
-samples, peak above -60 dBFS, |DC| at most 0.02 per channel, and at most 0.1% of
-samples past full scale. Paste the `[Check Batch0] ...` line and the
-`ENGINE SMOKE: PASS|FAIL` verdict into the hand-off. Request, WAV and full log land
-in `logs/engine-smoke/`. Run it with the GPU idle (check `GET :8085/jobs` for a
+It renders two fixed-seed instrumentals through `ace-synth --check`: "round" (10 s,
+seed 42, 250 latent frames) and "odd" (7.33 s, seed 43: 183 frames padded to 184 for
+the DiT patch, decoded in three ragged 96-frame VAE tiles), so padding and tile-edge
+indexing get exercised. `--check` measures the raw float buffer **before** the WAV
+writer's NaN-to-zero sanitiser (`audio-io.h` `wav_sanitize`) can hide a broken
+render. Pass needs zero non-finite and zero subnormal samples, peak above -60 dBFS,
+|DC| at most 0.02 per channel, and at most 0.1% of samples past full scale. The
+wrapper also deletes the old WAV first, checks the new one exists and holds exactly
+frames x 1920 samples, and prints per-stage wall times (model loads, text encode,
+DiT, VAE) from the engine log, so a denormal stall or other slowdown shows up as a
+time regression. ace-synth exits 1 if a WAV fails to write, 2 if a check fails.
+
+Paste both `[Check Batch0] ...` lines, the `stages:` and `wav:` lines and the
+`ENGINE SMOKE: PASS|FAIL` verdict into the hand-off. Requests, WAVs and logs land in
+`logs/engine-smoke/`. Run it with the GPU idle (check `GET :8085/jobs` for a
 `running` job first); it loads its own models, so the app can stay up.
 
-Measured 2026-10-20 on the RTX 5090, turbo BF16 DiT: 6.4 s end to end (4.2 s for
-the five-track self-test straight after); peak -1.1 dBFS, rms 0.102, DC about 3e-4,
-nothing past full scale. Normal values sit far inside every threshold.
+Measured 2026-10-20, RTX 5090, turbo BF16 DiT: about 3.7 s per case; round peak
+-1.1 dBFS, rms 0.102, DC about 3e-4; DiT about 100 ms, VAE about 90 ms, model loads
+about 2.8 s together. Normal values sit far inside every threshold.
 
 Mac Metal works the same (finds `engine/build/ace-synth`). The Mac server holds only
 the Q4_K_M turbo DiT, so pass it: `node tools/engine-smoke.mjs --models ~/hot-step-models
---dit acestep-v15-turbo-Q4_K_M.gguf`. Measured there 2026-10-20: 5.0 s, peak -0.3 dBFS,
-rms 0.066, PASS; `--self-test` catches all four faults.
+--dit acestep-v15-turbo-Q4_K_M.gguf`. Measured there 2026-10-20: about 2.5 s per case,
+DiT about 600 ms, VAE about 550 ms; both cases and the self-test PASS.
+
+**Block-based DSP: `monitor_run_chain`** (`engine/tools/monitor-chain.h`, used by
+vst-host's live monitor, which feeds it device-sized blocks) is the only block-based
+path. After touching it or vst-host's processing loop, run its test. It is
+header-only, so compile it directly rather than turning on `BUILD_TESTING` in the
+shared build cache:
+
+```powershell
+# VS developer prompt (vcvars64), in engine\build\test-standalone
+cl /nologo /std:c++17 /O2 /EHsc ..\..\tests\test-monitor-chain.cpp /Fe:test-monitor-chain.exe; .\test-monitor-chain.exe
+# Mac, from the repo root:
+# clang++ -std=c++17 -O2 engine/tests/test-monitor-chain.cpp -o engine/build/test-standalone/test-monitor-chain && engine/build/test-standalone/test-monitor-chain
+```
+
+It runs a stateful two-stage chain at blocks 1, 37, 441, 1000 and 4096 over a burst
+that decays into silence. Every size must match a one-block reference bit for bit,
+stay finite, hold no subnormals and end in exact silence, with ns/sample printed per
+size. A flush-off run must produce subnormals, which proves the counter. Nothing in
+the host sets FTZ/DAZ, so a plugin without its own denormal guard leaves a tail stuck
+at subnormal values: on the 5090 box that costs about 1.5x per sample (3.7 vs 2.4
+ns); on Apple silicon there is no penalty. Timings are reported, not asserted.
 
 If you only changed `ace-synth.cpp` or a header it uses, building just that target
 leaves a running app alone: `cmake --build engine/build --config Release --target ace-synth`.
