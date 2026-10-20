@@ -136,6 +136,17 @@ test('instrumental metadata and missing or malformed sidecars preserve fallback'
     if (!instrumental.matched || !instrumental.metadataAvailable) throw new Error('Expected dataset metadata');
     assert.equal(instrumental.isInstrumental, true);
     assert.equal(instrumental.lyrics, '');
+    // A blank flag is read from the lyrics.
+    fs.writeFileSync(sidecar, 'bpm: 123\nkey: C# Minor\nis_instrumental:\nlyrics:\n[Intro]\nSung line\n');
+    const blank = await f.service.lookup(input, 'owner');
+    if (!blank.matched || !blank.metadataAvailable) throw new Error('Expected dataset metadata');
+    assert.equal(blank.isInstrumental, false);
+    assert.equal(blank.lyrics, '[Intro]\nSung line');
+    fs.writeFileSync(sidecar, 'bpm: 123\nkey: C# Minor\nis_instrumental:\nlyrics:');
+    const blankEmpty = await f.service.lookup(input, 'owner');
+    assert.equal(blankEmpty.matched && blankEmpty.metadataAvailable && blankEmpty.isInstrumental, true);
+    fs.writeFileSync(sidecar, 'bpm: 123\nkey: C# Minor\nis_instrumental: maybe\nlyrics: line');
+    assert.deepEqual(await f.service.lookup(input, 'owner'), { matched: false });
   } finally { f.close(); }
 });
 

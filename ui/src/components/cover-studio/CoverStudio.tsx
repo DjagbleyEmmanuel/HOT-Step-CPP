@@ -669,7 +669,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (captionJobRef.current) void workflowApi.cancel(token, captionJobRef.current).catch(() => {});
     setSourceAssetId(''); setCoverDraftId(''); setCoverDraftRevision(0);
     const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
-    setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
+    // The last source's lyrics never carry over: the sidecar, cache or a search fills them.
+    setLyrics(''); setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
     setBpmCorrection(1);

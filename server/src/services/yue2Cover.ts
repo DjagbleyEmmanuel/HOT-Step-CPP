@@ -177,9 +177,10 @@ export function createYue2CoverService(deps = {
     const bpm = Number(fields.bpm);
     const key = fields.key?.trim() || '';
     const instrumental = fields.is_instrumental?.trim().toLowerCase();
-    const validInstrumental = ['true', 'false', '1', '0', 'yes', 'no'].includes(instrumental || '');
-    const isInstrumental = ['true', '1', 'yes'].includes(instrumental || '');
     const hasLyrics = typeof fields.lyrics === 'string' && !!fields.lyrics.trim();
+    // A blank flag (as many dataset sidecars carry) is read from the lyrics, as training reads it.
+    const validInstrumental = !instrumental || ['true', 'false', '1', '0', 'yes', 'no'].includes(instrumental);
+    const isInstrumental = instrumental ? ['true', '1', 'yes'].includes(instrumental) : !hasLyrics;
     const validBpm = Number.isFinite(bpm) && bpm >= 20 && bpm <= 300;
     const abc = readAbcSidecar(matched.audioPath);
     if (!validBpm || !key || !validInstrumental || (!hasLyrics && !isInstrumental)) {
