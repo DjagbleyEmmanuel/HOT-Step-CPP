@@ -42,6 +42,9 @@ import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
 import { Toast, type ToastType } from './components/shared/Toast';
+import { HotkeyHelpModal } from './components/shared/HotkeyHelpModal';
+import { CommandPalette, OPEN_PALETTE_EVENT } from './components/shared/CommandPalette';
+import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
@@ -719,6 +722,19 @@ const AppContent: React.FC = () => {
     if (selectedSong?.id === song.id) setSelectedSong(null);
     showToast(`Deleted "${song.title}"`, 'success');
   }, [token, selectedSong, queryClient]);
+
+  // Global desktop hotkeys (see utils/hotkeys.ts); "?" opens the cheat sheet.
+  const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
+  const openHotkeyHelp = useCallback(() => setShowHotkeyHelp(true), []);
+  const closeHotkeyHelp = useCallback(() => setShowHotkeyHelp(false), []);
+  const [showPalette, setShowPalette] = useState(false);
+  const openPalette = useCallback(() => setShowPalette(true), []);
+  const closePalette = useCallback(() => setShowPalette(false), []);
+  useEffect(() => {
+    window.addEventListener(OPEN_PALETTE_EVENT, openPalette);
+    return () => window.removeEventListener(OPEN_PALETTE_EVENT, openPalette);
+  }, [openPalette]);
+  useGlobalHotkeys(openHotkeyHelp, openPalette);
 
   // Handle bulk delete
   const handleBulkDelete = useCallback((ids: string[]) => {
@@ -1593,6 +1609,24 @@ const AppContent: React.FC = () => {
       </div>
 
       {/* Modals */}
+      {showHotkeyHelp && <HotkeyHelpModal onClose={closeHotkeyHelp} />}
+      {showPalette && (
+        <CommandPalette
+          onClose={closePalette}
+          onNavigate={navigateTo}
+          songs={songs}
+          onPickSong={(id) => {
+            const song = songs.find(s => s.id === id);
+            if (song) {
+              navigateTo('library');
+              playFromList(songToTrack(song), songs.map(songToTrack), 'library');
+              setSelectedSong(song);
+            } else {
+              navigateTo('library');
+            }
+          }}
+        />
+      )}
       <Toast
         message={toast.message}
         type={toast.type}

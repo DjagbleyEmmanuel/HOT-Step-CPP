@@ -66,6 +66,32 @@ Above the transport, a collapsible area (only expands while something is
 playing, or trim mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
+## Keyboard shortcuts
+
+On desktop these work anywhere in the app. Press `?` to see them in a small cheat sheet.
+
+| Key | Action |
+|---|---|
+| Space or K | Play / pause |
+| J / L | Seek back / forward 10 s |
+| Up / Down | Move the focused row in the Library list (outlined in pink) |
+| Enter | Play the focused row |
+| Delete | Delete the selection, or the focused row if nothing is selected. |
+| Esc | Clear the selection, then the focused row |
+| ? | Open the cheat sheet |
+| Ctrl+K (Cmd+K on Mac) | Open the command palette, also while typing in a field |
+
+Shortcuts are off while you type in a field, while a dialog is open, and in Compare studio,
+which has its own keys (B, Tab).
+
+### Command palette
+
+Ctrl+K (Cmd+K on Mac) opens a search box that jumps anywhere. Type a few
+letters of a studio name ("trn" finds Training Studio) or a song title or
+style; the list ranks studios first, then songs from your library. Use Up and
+Down to move, Enter to open, Esc to close. Picking a song opens Library and
+plays it. On a phone, tap the search icon in the top bar to open it.
+
 ## Playlists
 
 The playlist is a play queue, not a saved collection. There is one queue, not

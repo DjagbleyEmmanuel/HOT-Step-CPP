@@ -330,6 +330,11 @@ function subscribe(cb: () => void): () => void {
   return () => _listeners.delete(cb);
 }
 
+/** Non-reactive read of the current playback state (for event handlers). */
+export function getPlaybackState(): PlaybackState {
+  return _state;
+}
+
 function getSnapshot(): PlaybackState {
   return _state;
 }
