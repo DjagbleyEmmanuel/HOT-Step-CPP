@@ -138,3 +138,10 @@ export function splitLyricBlock(lyrics: string, index: number, line: number, lab
   lines.splice(at, 0, ...(blank ? [''] : []), `[${label}]`);
   return joinLike(lyrics, lines);
 }
+
+/** `abc` with abcjs numbering every bar: the directive goes after the X: line, in the header. */
+export function withBarNumbers(abc: string): string {
+  const lines = abc.split('\n');
+  const at = lines.findIndex(line => /^X:/.test(line.trim()));
+  return [...lines.slice(0, at + 1), '%%barnumbers 1', ...lines.slice(at + 1)].join('\n');
+}

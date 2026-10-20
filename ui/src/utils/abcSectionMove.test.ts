@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mergeScoreSections, mergeSections, relabelScoreSection, relabelSection, splitScoreSection, splitSection, type ScoreEdit, type SectionEdit } from './abcSectionMove';
-import { lyricBlockLines } from './abcSections';
+import { barRanges, mergeScoreSections, mergeSections, relabelScoreSection, relabelSection, splitScoreSection, splitSection, type ScoreEdit, type SectionEdit } from './abcSectionMove';
+import { abcSectionMarks, lyricBlockLines, withBarNumbers } from './abcSections';
 // The server's own readers: its section lint, and the planner's block split.
 import { lintScoreSections, scoreSections } from '../../../server/src/services/backends/yue2/scoreSections';
 import { splitLyricBlocks } from '../../../server/src/services/backends/yue2/sectionMatch';
@@ -157,4 +157,12 @@ test('lyrics with no tags at all are left alone and only the score changes', () 
 test('CRLF lyrics keep their line endings', () => {
   const edit = ok(splitSection(ABC, LYRICS.replace(/\n/g, '\r\n'), 1, 7, 1, 'pre-chorus'));
   assert.ok(!/[^\r]\n/.test(edit.lyrics));
+});
+
+test('numbering every bar on the lead sheet changes neither its bars nor its sections', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/8', 'K:C', '% intro', 'V: Vocal', 'z8|z8|', '% verse', 'V: Vocal', 'C8|D8|E8|', ''].join('\n');
+  const numbered = withBarNumbers(abc);
+  assert.equal(numbered.split('\n')[1], '%%barnumbers 1');
+  assert.deepEqual(barRanges(numbered).map(r => r.bar), barRanges(abc).map(r => r.bar));
+  assert.deepEqual(abcSectionMarks(numbered).map(m => m.label), ['intro', 'verse']);
 });

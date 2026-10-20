@@ -655,7 +655,7 @@
     "cover.prepare.structure.selectFirst": "Select a section on the strip first.",
     "cover.prepare.structure.strip": "Score sections",
     "cover.prepare.structure.bars": "bars {{bars}}",
-    "cover.prepare.structure.selectHint": "Click a section to select it and hear it. Shift-click, or Shift with the arrow keys, adds its neighbours.",
+    "cover.prepare.structure.selectHint": "Click a section to select it and hear it. Shift-click, or Shift with the arrow keys, adds its neighbours. To move where a section starts, drag its ▶ label on the lead sheet onto the numbered bar.",
     "cover.prepare.structure.short": "{{count}} short bar(s) inside the score. This is a warning, not an error. Pick one to fix its grouping:",
     "cover.prepare.structure.selection": "{{count}} sections selected",
     "cover.prepare.structure.hearScore": "Hear score",

@@ -3,7 +3,7 @@ import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
 import { useTranslation } from 'react-i18next';
 import { followNoteInBox } from '../../utils/abcFollow';
-import { abcSectionMarks, sectionAtChar, sectionColours } from '../../utils/abcSections';
+import { abcSectionMarks, sectionAtChar, sectionColours, withBarNumbers } from '../../utils/abcSections';
 import { withChoirVocal } from '../../utils/abcChoirVocal';
 import { barAtChar, barRanges } from '../../utils/abcSectionMove';
 import { AbcChart } from './AbcChart';
@@ -242,7 +242,9 @@ export const Yue2CoverScore: React.FC<Props> = p => {
     applyHighlightRef.current = () => {};
     if (!p.abc.trim()) return;
     let tunes: ReturnType<typeof abcjs.renderAbc>;
-    const abc = withChoirVocal(p.abc);
+    // Every bar numbered, so a section can be moved to a bar read off the sheet. Only the
+    // rendered copy carries the directive; offsets below all index this copy.
+    const abc = withBarNumbers(withChoirVocal(p.abc));
     try { tunes = abcjs.renderAbc(scoreRef.current, abc, { responsive: 'resize', add_classes: true }); }
     catch { return; }
     if (!tunes[0]) return;
