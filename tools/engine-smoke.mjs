@@ -36,6 +36,19 @@ if (!models) {
 
 const outDir = join(root, 'logs', 'engine-smoke');
 mkdirSync(outDir, { recursive: true });
+
+// Every run shares the files in outDir, so a second run would delete the first
+// one's WAVs and squat directory. Hold a lock; take it over only from a dead pid.
+const lock = join(outDir, '.lock');
+for (;;) {
+  try { writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  const owner = Number(readFileSync(lock, 'utf8'));
+  let alive = !owner; // empty: the owner is between create and write
+  if (owner) try { process.kill(owner, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; }
+  if (alive) { console.error(`engine-smoke: another run (pid ${owner}) is using logs/engine-smoke; wait for it to finish`); process.exit(1); }
+  rmSync(lock, { force: true });
+}
+process.on('exit', () => rmSync(lock, { force: true }));
 console.log(`engine-smoke: ${exe}\n  models  ${models}`);
 
 // frames = floor(duration * 25) rounded up to the DiT patch (2); 1920 samples per frame.
