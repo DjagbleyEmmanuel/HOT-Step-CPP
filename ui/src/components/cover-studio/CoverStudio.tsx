@@ -63,6 +63,7 @@ import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, on
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { AbcChart } from './AbcChart';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
 import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
@@ -147,6 +148,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sourceSongId, setSourceSongId] = useState(() => restore<string>('sourceSongId', ''));
   const [metadata, setMetadata] = useState<AudioMetadata | null>(() => restore('metadata', null));
   const [analysis, setAnalysis] = useState<AudioAnalysis | null>(() => restore('analysis', null));
+  const [useDetectedDetails, setUseDetectedDetails] = usePersistedState('hs-cover-use-detected-details', true);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -543,8 +545,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       setLyricsSource(instrumentalEditRef.current === instrumentalEdit ? 'dataset-sidecar' : null);
     }
     if (instrumentalEditRef.current === instrumentalEdit) setInstrumental(data.isInstrumental === true);
-    setAnalysis({ bpm: data.bpm, key: data.key, scale: data.key.split(' ')[1] });
-    setDatasetAnalysis(true);
+    if (useDetectedDetails) {
+      setAnalysis({ bpm: data.bpm, key: data.key, scale: data.key.split(' ')[1] });
+      setDatasetAnalysis(true);
+    }
     return true;
   };
 
@@ -592,7 +596,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setInstrumental(gpData.instrumental === true || lyr === '' || lyr === '[instrumental]');
 
     // Reset transforms/overrides from any previous source
-    setBpmCorrection(1); setKeyOverride(null); setBpmOverride(null);
+    if (useDetectedDetails) {
+      setAnalysis(null);
+      setBpmCorrection(1); setKeyOverride(null); setBpmOverride(null);
+    } else {
+      setAnalysis(prev => prev ?? { bpm: 120, key: 'C major' });
+    }
     setTempoScale(1.0); setPitchShift(0);
 
     // BPM/key — (A) use the track's stored metadata, else (B) analyze the source.
@@ -601,6 +610,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     void (async () => {
       const dataset = await lookupDatasetMetadata({ songId: String(s.id) });
       if (sourceLookupRef.current !== lookup || applyDatasetMetadata(dataset || { matched: false }, lyricEdit, instrumentalEdit)) return;
+      if (!useDetectedDetails) return;
       if (storedBpm && storedKey) {
         setAnalysis({ bpm: Number(storedBpm), key: String(storedKey), scale: String(storedKey).split(' ')[1] });
       } else if (audioUrl) {
@@ -673,9 +683,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setLyrics(''); setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
-    setBpmCorrection(1);
-    setBpmOverride(null);
-    setKeyOverride(null);
+    if (useDetectedDetails) {
+      setAnalysis(null);
+      setBpmCorrection(1);
+      setBpmOverride(null);
+      setKeyOverride(null);
+    } else {
+      setAnalysis(prev => prev ?? { bpm: 120, key: 'C major' });
+    }
 
     // Check track cache
     const cached = getTrackCache()[file.name];
@@ -685,7 +700,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (cached.title) setSongTitle(cached.title);
       if (cached.lyrics) setLyrics(cached.lyrics);
       setMetadata({ artist: cached.artist || '', title: cached.title || '', album: cached.album || '', duration: cached.duration });
-      if (Number.isFinite(cached.bpm) && cached.key) setAnalysis({ bpm: cached.bpm, key: cached.key, scale: cached.scale });
+      if (useDetectedDetails && Number.isFinite(cached.bpm) && cached.key) setAnalysis({ bpm: cached.bpm, key: cached.key, scale: cached.scale });
       // Still upload the file
       setIsUploading(true);
       try {
@@ -703,7 +718,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               album: cached.album || '', duration: cached.duration ?? null },
             analysis: { bpm: cached.bpm, key: cached.key, scale: cached.scale },
           } : undefined);
-          if (opened?.analysis) setAnalysis(opened.analysis);
+          if (useDetectedDetails && opened?.analysis) setAnalysis(opened.analysis);
           const dataset = await lookupDatasetMetadata({ sourceAudioUrl: d.audio_url });
           if (sourceLookupRef.current === lookup && dataset) applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit);
         }
@@ -750,7 +765,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         const d = opened.analysis;
         bpm = d.bpm; key = d.key; scale = d.scale;
         analysed = true;
-        if (sourceLookupRef.current === lookup) setAnalysis({ bpm, key, scale });
+        if (useDetectedDetails && sourceLookupRef.current === lookup) setAnalysis({ bpm, key, scale });
       }
       // 4. Cache. Only a real analysis goes in: with Essentia unavailable the
       // 120 / C major fallback was cached and came back labelled "detected" on
@@ -1729,7 +1744,31 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             </div>
           </MusicXmlImport>}
         </div>}
-        {(!yue2Mode || sourceMode === 'audio') && <SourcePanel
+        {(!yue2Mode || sourceMode === 'audio') && <>
+        <div className="px-4 pt-4 space-y-2">
+          <Toggle size="sm" accent="cyan" checked={useDetectedDetails}
+            disabled={isUploading || isAnalyzing}
+            onChange={enabled => {
+              if (!enabled && !analysis) setAnalysis({ bpm: bpmOverride ?? 120, key: keyOverride || 'C major' });
+              setUseDetectedDetails(enabled);
+            }}
+            label={t('cover.useDetectedDetails', 'Use detected BPM/key')}
+            info={t('cover.useDetectedDetailsInfo', 'On: loading audio uses detected, cached or dataset BPM and key. Off: ignore those results and keep your current BPM and key overrides when loading audio. Source analysis may still run. This does not edit the ABC score. Default manual values are 120 BPM and C major.')} />
+          <ParamLabel label={t('cover.sourceKeyBehavior', 'Source key behavior')}
+            info={yue2Mode
+              ? t('cover.sourceKeyBehaviorYue2', 'The source Key field is metadata. It does not transpose the ABC notes or pitch-shift the recording. YuE2 composes from the reviewed ABC score; use Pitch Shift in the cover settings to transpose that score for generation.')
+              : t('cover.sourceKeyBehaviorAce', 'The source Key field corrects the key sent to generation as conditioning. Changing it does not apply a DSP pitch shift to the recording. Use Pitch Shift in the cover settings to change the audio pitch.')}
+            className="text-xs text-zinc-600 dark:text-zinc-400" />
+          {yue2Mode && analysis && <div className="flex items-center gap-2">
+            <ParamLabel label={t('cover.tempoFix')} info={t('cover.sourceTempoFixInfo', 'Halve or double the current source BPM, including a manual override. This corrects source metadata; it does not change the ABC score tempo.')} className="text-xs text-zinc-600 dark:text-zinc-400" />
+            {([0.5, 2] as const).map(factor => <button key={factor} type="button"
+              onClick={() => setBpmOverride(Math.max(20, Math.min(300, Math.round((bpmOverride ?? analysis.bpm) * factor))))}
+              className="rounded border border-zinc-300 dark:border-white/10 px-2 py-1 text-xs text-zinc-700 dark:text-zinc-300">
+              {factor === 0.5 ? '÷2' : '×2'}
+            </button>)}
+          </div>}
+        </div>
+        <SourcePanel
           yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
@@ -1768,7 +1807,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           coverCaptionModel={coverCaptionModel}
           onCoverCaptionProviderChange={handleCoverProviderChange}
           onCoverCaptionModelChange={handleCoverModelChange}
-        />}
+        /></>}
         </div>
 
         <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />

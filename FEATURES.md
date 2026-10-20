@@ -209,7 +209,7 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Source upload | MP3, WAV, FLAC, OGG, M4A, Opus or AAC, or send a track from the Library. |
 | Latent import (ACE-Step) | Use a `.latent` or `.hslat` file and its embedded lyrics, caption, BPM and key. |
 | Essentia analysis | Local BPM and key detection, cached per browser. |
-| BPM and key fixes (ACE-Step) | Halve, double or type the tempo; override the detected key. YuE2 only shows detected values for reference. |
+| BPM and key fixes | Halve, double or type the source tempo and override its key; optionally ignore automatic BPM/key results on load. Key help explains ACE conditioning and YuE2 score behavior. |
 | Genius lyrics search | Find the source's lyrics, paste your own, or go instrumental. |
 | Target artist (ACE-Step) | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
 | Structure Fidelity (ACE-Step) | Controls how closely the output follows the source arrangement. |

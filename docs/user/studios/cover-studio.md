@@ -45,7 +45,15 @@ have to make.
    adapter choices, caption, and other controls without a manual save.
 3. Fix the analysis if Essentia got it wrong: the ÷2 / Detected / ×2 buttons and a
    free-text BPM box correct tempo halving or doubling, and a key dropdown
-   overrides the detected key.
+   overrides the detected key. The key override changes generation conditioning;
+   it does not apply a DSP pitch shift to the recording. Use **Pitch Shift**
+   in the cover settings to change the audio pitch.
+   Turn off **Use detected BPM/key** before loading another recording to keep
+   your current BPM and key, including manual overrides. Detected, cached and
+   dataset BPM/key results are ignored while it is off. Source analysis may
+   still run. With no current values, the manual fields start at 120 BPM and
+   C major. The switch is remembered in this browser; turning it back on uses
+   automatic values on the next load.
 4. Optionally turn on Advanced Mode to split the source into stems, then mute or
    lower individual stems in the mixer that opens. Splitting alone changes
    nothing: an untouched split recombines at full volume, which is the original
@@ -486,8 +494,13 @@ from Prepare. **Open** on Prepare returns to the existing build.
 A take's seed reproduces its composition only with the same group size. The
 same seed rendered alone can differ from one rendered in a group of four.
 
-YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
-latent or BPM/key correction controls. The YuE2 score tempo and pitch controls
+YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre or
+latent controls. Its source BPM/key fields are metadata. The source **Tempo fix**
+buttons halve or double the current BPM, including a manual override, within
+20 to 300 BPM. **Use detected BPM/key** also applies to YuE2 source loads.
+These controls do not change the reviewed ABC notes, key or tempo. Hover
+**Source key behavior** for the active backend's explanation.
+The YuE2 score tempo and pitch controls
 change ABC before composition, rather than source audio. A completed YuE2 cover
 uses the ordinary generation queue and appears in Library. Its saved job records
 the source kind, a recording identity for Source Audio, the reviewed full score,
