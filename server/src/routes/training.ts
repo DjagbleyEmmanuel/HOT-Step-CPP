@@ -150,6 +150,7 @@ import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../ser
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview, yue2JointPreviewMp3 } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
+import { evictOtherFamilies } from '../services/generation/residency.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
 import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
 import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
@@ -4368,7 +4369,10 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
       // (a Lyric Studio generation or the dataset's lyrics), so the ladder compares like with like.
       ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : prior?.caption ? { caption: prior.caption } : {}),
       ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : prior?.lyrics ? { lyrics: prior.lyrics } : {}) };
-    const last = await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' });
+    const last = await runOnGpuLane(async () => {
+      await evictOtherFamilies('yue2');
+      return renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset });
+    }, { label: 'yue2 refine preview', family: 'yue2' });
     res.json({ run: run.jobId, step, previews: [last] });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

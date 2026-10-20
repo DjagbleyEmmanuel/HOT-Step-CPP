@@ -28,6 +28,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
 import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
+import { evictOtherFamilies } from './generation/residency.js';
 import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed } from './backends/yue2/client.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
@@ -416,6 +417,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
         if (run.cancelled) throw new Error('YuE2 takes cancelled');
         const seeds = Array.from({ length: Math.min(4, count - n) }, () => randomInt(1, 2 ** 31 - 1));
         await runOnGpuLane(async lease => {
+          // Free every other family before YuE2 loads on the lane.
+          await evictOtherFamilies('yue2');
           const checkCancelled = () => {
             if (run.cancelled || !lease.isCurrent()) throw new Error('YuE2 takes cancelled');
           };
@@ -775,6 +778,7 @@ export function renderBuildPreview(id: string, userId: string): Yue2BuildSession
   void (async () => {
     try {
       await runOnGpuLane(async lease => {
+        await evictOtherFamilies('yue2');
         const req: Yue2SynthRequest = { ...request, codec_ids: codes, synth_batch_size: 1 };
         delete req.lm_batch_size;
         delete req.songs;
