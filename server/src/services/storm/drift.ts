@@ -238,9 +238,9 @@ export function initDrift(rngSeed: number): DriftState {
 }
 
 // Keys that are valid lock targets.
+const ALL_PARAM_SPECS = Object.values(SPEC_BY_BACKEND).flat();
 const LOCKABLE_KEYS = new Set<string>([
-  ...ACE_PARAM_SPECS.map(s => s.key),
-  ...YUE2_PARAM_SPECS.map(s => s.key),
+  ...ALL_PARAM_SPECS.map(s => s.key),
   'keyScale', 'seed',
 ]);
 
@@ -268,9 +268,8 @@ export function updateDriftPressure(
 
   // targets: only known ParamSpec keys with finite normalized values [0, 1].
   if (patch.targets !== null && typeof patch.targets === 'object' && !Array.isArray(patch.targets)) {
-    const allSpecs = [...ACE_PARAM_SPECS, ...YUE2_PARAM_SPECS];
     for (const [k, v] of Object.entries(patch.targets)) {
-      const spec = allSpecs.find(s => s.key === k);
+      const spec = ALL_PARAM_SPECS.find(s => s.key === k);
       if (!spec) continue;
       const num = Number(v);
       if (!Number.isFinite(num)) continue;
@@ -455,15 +454,15 @@ export function applyDrift(
   if (!p.locks['seed']) {
     if (p.seedMode === 'walk') {
       st.seed = st.seed + 1 + Math.floor(p.jitter * 7 * rng());
-      slotReq['seed'] = st.seed;
     } else if (p.seedMode === 'jump') {
       if (rng() < 0.5 * p.jitter) {
         st.seed = (mulberry32(st.rngSeed + st.slot * 1009)() * 0xffffffff) >>> 0;
-        slotReq['seed'] = st.seed;
       }
     }
-    // 'lock' mode: no change.
   }
+  // Lock, a locked seed and a non-jumping Jump hold the drift seed. Without
+  // this the slot keeps buildSlotRequest's baseSeed + slotIndex default.
+  slotReq['seed'] = st.seed;
 
   // ---- Plugin drift (optional, off by default) ----
   if (p.pluginDrift === true && p.pluginCandidates) {

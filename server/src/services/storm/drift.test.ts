@@ -716,3 +716,74 @@ describe('resolveStartDrift', () => {
     assert.strictEqual(out.pressure.jitter, 1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 17: SA3 drift specs and the held drift seed.
+//
+// TEETH CHECK: both SA3 tests failed before SA3_PARAM_SPECS joined the
+// target/lock validation (sa3Steps was dropped); both seed tests failed while
+// Lock left the slot on baseSeed + slotIndex.
+// ---------------------------------------------------------------------------
+function slotCtrl(drift: DriftRuntime, over: Partial<StreamControlSnapshot> = {}): StreamControlSnapshot {
+  return {
+    guidanceScale: 7, lssStrength: 0, inferenceSteps: 0, duration: 0, bpm: 0,
+    seedLock: false, nextSeed: null, nextBpm: null, nextDuration: null,
+    nextPrompt: null, nextLyrics: null, baseCaption: null, baseLyrics: null,
+    baseInstrumental: null, streamPaused: false, extraPluginParams: {},
+    inferMethod: null, scheduler: null, guidanceMode: null, drift, ...over,
+  };
+}
+
+describe('SA3 drift specs', () => {
+  it('sa3Steps target from start drift pulls SA3 steps', () => {
+    const rt = resolveStartDrift(undefined, false, { targets: { sa3Steps: 1 }, pull: 1, rate: 1 }, 500);
+    assert.ok(rt);
+    assert.strictEqual(rt.pressure.targets['sa3Steps'], 1);
+    const ctrl = slotCtrl(rt);
+    const r = buildSlotRequest({ seed: 500, sa3Steps: 8 }, ctrl, 0, 500, 'sa3');
+    assert.strictEqual(r.kind, 'sa3');
+    console.log(`  sa3 target: steps=${r.kind === 'sa3' ? r.steps : '?'} (from 8, target 64)`);
+    assert.ok(r.kind === 'sa3' && r.steps > 8, 'steps should move toward the target');
+  });
+
+  it('sa3Steps lock holds SA3 steps', () => {
+    const rt = resolveStartDrift(undefined, false, { targets: { sa3Steps: 1 }, locks: ['sa3Steps'], pull: 1, rate: 1 }, 500);
+    assert.ok(rt);
+    assert.strictEqual(rt.pressure.locks['sa3Steps'], true);
+    const r = buildSlotRequest({ seed: 500, sa3Steps: 8 }, slotCtrl(rt), 0, 500, 'sa3');
+    assert.ok(r.kind === 'sa3' && r.steps === 8, 'locked steps should stay at 8');
+  });
+});
+
+describe('drift seed Lock', () => {
+  const seedOf = (r: ReturnType<typeof buildSlotRequest>) =>
+    Number(r.kind === 'ace' ? (r.aceReq as unknown as Record<string, unknown>).seed : r.kind === 'sa3' ? r.seed : NaN);
+
+  it('Lock renders the drift seed on every slot', () => {
+    const rt = resolveStartDrift(undefined, false, { seedMode: 'lock', rate: 1 }, 500);
+    assert.ok(rt);
+    const ctrl = slotCtrl(rt);
+    const seeds = [0, 1, 2].map(i => seedOf(buildSlotRequest({ seed: 500 }, ctrl, i, 500, 'ace')));
+    console.log(`  lock seeds: ${seeds.join(', ')} (control ${rt.state.seed})`);
+    assert.deepStrictEqual(seeds, [500, 500, 500]);
+    assert.strictEqual(rt.state.seed, 500);
+  });
+
+  it('Lock returns to the drift seed after a one-shot seed', () => {
+    const rt = resolveStartDrift(undefined, false, { seedMode: 'lock' }, 500);
+    assert.ok(rt);
+    const one = seedOf(buildSlotRequest({ seed: 500 }, slotCtrl(rt, { nextSeed: 777 }), 0, 500, 'sa3'));
+    const next = seedOf(buildSlotRequest({ seed: 500 }, slotCtrl(rt), 1, 500, 'sa3'));
+    console.log(`  one-shot then lock: ${one}, ${next}`);
+    assert.strictEqual(one, 777);
+    assert.strictEqual(next, 500);
+  });
+
+  it('Jump with zero jitter holds the drift seed', () => {
+    const rt = resolveStartDrift(undefined, false, { seedMode: 'jump', jitter: 0 }, 500);
+    assert.ok(rt);
+    const ctrl = slotCtrl(rt);
+    const seeds = [0, 1, 2].map(i => seedOf(buildSlotRequest({ seed: 500 }, ctrl, i, 500, 'ace')));
+    assert.deepStrictEqual(seeds, [500, 500, 500]);
+  });
+});
