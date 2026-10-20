@@ -127,7 +127,8 @@ const formatFileSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-const MasteringContent: React.FC = () => {
+/** timbreOk: only ACE-Step reads a timbre reference, so the toggle hides elsewhere. */
+const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
   const gp = useGlobalParams();
   const { t } = useTranslation();
   const { token } = useAuth();
@@ -238,7 +239,7 @@ const MasteringContent: React.FC = () => {
       </div>
 
       {/* Timbre reference toggle */}
-      {gp.masteringReference && (
+      {timbreOk && gp.masteringReference && (
         gp.timbreAudioPath ? (
           <div className="flex items-center gap-1.5 mt-1 px-2 py-1.5 rounded-lg bg-teal-500/5 border border-teal-500/10">
             <Music2 size={14} className="text-teal-400" />
@@ -1099,7 +1100,7 @@ export const PostProcessingDropdown: React.FC = () => {
           </span>
         ) : undefined}
       >
-        <MasteringContent />
+        <MasteringContent timbreOk={aceCoupledOk} />
       </Accordion>
 
       {/* 3.5. Final Normalizer — the last audio-modifying stage, independent

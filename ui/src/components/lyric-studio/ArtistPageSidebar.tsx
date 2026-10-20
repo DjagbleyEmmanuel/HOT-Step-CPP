@@ -8,6 +8,7 @@ import { USE_LM_ADAPTER_KEY } from '../../utils/lmAdapterPref';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { useCapabilities } from '../../hooks/useCapabilities';
 
 // ── Persisted state hook ────────────────────────────────────────────────────
 function useLocalPersistedState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -60,6 +61,10 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
   // Off by default: a trained DiT adapter on the stock planner has been
   // sounding better than the same DiT adapter paired with its LM adapter.
   const [useLmAdapter, setUseLmAdapter] = useLocalPersistedState<boolean>(USE_LM_ADAPTER_KEY, false);
+  // Timbre reference and the preset's LM adapter are read by ACE-Step alone
+  // (features.lm marks it); on the other engines both toggles do nothing.
+  const { capabilities } = useCapabilities();
+  const aceOnlyOk = !capabilities || capabilities.features.lm;
 
   const gradient = (name: string) => {
     const hash = name.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
@@ -158,7 +163,7 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
         </div>
 
         {/* ── Randomize Timbre Reference ────────────────────────── */}
-        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+        {aceOnlyOk && <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
           <span className="flex items-center gap-1.5">
             <Shuffle className="w-3 h-3 text-zinc-500" />
             <ParamLabel
@@ -168,10 +173,10 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
             />
           </span>
           <Toggle size="sm" accent="pink" checked={randomizeTimbre} onChange={setRandomizeTimbre} aria-label={t('lyric.randomizeTimbre')} />
-        </div>
+        </div>}
 
         {/* ── Use LM Adapter ────────────────────────────────────── */}
-        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+        {aceOnlyOk && <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
           <span className="flex items-center gap-1.5">
             <Brain className="w-3 h-3 text-zinc-500" />
             <ParamLabel
@@ -181,7 +186,7 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
             />
           </span>
           <Toggle size="sm" accent="pink" checked={useLmAdapter} onChange={setUseLmAdapter} aria-label={t('lyric.useLmAdapter')} />
-        </div>
+        </div>}
 
         {/* "Generate All Audio" lived here. It queued every written song in the library
             with no way to narrow it down, and has been replaced by the Generate Audio tab
