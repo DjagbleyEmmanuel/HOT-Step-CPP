@@ -155,6 +155,7 @@ static bool mm3_lm_dora_prepare(const MM3Model & m, MM3LmAdapter * ad, std::stri
             ggml_tensor * wf = ggml_cast(ctx, w, GGML_TYPE_F32);
             ggml_tensor * d  = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, p.a)),
                                             ggml_cast(ctx, p.b, GGML_TYPE_F32));  // BA, [in, out]
+            ggml_mul_mat_set_prec(d, GGML_PREC_F32);
             ggml_tensor * t[3] = { ggml_sum_rows(ctx, ggml_sqr(ctx, wf)), ggml_sum_rows(ctx, ggml_mul(ctx, wf, d)),
                                    ggml_sum_rows(ctx, ggml_sqr(ctx, d)) };
             gf = ggml_new_graph_custom(ctx, 64, false);

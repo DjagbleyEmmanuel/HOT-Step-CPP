@@ -32,6 +32,8 @@ static inline ggml_tensor * dora_col_norm(ggml_context * ctx,
     // delta[in, out] = A[in, r] . B[r, out]: mul_mat contracts ne0, so the left
     // operand is A transposed to [r, in].
     ggml_tensor * delta = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, a)), b_f32);
+    // F16 inputs must still accumulate in F32, including on Vulkan.
+    ggml_mul_mat_set_prec(delta, GGML_PREC_F32);
     ggml_tensor * wd    = ggml_add(ctx, w_f32, ggml_scale(ctx, delta, scale));
     return ggml_sqrt(ctx, ggml_sum_rows(ctx, ggml_sqr(ctx, wd)));
 }
