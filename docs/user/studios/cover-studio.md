@@ -221,6 +221,8 @@ them.
 - **Split**: pick a bar and press **Split here**, naming the new section. The first
   section always starts at bar 1. **Move boundary here** moves the start of a
   section instead; a boundary cannot cross its neighbours or leave a section empty.
+  The lead sheet numbers every bar, and while you edit the structure you can also
+  drag a section's ▶ label on the lead sheet onto the bar where it should start.
 - **Rename**: changes the label in the score, never the music or the words.
   Consecutive choruses can stay separate sections.
 - **Delete section and its music** is tucked away on purpose. It warns how many
@@ -416,32 +418,33 @@ the top reads covering artist, then song, as the saved track is named.
    lead-in and its new part, not the whole song again, so late sections take
    about as long as early ones. The composer still hears everything kept. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
-   The play button pauses and resumes from the same spot. Click the
-   waveform to seek within the preview, lead-in included. Playback stops when you
-   keep, delete the take being played, undo, or leave the page.
-   **Keep** adds that take to the build and advances to the next section. Use the
-   trash button to delete an unwanted candidate.
+   The play button pauses and resumes from the same spot. Tap the waveform to
+   play from that point, lead-in included; the playhead shows where you are.
+   Playback stops when you keep, delete the take being played, undo, or leave
+   the page. **Keep** adds that take to the build and advances to the next
+   section. Use the trash button to delete an unwanted candidate.
 
-   **Crop**, left of Keep, sets where a take ends, and for a take of the first
-   section where the song starts. It adds a red out line and, on a first-section
-   take, a green in line to the waveform; drag either one. The out line stays in
-   the part that take composed, and the in line at least a second before it. An
-   out point inside a section asks whether the next take composes that section
-   again from the cut, or moves on to the next section there; **Done** waits for
-   the answer. **Done** replaces Crop while you drag; pressing it shows the take
-   as cropped (✂), and playback and the length follow. Nothing changes on the
-   server until **Keep**: the take is kept, then cut at the out point, and the in
-   point is stored with the build. The next takes continue from exactly the
-   cropped audio. The in point only changes the saved song: **Render Final Song**
-   starts there with a half-second fade in, and **Play build** starts there too.
-   The audio before it still feeds the composer, so later takes are unaffected.
+   To crop a take, drag across its waveform over the part to keep, or play it
+   and press **End at playhead** (and, on a take of the first section, **Start
+   at playhead**). What is cut is dimmed, with a red line at the end and, on a
+   first-section take, a green line at the start. The end stays in the part
+   that take composed, and the start at least a second before it. An end inside
+   a section asks what the next take does: compose that section again from the
+   cut, or move on to the next section there. While the song is still open and
+   nothing follows, moving on means the next section you add starts at the cut.
+   **Keep** waits for the answer, then keeps the take and cuts it; **No crop**
+   clears it. The next takes continue from exactly the cropped audio. The start
+   only changes the saved song: **Render Final Song** starts there with a
+   half-second fade in, and **Play build** starts there too. The audio before it
+   still feeds the composer, so later takes are unaffected.
    A line under the Song bar shows a stored start or a cropped last keep, with
-   **Start from the top** and **Undo crop** to take either back. The last kept take
-   also sits at the top of the Takes box, marked **Kept**, with its own **Crop**:
-   there **Done** applies the crop straight away, so you can shorten a section
-   after keeping it (dragging the red line back to the end undoes the crop).
-   Takes already made from it stop being keepable. Takes made
-   before a crop can no longer be kept until the build they continued is back.
+   **Start from the top** and **Undo crop** to take either back. To crop what is
+   already kept, press **Crop previous section** at the top of the Takes box: it
+   opens the last kept take, uncropped, with the same waveform, and **Apply**
+   cuts it (choosing **No crop** and applying undoes a crop). Takes already made
+   from it stop being keepable. Takes made before a crop can no longer be kept
+   until the build they continued is back. Adding, removing or moving sections
+   after the ones a take composed leaves it keepable.
 4. Repeat for the remaining sections. Because takes hold only their own part,
    **Render the build so far** (on the Song bar) renders everything kept once,
    which is quicker than a take since nothing is composed; then **Play build**
