@@ -180,6 +180,8 @@ export interface AceRequest {
   /** Runtime adapter delta VRAM precision: "bf16" (full), "q8_0" (~½), "q4_k" (~¼).
    *  Quantizes precomputed deltas in VRAM at load; no disk change. Runtime mode only. */
   adapter_runtime_quant?: string;
+  /** Opt in to DoRA magnitude rescaling in runtime DiT adapters. Default false. */
+  adapter_runtime_dora?: boolean;
   /** Merge (low VRAM): re-encode merged weights to the base's native quant instead of
    *  F32 promotion (~¼ the merged-DiT VRAM on a Q8 base). Merge mode only. */
   adapter_merge_lowvram?: boolean;

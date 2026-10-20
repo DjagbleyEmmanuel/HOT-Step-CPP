@@ -552,7 +552,7 @@ usage. `ace-train --help` prints the full option list.
 | `mm3-lm-loss`, `mm3-lm-probe` | MM3 LM trainer diagnostics and wiring gate |
 | `mm3-preprocess` | MM3 dataset to flow-DiT target latents |
 | `mm3-condition` | MM3 AR rollout to a flow-DiT conditioning cache |
-| `mm3-train-dit` | Train an MM3 flow-DiT LoRA |
+| `mm3-train-dit` | Train an MM3 flow-DiT LoRA, or DoRA with `--dora`; CLI-only |
 | `rec7-selftest` | Parity gate for the rec7 state encoder |
 | `yue2-preprocess` | Audio folder to cached YuE2 VAE latents and a manifest. Skips `*.engine.wav` (old server conversion-cache leftovers, duplicates of real tracks), as the dataset scanner does |
 | `yue2-tokenize` | Fill a YuE2 manifest's codec ids. `--dump-mert` also writes `codes/<stem>.mert.f16`, the tokenizer head's exact instance-normed `[T25, 1024]` MERT input, for head-training experiments |

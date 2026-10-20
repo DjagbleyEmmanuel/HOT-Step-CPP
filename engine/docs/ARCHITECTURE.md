@@ -14,6 +14,17 @@ code and this page disagree, the code wins; fix the page.
 
 ## Request JSON reference
 
+`adapter_runtime_dora` is an optional boolean shared by ACE-Step and MiniMax-Music3
+generation requests. It defaults to false, preserving legacy runtime DiT behavior.
+True enables DoRA magnitude rescaling, including runtime paths forced by adapter
+windows or sections. Merge and LM adapter behavior is unchanged. The Node/UI field
+is `adapterRuntimeDora`; false and absent values omit the wire key.
+
+For MM3 flow-DiT training, `ace-train mm3-train-dit --dora` sets `MM3TrainArgs.dora`.
+The trainer takes the same `--cache`, `--models` and `--out` arguments as LoRA and
+requires the outputs of both `mm3-preprocess` and `mm3-condition`. This trainer
+remains CLI-only; it is not an app training job or a DiT adapter capability.
+
 The ACE-Step request (`AceRequest`, `engine/src/request.h`) is one JSON object. It
 is read by `ace-lm`, `ace-synth` and `ace-understand`, and by ace-server's `/lm`,
 `/synth`, `/understand`, `/vae` and `/codes-decode`. Missing fields keep their

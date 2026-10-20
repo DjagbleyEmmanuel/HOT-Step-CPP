@@ -62,8 +62,14 @@ ACE-Step DiT adapters load from three shapes:
 - A LoKr folder from the Training Studio, holding `lokr_weights.safetensors`. No config
   file is needed.
 
-DoRA adapters (either the LyCORIS or the PEFT naming) load in Merge mode only. In the
-other modes the engine logs a warning and applies them as plain LoRA.
+DoRA adapters support Merge mode and opt-in runtime magnitude rescaling. In the
+ACE-Step Adapters section, turn on **Runtime DoRA magnitudes** to apply the learned
+magnitudes in Runtime or Low-Rank mode, including when section controls or active
+phases force runtime loading. This may materialize full-size deltas in Low-Rank mode.
+The switch is saved in the browser and defaults to off, preserving the older runtime
+result that skips magnitude rescaling. Merge mode and planner LM adapters keep their
+existing behavior. The same saved switch is sent to MiniMax-Music3 requests; its DiT
+training and adapter controls remain CLI-only.
 
 ACE-Step checks DoRA files before applying their weights, including with the default
 loading settings. A PEFT config with `use_dora: true` must have matching magnitude
@@ -124,7 +130,7 @@ you use it.
 |---|---|
 | Merge | Bakes the adapter into the model weights when the model loads. Sampling runs at full speed. **Merge VRAM** picks how the merged weights are stored: **HQ** keeps them at F32, about four times the VRAM on a Q8 base; **Low ¼** re-encodes them to the base's own quantization. FP4 bases always take the low path. Not available on ConvRot models. |
 | Runtime (default) | Leaves the base weights alone and applies the adapter at every step. **Adapter VRAM** stores the deltas as **Full** (BF16), **Q8 ½** or **Q4 ¼**. Q4 fits the most stacked adapters for a small quality cost. |
-| Low-Rank | Applies the raw adapter factors per step without building full-size deltas. The lowest VRAM of the three. Works with LoRA and LoKr; DoRA needs Merge. |
+| Low-Rank | Applies the raw adapter factors per step without building full-size deltas. The lowest VRAM of the three for LoRA and LoKr. With **Runtime DoRA magnitudes** on, DoRA uses full-size deltas to include magnitude rescaling. |
 
 Changing the adapter, a scale, the mode or the VRAM setting reloads the DiT on the next
 generation. Generations with unchanged settings reuse the loaded model. The first Runtime

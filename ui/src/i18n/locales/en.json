@@ -2676,6 +2676,8 @@
     "adapter.loadingMode": "Loading Mode",
     "adapter.noAdapterRender": "No-adapter reference",
     "adapter.noAdapterRenderHint": "Adds a raw 20-step render with the DiT adapter bypassed (LM adapter kept, no post-processing) — hear the song without the adapter via the playbar switch.",
+    "adapter.runtimeDora": "Runtime DoRA magnitudes",
+    "adapter.runtimeDoraInfo": "Apply learned DoRA magnitudes when loading runtime DiT adapters. Off preserves the older runtime result, which skips magnitude rescaling. Shared by ACE-Step and MiniMax-Music3. Merge mode and LM adapters keep their existing behavior. Enabling this may use full-size runtime deltas even in Low-Rank mode.",
     "adapter.merge": "Merge",
     "adapter.runtimeLora": "Runtime LoRA ⚡",
     "adapter.groupScales": "Group Scales",

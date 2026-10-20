@@ -12,6 +12,10 @@ time you open the app. A different browser, or one with its site data cleared, s
 the defaults listed below. To keep a set of settings you can return to, save a
 [profile](#profiles).
 
+The ACE-Step Adapters section has a **Runtime DoRA magnitudes** switch. It defaults
+to off for compatibility with older runtime renders and is shared with MiniMax-Music3
+requests. See [DoRA loading](adapters.md#file-formats) for its effect on runtime memory.
+
 ## The bar at a glance
 
 | Section | What it holds |

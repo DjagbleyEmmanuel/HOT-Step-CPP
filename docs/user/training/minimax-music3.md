@@ -10,6 +10,13 @@ The recipe is tuned for an album clone: a render that could pass for another tra
 
 ## What the dataset needs
 
+MM3 flow-DiT training is available through the CLI only. Use `ace-train mm3-train-dit
+--dora --cache <cache> --models <models> --out <output>` for DoRA, or omit `--dora`
+for LoRA. The cache must contain both `mm3_preprocess.json` and
+`mm3_condition.json`, produced by `mm3-preprocess` and `mm3-condition`. RVQ codes
+from the app's Codes phase are not a DiT cache. This does not add a DiT training
+form or DiT adapter picker to the app; the LM method controls below are unchanged.
+
 Create and label the dataset in the Dataset phase as for any backend (see [Training Studio](../studios/training-studio.md)). MM3 adds three requirements.
 
 Per-track MM3 captions. The trainer reads a Structured Caption from a `<stem>.mm3.txt` file beside each audio file, and refuses a run with no captions at all. These files are written by a caption pass with MOSS (local) or Gemini as the provider, from either Label or Enhance labels. Both listen to the track; BPM and key are then taken from the local analysis, because the captioners get them wrong. Do not rename the ACE-Step `.txt` sidecars to `.mm3.txt`: an ACE caption trains the wrong genre, and the rename puts the lyrics in the prompt twice. Lyrics come from the normal sidecar.

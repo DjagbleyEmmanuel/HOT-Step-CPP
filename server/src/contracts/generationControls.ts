@@ -38,6 +38,7 @@ export const generationControlsSchema = z.object({
   adapterSectionIsolation: z.unknown().optional(), // number, default 0.5
   adapterMode: z.unknown().optional(), // 'merge' | 'runtime' | 'runtime_lowrank', default 'runtime'
   adapterRuntimeQuant: z.unknown().optional(), // string, default 'bf16'
+  adapterRuntimeDora: z.unknown().optional(), // boolean, default false
   adapterMergeLowVram: z.unknown().optional(), // boolean, default false
   adapterGroupScales: z.unknown().optional(), // { self_attn, cross_attn, mlp, cond_embed, time_embed, proj_in: number }
   rebaseSource: z.unknown().optional(), // string, default ''

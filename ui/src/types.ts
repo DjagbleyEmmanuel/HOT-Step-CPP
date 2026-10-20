@@ -196,6 +196,7 @@ export interface GenerationParams {
   adapterSectionIsolation?: boolean;
   /** Runtime-mode delta quantization ('bf16' | 'q8_0' | 'q4_0' | aliased 'q4_k'). */
   adapterRuntimeQuant?: string;
+  adapterRuntimeDora?: boolean;
   /** Merge-mode low-VRAM storage: re-encode merged weights to the base's native
    *  quant instead of F32 promotion. */
   adapterMergeLowVram?: boolean;

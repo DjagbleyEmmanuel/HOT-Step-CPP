@@ -301,6 +301,7 @@ static void print_usage(void) {
             "                \"<word>, \" to every caption, the shape --trigger-prepend trained.\n"
             "  mm3-train-dit MiniMax-Music3 flow-DiT LoRA training.\n"
             "                --cache <dir from mm3-condition> --models <dir> --out <dir>\n"
+            "                [--dora] learn per-output magnitudes alongside LoRA factors.\n"
             "                [--rank 32] [--alpha 32] [--lr 1e-4] [--steps 200] [--crop 689]\n"
             "                [--grad-accum 1] [--seed 42]\n"
             "                [--song <substring>] overfit one song. Matches a SUBSTRING OF THE\n"
@@ -4473,6 +4474,7 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
         if      (!strcmp(argv[i], "--cache"))      a.cache_dir  = next("--cache");
         else if (!strcmp(argv[i], "--models"))     a.models_dir = next("--models");
         else if (!strcmp(argv[i], "--out"))        a.out_dir    = next("--out");
+        else if (!strcmp(argv[i], "--dora"))       a.dora       = true;
         else if (!strcmp(argv[i], "--rank"))       a.rank       = atoll(next("--rank"));
         else if (!strcmp(argv[i], "--alpha"))      a.alpha      = (float) atof(next("--alpha"));
         else if (!strcmp(argv[i], "--lr"))         a.lr         = (float) atof(next("--lr"));

@@ -248,6 +248,7 @@ export function resolveGenerationParams(
       adapterSectionIsolation: stack.length >= 2 ? s.adapterSectionIsolation : undefined,
       adapterGroupScales: primary ? s.adapterGroupScales : undefined,
       adapterMode: primary ? s.adapterMode : 'merge',
+      adapterRuntimeDora: s.adapterRuntimeDora === true ? true : undefined,
       // Runtime delta quantization (VRAM saver) — relevant in both runtime modes
       // (lowrank still stores full-size re-base corrections / Conv1d fallbacks).
       // Also sent when timestep windows are active: they force runtime mode

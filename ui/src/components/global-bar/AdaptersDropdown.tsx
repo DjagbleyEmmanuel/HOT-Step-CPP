@@ -14,10 +14,11 @@ import { adapterApi } from '../../services/api';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { Slider } from '../shared/Slider';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Toggle } from '../shared/Toggle';
 import { ModelSelect, getModelFormat } from './ModelSelect';
 import { formatDitModel } from './modelLabels';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { GLOBAL_PARAM_DEFAULTS, useGlobalParamsStore } from '../../stores/globalParamsStore';
 import type { AdapterFile } from '../../types';
 
 // Select styling applied inline where needed
@@ -45,6 +46,8 @@ function formatSize(bytes: number): string {
 
 export const AdaptersDropdown: React.FC = () => {
   const gp = useGlobalParams();
+  const adapterRuntimeDora = useGlobalParamsStore(s => s.adapterRuntimeDora);
+  const setAdapterRuntimeDora = useGlobalParamsStore(s => s.setAdapterRuntimeDora);
   const { t } = useTranslation();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
 
@@ -145,6 +148,14 @@ export const AdaptersDropdown: React.FC = () => {
 
   return (
     <div className="space-y-3">
+      <Toggle
+        size="sm"
+        checked={adapterRuntimeDora === true}
+        onChange={setAdapterRuntimeDora}
+        defaultValue={GLOBAL_PARAM_DEFAULTS.adapterRuntimeDora}
+        label={t('adapter.runtimeDora')}
+        info={t('adapter.runtimeDoraInfo')}
+      />
       {/* Simple / Advanced toggle. The mode decides whether the stack or the
           single adapter is sent (globalParamsStore isStack), so it resets like
           any other parameter; the paths and stack it hides stay stored. */}

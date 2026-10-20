@@ -222,6 +222,7 @@ export function translateParams(params: any): AceRequest {
   if (params.adapterGroupScales) req.adapter_group_scales = params.adapterGroupScales;
   if (params.adapterMode) req.adapter_mode = params.adapterMode;
   if (params.adapterRuntimeQuant) req.adapter_runtime_quant = params.adapterRuntimeQuant;
+  if (params.adapterRuntimeDora === true) req.adapter_runtime_dora = true;
   if (params.adapterMergeLowVram) req.adapter_merge_lowvram = true;
 
   // Per-section adapter masking (regional LoRA): parse inline [Section]{k=v} directives
