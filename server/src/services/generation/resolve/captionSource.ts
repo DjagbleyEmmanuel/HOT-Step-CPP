@@ -146,7 +146,7 @@ export function yue2PickAtEnqueue(
 ): Record<string, string | number> {
   const pick: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(defaults ?? {})) {
-    if (/^lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late)?)?$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
+    if (/^lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|Plan)?)?$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
       pick[k] = v;
     }
   }
