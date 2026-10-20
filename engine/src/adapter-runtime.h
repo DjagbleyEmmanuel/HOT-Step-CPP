@@ -1047,6 +1047,7 @@ static bool adapter_runtime_dora_stack(DiTLoRA * lora, WeightCtx * base,
     if (!shadow.ctx) return false;
     struct Cleanup { WeightCtx * ctx; ~Cleanup() { wctx_free(ctx); } } cleanup{&shadow};
     struct Original { const void * data; ggml_type type; };
+    // pending[i] pairs with originals[i]; the merger must not append or reorder pending.
     std::vector<Original> originals;
     std::vector<std::unique_ptr<float[]>> owned;
     auto decode = [](const void * src, ggml_type type, int64_t n, float * dst) {
