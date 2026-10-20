@@ -2202,6 +2202,17 @@ router.post('/datasets/:id/mm3-codes', (req: Request, res: Response) => {
  *  place. This route has no such UI in front of it (a raw API call can set
  *  every boolean at once), so the illegal state needs an explicit refusal
  *  rather than a precedence order nobody asked for. Returns '' when fine. */
+/** The MM3 crop is validated, never clamped: an out-of-range value used to be swapped for the default
+ *  and the trainer ran with a crop the user never chose. Absent/null means "use the default". */
+export const MM3_MAX_FRAMES_RANGE = { min: 64, max: 9000 } as const;
+export function mm3MaxFramesError(raw: unknown): string {
+  if (raw === undefined || raw === null) return '';
+  const v = Number(raw);
+  const { min, max } = MM3_MAX_FRAMES_RANGE;
+  return Number.isFinite(v) && v >= min && v <= max
+    ? '' : `maxFrames must be a number between ${min} and ${max} (got ${String(raw)}).`;
+}
+
 function mm3MethodConflict(b: Record<string, unknown>, adapterType: 'lora' | 'lokr'): string {
   const on = (['dora', 'hira', 'loha', 'pissa', 'hra'] as const).filter(k => b[k] === true);
   if (!on.length) return '';
@@ -2512,6 +2523,12 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
         });
         return;
       }
+    }
+
+    const maxFramesError = mm3MaxFramesError(b.maxFrames);
+    if (maxFramesError) {
+      res.status(400).json({ error: maxFramesError });
+      return;
     }
 
     const adapterType: 'lora' | 'lokr' = b.adapterType === 'lora' || b.adapterType === 'lokr'

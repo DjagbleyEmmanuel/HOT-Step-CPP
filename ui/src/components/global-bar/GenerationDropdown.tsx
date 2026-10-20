@@ -25,6 +25,21 @@ import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
 
+/** Accordion header that holds its own switch/buttons: a div, not a button, so nothing nests inside a
+ *  button. Enter/Space toggle only when the header itself has focus, not a control inside it. */
+const accordionHeader = (open: boolean, toggle: () => void) => ({
+  role: 'button' as const,
+  tabIndex: 0,
+  'aria-expanded': open,
+  onClick: toggle,
+  onKeyDown: (e: React.KeyboardEvent) => {
+    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      toggle();
+    }
+  },
+});
+
 export const GenerationDropdown: React.FC = () => {
   const gp = useGlobalParams();
   const { t } = useTranslation();
@@ -356,10 +371,9 @@ export const GenerationDropdown: React.FC = () => {
         };
         return (
           <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 transition-all overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setCompositeOpen(!compositeOpen)}
-              className="w-full flex items-center justify-between px-3 py-2 hover:bg-purple-500/5 transition-colors"
+            <div
+              {...accordionHeader(compositeOpen, () => setCompositeOpen(!compositeOpen))}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-purple-500/5 transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-2">
                 <ChevronDown size={12} className={`text-purple-400 transition-transform duration-200 ${compositeOpen ? 'rotate-180' : ''}`} />
@@ -369,7 +383,7 @@ export const GenerationDropdown: React.FC = () => {
                 className="flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 transition-colors">
                 <RotateCcw size={10} /> Reset
               </button>
-            </button>
+            </div>
             {compositeOpen && (
               <div className="px-3 pb-3 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -583,10 +597,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* ── DCW Correction (Accordion with checkbox in title) ── */}
       <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 transition-all overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setDcwOpen(!dcwOpen)}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-emerald-500/5 transition-colors"
+        <div
+          {...accordionHeader(dcwOpen, () => setDcwOpen(!dcwOpen))}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-emerald-500/5 transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-emerald-400 transition-transform duration-200 ${dcwOpen ? 'rotate-180' : ''}`} />
@@ -608,7 +621,7 @@ export const GenerationDropdown: React.FC = () => {
               <RotateCcw size={10} /> Reset
             </span>
           )}
-        </button>
+        </div>
         {dcwOpen && gp.dcwEnabled && (
           <div className="px-3 pb-3 space-y-3">
             <div>
@@ -644,10 +657,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* ── Duration Buffer / Auto-Trim (Accordion with toggle) ── */}
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 transition-all overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setAutoTrimOpen(!autoTrimOpen)}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors"
+        <div
+          {...accordionHeader(autoTrimOpen, () => setAutoTrimOpen(!autoTrimOpen))}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${autoTrimOpen ? 'rotate-180' : ''}`} />
@@ -668,7 +680,7 @@ export const GenerationDropdown: React.FC = () => {
               <RotateCcw size={10} /> Reset
             </span>
           )}
-        </button>
+        </div>
         {autoTrimOpen && gp.autoTrimEnabled && (
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Duration Buffer (seconds)" value={gp.durationBuffer}
@@ -731,10 +743,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* ── Post-VAE Spectral Denoiser (Accordion with toggle) ── */}
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 transition-all overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setDenoiserOpen(!denoiserOpen)}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors"
+        <div
+          {...accordionHeader(denoiserOpen, () => setDenoiserOpen(!denoiserOpen))}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-amber-500/5 transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-amber-400 transition-transform duration-200 ${denoiserOpen ? 'rotate-180' : ''}`} />
@@ -756,7 +767,7 @@ export const GenerationDropdown: React.FC = () => {
               <RotateCcw size={10} /> Reset
             </span>
           )}
-        </button>
+        </div>
         {denoiserOpen && gp.denoiseStrength > 0 && (
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Strength" value={gp.denoiseStrength}
@@ -780,10 +791,9 @@ export const GenerationDropdown: React.FC = () => {
 
       {/* ── LSS: Latent Spectral Suppressor (Accordion with toggle) ── */}
       <div className="rounded-xl border border-teal-500/20 bg-teal-500/5 transition-all overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setLssOpen(!lssOpen)}
-          className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-500/5 transition-colors"
+        <div
+          {...accordionHeader(lssOpen, () => setLssOpen(!lssOpen))}
+          className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-500/5 transition-colors cursor-pointer"
         >
           <div className="flex items-center gap-2">
             <ChevronDown size={12} className={`text-teal-400 transition-transform duration-200 ${lssOpen ? 'rotate-180' : ''}`} />
@@ -805,7 +815,7 @@ export const GenerationDropdown: React.FC = () => {
               <RotateCcw size={10} /> Reset
             </span>
           )}
-        </button>
+        </div>
         {lssOpen && lssStrength > 0 && (
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Strength" value={lssStrength}

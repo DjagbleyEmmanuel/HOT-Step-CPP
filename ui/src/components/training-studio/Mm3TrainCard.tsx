@@ -126,12 +126,12 @@ const MM3_METHOD_KEYS: Record<Mm3Method, { label: string; info: string }> = {
 
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; info?: string; meta?: string;
-  disabled?: boolean;
+  disabled?: boolean; min?: number; max?: number;
   /** The server-default value to compare against and show beside the reset
    *  icon; the icon itself calls onReset, not a write of this value. */
   defaultValue?: number;
   onReset?: () => void;
-}> = ({ label, value, onChange, step = 1, info, meta, disabled, defaultValue, onReset }) => (
+}> = ({ label, value, onChange, step = 1, info, meta, disabled, min, max, defaultValue, onReset }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
     <ParamLabel
       label={label}
@@ -141,7 +141,7 @@ const NumField: React.FC<{
       onReset={defaultValue !== undefined && value !== defaultValue && !disabled ? onReset : undefined}
     />
     <input
-      type="number" className={INPUT} value={value} step={step} disabled={disabled}
+      type="number" className={INPUT} value={value} step={step} min={min} max={max} disabled={disabled}
       onChange={e => onChange(Number(e.target.value))}
     />
   </label>
@@ -665,7 +665,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'detail but needs more VRAM and is more prone to overfitting on a small dataset; '
                   + 'lower trains faster and fits smaller cards but may undercook the likeness.')} />
               <NumField label={t('trainingStudio.mm3.maxFrames', 'Crop (frames)')} value={form.maxFrames}
-                onChange={v => set('maxFrames', v)} step={50}
+                onChange={v => set('maxFrames', v)} step={50} min={64} max={9000}
                 defaultValue={base.maxFrames} onReset={() => reset('maxFrames')}
                 meta={t('trainingStudio.mm3.maxFramesMeta', 'default 1500 frames')}
                 info={t('trainingStudio.mm3.maxFramesInfo',
