@@ -65,6 +65,12 @@ ACE-Step DiT adapters load from three shapes:
 DoRA adapters (either the LyCORIS or the PEFT naming) load in Merge mode only. In the
 other modes the engine logs a warning and applies them as plain LoRA.
 
+ACE-Step checks DoRA files before applying their weights, including with the default
+loading settings. A PEFT config with `use_dora: true` must have matching magnitude
+tensors. If those tensors are missing, loading fails instead of treating the file as
+plain LoRA. Keep the original config and weights together; replace an incomplete
+adapter with a complete export.
+
 MiniMax-Music3 adapters are PEFT `.safetensors` files trained on the MiniMax-Music3 LM.
 Each can have a sidecar named `<file>.safetensors.json` that records the trigger word,
 rank, dataset, step count, notes and recommended dial settings. The Training Studio writes
