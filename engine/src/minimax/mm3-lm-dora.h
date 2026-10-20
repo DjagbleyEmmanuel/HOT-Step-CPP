@@ -15,11 +15,12 @@
 // THE DIALS (2026-10-20). The norm is computed at the adapter's own trained
 // strength (`base_scale`). This pass also keeps the three row terms of
 // ||W + s*BA||^2 (n0 + 2s*n1 + s^2*n2) on the host, and
-// mm3_lm_dora_set_scales re-normalises from them for each request's dials: one
-// [out] upload per module, no second [in, out] pass. So a dialled runtime
-// render is m * (W + s*BA) / ||W + s*BA||, the W' mm3_lm_merge_apply writes for
-// the same dials. Before this, the norm stayed at the trained scale and runtime
-// and merge disagreed at any dial but 1.
+// mm3_lm_dora_set_scales re-normalises from them for each request's dials when
+// the request opts in (MM3LmAdapterScales::dora_renorm): one [out] upload per
+// module, no second [in, out] pass. A dialled runtime render is then
+// m * (W + s*BA) / ||W + s*BA||, the W' mm3_lm_merge_apply writes for the same
+// dials. Off (the default) keeps the norm at the trained scale, the legacy
+// render, where runtime and merge disagree at any dial but 1.
 //
 // Cost: one [in, out] F32 transient per module (~200 MB at MM3's widths), a
 // rank-r GEMM, and a row reduction — a few seconds at load, once per (adapter,

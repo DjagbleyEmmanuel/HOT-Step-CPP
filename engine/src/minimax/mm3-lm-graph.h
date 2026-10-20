@@ -634,8 +634,9 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
                 y               = ggml_add(ctx, y, ggml_scale(ctx, d, s));
                 if (p.has_dora()) {
                     // DoRA: y <- y * (m / ||W + s*BA||_col). The norm comes from
-                    // the load-time pass (mm3-lm-dora.h), set to this request's
-                    // s by mm3_lm_set_adapter — W, A and B are all frozen
+                    // the load-time pass (mm3-lm-dora.h); with dora_renorm,
+                    // mm3_lm_set_adapter moves it to this request's s. W, A
+                    // and B are all frozen
                     // here, so it is exact rather than an
                     // approximation. m/nrm is [out] and broadcasts over the
                     // token and batch axes.

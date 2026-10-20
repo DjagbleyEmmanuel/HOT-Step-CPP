@@ -77,10 +77,14 @@ struct MM3LmAdapterScales {
     float early  = 1.0f;  // layers 0..11
     float mid    = 1.0f;  // layers 12..23
     float late   = 1.0f;  // layers 24..35
+    // Opt-in DoRA dial fix (mm3_lm_dora_set_scales), off = the legacy render.
+    // The MM3 side of the request key ACE reads as adapter_runtime_dora; it
+    // lives here because MM3 jobs never populate g_hotstep_params.
+    bool  dora_renorm = false;
 
     bool operator==(const MM3LmAdapterScales & o) const {
         return global == o.global && attn == o.attn && mlp == o.mlp && early == o.early && mid == o.mid &&
-               late == o.late;
+               late == o.late && dora_renorm == o.dora_renorm;
     }
 
     bool operator!=(const MM3LmAdapterScales & o) const { return !(*this == o); }
@@ -242,12 +246,14 @@ struct MM3LmAdapter {
     }
 };
 
-// Point every DoRA module's nrm at ||W + s*BA||_col for the request's effective
-// scale s, so the runtime is m * (W + s*BA) / ||W + s*BA|| at any dial — the
-// same W' mm3_lm_merge_apply writes. Host maths from the pass's row terms, one
-// [out] upload per module whose scale changed; nothing when it did not. At the
-// trained scale the pass's own nrm goes back verbatim (bit-identical renders).
-// s == 0 is skipped: the graph applies neither delta nor rescale there.
+// With sc.dora_renorm, point every DoRA module's nrm at ||W + s*BA||_col for
+// the request's effective scale s, so the runtime is m * (W + s*BA) /
+// ||W + s*BA|| at any dial — the same W' mm3_lm_merge_apply writes. Without
+// it, nrm stays at the trained scale: the legacy render, byte for byte, at
+// every dial. Host maths from the pass's row terms, one [out] upload per
+// module whose scale changed; nothing when it did not. At the trained scale
+// the pass's own nrm goes back verbatim. s == 0 is skipped: the graph applies
+// neither delta nor rescale there.
 //
 // Writes tensor data, so call it only between generations (mm3_lm_set_adapter's
 // contract); `ad` is const there, hence the mutable nrm_s.
@@ -262,7 +268,7 @@ static void mm3_lm_dora_set_scales(const MM3LmAdapter * ad, const MM3LmAdapterSc
             if (!p.has_dora() || !p.has_lora() || p.dora_nrm_base.empty()) {
                 continue;
             }
-            const float s = ad->effective(l, mod, sc);
+            const float s = sc.dora_renorm ? ad->effective(l, mod, sc) : p.base_scale;
             if (s == 0.0f || s == p.dora_nrm_s) {
                 continue;
             }

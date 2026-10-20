@@ -18,9 +18,9 @@
 // And the MM3 LM runtime (mm3-lm-adapter.h / mm3-lm-dora.h), through the real
 // loader and norm pass on a fake one-layer LM:
 //
-//   8. at any dial, nrm is ||W + s*BA||_col for the effective s (the norm
-//      mm3_lm_merge_apply uses), and at the trained scale it is the pass's own
-//      value bit for bit;
+//   8. with dora_renorm off, nrm is the legacy bytes at every dial; on, it is
+//      ||W + s*BA||_col for the effective s (the norm mm3_lm_merge_apply
+//      uses), and at the trained scale the pass's own value bit for bit;
 //   9. a use_dora file with a module missing its magnitude does not load.
 //
 // Build: configure engine/ with -DBUILD_TESTING=ON, target mm3-dit-dora-test.
@@ -360,9 +360,22 @@ static void lm_dial_checks() {
         return out;
     };
 
+    const std::vector<float> base_k = get(ps[1]->nrm);
+    const float              dials[][2] = { { 0.5f, 0.7f }, { 1.3f, 1.0f }, { 1.0f, 0.25f } };  // global, attn
+
+    // Switch off (the default): the legacy render at every dial, byte for byte.
     MM3LmAdapterScales sc;
-    const float        dials[][2] = { { 0.5f, 0.7f }, { 1.3f, 1.0f }, { 1.0f, 0.25f } };  // global, attn
-    double             worst      = 0.0;
+    for (const auto & d : dials) {
+        sc.global = d[0];
+        sc.attn   = d[1];
+        mm3_lm_dora_set_scales(ad, sc);
+        CHECK(get(ps[0]->nrm) == base_q && get(ps[1]->nrm) == base_k,
+              "LM: switch off at dial %.2f/%.2f moved nrm off the legacy bytes", d[0], d[1]);
+    }
+
+    // Switch on: nrm follows the dial, matching merge mode's ||W + s*BA||.
+    sc.dora_renorm = true;
+    double worst   = 0.0;
     for (const auto & d : dials) {
         sc.global = d[0];
         sc.attn   = d[1];
@@ -375,11 +388,19 @@ static void lm_dial_checks() {
         }
     }
     CHECK(worst < 1e-5, "LM: dialled nrm vs ||W + s*BA|| worst rel err %.3g", worst);
-    sc = MM3LmAdapterScales{};
+
+    // Switching off again from a dialled state restores the legacy bytes.
+    sc.dora_renorm = false;
     mm3_lm_dora_set_scales(ad, sc);
-    CHECK(get(ps[0]->nrm) == base_q, "LM: back at dial 1, nrm is not the norm pass's own bytes");
-    fprintf(stderr, "[mm3-dit-dora] LM dialled nrm vs ||W + s*BA|| worst rel err %.3g; dial 1 bit-identical\n",
-            worst);
+    CHECK(get(ps[0]->nrm) == base_q && get(ps[1]->nrm) == base_k,
+          "LM: switch off after a dialled request did not restore the legacy bytes");
+    // And on at dial 1 is the pass's own nrm too.
+    sc = MM3LmAdapterScales{};
+    sc.dora_renorm = true;
+    mm3_lm_dora_set_scales(ad, sc);
+    CHECK(get(ps[0]->nrm) == base_q, "LM: switch on at dial 1, nrm is not the norm pass's own bytes");
+    fprintf(stderr, "[mm3-dit-dora] LM switch off: legacy bytes at every dial; on: nrm vs ||W + s*BA|| worst "
+                    "rel err %.3g, dial 1 bit-identical\n", worst);
 
     mm3_lm_adapter_free(ad);
     ggml_backend_buffer_free(wb);
