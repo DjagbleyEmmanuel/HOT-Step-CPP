@@ -1,6 +1,55 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SA3_LOADING_STAGE, sa3RenderStage } from './generate.js';
+import {
+  SA3_LOADING_STAGE, sa3RenderStage, resolveSa3Sampler, resolveSa3SeedBlend,
+} from './generate.js';
+
+test('SA3 selects its default Lua sampler while preserving native and plugin overrides', () => {
+  assert.deepEqual(resolveSa3Sampler({}, {}), { sampler: 'pingpong', solver: 'md_pingpong_blend' });
+  assert.deepEqual(resolveSa3Sampler({ sa3Sampler: 'pingpong' }, {}), { sampler: 'pingpong' });
+  assert.deepEqual(resolveSa3Sampler({ sa3Sampler: 'euler' }, {}), { sampler: 'euler' });
+  assert.deepEqual(resolveSa3Sampler({}, { solver: 'heun' }), { sampler: 'pingpong' });
+});
+
+test('SA3 blend defaults preserve explicit endpoints and reject non-finite values', () => {
+  for (const v of [undefined, null, '', NaN, Infinity, 'invalid']) {
+    assert.equal(resolveSa3SeedBlend(v), 0.5);
+  }
+  for (const [v, expected] of [[0, 0], ['0', 0], [1, 1], ['1', 1], [-1, 0], [2, 1], [0.25, 0.25]] as const) {
+    assert.equal(resolveSa3SeedBlend(v), expected);
+  }
+});
+
+test('SA3 synth sends the default and full blend, and disables breeding at zero or without seed B', async () => {
+  const { aceClient } = await import('../../aceClient.js');
+  const realFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    requests.push(new URL(String(url)));
+    return new Response(new Uint8Array([1, 2, 3]));
+  }) as typeof fetch;
+  try {
+    for (const input of [undefined, 0, 1]) {
+      await aceClient.submitSa3Synth({
+        tokens: [1], nTokens: 1, durationSec: 1, seed: 123,
+        seedB: 456, seedBlend: resolveSa3SeedBlend(input),
+      });
+    }
+    await aceClient.submitSa3Synth({ tokens: [1], nTokens: 1, durationSec: 1, seedBlend: 1 });
+    assert.equal(requests.length, 4);
+    assert.ok(requests.every(url => url.pathname === '/sa3-synth'));
+    assert.equal(requests[0].searchParams.get('seed_b'), '456');
+    assert.equal(requests[0].searchParams.get('seed_blend'), '0.5');
+    assert.equal(requests[1].searchParams.has('seed_b'), false);
+    assert.equal(requests[1].searchParams.has('seed_blend'), false);
+    assert.equal(requests[2].searchParams.get('seed_b'), '456');
+    assert.equal(requests[2].searchParams.get('seed_blend'), '1');
+    assert.equal(requests[3].searchParams.has('seed_b'), false);
+    assert.equal(requests[3].searchParams.has('seed_blend'), false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
 
 // Copied from the DAW facade (pr/29 dawFacade.ts:457): a stage matching this
 // reports phase loading_model and eta_s null. pr/06 has no facade, so the
