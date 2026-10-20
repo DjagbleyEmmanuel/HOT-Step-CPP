@@ -29,7 +29,7 @@ test('linked presets are refreshed when updateLinkedPresets is on or absent', ()
     refreshLinkedMm3Presets(t.job, { updateLinkedPresets: true }, t.ckpt, t.deps);
     refreshLinkedMm3Presets(t.job, {}, t.ckpt, t.deps);
     assert.equal(t.calls.length, 2);
-    assert.match(t.calls[0], /^ds-1[\/]final[\/]adapter_model\.safetensors$/);
+    assert.match(t.calls[0], /^ds-1[\\/]final[\\/]adapter_model\.safetensors$/);
   } finally { t.done(); }
 });
 
