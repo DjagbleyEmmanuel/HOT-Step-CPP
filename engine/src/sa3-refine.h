@@ -809,6 +809,10 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             solver_state.seeds   = &seed64;   // request seed so Lua stochastic solvers honour it (was nullptr -> seed 0)
             solver_state.batch_n = 1;
             solver_state.n_per   = n_lat;
+            if (breeding) {  // Lua stochastic solvers mix their own lockstep B stream
+                solver_state.seed_b     = sp->seed_b;
+                solver_state.seed_blend = breed_t;
+            }
             solver_state.xt_scratch.assign((size_t)n_lat, 0.0f);  // multi-eval solvers expect this pre-sized
             if (solver_plugin->needs_model) tm_v_snap.assign((size_t)n_lat, 0.0f);
         }
