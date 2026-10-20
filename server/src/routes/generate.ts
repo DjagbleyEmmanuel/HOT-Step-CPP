@@ -27,6 +27,11 @@ import {
 import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes.js';
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
+import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
+import { tokenizeForSa3 } from '../services/sa3Tokenizer.js';
+import { buildSlotRequest } from '../services/storm/slot.js';
+import { initDrift, updateDriftPressure, resolveStartDrift, defaultDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
+import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
@@ -726,6 +731,12 @@ interface StreamControlState {
   inferMethod: string | null;
   scheduler: string | null;
   guidanceMode: string | null;
+  /** Active drift runtime, set at stream start when baseParams.drift is present. */
+  drift?: DriftRuntime;
+  /** baseSeed resolved at stream start; used by /storm/control pre-stream drift seeding. */
+  baseSeed?: number;
+  /** True when ctrl.drift was set by /storm/control while no stream was live. */
+  driftPending?: boolean;
 }
 
 const streamRunning = new Map<string, boolean>();
@@ -749,7 +760,12 @@ function getStreamControl(streamId: string): StreamControlState {
 }
 
 function stopStream(streamId: string): void {
+  const wasRunning = streamRunning.get(streamId) === true;
   streamRunning.set(streamId, false);
+  // Drop the live drift runtime so it cannot leak into the next stream.
+  // A pending (idle-time) drift is left alone.
+  const c = streamControl.get(streamId);
+  if (c && wasRunning && !c.driftPending) c.drift = undefined;
   const aceJobId = streamAceJob.get(streamId);
   if (aceJobId) {
     aceClient.cancelJob(aceJobId).catch(() => {});
@@ -809,9 +825,20 @@ router.post('/storm/stream', async (req, res) => {
   // "Keep DiT & VAE loaded" setting — same per-request ?keep_loaded=1 the
   // normal synth phase sends; without it the engine evicts between slots.
   const coResident = baseParams.coResident === true;
+  // Snapshot the active backend at stream start. Switching backends mid-stream
+  // is not supported; a new stream must be started after a backend switch.
+  const streamBackend = getActiveBackendId();
   let slotIdx = 0;
 
-  console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed})`);
+  // Record the resolved baseSeed so pre-stream /storm/control calls can use it.
+  ctrl.baseSeed = baseSeed;
+
+  // Resolve the drift runtime. A pre-stream /storm/control drift is kept only
+  // when it is flagged pending; leftovers from a finished stream are dropped.
+  ctrl.drift = resolveStartDrift(ctrl.drift, ctrl.driftPending === true, baseParams.drift, baseSeed);
+  ctrl.driftPending = false;
+
+  console.log(`[STORM ${streamId}] stream started (baseSeed=${baseSeed}, backend=${streamBackend})`);
   pushLog(`[STORM ${streamId}] stream started`);
 
   try {
@@ -823,64 +850,66 @@ router.post('/storm/stream', async (req, res) => {
       }
       if (!streamRunning.get(streamId)) break;
 
-      const mergedPluginParams = {
-        ...(typeof baseParams.pluginParams === 'object' && baseParams.pluginParams !== null
-          ? baseParams.pluginParams as Record<string, unknown> : {}),
-        ...ctrl.extraPluginParams,
-      };
-
-      // NOTE: keys here must match what translateParams reads (camelCase for
-      // UI-facing params). An explicit per-slot seed also requires
-      // randomSeed=false or translateParams re-randomizes it.
-      const slotReq: Record<string, unknown> = {
-        ...baseParams,
-        randomSeed: false,
-        seed: ctrl.nextSeed !== null
-          ? ctrl.nextSeed
-          : (ctrl.seedLock ? baseSeed : baseSeed + slotIdx),
-        guidanceScale: ctrl.guidanceScale,
-        ...(ctrl.lssStrength > 0 ? { lssStrength: ctrl.lssStrength } : {}),
-        ...(ctrl.inferenceSteps > 0 ? { inferenceSteps: ctrl.inferenceSteps } : {}),
-        ...(ctrl.nextBpm !== null ? { bpm: ctrl.nextBpm } : ctrl.bpm > 0 ? { bpm: ctrl.bpm } : {}),
-        ...(ctrl.nextDuration !== null ? { duration: ctrl.nextDuration } : ctrl.duration > 0 ? { duration: ctrl.duration } : {}),
-        // Solver / scheduler / guidance live overrides — null keeps the snapshot value
-        ...(ctrl.inferMethod ? { inferMethod: ctrl.inferMethod } : {}),
-        ...(ctrl.scheduler ? { scheduler: ctrl.scheduler } : {}),
-        ...(ctrl.guidanceMode ? { guidanceMode: ctrl.guidanceMode } : {}),
-        ...(Object.keys(mergedPluginParams).length > 0 ? { pluginParams: mergedPluginParams } : {}),
-      };
-
-      // One-shot overrides (consumed after applying); Stick makes them base
+      // Log one-shot fields before buildSlotRequest reads them (they are
+      // cleared below after the helper returns).
       if (ctrl.nextPrompt !== null) {
-        slotReq.caption = ctrl.nextPrompt;
-        slotReq.prompt = ctrl.nextPrompt;
-        ctrl.nextPrompt = null;
         console.log(`[STORM ${streamId}] slot ${slotIdx}: applying queued prompt`);
-      } else if (ctrl.baseCaption !== null) {
-        slotReq.caption = ctrl.baseCaption;
-        slotReq.prompt = ctrl.baseCaption;
       }
       if (ctrl.nextLyrics !== null) {
-        slotReq.lyrics = ctrl.nextLyrics;
-        slotReq.instrumental = false;
+        console.log(`[STORM ${streamId}] slot ${slotIdx}: lyrics applied (one-shot), instrumental off`);
+      }
+
+      // Build the per-backend wire request via the shared slot helper.
+      // The helper reads ctrl but does not mutate it.
+      const slotResult = buildSlotRequest(baseParams, ctrl, slotIdx, baseSeed, streamBackend);
+
+      // Consume one-shot fields (same clearing the inline code did before).
+      if (ctrl.nextPrompt !== null) ctrl.nextPrompt = null;
+      if (ctrl.nextLyrics !== null) {
         ctrl.baseInstrumental = false;
         ctrl.nextLyrics = null;
-        console.log(`[STORM ${streamId}] slot ${slotIdx}: lyrics applied (one-shot), instrumental off`);
-      } else if (ctrl.baseLyrics !== null) {
-        slotReq.lyrics = ctrl.baseLyrics;
-        slotReq.instrumental = false;
-      } else if (ctrl.baseInstrumental === false) {
-        slotReq.instrumental = false;
       }
       if (ctrl.nextSeed !== null) ctrl.nextSeed = null;
       if (ctrl.nextBpm !== null) ctrl.nextBpm = null;
       if (ctrl.nextDuration !== null) ctrl.nextDuration = null;
 
-      const aceReq = translateParams(slotReq);
+      // SA3 is a single synchronous fetch -- no job poll needed.
+      if (slotResult.kind === 'sa3') {
+        const { ids, nTokens } = await tokenizeForSa3(slotResult.caption);
+        const sa3Buf = await aceClient.submitSa3Synth({
+          tokens: ids,
+          nTokens,
+          durationSec: slotResult.durationSec,
+          steps: slotResult.steps,
+          sampler: slotResult.sampler,
+          seed: slotResult.seed,
+          adapters: slotResult.adapters,
+          outFmt: 'f32',
+          ...(slotResult.solver        ? { solver:        slotResult.solver }        : {}),
+          ...(slotResult.scheduler     ? { scheduler:     slotResult.scheduler }     : {}),
+          ...(slotResult.guidanceMode  ? { guidanceMode:  slotResult.guidanceMode }  : {}),
+          ...(slotResult.guidanceScale !== undefined ? { guidanceScale: slotResult.guidanceScale } : {}),
+          ...(slotResult.pluginParams  ? { pluginParams:  slotResult.pluginParams }  : {}),
+          ...(slotResult.postprocessPlugin ? { postprocessPlugin: slotResult.postprocessPlugin } : {}),
+        });
+        if (!streamRunning.get(streamId)) break;
+        res.write(sa3Buf);
+        session?.chunk(sa3Buf);
+        slotIdx++;
+        continue;
+      }
+
+      // Submit to the right backend and get a shared-job id.
+      let synthJobId: string;
+      if (slotResult.kind === 'yue2') {
+        const synthRes = await yue2Synth(slotResult.yue2Req);
+        synthJobId = synthRes.job_id;
+      } else {
+        synthJobId = await aceClient.submitSynth(slotResult.aceReq, 'wav32', coResident);
+      }
 
       // Inline poll — checks streamRunning every 300 ms so stop/disconnect
       // cancels mid-render instead of waiting out the slot.
-      const synthJobId = await aceClient.submitSynth(aceReq, 'wav32', coResident);
       streamAceJob.set(streamId, synthJobId);
       const slotStart = Date.now();
       let jobDone = false;
@@ -892,7 +921,7 @@ router.post('/storm/stream', async (req, res) => {
         }
         if (Date.now() - slotStart > STREAM_SLOT_TIMEOUT_MS) {
           await aceClient.cancelJob(synthJobId).catch(() => {});
-          console.warn(`[STORM ${streamId}] slot ${slotIdx}: render timeout — stopping stream`);
+          console.warn(`[STORM ${streamId}] slot ${slotIdx}: render timeout -- stopping stream`);
           streamRunning.set(streamId, false);
           break;
         }
@@ -912,7 +941,13 @@ router.post('/storm/stream', async (req, res) => {
         console.warn(`[STORM ${streamId}] slot ${slotIdx}: result fetch failed (${audioRes.status})`);
         break;
       }
-      const wavBuf = Buffer.from(await audioRes.arrayBuffer());
+      const audioBody = Buffer.from(await audioRes.arrayBuffer());
+      // YuE2 may return multipart/mixed (one WAV per track); take the first
+      // part. ACE always returns a single WAV so the same path works for both.
+      const contentType = audioRes.headers.get('content-type') || 'audio/wav';
+      const wavBuf = contentType.startsWith('multipart/mixed')
+        ? (splitMultipartMixed(audioBody, contentType)[0] ?? audioBody)
+        : audioBody;
       res.write(wavBuf);
       session?.chunk(wavBuf);
       slotIdx++;
@@ -921,8 +956,17 @@ router.post('/storm/stream', async (req, res) => {
     console.error(`[STORM stream ${streamId}] error:`, err);
   } finally {
     stopStream(streamId);
+    // Keep a drift that a POST /storm/control set as pending after the stream
+    // ended; everything else (including live drift) is discarded.
+    const endCtrl = streamControl.get(streamId);
+    const pendingDrift = endCtrl?.driftPending ? endCtrl.drift : undefined;
     streamControl.delete(streamId);
     session?.end();
+    if (pendingDrift) {
+      const fresh = getStreamControl(streamId);
+      fresh.drift = pendingDrift;
+      fresh.driftPending = true;
+    }
     console.log(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     pushLog(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     res.end();
@@ -968,6 +1012,25 @@ router.post('/storm/control', (req, res) => {
       if (typeof v === 'number' || typeof v === 'string') ctrl.extraPluginParams[k] = v;
     }
   }
+  // Drift pressure patch -- ignore bad fields, never throw.
+  if (b.drift && typeof b.drift === 'object' && !Array.isArray(b.drift)) {
+    const live = streamRunning.get(streamId) === true;
+    if (live && ctrl.drift) {
+      // Stream is live: merge into existing runtime.
+      updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
+    } else if (!live && ctrl.drift && ctrl.driftPending) {
+      // Already pending: merge further idle-time patches.
+      updateDriftPressure(ctrl.drift, b.drift as Partial<DriftPressure>);
+    } else {
+      // Fresh runtime. When idle it is stored as pending; state is re-seeded
+      // with the real baseSeed at stream start (resolveStartDrift).
+      const seed = ctrl.baseSeed ?? Math.floor(Math.random() * 2147483647);
+      const driftRuntime: DriftRuntime = { state: initDrift(seed), pressure: defaultDriftPressure() };
+      updateDriftPressure(driftRuntime, b.drift as Partial<DriftPressure>);
+      ctrl.drift = driftRuntime;
+      ctrl.driftPending = !live;
+    }
+  }
 
   res.json({ ok: true, streamId });
 });
@@ -975,9 +1038,12 @@ router.post('/storm/control', (req, res) => {
 // GET /api/generate/storm/control — read back a stream's live state
 router.get('/storm/control', (req, res) => {
   const streamId = typeof req.query.streamId === 'string' ? req.query.streamId : 'default';
+  const ctrl = getStreamControl(streamId);
+  const { drift: _drift, ...ctrlWithoutDrift } = ctrl;
   res.json({
     running: streamRunning.get(streamId) ?? false,
-    ...getStreamControl(streamId),
+    ...ctrlWithoutDrift,
+    ...(ctrl.drift ? { drift: driftSnapshot(ctrl.drift) } : {}),
   });
 });
 

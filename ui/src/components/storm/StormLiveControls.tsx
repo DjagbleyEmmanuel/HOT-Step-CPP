@@ -91,6 +91,8 @@ export interface StormLiveControlsProps {
   activeScheduler?: string;
   activeGuidanceMode?: string;
   onSlotMetaUpdate?: (meta: Map<number, SlotMeta>) => void;
+  /** When true, hides ACE-only controls (Steps, Key, BPM). Pass for YuE2. */
+  hideAceControls?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -113,6 +115,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
   activeSolver,
   activeScheduler,
   activeGuidanceMode,
+  hideAceControls = false,
   onSlotMetaUpdate,
 }) => {
   const { token } = useAuth();
@@ -562,7 +565,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
         )}
 
         {/* Next-slot sliders */}
-        {NEXT_SLOT_PARAMS.filter(s => s.key !== 'bpm').map(s => (
+        {NEXT_SLOT_PARAMS.filter(s => s.key !== 'bpm' && !(hideAceControls && s.key === 'inference_steps')).map(s => (
           <div key={s.key} className="flex items-center gap-2">
             <span className={`text-[10px] w-14 ${s.color}`}>{s.emoji} {s.label}</span>
             <input type="range" min={s.min} max={s.max} step={s.step}
@@ -626,8 +629,8 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
           onLoadRandom={handleSeedLoadRandom}
         />
 
-        {/* Key control row */}
-        <div className="flex items-center gap-2">
+        {/* Key control row — ACE only */}
+        {!hideAceControls && <div className="flex items-center gap-2">
           <span className="text-[10px] text-zinc-500 w-14">🎹 Key</span>
           <button onClick={() => setKeyMode(keyMode === 'auto' ? 'manual' : 'auto')}
             className={`text-[8px] px-1.5 py-0.5 rounded font-medium transition-colors shrink-0 ${
@@ -645,10 +648,10 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
               placeholder="e.g. Cm, F#, Bbm"
               className="flex-1 text-[10px] bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 transition-colors" />
           )}
-        </div>
+        </div>}
 
-        {/* BPM auto row */}
-        <div className="flex items-center gap-2">
+        {/* BPM auto row — ACE only */}
+        {!hideAceControls && <div className="flex items-center gap-2">
           <span className="text-[10px] text-zinc-500 w-14">🥁 BPM</span>
           <button onClick={() => setBpmMode(bpmMode === 'auto' ? 'manual' : 'auto')}
             className={`text-[8px] px-1.5 py-0.5 rounded font-medium transition-colors shrink-0 ${
@@ -668,7 +671,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
               <span className="text-[10px] text-orange-400 w-8 text-right tabular-nums">{sliderVals['bpm']}</span>
             </>
           )}
-        </div>
+        </div>}
 
         {/* AI Continuation */}
         <div className="space-y-1">
