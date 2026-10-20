@@ -13,7 +13,7 @@ const between = (from: string, to: string) => source.slice(source.indexOf(from),
 // Compile-time key lists: adding a key to the type without listing it here fails tsc.
 const CONTROL_KEYS = ['streamId', 'guidance_scale', 'lss_strength', 'inference_steps', 'duration', 'bpm', 'next_bpm', 'next_duration',
   'seed_lock', 'seed', 'prompt', 'lyrics', 'stick_prompt', 'stick_lyrics', 'stream_pause', 'infer_method', 'scheduler',
-  'guidance_mode', 'plugin_params'] as const satisfies ReadonlyArray<keyof StormControl>;
+  'guidance_mode', 'plugin_params', 'drift'] as const satisfies ReadonlyArray<keyof StormControl>;
 type MissingControl = Exclude<keyof StormControl, typeof CONTROL_KEYS[number]>;
 const _controlComplete: MissingControl extends never ? true : never = true;
 const MM3_KEYS = ['mm3_streaming', 'mm3_interleaved', 'mm3_duration', 'mm3_takes', 'mm3_take_seeds'] as const satisfies ReadonlyArray<keyof Mm3StreamStatus>;
@@ -42,7 +42,11 @@ test('the stream routes set the published session header, and status carries the
 
 test('STORM start and stop read the published fields', () => {
   const start = between("router.post('/storm/stream'", '\nrouter.');
-  for (const key of ['streamId', 'seed', 'coResident', 'pluginParams']) assert.ok(start.includes(`baseParams.${key}`), key);
+  for (const key of ['streamId', 'seed', 'coResident']) assert.ok(start.includes(`baseParams.${key}`), key);
+  // The slot builder (services/storm/slot.ts) merges baseParams.pluginParams into every slot.
+  const slot = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'services', 'storm', 'slot.ts'), 'utf8');
+  assert.ok(start.includes('buildSlotRequest(baseParams'), 'stream passes baseParams to the slot builder');
+  assert.ok(slot.includes('baseParams.pluginParams'), 'pluginParams');
   const stop = between("router.post('/storm/stop'", '\nrouter.');
   assert.ok(stop.includes('b.streamId'));
   assert.ok(stop.includes('res.json({ ok: true })'));

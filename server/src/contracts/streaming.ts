@@ -11,6 +11,8 @@
 // stream session named in the X-Stream-Session response header
 // (contracts/streamSessions.ts).
 
+import type { DriftPressure } from '../services/storm/drift.js';
+
 /** Response header naming the stream's Node session. Absent when Node could
  *  not open one; the audio is unaffected. */
 export const STREAM_SESSION_HEADER = 'X-Stream-Session';
@@ -53,9 +55,14 @@ export interface StormControl {
   scheduler?: string;
   guidance_mode?: string;
   plugin_params?: Record<string, number | string>;
+  /** Directed Drift pressure patch, merged into the stream's drift (or held
+   *  for the next stream when none is running). Bad fields are ignored. */
+  drift?: Partial<DriftPressure>;
 }
 export interface StormControlResponse { ok: true; streamId: string }
-/** POST /api/generate/storm/stop: cancels the slot in flight and ends the response. */
+/** POST /api/generate/storm/stop: starts no further slot and ends the response.
+ *  An ACE/YuE2 slot in flight is cancelled; an SA3 slot runs to the end. Its
+ *  audio is discarded either way. */
 export interface StormStop { streamId?: string }
 export interface StormStopResponse { ok: true }
 
