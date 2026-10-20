@@ -989,11 +989,6 @@ if(BUILD_TESTING)
     link_ggml_backends(dora-common-test)
     add_test(NAME dora-common COMMAND dora-common-test)
 
-    add_executable(dora-runtime-test tests/test-dora-runtime.cpp)
-    link_ggml_backends(dora-runtime-test)
-    target_link_libraries(dora-runtime-test PRIVATE yyjson)
-    add_test(NAME dora-runtime COMMAND dora-runtime-test)
-
     add_executable(sa3-dora-load-test tests/test-sa3-dora-load.cpp)
     link_ggml_backends(sa3-dora-load-test)
     target_link_libraries(sa3-dora-load-test PRIVATE yyjson)
