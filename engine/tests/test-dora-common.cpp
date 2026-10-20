@@ -212,7 +212,12 @@ static void check_norm(const char * tag, const Site & s, float scale, int zero_c
         const double rel = std::fabs((double) now[o] - ref[o]) / ref[o];
         worst            = rel > worst ? rel : worst;
     }
-    CHECK(worst < 1e-5, "%s: max rel err %.3g vs host reference", tag, worst);
+    // Bit-exactness against the legacy graph is the gate; this only catches a
+    // gross error (axis, scale). 1e-3 because CUDA and Vulkan mul_mat land
+    // near 1e-4 here (CUDA's small F32 x F32 likely on TF32 tensor cores), with
+    // the legacy graph identical; CPU and Metal sit near 1e-7. The printed
+    // max_rel shows it per backend.
+    CHECK(worst < 1e-3, "%s: max rel err %.3g vs host reference", tag, worst);
     printf("  %-34s in=%-3lld out=%-3lld bit-exact=%s  max_rel=%.2e\n", tag, (long long) s.in, (long long) s.out,
            memcmp(legacy.data(), now.data(), now.size() * sizeof(float)) == 0 ? "yes" : "NO", worst);
 }
