@@ -835,8 +835,8 @@ const MAX_OCCURRENCES = 100;
 /** Replaces the occurrences not yet built (coverArrangement's editPlan):
  *  `upcoming` lists source section ids (s0...) for new occurrences, or
  *  existing upcoming occurrence ids (o3...) to keep their identity, and
- *  `finished` says the plan ends the song. Kept occurrences stay. Every take
- *  not yet kept becomes ineligible through the revision. */
+ *  `finished` says the plan ends the song. Kept occurrences stay. A take not
+ *  yet kept stays keepable only when its own sections are untouched (carryTakes). */
 export function editBuildPlan(id: string, userId: string, revision: unknown, upcoming: unknown, finished: unknown): Yue2BuildSession {
   const stored = load(id, userId);
   checkRevision(stored, revision);
@@ -851,10 +851,29 @@ export function editBuildPlan(id: string, userId: string, revision: unknown, upc
   const same = (a: typeof arrangement) => JSON.stringify([a.plan, a.finished]);
   if (same(arrangement) === same(stored.arrangement)) return view(stored);
   arranged({ request: stored.request, arrangement });
+  const before = stored.revision;
   stored.arrangement = arrangement;
   stored.revision++;
+  carryTakes(stored, before);
   save(stored);
   return view(stored);
+}
+
+/** Takes made at revision `before` whose own sections a plan edit left alone
+ *  stay keepable: keeping one first and editing the plan after gives the same
+ *  build. A take that composed an ending stays only while the song still ends
+ *  after it. */
+export function carryTakes(stored: Pick<ArrangedSession, 'takes' | 'kept' | 'arrangement' | 'revision'>, before: number): void {
+  const from = nextOccurrence(stored);
+  const parent = stored.kept.at(-1) ?? null;
+  const { plan, finished } = stored.arrangement;
+  for (const take of stored.takes) {
+    if (take.revision !== before || take.parent !== parent || take.from !== from) continue;
+    const want = plan.slice(from, take.to + 1).map(o => o.id);
+    if (want.length !== take.occurrences.length || want.some((id, i) => id !== take.occurrences[i])) continue;
+    const ending = take.starts.length <= take.to + 1;
+    if (!ending || (finished && plan.length === take.to + 1)) take.revision = stored.revision;
+  }
 }
 
 /** Why `lyrics` cannot be sung by a build, or null. Text above the first tag

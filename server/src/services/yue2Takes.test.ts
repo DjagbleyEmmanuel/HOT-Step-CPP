@@ -555,6 +555,19 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.deepEqual(getBuildSession(s.id, 'user').arrangement.plan[0].id, 'o4');
   });
 
+  await t.test('a plan edit after a take leaves it keepable while its own sections are untouched', async () => {
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s0', 's1'], false);
+    const [both] = await take(s.id, 1, 1);
+    // Appending the next section, or moving what follows the take, does not touch it.
+    let now = editBuildPlan(s.id, 'user', 1, ['o4', 'o5', 's2'], false);
+    assert.equal(now.takes.find(x => x.id === both.id)!.revision, now.revision);
+    // Its own sections changed: not keepable.
+    now = editBuildPlan(s.id, 'user', now.revision, ['o5', 'o4', 'o6'], false);
+    assert.notEqual(now.takes.find(x => x.id === both.id)!.revision, now.revision);
+    assert.throws(() => keepBuildTake(s.id, 'user', both.id, now.revision), /before the last change/);
+  });
+
   await t.test('an unbuilt repeat sings its own lines; built ones and tags are refused', async () => {
     const { setOccurrenceLyrics } = await import('./yue2Takes.js');
     const s = start();
