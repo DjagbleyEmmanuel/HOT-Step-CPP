@@ -110,6 +110,20 @@ test('previews render with the sampler snapshot, and junk keys are dropped', asy
   }
 });
 
+test('previews clamp composer temperature to 1.0 when Top-K is unlimited', async () => {
+  const f = previewFixture();
+  const { deps, calls } = mockDeps();
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, sampler: { yue2SemTopK: 0, yue2SemTemperature: 1.4 } },
+    arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+  const synths = calls.filter(c => c.name === 'synth').map(c => c.value as any);
+  assert.ok(synths.length >= 1);
+  for (const s of synths) {
+    assert.equal(s.semantic_top_k, 0);
+    assert.equal(s.semantic_temperature, 1);
+  }
+});
+
 test('with no song picked, renderer skips an instrumental first track', async () => {
   const f = previewFixture();
   fs.writeFileSync(f.dataset, JSON.stringify({ items: [

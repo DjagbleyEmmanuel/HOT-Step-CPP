@@ -275,7 +275,8 @@ function yue2InstrumentalAbc(abc: string, notes: string[]): string {
 
 /** The LM tab's planner and composer sampler fields, as wire fields. Only
  *  what the UI actually sent travels (an untouched control is absent), so the
- *  engine keeps its checkpoint value otherwise. Shared with training previews. */
+ *  engine keeps its checkpoint value otherwise. Shared with training previews,
+ *  so the unlimited Top-K temperature clamp lives here, not in the callers. */
 export function yue2LmOverrides(params: Record<string, unknown>, notes: string[] = []): Record<string, number> {
   const lmFields: Array<[string, keyof Yue2SynthRequest]> = [
     ['yue2PlanTemperature', 'plan_temperature'], ['yue2PlanTopP', 'plan_top_p'], ['yue2PlanTopK', 'plan_top_k'],
@@ -294,6 +295,7 @@ export function yue2LmOverrides(params: Record<string, unknown>, notes: string[]
     if (Number.isFinite(v)) lmOverrides[wireKey] = v;
     else notes.push(`Invalid ${uiKey} — using the checkpoint default`);
   }
+  clampYue2SemanticSampling(lmOverrides, notes, yue2PropsCached()?.sampling?.semantic?.temperature);
   return lmOverrides;
 }
 
@@ -606,7 +608,6 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const noise_seed = yue2Seed(typeof noiseSeedRaw === 'number' ? Math.floor(noiseSeedRaw) : noiseSeedRaw);
 
   const lmOverrides = yue2LmOverrides(params, notes);
-  clampYue2SemanticSampling(lmOverrides, notes, propsNow?.sampling?.semantic?.temperature);
   if (Object.keys(lmOverrides).length) notes.push(`LM overrides: ${Object.entries(lmOverrides).map(([k, v]) => `${k}=${v}`).join(', ')}`);
 
   const req: Yue2SynthRequest = {
