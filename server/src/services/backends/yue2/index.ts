@@ -641,14 +641,15 @@ async function capabilities(): Promise<BackendCapabilities> {
       },
       {
         key: 'yue2SemTopK', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Top-K',
-        hint: `Candidates kept per codec frame. Checkpoint: ${sd('semantic', 'top_k', 100)}.`,
-        default: sd('semantic', 'top_k', 100), min: 1, max: 500, step: 1,
+        hint: `Candidates kept per codec frame. 0 = unlimited. Checkpoint: ${sd('semantic', 'top_k', 100)}. `
+            + 'Unlimited with Composer Temperature above 1.0 breaks the song; the server clamps temperature to 1.0 in that case.',
+        default: sd('semantic', 'top_k', 100), min: 0, max: 500, step: 1,
       },
       {
         key: 'yue2SemRepPenalty', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Repetition Penalty',
         hint: 'Frequency penalty over recent codec frames — the "same bar forever" guard. '
             + `1.0 = off. Checkpoint: ${sd('semantic', 'repetition_penalty', 1.2)}.`,
-        default: sd('semantic', 'repetition_penalty', 1.2), min: 1, max: 1.5, step: 0.005,
+        default: sd('semantic', 'repetition_penalty', 1.2), min: 1, max: 2, step: 0.005,
       },
       {
         key: 'yue2SemRepWindow', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Repetition Window',
@@ -711,7 +712,8 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'text',
         label: 'CFG Scale',
         hint: 'Blank = the checkpoint\'s own default for the selected Chain of Thought mode '
-            + '(1.0 for melody/full, 1.01 for off). Set a number to override it.',
+            + '(1.0 for melody/full, 1.01 for off). Set a number to override it (useful range 0.5 to 3.0). '
+            + 'Higher follows the style text harder but costs some high-end air.',
         default: '',
       },
       {
