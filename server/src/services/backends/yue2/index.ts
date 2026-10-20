@@ -27,7 +27,7 @@ import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
-import { yue2AdapterTrigger } from './jointAdapterContext.js';
+import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
 import { EMPTY_COVER_SCORE_ERROR, hasSoundingVocalBar } from './scoreHealth.js';
 import { runYue2Generation } from './generate.js';
@@ -1167,7 +1167,7 @@ function yue2LmAdapterCatalogue(): {
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const fileMeta = readSafetensorsMeta(abs);
-        const { trigger, inferred } = yue2AdapterTrigger(abs, jointRuns);
+        const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);
         const rank = fileMeta?.rank;
         const steps = fileMeta?.steps ?? ckpt.step;
         paths.push(abs);
@@ -1178,6 +1178,7 @@ function yue2LmAdapterCatalogue(): {
           runName,
           trigger: trigger || undefined,
           triggerInferred: inferred || undefined,
+          triggerManual: manual || undefined,
           rank,
           steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
           bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
@@ -1204,7 +1205,7 @@ function yue2LmAdapterCatalogue(): {
     const kind: Yue2LmAdapterKind | null = /^yue2-ar-/.test(fileMeta?.format ?? '') ? 'ar'
       : /^yue2-nar-/.test(fileMeta?.format ?? '') ? 'nar' : null;
     if (!kind) continue;
-    const { trigger, inferred } = yue2AdapterTrigger(abs, jointRuns);
+    const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);
     const runName = path.relative(folder, path.dirname(abs)) || path.basename(folder);
     const steps = fileMeta?.steps;
     paths.push(abs);
@@ -1214,6 +1215,7 @@ function yue2LmAdapterCatalogue(): {
       runName,
       trigger: trigger || undefined,
       triggerInferred: inferred || undefined,
+      triggerManual: manual || undefined,
       rank: fileMeta?.rank,
       steps: steps && Number.isFinite(steps) && steps > 0 ? steps : undefined,
       bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
@@ -1485,6 +1487,14 @@ async function selectModel(selection: Record<string, string>) {
     }
     setSetting(ADAPTER_FOLDER_SETTING, folder);
     if (Object.keys(selection).length === 1) return { changed: false, lmAdapterFolder: folder };
+  }
+  // A typed trigger word for an adapter that carries none (the Adapters
+  // dropdown): stored per file, not part of the pick.
+  if (typeof selection.lmAdapterTriggerPath === 'string' && typeof selection.lmAdapterTrigger === 'string') {
+    const ref = resolveYue2Adapter(selection.lmAdapterTriggerPath.trim());
+    if (!ref) throw new Error(`YuE2 adapter not usable: ${selection.lmAdapterTriggerPath}`);
+    setYue2ManualTrigger(ref, selection.lmAdapterTrigger);
+    if (Object.keys(selection).length === 2) return { changed: false };
   }
   const persisted = yue2PersistedSelection();
   const sel: Yue2Selection = {

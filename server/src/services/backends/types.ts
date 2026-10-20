@@ -196,6 +196,8 @@ export interface BackendModels {
     trigger?: string;
     /** Joint export fallback from the dataset setting, absent from training metadata. */
     triggerInferred?: boolean;
+    /** Typed in the Adapters dropdown: the file, its run and its dataset carry none. */
+    triggerManual?: boolean;
     rank?: number;
     steps?: number;
     bytes?: number;

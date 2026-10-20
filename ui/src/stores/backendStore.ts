@@ -212,6 +212,8 @@ export interface BackendModelCatalogue {
     runName?: string;
     trigger?: string;
     triggerInferred?: boolean;
+    /** Typed in the Adapters dropdown: the file, its run and its dataset carry none. */
+    triggerManual?: boolean;
     rank?: number;
     steps?: number;
     bytes?: number;

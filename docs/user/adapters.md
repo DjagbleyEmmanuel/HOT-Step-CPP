@@ -269,6 +269,11 @@ structure and phrasing. An adapter trained on one half is refused by the other.
    Each dial saves when you let go of the slider, or when you leave or press Enter in its
    number box.
 
+A picked adapter shows the trigger word it was trained with. One that carries none (no
+trigger in the file, its run or its dataset) shows a **LoRA trigger word** box instead: type the
+word if you know it and it is put at the start of the style prompt for every render with that
+adapter file. It saves when you leave the box or press Enter; clear it to stop.
+
 The AR slot splits Strength in two. **Planner Strength** applies while the AR writes the
 score (melody, chords and sections); **Composer Strength** applies while it turns that
 score into audio. Planner Strength follows Composer Strength until you move it, and

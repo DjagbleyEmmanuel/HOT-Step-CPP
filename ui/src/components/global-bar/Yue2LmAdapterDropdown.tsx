@@ -163,10 +163,12 @@ interface SlotPanelProps {
   inForce: boolean;
   disabled: boolean;
   onCommit: (kind: SlotKind, path: string | null, dials: Dials) => Promise<void>;
+  /** Save a typed trigger word for an adapter file that carries none. */
+  onTrigger: (path: string, trigger: string) => Promise<void>;
 }
 
 const SlotPanel: React.FC<SlotPanelProps> = ({
-  kind, title, blurb, paths, meta, selected, dials, inForce, disabled, onCommit,
+  kind, title, blurb, paths, meta, selected, dials, inForce, disabled, onCommit, onTrigger,
 }) => {
   const { t } = useTranslation();
   const [draft, setDraftState] = useState<Dials>(dials);
@@ -189,6 +191,16 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
   useEffect(() => { setDraft(dials); }, [dials.scale, dials.attn, dials.mlp, dials.early, dials.mid, dials.late, dials.plan]);
 
   const entry = selected ? meta[selected] : undefined;
+  // A trigger the file itself (or its run/dataset) carries is shown as-is; one
+  // the user typed, or none at all, is an editable LoRA trigger word field.
+  const triggerEmbedded = !!entry?.trigger && !entry.triggerManual;
+  const [triggerDraft, setTriggerDraft] = useState(entry?.triggerManual ? entry.trigger ?? '' : '');
+  useEffect(() => { setTriggerDraft(entry?.triggerManual ? entry.trigger ?? '' : ''); }, [selected, entry?.trigger, entry?.triggerManual]);
+  const saveTrigger = () => {
+    const typed = triggerDraft.trim();
+    const saved = entry?.triggerManual ? entry.trigger ?? '' : '';
+    if (selected && typed !== saved) void onTrigger(selected, typed);
+  };
 
   return (
     <div className="space-y-3">
@@ -223,20 +235,42 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
         <>
           {/* ── What this adapter is ── */}
           <div className="px-3 py-2 rounded-xl bg-zinc-100/50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-white/5 space-y-1">
-            {entry?.trigger ? (
+            {triggerEmbedded ? (
               <div className="flex items-baseline gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500">
                   {t('globalBar.yue2AdapterTrigger', 'Trigger')}
                 </span>
-                <span className="text-xs font-mono text-emerald-500 select-all break-all">{entry.trigger}</span>
+                <span className="text-xs font-mono text-emerald-500 select-all break-all">{entry!.trigger}</span>
               </div>
             ) : (
-              <div className="flex gap-2 items-start">
-                <AlertTriangle size={12} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                <p className="text-[10px] text-amber-500/90 leading-relaxed">
-                  {t('globalBar.yue2AdapterNoTrigger',
-                    'This adapter records no trigger word, so there is no phrase that reliably calls its style up. It was trained without one.')}
-                </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <ParamLabel
+                    label={t('globalBar.yue2AdapterManualTrigger', 'LoRA trigger word')}
+                    info={t('globalBar.yue2AdapterManualTriggerInfo',
+                      'This adapter carries no trigger word. If you know the word it was trained with, type it here: it is put at the start of the style prompt for every render with this adapter. Saved for this adapter file when you leave the box or press Enter; clear it to stop.')}
+                    className="text-[10px] uppercase tracking-wider text-zinc-500 shrink-0"
+                  />
+                  <input
+                    type="text"
+                    value={triggerDraft}
+                    onChange={e => setTriggerDraft(e.target.value)}
+                    onBlur={saveTrigger}
+                    onKeyDown={e => { if (e.key === 'Enter') saveTrigger(); }}
+                    disabled={disabled}
+                    placeholder={t('globalBar.yue2AdapterManualTriggerPlaceholder', 'none')}
+                    className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs font-mono text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-emerald-500/40 disabled:opacity-50"
+                  />
+                </div>
+                {!entry?.triggerManual && (
+                  <div className="flex gap-2 items-start">
+                    <AlertTriangle size={12} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-amber-500/90 leading-relaxed">
+                      {t('globalBar.yue2AdapterNoTrigger',
+                        'This adapter records no trigger word, so there is no phrase that reliably calls its style up. It was trained without one.')}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {entry?.triggerInferred && (
@@ -245,7 +279,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                   'Dataset tag inferred for this joint checkpoint. The adapter was trained without the trigger phrase; adding it to the prompt is experimental.')}
               </p>
             )}
-            {entry?.trigger && !entry.triggerInferred && (
+            {triggerEmbedded && !entry!.triggerInferred && (
               <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
                 {t('globalBar.yue2AdapterTriggerUse',
                   'Start the style prompt with this word — it is how the adapter is addressed.')}
@@ -458,6 +492,17 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
 
   const license = typeof capabilities?.license === 'string' ? capabilities.license : undefined;
 
+  const onTrigger = async (adapterPath: string, trigger: string) => {
+    setBusy(true);
+    const ok = await selectModels({ lmAdapterTriggerPath: adapterPath, lmAdapterTrigger: trigger }, activeBackendId);
+    setBusy(false);
+    setNote(ok
+      ? (trigger
+        ? t('globalBar.yue2AdapterTriggerSaved', 'Trigger word saved for this adapter.')
+        : t('globalBar.yue2AdapterTriggerCleared', 'Trigger word cleared for this adapter.'))
+      : t('globalBar.yue2AdapterTriggerFailed', 'Could not save that trigger word.'));
+  };
+
   const onCommit = async (kind: SlotKind, pick: string | null, dials: Dials) => {
     setBusy(true);
     setNote(null);
@@ -575,6 +620,7 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
         inForce={inForceFor('nar')}
         disabled={locked}
         onCommit={onCommit}
+        onTrigger={onTrigger}
       />
 
       <div className="border-t border-zinc-200 dark:border-white/5" />
@@ -591,6 +637,7 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
         inForce={inForceFor('ar')}
         disabled={locked}
         onCommit={onCommit}
+        onTrigger={onTrigger}
       />
 
       {selectedFor('ar') && selectedFor('nar') && (
