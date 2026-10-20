@@ -86,11 +86,11 @@ which has its own keys (B, Tab).
 
 ### Command palette
 
-Ctrl+K (Cmd+K on Mac) opens a search box that jumps anywhere. Type a few
-letters of a studio name ("trn" finds Training Studio) or a song title or
-style; the list ranks studios first, then songs from your library. Use Up and
+On desktop, Ctrl+K (Cmd+K on Mac) opens a search box that jumps anywhere. Type a few
+letters of a studio name ("trn" finds Training Studio) or a song title;
+the list ranks studios first, then songs from your library. Use Up and
 Down to move, Enter to open, Esc to close. Picking a song opens Library and
-plays it. On a phone, tap the search icon in the top bar to open it.
+plays it.
 
 ## Playlists
 
