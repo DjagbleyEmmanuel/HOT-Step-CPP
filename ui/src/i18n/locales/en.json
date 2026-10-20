@@ -2810,6 +2810,8 @@
     "trainingStudio.mm3.steps": "Steps",
     "trainingStudio.mm3.saveEvery": "Checkpoint every",
     "trainingStudio.mm3.keepResumeState": "Keep resume state after completion",
+    "trainingStudio.mm3.updateLinkedPresets": "Update linked album presets",
+    "trainingStudio.mm3.updateLinkedPresetsHint": "When the run finishes, Lyric Studio album presets linked to this dataset are pointed at its final checkpoint. Turn off for test runs so they do not replace a preset you use.",
     "trainingStudio.mm3.keepResumeStateHint": "The optimizer state (about 4 GB) lets a finished run be continued past its step count. Off: it is deleted once the run ends. A run that stops early keeps it either way.",
     "trainingStudio.mm3.rank": "Rank",
     "trainingStudio.mm3.maxFrames": "Crop (frames)",

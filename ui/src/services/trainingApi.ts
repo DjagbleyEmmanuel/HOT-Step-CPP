@@ -252,6 +252,8 @@ export interface Mm3TrainLmRequest {
   steps?: number;
   saveEvery?: number;
   keepResumeState?: boolean;
+  /** Repoint linked Lyric Studio album presets at the final checkpoint (default true). */
+  updateLinkedPresets?: boolean;
   /** Tracks longer than the window: exclude (default) or crop. */
   longTracks?: 'exclude' | 'crop';
   warmup?: number;

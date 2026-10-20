@@ -52,6 +52,7 @@ interface FormState {
   targetLossEpochs: number;
   saveEvery: number;
   keepResumeState: boolean;
+  updateLinkedPresets: boolean;
   longTracks: 'exclude' | 'crop';
   rank: number;
   alpha: number;
@@ -195,6 +196,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     targetLossEpochs: status.defaults.targetLossEpochs ?? 5,
     saveEvery: status.defaults.saveEvery ?? 100,
     keepResumeState: status.defaults.keepResumeState ?? false,
+    updateLinkedPresets: status.defaults.updateLinkedPresets ?? true,
     longTracks: status.defaults.longTracks === 'crop' ? 'crop' : 'exclude',
     // Rank follows the recommendation for the same reason as the base: at the
     // default 256 nothing fits below ~24 GB, so a 16 GB card would open on a
@@ -706,6 +708,13 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 info={t('trainingStudio.mm3.keepResumeStateHint',
                   'The optimizer state (about 4 GB) lets a finished run be continued past its step '
                   + 'count. Off: it is deleted once the run ends. A run that stops early keeps it either way.')} />
+              <Toggle accent="amber" className="col-span-2" checked={form.updateLinkedPresets}
+                onChange={v => set('updateLinkedPresets', v)}
+                defaultValue={base.updateLinkedPresets} onReset={() => reset('updateLinkedPresets')}
+                label={t('trainingStudio.mm3.updateLinkedPresets', 'Update linked album presets')}
+                info={t('trainingStudio.mm3.updateLinkedPresetsHint',
+                  'When the run finishes, Lyric Studio album presets linked to this dataset are pointed at '
+                  + 'its final checkpoint. Turn off for test runs so they do not replace a preset you use.')} />
               <Toggle accent="amber" className="col-span-2" checked={form.longTracks === 'exclude'}
                 onChange={v => set('longTracks', v ? 'exclude' : 'crop')}
                 defaultValue={base.longTracks === 'exclude'} onReset={() => reset('longTracks')}

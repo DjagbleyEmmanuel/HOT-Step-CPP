@@ -106,6 +106,7 @@ registerTrainingOperations('recipes', mountTrainingRecipes);
 export function mm3ExecutionBody(form: Record<string, any>, activePreset: string, trainLaunder: boolean, flashSupported: boolean) {
   return {
         steps: form.steps, saveEvery: form.saveEvery, keepResumeState: form.keepResumeState,
+        updateLinkedPresets: form.updateLinkedPresets,
         longTracks: form.longTracks,
         rank: form.rank, alpha: form.alpha,
         lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,

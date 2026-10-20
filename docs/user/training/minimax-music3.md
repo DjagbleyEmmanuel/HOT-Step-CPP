@@ -62,6 +62,7 @@ The rest of the recipe is shared:
 | Prior preservation | Off | |
 | Train until | Step count | |
 | Keep resume state after completion | Off | |
+| Update linked album presets | On | When the run ends, Lyric Studio album presets linked to the dataset are pointed at its final checkpoint. Turn it off for test runs. |
 
 When to move off them:
 

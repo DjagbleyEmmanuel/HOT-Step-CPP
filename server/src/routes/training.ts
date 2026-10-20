@@ -2665,6 +2665,7 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       scoreLast:    num('scoreLast', 0, 0, 9000),
       scoreLastEndOnly: b.scoreLastEndOnly === true,
       keepResumeState: bool('keepResumeState', D.keepResumeState),
+      updateLinkedPresets: bool('updateLinkedPresets', D.updateLinkedPresets),
       longTracks: longTracksResolved,
       verifyExport: b.verifyExport === true,
       lyricsDropout: num('lyricsDropout', 0, 0, 1),
