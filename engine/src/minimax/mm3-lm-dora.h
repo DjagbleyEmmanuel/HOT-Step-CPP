@@ -30,6 +30,7 @@
 #include "mm3-model.h"
 
 #include "backend.h"
+#include "dora-common.h"
 #include "ggml.h"
 
 #include <cstdio>
@@ -113,13 +114,9 @@ static bool mm3_lm_dora_prepare(const MM3Model & m, MM3LmAdapter * ad, std::stri
             }
             // ggml_cast dequantizes, which is the point: the resident base is
             // routinely q8_0 and that is why the runtime path exists at all.
-            ggml_tensor * a_t   = ggml_cont(ctx, ggml_transpose(ctx, p.a));   // [r, in] f16
-            ggml_tensor * b32   = ggml_cast(ctx, p.b, GGML_TYPE_F32);         // [r, out]
-            ggml_tensor * delta = ggml_mul_mat(ctx, a_t, b32);                // [in, out] f32
-            ggml_tensor * basef = ggml_cast(ctx, w, GGML_TYPE_F32);
-            ggml_tensor * wd    = ggml_add(ctx, basef, ggml_scale(ctx, delta, p.base_scale));
-            ggml_tensor * nr    = ggml_sqrt(ctx, ggml_sum_rows(ctx, ggml_sqr(ctx, wd)));  // [1, out]
-            ggml_tensor * outt  = ggml_reshape_1d(ctx, nr, nr->ne[1]);
+            ggml_tensor * nr   = dora_col_norm(ctx, ggml_cast(ctx, w, GGML_TYPE_F32), p.a,
+                                               ggml_cast(ctx, p.b, GGML_TYPE_F32), p.base_scale);  // [1, out]
+            ggml_tensor * outt = ggml_reshape_1d(ctx, nr, nr->ne[1]);
             ggml_set_output(outt);
 
             ggml_cgraph * gf = ggml_new_graph_custom(ctx, 64, false);

@@ -982,4 +982,10 @@ if(BUILD_TESTING)
     enable_testing()
     add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
     add_test(NAME monitor-chain COMMAND test-monitor-chain)
+
+    # DoRA norm-refresh freeze fixture (dora-common.h vs the pre-extraction
+    # graphs). GGML_BACKEND picks the device; see the test's header.
+    add_executable(dora-common-test tests/test-dora-common.cpp)
+    link_ggml_backends(dora-common-test)
+    add_test(NAME dora-common COMMAND dora-common-test)
 endif()
