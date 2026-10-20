@@ -141,6 +141,11 @@ time-major; frame `f` is slerped on its own (per-frame vector across channels) a
 song can start as one seed and end as the other. API field: `seedBlendEnd`.
 Per-frame morph is not the same as whole-item breeding even at a constant blend (each frame is slerped on its own), so when `seed_blend_end` equals `seed_blend` the engine uses the whole-item breeding path.
 
+SA3 seed breeding: `/sa3-synth` accepts `seed_b` (int64, `-1` = off) and `seed_blend`
+(float 0 to 1, default 0) as form/query params. The whole pure-noise latent is slerped
+from the `seed` noise toward the `seed_b` noise (same std::mt19937_64 gaussian at
+`seed_b`); `0` gives `seed` exactly, `1` gives `seed_b`. No effect on `/sa3-refine`.
+
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
 item `b` of `/lm` gets `lm_seed + b`.

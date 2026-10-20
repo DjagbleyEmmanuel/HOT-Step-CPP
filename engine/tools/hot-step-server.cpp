@@ -4527,6 +4527,13 @@ int main(int argc, char ** argv) {
         if (req.has_param("sa3_lua_renoise") && req.get_param_value("sa3_lua_renoise") == "0") {
             sa3_sp.sa3_lua_renoise = false;
         }
+        if (req.has_param("seed_b")) {
+            sa3_sp.seed_b = std::strtoll(req.get_param_value("seed_b").c_str(), nullptr, 10);
+        }
+        if (req.has_param("seed_blend")) {
+            float t = std::strtof(req.get_param_value("seed_blend").c_str(), nullptr);
+            sa3_sp.seed_blend = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        }
         if (req.has_param("plugin_params")) {
             const std::string & pp_json = req.get_param_value("plugin_params");
             yyjson_doc * pp_doc = yyjson_read(pp_json.c_str(), pp_json.size(), 0);

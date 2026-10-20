@@ -291,10 +291,15 @@ struct Sa3PluginParams {
     // renoise) for A/B. No effect when no solver is selected, or on the
     // owns_loop path (see sa3-refine.h NOTE at the owns_loop branch).
     bool sa3_lua_renoise = true;
+    // Seed breeding (/sa3-synth only): slerp the initial noise of `seed`
+    // toward the noise of seed_b. seed_b < 0 or seed_blend == 0 = off.
+    int64_t seed_b     = -1;
+    float   seed_blend = 0.0f;
 
     bool any() const {
         return !solver.empty() || !scheduler.empty() || !guidance_mode.empty()
-            || !postprocess_plugin.empty();
+            || !postprocess_plugin.empty()
+            || (seed_b >= 0 && seed_blend > 0.0f);  // breeding needs sp on the native path too
     }
 };
 
@@ -389,12 +394,65 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     std::vector<float> x;
     std::mt19937_64 rng(seed);
     std::normal_distribution<float> gauss(0.0f, 1.0f);
+    // Seed breeding (noise_only): seed B gets its own stream, advanced in
+    // lockstep with seed A. The initial latent is slerped below, and every
+    // pingpong re-noise draw is mixed too (renoise_draw), otherwise the
+    // re-noise from seed A dominates and the render stays at A.
+    const float breed_t = sp ? sp->seed_blend : 0.0f;
+    const bool  breeding = noise_only && !zero_noise && sp && sp->seed_b >= 0 && breed_t > 0.0f;
+    std::mt19937_64 rng_b((uint64_t) (sp && sp->seed_b >= 0 ? sp->seed_b : 0));
+    std::normal_distribution<float> gauss_b(0.0f, 1.0f);
+    // Independent gaussians are ~orthogonal, so slerp reduces to cos/sin weights.
+    const float rn_wa = breed_t >= 1.0f ? 0.0f : cosf(breed_t * 1.5707963f);
+    const float rn_wb = breed_t >= 1.0f ? 1.0f : sinf(breed_t * 1.5707963f);
+    auto renoise_draw = [&]() -> float {
+        if (zero_noise) return 0.0f;
+        if (!breeding) return gauss(rng);
+        const float a = gauss(rng);
+        const float b = gauss_b(rng_b);
+        return breed_t >= 1.0f ? b : rn_wa * a + rn_wb * b;
+    };
     if (noise_only) {
         // Pure noise init. Latent is SA3 channel-major [Oc][L] -- same layout
         // sa3_encode_tiled produces, so the loop below is oblivious to which
         // path filled it.
         x.resize((size_t) SA3_LAT_CH * L);
         for (auto & xi : x) xi = zero_noise ? 0.0f : gauss(rng);
+        const float bt = breed_t;
+        if (breeding) {
+            // Same RNG, seed B; whole latent treated as one vector.
+            const size_t n = x.size();
+            std::vector<float> nb(n);
+            for (auto & v : nb) v = gauss_b(rng_b);
+            fprintf(stderr, "[SA3] seed breeding: A=%llu B=%lld blend=%.3f\n",
+                    (unsigned long long) seed, (long long) sp->seed_b, bt);
+            if (bt >= 1.0f) {
+                x = nb;
+            } else {
+                double dot = 0.0, na = 0.0, nbb = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    dot += (double) x[i] * nb[i];
+                    na  += (double) x[i] * x[i];
+                    nbb += (double) nb[i] * nb[i];
+                }
+                const double la = sqrt(na), lb = sqrt(nbb);
+                double c = (la > 0.0 && lb > 0.0) ? dot / (la * lb) : 1.0;
+                c = c > 1.0 ? 1.0 : (c < -1.0 ? -1.0 : c);
+                const double om     = acos(c);
+                const bool   nearly = sin(om) < 1e-4;
+                const double wa = nearly ? 1.0 - bt : sin((1.0 - bt) * om) / sin(om);
+                const double wb = nearly ? (double) bt : sin(bt * om) / sin(om);
+                double nl = 0.0;
+                for (size_t i = 0; i < n; i++) {
+                    x[i] = (float) (wa * x[i] + wb * nb[i]);
+                    nl += (double) x[i] * x[i];
+                }
+                if (nearly && nl > 0.0) {
+                    const float k = (float) (((1.0 - bt) * la + bt * lb) / sqrt(nl));
+                    for (auto & v : x) v *= k;
+                }
+            }
+        }
     } else {
         // Pad audio to S, encode
         std::vector<float> padded((size_t)2 * S, 0.0f);
@@ -824,7 +882,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                     for (size_t k = 0; k < x.size(); k++) {
                         float v_eff    = (x_prev[k] - x[k]) * inv_dt;
                         float denoised = x_prev[k] - t_curr * v_eff;
-                        float n = zero_noise ? 0.0f : gauss(rng);
+                        float n = renoise_draw();
                         x[k] = (t_next > 0.0f) ? ((1.0f - t_next) * denoised + t_next * n) : denoised;
                     }
                 }
@@ -833,7 +891,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                 // denoised = x - t*v; x = (1-t_next)*denoised + t_next*randn
                 for (size_t k = 0; k < x.size(); k++) {
                     float denoised = x[k] - t_curr * v[k];
-                    float n = zero_noise ? 0.0f : gauss(rng);
+                    float n = renoise_draw();
                     x[k] = (1.0f - t_next) * denoised + t_next * n;
                 }
                 sa3_call_post_step(i, t_curr, t_next);

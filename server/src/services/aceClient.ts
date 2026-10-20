@@ -863,6 +863,10 @@ export const aceClient = {
       steps?: number;         // sampler steps (engine default 8)
       sampler?: 'pingpong' | 'euler';
       seed?: number;
+      /** Seed breeding: second noise seed (-1/omitted = off). */
+      seedB?: number;
+      /** Seed breeding blend, 0 = seed only, 1 = seedB only (slerp). */
+      seedBlend?: number;
       outSr?: number;
       backend?: 'auto' | 'onnx' | 'gguf';
       adapters?: Array<{ name: string; scale: number }>;
@@ -896,6 +900,10 @@ export const aceClient = {
     if (opts.steps !== undefined) params.set('steps', String(opts.steps));
     if (opts.sampler) params.set('sampler', opts.sampler);
     if (opts.seed !== undefined) params.set('seed', String(opts.seed));
+    if (opts.seedB !== undefined && opts.seedB >= 0 && opts.seedBlend !== undefined && opts.seedBlend > 0) {
+      params.set('seed_b', String(Math.floor(opts.seedB)));
+      params.set('seed_blend', String(Math.min(1, opts.seedBlend)));
+    }
     if (opts.outSr !== undefined) params.set('out_sr', String(opts.outSr));
     if (opts.solver) params.set('solver', opts.solver);
     if (opts.scheduler) params.set('scheduler', opts.scheduler);
