@@ -40,7 +40,8 @@ const smokeDir = join(root, 'logs', 'engine-smoke');
 mkdirSync(smokeDir, { recursive: true });
 for (const d of readdirSync(smokeDir)) {
   const p = join(smokeDir, d);
-  if (/^\d{14}-\d+$/.test(d) && statSync(p).mtimeMs < Date.now() - 86_400_000) rmSync(p, { recursive: true, force: true });
+  // Best effort: a concurrent run may be pruning the same folder.
+  try { if (/^\d{14}-\d+$/.test(d) && statSync(p).mtimeMs < Date.now() - 86_400_000) rmSync(p, { recursive: true, force: true }); } catch { /* gone or busy */ }
 }
 const runId = `${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
 const outDir = join(smokeDir, runId);
