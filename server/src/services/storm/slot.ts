@@ -1,6 +1,6 @@
 // services/storm/slot.ts -- per-slot wire-request builder for the Storm stream loop.
 //
-// Isolates the ACE and YuE2 request builds from routes/generate.ts so each
+// Isolates the ACE, YuE2 and SA3 request builds from routes/generate.ts so each
 // branch is testable without spinning up the full route, and so a later
 // Drifter pass can import this module without depending on Express.
 //
@@ -10,7 +10,11 @@
 
 import { translateParams } from '../generation/translateParams.js';
 import { mapYue2Params } from '../backends/yue2/generate.js';
-import { mapSa3SamplerPlugins, mapSa3Adapters } from '../backends/sa3/generate.js';
+import {
+  mapSa3SamplerPlugins, mapSa3Adapters, resolveSa3Sampler, resolveSa3SeedBlend, SA3_DEFAULT_STEPS,
+} from '../backends/sa3/generate.js';
+import { SA3_MAX_DURATION_SEC } from '../backends/sa3/index.js';
+import { runOnGpuLane } from '../generation/gpuLane.js';
 import { applyDrift } from './drift.js';
 import type { DriftRuntime } from './drift.js';
 import type { AceRequest } from '../aceClient.js';
@@ -63,6 +67,8 @@ export interface Sa3SlotResult {
   seed: number;
   sampler: 'pingpong' | 'euler';
   adapters: Array<{ name: string; scale: number }>;
+  seedB?: number;
+  seedBlend?: number;
   guidanceScale?: number;
   solver?: string;
   scheduler?: string;
@@ -133,6 +139,11 @@ export function buildSlotRequest(
     ...(Object.keys(mergedPluginParams).length > 0 ? { pluginParams: mergedPluginParams } : {}),
   };
 
+  // The live guidance knob drives YuE2 cfg_scale (mapYue2Params reads
+  // yue2CfgScale, not guidanceScale). Set it BEFORE drift so a drifted
+  // yue2CfgScale survives to the wire.
+  if (backend === 'yue2') slotReq.yue2CfgScale = ctrl.guidanceScale;
+
   // Apply drift pressure first -- one-shot overrides below always win.
   if (ctrl.drift) {
     applyDrift(slotReq, ctrl.drift, backend);
@@ -164,40 +175,69 @@ export function buildSlotRequest(
   }
 
   if (backend === 'yue2') {
-    // YuE2 subset. Map guidanceScale -> yue2CfgScale so the live guidance
-    // knob controls YuE2 cfg_scale (mapYue2Params reads yue2CfgScale, not the
-    // generic guidanceScale key).
-    slotReq.yue2CfgScale = ctrl.guidanceScale;
-
     const mapping = mapYue2Params(slotReq);
     return { kind: 'yue2', yue2Req: mapping.req };
   }
 
   if (backend === 'sa3') {
-    // SA3 subset: caption, duration, steps, seed, adapters, and optional
-    // sampler-plugin params. ACE-only fields (solver/scheduler/guidance on ACE,
-    // BPM, LSS, inferMethod) are not forwarded. guidanceScale is passed through
-    // mapSa3SamplerPlugins which gates it behind samplerPluginsEnabled.
+    // SA3 subset, resolved the same way runSa3Generation resolves a normal
+    // render: caption, duration, steps, sampler/default solver, seed (+ seed B),
+    // adapters, and optional sampler-plugin params. ACE-only fields (BPM, LSS)
+    // are not forwarded. guidanceScale is passed through mapSa3SamplerPlugins
+    // which gates it behind samplerPluginsEnabled.
     const caption = String(slotReq.caption ?? slotReq.prompt ?? '').trim();
 
     let durationSec = Number(slotReq.duration);
     if (!Number.isFinite(durationSec) || durationSec < 1) durationSec = 30;
+    if (durationSec > SA3_MAX_DURATION_SEC) durationSec = SA3_MAX_DURATION_SEC;
 
     let steps = Number(slotReq.sa3Steps);
-    if (!Number.isFinite(steps) || steps < 1) steps = 24;
+    if (!Number.isFinite(steps) || steps < 1) steps = SA3_DEFAULT_STEPS;
     if (steps > 64) steps = 64;
 
-    const sampler: 'pingpong' | 'euler' = slotReq.sa3Sampler === 'euler' ? 'euler' : 'pingpong';
     const seed = Math.floor(Number(slotReq.seed) || 0);
 
     const adapters = mapSa3Adapters(slotReq);
     const plugins  = mapSa3SamplerPlugins(slotReq);
+    const { sampler, solver: defaultSolver } = resolveSa3Sampler(slotReq, plugins);
+    if (defaultSolver) plugins.solver = defaultSolver;
 
-    return { kind: 'sa3', caption, durationSec, steps, seed, sampler, adapters, ...plugins };
+    const seedB = slotReq.seedB;
+    const breed = seedB !== undefined && seedB !== null && seedB !== '' && Number(seedB) >= 0
+      ? { seedB: Math.floor(Number(seedB)), seedBlend: resolveSa3SeedBlend(slotReq.seedBlend) }
+      : {};
+
+    return { kind: 'sa3', caption, durationSec, steps, seed, sampler, adapters, ...breed, ...plugins };
   }
 
   // ACE branch -- byte-for-byte the same request as the inline logic that
   // routes/generate.ts used before this helper was extracted.
   const aceReq = translateParams(slotReq);
   return { kind: 'ace', aceReq };
+}
+
+/**
+ * Render one Storm slot while owning the shared GPU lane, so a slot never
+ * overlaps a library generation, training preview or another family's model.
+ *
+ * `render` must resolve only once the engine has finished with the slot (a
+ * cancelled ACE/YuE2 job has reached a terminal state; a synchronous SA3
+ * fetch has returned). The lane stays owned until then, even after Stop or a
+ * client disconnect. Returns null when the stream stopped before or during
+ * the slot: a slot still queued for the lane never starts, and a finished
+ * slot's output is discarded.
+ */
+export async function renderSlotOnLane(opts: {
+  label: string;
+  family: string;
+  isRunning: () => boolean;
+  evict: () => Promise<void>;
+  render: () => Promise<Buffer | null>;
+}): Promise<Buffer | null> {
+  const buf = await runOnGpuLane(async () => {
+    if (!opts.isRunning()) return null;
+    await opts.evict();
+    return opts.render();
+  }, { label: opts.label, family: opts.family });
+  return opts.isRunning() ? buf : null;
 }

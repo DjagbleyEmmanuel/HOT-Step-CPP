@@ -29,7 +29,7 @@ import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { yue2Synth, splitMultipartMixed } from '../services/backends/yue2/client.js';
 import { tokenizeForSa3 } from '../services/sa3Tokenizer.js';
-import { buildSlotRequest } from '../services/storm/slot.js';
+import { buildSlotRequest, renderSlotOnLane } from '../services/storm/slot.js';
 import { initDrift, updateDriftPressure, resolveStartDrift, defaultDriftPressure, snapshot as driftSnapshot } from '../services/storm/drift.js';
 import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
@@ -873,81 +873,90 @@ router.post('/storm/stream', async (req, res) => {
       if (ctrl.nextBpm !== null) ctrl.nextBpm = null;
       if (ctrl.nextDuration !== null) ctrl.nextDuration = null;
 
-      // SA3 is a single synchronous fetch -- no job poll needed.
-      if (slotResult.kind === 'sa3') {
-        const { ids, nTokens } = await tokenizeForSa3(slotResult.caption);
-        const sa3Buf = await aceClient.submitSa3Synth({
-          tokens: ids,
-          nTokens,
-          durationSec: slotResult.durationSec,
-          steps: slotResult.steps,
-          sampler: slotResult.sampler,
-          seed: slotResult.seed,
-          adapters: slotResult.adapters,
-          outFmt: 'f32',
-          ...(slotResult.solver        ? { solver:        slotResult.solver }        : {}),
-          ...(slotResult.scheduler     ? { scheduler:     slotResult.scheduler }     : {}),
-          ...(slotResult.guidanceMode  ? { guidanceMode:  slotResult.guidanceMode }  : {}),
-          ...(slotResult.guidanceScale !== undefined ? { guidanceScale: slotResult.guidanceScale } : {}),
-          ...(slotResult.pluginParams  ? { pluginParams:  slotResult.pluginParams }  : {}),
-          ...(slotResult.postprocessPlugin ? { postprocessPlugin: slotResult.postprocessPlugin } : {}),
-        });
-        if (!streamRunning.get(streamId)) break;
-        res.write(sa3Buf);
-        session?.chunk(sa3Buf);
-        slotIdx++;
-        continue;
-      }
-
-      // Submit to the right backend and get a shared-job id.
-      let synthJobId: string;
-      if (slotResult.kind === 'yue2') {
-        const synthRes = await yue2Synth(slotResult.yue2Req);
-        synthJobId = synthRes.job_id;
-      } else {
-        synthJobId = await aceClient.submitSynth(slotResult.aceReq, 'wav32', coResident);
-      }
-
-      // Inline poll — checks streamRunning every 300 ms so stop/disconnect
-      // cancels mid-render instead of waiting out the slot.
-      streamAceJob.set(streamId, synthJobId);
-      const slotStart = Date.now();
-      let jobDone = false;
-      while (!jobDone) {
-        if (!streamRunning.get(streamId)) {
-          await aceClient.cancelJob(synthJobId).catch(() => {});
-          console.log(`[STORM ${streamId}] slot ${slotIdx}: cancelled mid-render`);
-          break;
+      // Resolves only once the engine is done with the slot, so the lane is
+      // held through it. Stop/disconnect cancels an ACE/YuE2 job and waits for
+      // its terminal state; an SA3 slot (one synchronous fetch, no mid-render
+      // cancel) finishes. Either way the output is discarded.
+      const renderSlot = async (): Promise<Buffer | null> => {
+        if (slotResult.kind === 'sa3') {
+          const { ids, nTokens } = await tokenizeForSa3(slotResult.caption);
+          return aceClient.submitSa3Synth({
+            tokens: ids,
+            nTokens,
+            durationSec: slotResult.durationSec,
+            steps: slotResult.steps,
+            sampler: slotResult.sampler,
+            seed: slotResult.seed,
+            ...(slotResult.seedB !== undefined ? { seedB: slotResult.seedB, seedBlend: slotResult.seedBlend } : {}),
+            adapters: slotResult.adapters,
+            outFmt: 'f32',
+            ...(slotResult.solver        ? { solver:        slotResult.solver }        : {}),
+            ...(slotResult.scheduler     ? { scheduler:     slotResult.scheduler }     : {}),
+            ...(slotResult.guidanceMode  ? { guidanceMode:  slotResult.guidanceMode }  : {}),
+            ...(slotResult.guidanceScale !== undefined ? { guidanceScale: slotResult.guidanceScale } : {}),
+            ...(slotResult.pluginParams  ? { pluginParams:  slotResult.pluginParams }  : {}),
+            ...(slotResult.postprocessPlugin ? { postprocessPlugin: slotResult.postprocessPlugin } : {}),
+          });
         }
-        if (Date.now() - slotStart > STREAM_SLOT_TIMEOUT_MS) {
-          await aceClient.cancelJob(synthJobId).catch(() => {});
-          console.warn(`[STORM ${streamId}] slot ${slotIdx}: render timeout -- stopping stream`);
-          streamRunning.set(streamId, false);
-          break;
-        }
-        const status = await aceClient.pollJob(synthJobId);
-        if (status.status === 'done') { jobDone = true; break; }
-        if (status.status === 'failed' || status.status === 'cancelled') {
-          console.warn(`[STORM ${streamId}] slot ${slotIdx}: ${status.status}`);
-          break;
-        }
-        await new Promise(r => setTimeout(r, 300));
-      }
-      streamAceJob.delete(streamId);
-      if (!jobDone || !streamRunning.get(streamId)) break;
 
-      const audioRes = await aceClient.getJobResult(synthJobId);
-      if (!audioRes.ok) {
-        console.warn(`[STORM ${streamId}] slot ${slotIdx}: result fetch failed (${audioRes.status})`);
-        break;
-      }
-      const audioBody = Buffer.from(await audioRes.arrayBuffer());
-      // YuE2 may return multipart/mixed (one WAV per track); take the first
-      // part. ACE always returns a single WAV so the same path works for both.
-      const contentType = audioRes.headers.get('content-type') || 'audio/wav';
-      const wavBuf = contentType.startsWith('multipart/mixed')
-        ? (splitMultipartMixed(audioBody, contentType)[0] ?? audioBody)
-        : audioBody;
+        // Submit to the right backend and get a shared-job id.
+        const synthJobId = slotResult.kind === 'yue2'
+          ? (await yue2Synth(slotResult.yue2Req)).job_id
+          : await aceClient.submitSynth(slotResult.aceReq, 'wav32', coResident);
+
+        // Inline poll — checks streamRunning every 300 ms so stop/disconnect
+        // cancels mid-render, then keeps polling until the engine settles.
+        streamAceJob.set(streamId, synthJobId);
+        const slotStart = Date.now();
+        let cancelSent = false;
+        try {
+          for (;;) {
+            if (!cancelSent && !streamRunning.get(streamId)) {
+              cancelSent = true;
+              await aceClient.cancelJob(synthJobId).catch(() => {});
+              console.log(`[STORM ${streamId}] slot ${slotIdx}: cancelled mid-render`);
+            }
+            if (!cancelSent && Date.now() - slotStart > STREAM_SLOT_TIMEOUT_MS) {
+              cancelSent = true;
+              await aceClient.cancelJob(synthJobId).catch(() => {});
+              console.warn(`[STORM ${streamId}] slot ${slotIdx}: render timeout -- stopping stream`);
+              streamRunning.set(streamId, false);
+            }
+            const status = await aceClient.pollJob(synthJobId);
+            if (status.status === 'done') break;
+            if (status.status === 'failed' || status.status === 'cancelled') {
+              if (!cancelSent) console.warn(`[STORM ${streamId}] slot ${slotIdx}: ${status.status}`);
+              return null;
+            }
+            await new Promise(r => setTimeout(r, 300));
+          }
+        } finally {
+          streamAceJob.delete(streamId);
+        }
+        if (!streamRunning.get(streamId)) return null;
+
+        const audioRes = await aceClient.getJobResult(synthJobId);
+        if (!audioRes.ok) {
+          console.warn(`[STORM ${streamId}] slot ${slotIdx}: result fetch failed (${audioRes.status})`);
+          return null;
+        }
+        const audioBody = Buffer.from(await audioRes.arrayBuffer());
+        // YuE2 may return multipart/mixed (one WAV per track); take the first
+        // part. ACE always returns a single WAV so the same path works for both.
+        const contentType = audioRes.headers.get('content-type') || 'audio/wav';
+        return contentType.startsWith('multipart/mixed')
+          ? (splitMultipartMixed(audioBody, contentType)[0] ?? audioBody)
+          : audioBody;
+      };
+
+      const wavBuf = await renderSlotOnLane({
+        label: `storm ${streamId} slot ${slotIdx}`,
+        family: streamBackend,
+        isRunning: () => streamRunning.get(streamId) === true,
+        evict: () => evictOtherFamilies(streamBackend),
+        render: renderSlot,
+      });
+      if (!wavBuf) break;
       res.write(wavBuf);
       session?.chunk(wavBuf);
       slotIdx++;
@@ -973,7 +982,10 @@ router.post('/storm/stream', async (req, res) => {
   }
 });
 
-// POST /api/generate/storm/stop — stop a stream (cancels the in-flight slot)
+// POST /api/generate/storm/stop — stop a stream. No further slot starts. An
+// in-flight ACE/YuE2 slot is cancelled; an in-flight SA3 slot runs to the end
+// (no mid-render cancel). Its output is discarded either way, and the GPU lane
+// stays held until the engine has finished.
 router.post('/storm/stop', (req, res) => {
   const b = req.body as Record<string, unknown>;
   const streamId = typeof b.streamId === 'string' ? b.streamId : 'default';
