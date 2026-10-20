@@ -31,7 +31,7 @@ const RECORDED: Record<string, string[]> = {
   'cover|a,': ['cover-studio-scoreSections', 'cover-studio-scoreCuts'],
   'cover|s,null,': ['cover-studio-keyOverride', 'cover-studio-lyricsSource'],
   '-|': ['cover-studio-nope', 'hs-unknown', 'hs-yue2CaptionSource:ds:a:b', 'lireek-playQueue'],
-  'create|s,': ['hs-artist', 'hs-caption', 'hs-keyScale', 'hs-lora-trigger', 'hs-lyrics', 'hs-negative-prompt', 'hs-sourceLatentUrl', 'hs-subject',
+  'create|s,': ['hs-artist', 'hs-caption', 'hs-draftName', 'hs-keyScale', 'hs-lora-trigger', 'hs-lyrics', 'hs-negative-prompt', 'hs-sourceLatentUrl', 'hs-subject',
     'hs-timeSignature', 'hs-title', 'hs-vocalGender', 'hs-vocalLanguage', 'hs-yue2CaptionDataset'],
   'create|b,': ['hs-beat-intro', 'hs-instrumental'],
   'create|n,': ['hs-bpm', 'hs-duration', 'hs-intro-bars'],

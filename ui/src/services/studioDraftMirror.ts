@@ -146,6 +146,11 @@ export interface StudioDraftControl {
   load(id: string, apply: (body: StudioDraftBody) => void, refuse?: (body: StudioDraftBody) => string): Promise<boolean>;
 }
 
+/** The field a named save writes the draft's name into, per studio. */
+export function draftNameKey(studio: StudioDraftBody['studio']): string {
+  return studio === 'cover' ? 'cover-studio-draftName' : 'hs-draftName';
+}
+
 /** Mirror `fields` into this editor's draft for `studio`. */
 export function useStudioDraftMirror(studio: StudioDraftBody['studio'], token: string | null | undefined,
   fields: Record<string, unknown>, identity: Omit<StudioDraftBody, 'studio' | 'fields'> = {}): StudioDraftControl {
@@ -174,13 +179,13 @@ export function useStudioDraftMirror(studio: StudioDraftBody['studio'], token: s
     if (!token || !name.trim()) return false;
     try {
       const current = JSON.parse(bodyRef.current) as StudioDraftBody;
-      await studioDraftsApi.create(token, { ...current, fields: { ...current.fields, 'cover-studio-draftName': name.trim() } });
+      await studioDraftsApi.create(token, { ...current, fields: { ...current.fields, [draftNameKey(studio)]: name.trim() } });
       setError('');
       return true;
     } catch (err) {
       setError(`Draft not saved: ${messageOf(err)}`);
       return false;
     }
-  }, [token]);
+  }, [token, studio]);
   return { error, list, load, saveNamed };
 }

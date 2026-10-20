@@ -6,11 +6,11 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { StudioDraftBody } from '../../../../server/src/contracts/studioDrafts';
 import type { StudioDraftDocument } from '../../services/studioDraftsApi';
-import type { StudioDraftControl } from '../../services/studioDraftMirror';
+import { draftNameKey, type StudioDraftControl } from '../../services/studioDraftMirror';
 import { StyledSelect } from './StyledSelect';
 
 const labelOf = (doc: StudioDraftDocument, textKey: string) => {
-  const draftName = doc.body.fields['cover-studio-draftName'];
+  const draftName = doc.body.fields[draftNameKey(doc.body.studio)];
   if (typeof draftName === 'string' && draftName.trim()) return draftName;
   const text = doc.body.fields[textKey];
   const name = typeof text === 'string' && text.trim() ? text.trim().slice(0, 40) : doc.id.slice(0, 8);
