@@ -159,7 +159,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Keyboard shortcuts | Space/K play-pause, J/L seek 10 s, Up/Down/Enter to move and play a focused row, Delete, Esc to clear, `?` for a cheat sheet. |
 | Command palette | Desktop Ctrl+K / Cmd+K fuzzy-searches studios and library song titles; arrows and Enter to jump or play. |
 
-| Full-screen phone player | Tap the mini player on a phone for big cover art, a scrubbable waveform and large transport buttons; swipe down, the chevron or the Android back button closes it. |
+| Full-screen phone player | Tap the mini player on a phone for a viewport-sized dialog with big cover art, a scrubbable waveform and large transport buttons; swipe down, the chevron or the Android back button closes it. |
 | Lock screen controls | Media Session support: track info and cover on the lock screen and OS overlay, with play/pause, next/previous and seek. |
 | Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |

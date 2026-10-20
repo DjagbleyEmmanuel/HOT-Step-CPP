@@ -26,12 +26,14 @@ test('clearing a paused track resets Media Session caches before another paused 
   state.currentTrack = null; sync!();
   assert.equal(ms.playbackState, 'none');
   assert.equal(ms.metadata, null);
+  assert.equal(positions.length, 2, 'clearing a track resets the native position state');
+  assert.equal(positions[1], undefined);
   state.currentTrack = { id: 'b', title: 'Second' }; sync!();
   assert.equal(ms.playbackState, 'paused');
   assert.equal(ms.metadata.title, 'Second');
-  assert.equal(positions.length, 2);
+  assert.equal(positions.length, 3);
   state.currentTrack = null; sync!();
   state.currentTrack = { id: 'b', title: 'Second' }; sync!();
   assert.equal(ms.playbackState, 'paused');
-  assert.equal(positions.length, 3, 'reselecting the same paused track also republishes its position');
+  assert.equal(positions.length, 5, 'reselecting the same paused track also republishes its position');
 });

@@ -14,6 +14,8 @@ function fixture() {
   let refs: any[] = [];
   let refIndex = 0;
   let closed = 0;
+  const body = {};
+  let rendered: any;
   const window = {
     history: {
       get state() { return stack[index]; },
@@ -30,13 +32,14 @@ function fixture() {
   };
   const exports: any = {};
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports, window, queueMicrotask,
+    exports, window, document: { body }, queueMicrotask,
     require: (id: string) => {
       if (id === 'react') return {
         useEffect: (fn: any) => { effect = fn; },
         useRef: (value: any) => { const i = refIndex++; return refs[i] ??= { current: value }; },
       };
-      if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null };
+      if (id === 'react-dom') return { createPortal: (children: any, container: any) => ({ children, container }) };
+      if (id === 'react/jsx-runtime') return { jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) };
       if (id === 'react-i18next') return { useTranslation: () => ({ t: (s: string) => s }) };
       if (id.includes('useDisguiseMode')) return { useDisguiseMode: () => ({ disguiseTitle: (title: string) => title }) };
       return {};
@@ -45,12 +48,19 @@ function fixture() {
   const render = (fresh = false) => {
     if (fresh) refs = [];
     refIndex = 0;
-    exports.FullScreenPlayer({ song: { id: 'track' }, onClose: () => { closed++; } });
+    rendered = exports.FullScreenPlayer({ song: { id: 'track' }, onClose: () => { closed++; } });
     return effect!;
   };
-  return { window, render, pending, get closed() { return closed; }, get index() { return index; } };
+  return { window, render, pending, body, get rendered() { return rendered; }, get closed() { return closed; }, get index() { return index; } };
 }
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+test('phone dialog renders into the body outside player transform and stacking ancestors', () => {
+  const f = fixture();
+  f.render();
+  assert.equal(f.rendered.container, f.body);
+  assert.equal(f.rendered.children.props.role, 'dialog');
+});
 
 test('StrictMode replay keeps one entry; Back closes once and cleanup never navigates again', async () => {
   const f = fixture();

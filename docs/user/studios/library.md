@@ -68,14 +68,16 @@ playing, or trim mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
 On a phone, tap the song title or cover in the mini player to open the
-full-screen player: large cover art, title and backend, a big waveform you
+full-screen player, covering the viewport even with Disco mode enabled:
+large cover art, title and backend, a big waveform you
 can tap to seek plus a scrub bar with a large thumb, and big transport
 buttons. Close it with the chevron at the top, by swiping down, or with the
 Android back button. Closing and reopening keeps Back within the app;
 switching studios does not navigate back during player cleanup.
 
-Clearing the current track removes its lock-screen metadata. Selecting a
-paused track afterwards restores its media controls and playback position.
+Clearing the current track removes its lock-screen metadata and playback
+position. Selecting a paused track afterwards restores its media controls
+and playback position.
 
 ## Keyboard shortcuts
 

@@ -906,7 +906,12 @@ function mediaSessionSync(): void {
   const s = _state;
   const track = s.currentTrack;
   if (!track) {
-    if (_msTrackId !== null) { ms.metadata = null; ms.playbackState = 'none'; _msTrackId = null; }
+    if (_msTrackId !== null) {
+      ms.metadata = null;
+      ms.playbackState = 'none';
+      try { ms.setPositionState(); } catch { /* unsupported position state */ }
+      _msTrackId = null;
+    }
     _msPlaying = null;
     _msLastPos = -10;
     return;

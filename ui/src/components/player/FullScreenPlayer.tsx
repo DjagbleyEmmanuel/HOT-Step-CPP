@@ -3,6 +3,7 @@
 // on open and popstate closes the view.
 
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
@@ -88,7 +89,7 @@ export const FullScreenPlayer: React.FC<Props> = ({
   const backend = (song as { backend?: string }).backend
     || (song.generationParams as { backend?: string } | undefined)?.backend || '';
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -160,6 +161,7 @@ export const FullScreenPlayer: React.FC<Props> = ({
           {repeatMode === 'one' ? <Repeat1 size={22} /> : <Repeat size={22} />}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
