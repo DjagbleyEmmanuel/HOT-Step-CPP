@@ -92,6 +92,24 @@ test('renderer uses selected style/lyrics, writes audio, and restores selection'
   assert.ok(fs.readdirSync(path.join(f.output, 'previews')).some(n => n.startsWith(`step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}`) && n.endsWith('.wav')));
 });
 
+test('previews render with the sampler snapshot, and junk keys are dropped', async () => {
+  const opts = parseYue2JointPreviewOptions({ sampler: { yue2PlanTemperature: 0.7, yue2SemRepPenalty: 1.1,
+    yue2CfgScale: '1.5', ditModel: 'x', yue2SemTopK: Infinity } }, 50);
+  assert.deepEqual(opts.sampler, { yue2PlanTemperature: 0.7, yue2SemRepPenalty: 1.1, yue2CfgScale: '1.5' });
+  const f = previewFixture();
+  const { deps, calls } = mockDeps();
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, sampler: opts.sampler },
+    arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+  const synths = calls.filter(c => c.name === 'synth').map(c => c.value as any);
+  assert.ok(synths.length >= 2);  // the plan and the render
+  for (const s of synths) {
+    assert.equal(s.plan_temperature, 0.7);
+    assert.equal(s.semantic_repetition_penalty, 1.1);
+    assert.equal(s.cfg_scale, 1.5);
+  }
+});
+
 test('with no song picked, renderer skips an instrumental first track', async () => {
   const f = previewFixture();
   fs.writeFileSync(f.dataset, JSON.stringify({ items: [

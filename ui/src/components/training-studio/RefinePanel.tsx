@@ -7,6 +7,7 @@
 // listening ladder: resume the finished run with the planner live (the
 // decoder rides along; it never decays), save a checkpoint every 0.1 KL up to
 // a ceiling, render a preview per rung, pick the last good one.
+import { yue2SamplerSnapshot } from '../../stores/globalParamsStore';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -134,7 +135,7 @@ export const RefinePanel: React.FC = () => {
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
-        preview: { enabled: autoPreview, everySteps: 0, arScale: (opts.preview as Yue2JointTrainRequest['preview'])?.arScale ?? YUE2_JOINT_LADDER_PREVIEW.arScale, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, ...draftOpts } } as unknown as Yue2JointTrainRequest;
+        preview: { enabled: autoPreview, everySteps: 0, arScale: (opts.preview as Yue2JointTrainRequest['preview'])?.arScale ?? YUE2_JOINT_LADDER_PREVIEW.arScale, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, sampler: yue2SamplerSnapshot(), ...draftOpts } } as unknown as Yue2JointTrainRequest;
       const result = await runCommand(client, trainingWorker, () => startYue2JointTrain(datasetId, request, { worker: trainingWorker }));
       setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
       setLadderRun(result.jobId);

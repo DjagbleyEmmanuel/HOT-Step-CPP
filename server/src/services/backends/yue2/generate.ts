@@ -272,6 +272,30 @@ function yue2InstrumentalAbc(abc: string, notes: string[]): string {
   return moved.abc;
 }
 
+/** The LM tab's planner and composer sampler fields, as wire fields. Only
+ *  what the UI actually sent travels (an untouched control is absent), so the
+ *  engine keeps its checkpoint value otherwise. Shared with training previews. */
+export function yue2LmOverrides(params: Record<string, unknown>, notes: string[] = []): Record<string, number> {
+  const lmFields: Array<[string, keyof Yue2SynthRequest]> = [
+    ['yue2PlanTemperature', 'plan_temperature'], ['yue2PlanTopP', 'plan_top_p'], ['yue2PlanTopK', 'plan_top_k'],
+    ['yue2PlanRepPenalty', 'plan_repetition_penalty'], ['yue2PlanRepWindow', 'plan_penalty_window'],
+    ['yue2PlanMaxTokens', 'plan_max_tokens'],
+    ['yue2SemTemperature', 'semantic_temperature'], ['yue2SemTopP', 'semantic_top_p'], ['yue2SemTopK', 'semantic_top_k'],
+    ['yue2SemRepPenalty', 'semantic_repetition_penalty'], ['yue2SemRepWindow', 'semantic_penalty_window'],
+    ['yue2SemMinTokens', 'semantic_min_tokens'], ['yue2SemMaxTokens', 'semantic_max_tokens'],
+    ['yue2EndThreshold', 'end_threshold'], ['yue2EndBias', 'end_bias'],
+    ['yue2EndBiasFrom', 'end_bias_from_sec'], ['yue2EndBiasRamp', 'end_bias_ramp_sec'],
+  ];
+  const lmOverrides: Record<string, number> = {};
+  for (const [uiKey, wireKey] of lmFields) {
+    if (params[uiKey] === undefined || params[uiKey] === null || params[uiKey] === '') continue;
+    const v = Number(params[uiKey]);
+    if (Number.isFinite(v)) lmOverrides[wireKey] = v;
+    else notes.push(`Invalid ${uiKey} — using the checkpoint default`);
+  }
+  return lmOverrides;
+}
+
 /**
  * UI params -> /yue2/synth request.
  *
@@ -580,25 +604,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const noiseSeedRaw = params.yue2NoiseSeed;
   const noise_seed = yue2Seed(typeof noiseSeedRaw === 'number' ? Math.floor(noiseSeedRaw) : noiseSeedRaw);
 
-  // LM tab: forward only what the UI actually sent (an untouched control is
-  // absent), so the engine keeps its checkpoint value otherwise.
-  const lmFields: Array<[string, keyof Yue2SynthRequest]> = [
-    ['yue2PlanTemperature', 'plan_temperature'], ['yue2PlanTopP', 'plan_top_p'], ['yue2PlanTopK', 'plan_top_k'],
-    ['yue2PlanRepPenalty', 'plan_repetition_penalty'], ['yue2PlanRepWindow', 'plan_penalty_window'],
-    ['yue2PlanMaxTokens', 'plan_max_tokens'],
-    ['yue2SemTemperature', 'semantic_temperature'], ['yue2SemTopP', 'semantic_top_p'], ['yue2SemTopK', 'semantic_top_k'],
-    ['yue2SemRepPenalty', 'semantic_repetition_penalty'], ['yue2SemRepWindow', 'semantic_penalty_window'],
-    ['yue2SemMinTokens', 'semantic_min_tokens'], ['yue2SemMaxTokens', 'semantic_max_tokens'],
-    ['yue2EndThreshold', 'end_threshold'], ['yue2EndBias', 'end_bias'],
-    ['yue2EndBiasFrom', 'end_bias_from_sec'], ['yue2EndBiasRamp', 'end_bias_ramp_sec'],
-  ];
-  const lmOverrides: Record<string, number> = {};
-  for (const [uiKey, wireKey] of lmFields) {
-    if (params[uiKey] === undefined || params[uiKey] === null || params[uiKey] === '') continue;
-    const v = Number(params[uiKey]);
-    if (Number.isFinite(v)) lmOverrides[wireKey] = v;
-    else notes.push(`Invalid ${uiKey} — using the checkpoint default`);
-  }
+  const lmOverrides = yue2LmOverrides(params, notes);
   if (Object.keys(lmOverrides).length) notes.push(`LM overrides: ${Object.entries(lmOverrides).map(([k, v]) => `${k}=${v}`).join(', ')}`);
 
   const req: Yue2SynthRequest = {

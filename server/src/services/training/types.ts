@@ -230,6 +230,10 @@ export interface TrainingPreview {
 export interface Yue2JointPreviewOptions {
   /** Music adapter strength for previews. The sound adapter stays at 1. */
   arScale?: number;
+  /** The Create panel's YuE2 planner/composer sampler settings and CFG
+   *  (yue2Plan*, yue2Sem*, yue2End*, yue2CfgScale), snapshotted by the UI when
+   *  the run starts or a render is asked for. Absent = engine defaults. */
+  sampler?: Record<string, number | string>;
   enabled: boolean;
   /** Steps between preview pauses; 0 with a KL-rung run = one pause per rung. */
   everySteps: number;

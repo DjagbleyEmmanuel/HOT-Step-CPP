@@ -2675,7 +2675,7 @@ export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
-  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; arScale?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number },
+  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; arScale?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number; sampler?: Record<string, number | string> },
 ): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
 }

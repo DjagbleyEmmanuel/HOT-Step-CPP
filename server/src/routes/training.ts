@@ -4359,8 +4359,9 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
     const odeSteps = Number.isInteger(Number(b.odeSteps)) && Number(b.odeSteps) > 0 ? Math.min(64, Number(b.odeSteps)) : undefined;
     const narCacheRatio = typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? b.narCacheRatio : undefined;
-    const { arScale } = parseYue2JointPreviewOptions({ arScale: b.arScale ?? (run.options.preview as { arScale?: number } | undefined)?.arScale }, 0);
-    const options = { enabled: true, everySteps: 0, takes, arScale, fixedTakes: hasFixed ? 0 : 1, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
+    const runPreview = run.options.preview as { arScale?: number; sampler?: unknown } | undefined;
+    const { arScale, sampler } = parseYue2JointPreviewOptions({ arScale: b.arScale ?? runPreview?.arScale, sampler: b.sampler ?? runPreview?.sampler }, 0);
+    const options = { enabled: true, everySteps: 0, takes, arScale, ...(sampler ? { sampler } : {}), fixedTakes: hasFixed ? 0 : 1, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
       ...(b.baselineOnly === true ? { baselineOnly: true } : {}),
       ...(odeSteps ? { odeSteps } : {}), ...(narCacheRatio !== undefined ? { narCacheRatio } : {}),
       // Without an override, a rung sings what the run's earlier previews sang

@@ -243,6 +243,19 @@ export function scopedKey(base: string, backendId: string = activeBackendId()): 
   return backendId === 'ace' ? base : `${base}@${backendId}`;
 }
 
+/** The YuE2 LM tab's planner/composer sampler settings and CFG, whichever
+ *  backend is active: training previews render with them. */
+export function yue2SamplerSnapshot(): Record<string, number | string> {
+  const bp = (activeBackendId() === 'yue2'
+    ? useGlobalParamsStore.getState().backendParams
+    : readScoped<Record<string, unknown>>('hs-backendParams', {}, 'yue2')) ?? {};
+  const out: Record<string, number | string> = {};
+  for (const [k, v] of Object.entries(bp)) {
+    if (/^yue2(Plan|Sem|End)[A-Za-z]+$|^yue2CfgScale$/.test(k) && (typeof v === 'number' || typeof v === 'string') && v !== '') out[k] = v;
+  }
+  return out;
+}
+
 function readScoped<T>(base: string, fallback: T, backendId: string = activeBackendId()): T {
   const key = scopedKey(base, backendId);
   if (key !== base) {

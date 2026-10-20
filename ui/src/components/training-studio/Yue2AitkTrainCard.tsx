@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { yue2SamplerSnapshot } from '../../stores/globalParamsStore';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -525,7 +526,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const recipe = { ...form, gpuUuid: runOn ? undefined : form.gpuUuid,
         device: runOn ? '' : defaultDevice === 'CUDA0' ? 'CUDA0' : form.device,
         autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
-        ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
+        ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview, sampler: yue2SamplerSnapshot(),
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       if (runOn) {
         await runCommand(client, trainingWorker, () => dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe }));

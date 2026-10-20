@@ -7,6 +7,7 @@
 // and the Refine tab (KL-rung ladders of the earlier recipe). Extracted from
 // RefinePanel; the scoring maths mirrors server/src/services/training/
 // yue2BestRung.ts, so change both together.
+import { yue2SamplerSnapshot } from '../../stores/globalParamsStore';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -122,7 +123,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const render = async (step: number) => {
     if (!datasetId || !runId) return;
     setRendering(step);
-    try { await runCommand(client, null, () => renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, arScale: renderOpts.arScale, ...draftOpts })); }
+    try { await runCommand(client, null, () => renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, arScale: renderOpts.arScale, sampler: yue2SamplerSnapshot(), ...draftOpts })); }
     catch (err) { fail(err); }
     finally { setRendering(null); }
   };
