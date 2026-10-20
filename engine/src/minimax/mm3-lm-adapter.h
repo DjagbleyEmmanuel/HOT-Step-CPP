@@ -818,6 +818,16 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err, 
                 mm3_lm_adapter_free(ad);
                 return nullptr;
             }
+            for (float v : f32) {
+                if (!std::isfinite(v)) {
+                    st_close(&st);
+                    if (err) {
+                        *err = "non-finite DoRA magnitude in " + e.name;
+                    }
+                    mm3_lm_adapter_free(ad);
+                    return nullptr;
+                }
+            }
             ggml_backend_tensor_set(p.m, f32.data(), 0, (size_t) n * sizeof(float));
             continue;
         }
