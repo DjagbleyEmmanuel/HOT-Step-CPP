@@ -66,7 +66,12 @@ exactly `n * track_rate / device_rate` frames per `n` device frames whatever the
 sizes are. Seek, track change and stop drop the buffered frames; pause leaves them for the
 resume. A track at a new rate re-prepares every plugin at that rate.
 `engine/tests/test-monitor-resampler.cpp` checks continuity and frame accounting with
-irregular block sizes (compile line in the file). On the Node side
+irregular block sizes (compile line in the file). The plugin chain loop itself lives in
+`tools/monitor-chain.h` (`monitor_run_chain`): each block is cut into chunks of at most
+`MAX_CHUNK` frames and every chunk runs the plugins in order, ping-ponging between two
+scratch buffers, so a non-commutative chain keeps its order and the output may alias the
+input. `engine/tests/test-monitor-chain.cpp` checks order, in-place output and multi-chunk
+blocks without any plugin; it is opt-in (`-DBUILD_TESTING=ON`). On the Node side
 (`server/src/routes/vst.ts`), monitor start, restart and stop run one at a time, so
 overlapping requests cannot spawn two hosts on the same control and status files. Host
 lifecycle lines go to `logs/<session>/vst_host.log`.

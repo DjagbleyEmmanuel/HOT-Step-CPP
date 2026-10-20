@@ -343,7 +343,8 @@ and recording suggestions stay off for those scores.
 For a one-shot cover, **Generate cover** renders the song in one go. Choose
 **Build by section** on **Prepare** to compare takes a few sections at a time.
 It opens the **Build** tab, using the approved score, lyrics and settings from
-Prepare. Finish preparing those before generating the first takes. The title at
+Prepare. Finish preparing those before generating the first takes.
+Before each take or preview, and before a Training Studio refine preview, the app frees the VRAM of the other model families (ACE-Step, MiniMax-Music3) and waits for each to confirm, so YuE2 does not load beside a resident model. The title at
 the top reads covering artist, then song, as the saved track is named.
 
 1. Two bars show the song. The **Source** bar is the score as it is, and never

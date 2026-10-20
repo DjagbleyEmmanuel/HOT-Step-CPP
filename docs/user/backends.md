@@ -285,7 +285,7 @@ Dials that change how closely the rendering follows the plan (experimental):
 
 Listening observations (not guarantees):
 
-- Top-K 0 (unlimited) with temperature above 1.0 can break the render.
+- Top-K 0 (unlimited) with Composer Temperature above 1.0 breaks the render, so the server clamps the temperature to 1.0 in that case and adds a warning to the job notes. The Composer Top-K slider now reaches 0 for unlimited.
 - Temperature works in both directions: around 0.7 and around 1.3 are both usable.
 - Higher CFG follows the style more closely but costs some high-end air.
 - Words like "choir" or "reverb" in the style add heavy reverb.

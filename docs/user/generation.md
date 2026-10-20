@@ -228,7 +228,7 @@ values: 120 BPM, 120 seconds, C major, 4/4.
 | Chain-of-Thought Caption | toggle | on | When on, the LM rewrites your caption into a fuller style description before generation. When off, your caption is used as typed. |
 | Temperature | 0 to 2 | 0.8 | Higher is more varied, lower is more predictable. |
 | CFG Scale | 0 to 10 | 2.2 | Guidance strength for the LM itself. |
-| Top-K | 0 to 200 | 0 | Limits sampling to the K most likely tokens. 0 turns it off. |
+| Top-K | 0 to 200 | 0 | Limits sampling to the K most likely tokens. 0 turns it off. (YuE2's Composer Top-K is separate: 0 is unlimited there, and unlimited with a temperature above 1.0 is clamped to 1.0.) |
 | Top-P | 0 to 1 | 0.92 | Nucleus sampling threshold. |
 | Repetition Penalty | 1.0 to 1.5 | 1.1 | Penalises recently used audio codes to break stuck loops. 1.0 turns it off. |
 | Rep. Mode | Presence, Frequency, DRY | Presence | Shown when the penalty is above 1.0. See below. |
@@ -351,7 +351,8 @@ while monitoring are only heard after you restart the monitor; a banner offers t
 The monitor plays at the track's own rate (44.1 kHz for some backends, 48 kHz for
 ACE-Step). If your sound device cannot switch to that rate, the monitor converts to the
 device's rate itself, at the same pitch and speed. When the next track has a different rate,
-the plugins are set up again for it. If the monitor misbehaves, `vst_host.log` in the newest
+the plugins are set up again for it. Chains of any length run their plugins in the order
+shown, including three or more. If the monitor misbehaves, `vst_host.log` in the newest
 `logs/<session>` folder records each start, stop, seek and rate change.
 
 Presets save the current chain under a name so you can switch between chains. The chain
