@@ -30,6 +30,15 @@
 
 static int g_fail = 0;
 
+// Max that cannot be fooled by NaN: `NaN > worst` is false, so a plain max
+// would drop it and pass. Once worst is NaN it stays NaN and `worst < tol`
+// fails.
+static void track_worst(double & worst, double v) {
+    if (!std::isnan(worst) && !(v <= worst)) {
+        worst = v;
+    }
+}
+
 #define CHECK(cond, ...)                         \
     do {                                         \
         if (!(cond)) {                           \
@@ -204,14 +213,18 @@ static void check_norm(const char * tag, const Site & s, float scale, int zero_c
     CHECK(memcmp(legacy.data(), now.data(), now.size() * sizeof(float)) == 0, "%s: helper differs from legacy graph", tag);
     const std::vector<double> ref = ref_norm(s, scale);
     double worst = 0.0;
+    int    bad   = 0;
     for (int64_t o = 0; o < s.out; o++) {
+        bad += !std::isfinite(now[o]) || !std::isfinite(ref[o]);
         if (o == zero_col) {
             CHECK(now[o] == 0.0f, "%s: zero column %lld gave %g, want exactly 0", tag, (long long) o, (double) now[o]);
             continue;
         }
         const double rel = std::fabs((double) now[o] - ref[o]) / ref[o];
-        worst            = rel > worst ? rel : worst;
+        track_worst(worst, rel);
     }
+    // Matching NaNs pass the memcmp above, so finiteness is checked on its own.
+    CHECK(bad == 0, "%s: %d non-finite norm or reference value(s)", tag, bad);
     // Bit-exactness against the legacy graph is the gate; this only catches a
     // gross error (axis, scale). 1e-3 because CUDA and Vulkan mul_mat land
     // near 1e-4 here (CUDA's small F32 x F32 likely on TF32 tensor cores), with
@@ -264,6 +277,7 @@ static void check_bias(const Site & s, float scale, const std::vector<float> & n
     ggml_free(ctx);
 
     double worst = 0.0;
+    int    bad   = 0;
     for (int64_t t = 0; t < seq; t++) {
         for (int64_t o = 0; o < s.out; o++) {
             double acc = 0.0;
@@ -276,9 +290,11 @@ static void check_bias(const Site & s, float scale, const std::vector<float> & n
             }
             const double want = (double) hm[o] * acc / (double) nrm[o] + (double) hbias[o];
             const double err  = std::fabs((double) hy[t * s.out + o] - want) / (1.0 + std::fabs(want));
-            worst             = err > worst ? err : worst;
+            bad += !std::isfinite(hy[t * s.out + o]) || !std::isfinite(want);
+            track_worst(worst, err);
         }
     }
+    CHECK(bad == 0, "bias: %d non-finite output or reference value(s)", bad);
     CHECK(worst < 1e-4, "bias: max err %.3g, rescale must exclude the bias", worst);
     printf("  %-34s max_err=%.2e\n", "bias outside rescale", worst);
 
