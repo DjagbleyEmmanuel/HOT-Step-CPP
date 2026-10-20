@@ -77,5 +77,6 @@ In sidebar order.
 | [Writing and maintaining the docs](dev/docs-contributing.md) | Layout, page template, generated tables, the checker |
 | [Writing style](dev/writing-style.md) | Rules for prose a human reads |
 | [UI design rules](dev/ui-design.md) | The shared controls every screen uses (dropdown, toggle, hover explanation), accent colours, and the check that enforces them |
+| [TanStack Query audit and migration](dev/tanstack-query.md) | Every TanStack integration audited: deprecated fetchQuery sweep, useQuery/useMutation gaps, hook folder conventions, phased migration plan |
 | [Skill library](../.claude/skills/README.md) | Procedures per maintenance domain for coding agents |
 | `AGENTS.md` (local only) | Project rules for agents, including the documentation ownership table |

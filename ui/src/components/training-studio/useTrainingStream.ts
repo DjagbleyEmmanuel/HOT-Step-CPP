@@ -35,7 +35,7 @@ export function useTrainingStream(jobId: string | null) {
         // and keep Start disabled indefinitely. Poll once per error: a live job
         // is a no-op; a terminal or vanished job synthesizes its final status.
         // Through the cache, so every view streaming this job shares the probe.
-        void queryClient.fetchQuery(trainingQueries.job(worker, jobId)).then(
+        void queryClient.query(trainingQueries.job(worker, jobId)).then(
           (job) => {
             if (job.status !== 'queued' && job.status !== 'running') {
               apply({ type: 'status', status: job.status, ...(job.error ? { error: job.error } : {}) });

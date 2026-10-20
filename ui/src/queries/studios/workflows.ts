@@ -22,8 +22,8 @@ export const documentOptions = (token: string, id: string) => {
 
 export const studioWorkflowApi = {
   ...workflowApi,
-  get: (token: string, id: string, after = 0) => queryClient.fetchQuery(workflowOptions(token, id, after)),
-  getDocument: (token: string, id: string) => queryClient.fetchQuery(documentOptions(token, id)),
+  get: (token: string, id: string, after = 0) => queryClient.query(workflowOptions(token, id, after)),
+  getDocument: (token: string, id: string) => queryClient.query(documentOptions(token, id)),
   updateDocument: async (...args: Parameters<typeof workflowApi.updateDocument>) => {
     const key = documentOptions(args[0], args[1]).queryKey;
     await queryClient.cancelQueries({ queryKey: key });

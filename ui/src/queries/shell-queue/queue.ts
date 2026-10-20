@@ -2,7 +2,7 @@
 //
 // The queue executor (stores/audioGenQueueStore.ts) keeps its own sequencing,
 // legacy owner/migration rules and completion effects; Query owns the reads
-// it makes. Every read goes through fetchQuery, so two loops asking for the
+// it makes. Every read goes through query(), so two loops asking for the
 // same thing at once share one request, and a loop that is happy with a
 // recent answer takes the cache instead of asking again. Reads never retry
 // here: each executor loop already decides what a failed read means.
@@ -52,25 +52,25 @@ export const selectedPathOptions = (token: string) => queryOptions({
  *  request already in flight); a waiter that only needs "recent" passes the
  *  poll cadence and rides the projection's own reads. */
 export const readAudioQueue = (token: string, maxAgeMs = 0) =>
-  queryClient.fetchQuery({ ...audioQueueItemsOptions(token), staleTime: maxAgeMs });
+  queryClient.query({ ...audioQueueItemsOptions(token), staleTime: maxAgeMs });
 
 /** One job's status. Every loop that follows a job polls at about the active
  *  cadence, so answers younger than a poll are shared rather than re-asked. */
 export const readGenerationStatus = (jobId: string) =>
-  queryClient.fetchQuery({ ...generationStatusOptions(jobId), staleTime: ACTIVE_POLL_MS - 500 });
+  queryClient.query({ ...generationStatusOptions(jobId), staleTime: ACTIVE_POLL_MS - 500 });
 
 export const readWorkflowJob = (token: string, jobId: string) =>
-  queryClient.fetchQuery({ ...workflowJobOptions(token, jobId), staleTime: 0 });
+  queryClient.query({ ...workflowJobOptions(token, jobId), staleTime: 0 });
 
 /** A finished render's song row, fresh: the queue reads it the moment the
  *  render is saved. Shares the canonical song key with every other reader. */
 export const readSong = (id: string) =>
-  queryClient.fetchQuery({ ...songOptions(id), staleTime: 0 });
+  queryClient.query({ ...songOptions(id), staleTime: 0 });
 
 export const readSongIds = (token: string) =>
-  queryClient.fetchQuery({ ...songIdsOptions(token), staleTime: 0 });
+  queryClient.query({ ...songIdsOptions(token), staleTime: 0 });
 
 /** Which submit path the server runs. Asked fresh: Settings can switch it,
  *  and the next submit must follow. */
 export const readSelectedPath = (token: string) =>
-  queryClient.fetchQuery({ ...selectedPathOptions(token), staleTime: 0 });
+  queryClient.query({ ...selectedPathOptions(token), staleTime: 0 });

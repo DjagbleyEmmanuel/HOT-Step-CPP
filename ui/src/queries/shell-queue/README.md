@@ -33,7 +33,7 @@ area's recent feed, studios' `studios/recent-songs` and Cover's
 The executor in `stores/audioGenQueueStore.ts` keeps its sequencing,
 migration fencing, manual rows and completion effects. Its server reads go
 through `queue.ts`: queue items, job status, workflow job, song rows, song ids
-and the submit path, each by `fetchQuery`. Loops reading the same thing at
+and the submit path, each by `query()`. Loops reading the same thing at
 once share one request. A job status younger than one second, or a queue
 list younger than one poll for the enqueue waiter, is taken from the cache.
 These reads never retry; each loop already decides what a failure means.

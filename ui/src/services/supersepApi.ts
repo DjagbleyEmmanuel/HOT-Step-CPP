@@ -131,6 +131,6 @@ export async function waitForCompletion(
     signal => getProgress(jobId, { signal }), p => p.status === 'running',
     p => onProgress?.(p.progress, p.message), { pollMs: pollIntervalMs });
   if (p.status !== 'done') throw new Error(p.error || `Separation ${p.status}`);
-  return queryClient.fetchQuery({ queryKey: serverKey('studios/separation-result', { id: jobId }),
+  return queryClient.query({ queryKey: serverKey('studios/separation-result', { id: jobId }),
     queryFn: ({ signal }) => getStemList(jobId, { signal }) });
 }

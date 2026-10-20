@@ -546,7 +546,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const worker = get().trainingWorker;
     try {
       // Cached for staleTime: every panel asks on mount, and they share one read.
-      const capabilities = await queryClient.fetchQuery(tq.capabilities(worker));
+      const capabilities = await queryClient.query(tq.capabilities(worker));
       if (get().trainingWorker === worker) set({ capabilities });
     } catch (err) {
       // Capabilities are advisory — a failure must never blank the studio.
@@ -560,7 +560,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const worker = get().trainingWorker;
     set({ loading: true, error: null });
     try {
-      const datasets = await queryClient.fetchQuery(tq.datasets(worker));
+      const datasets = await queryClient.query(tq.datasets(worker));
       // A list read for the worker the studio just left belongs to that
       // worker's cache entry, never to this one's store.
       if (get().trainingWorker === worker) set({ datasets, loading: false });
@@ -578,7 +578,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const isSwitch = get().selectedDatasetId !== id;
     set({ loading: true, error: null });
     try {
-      const detail = await queryClient.fetchQuery(tq.dataset(worker, id));
+      const detail = await queryClient.query(tq.dataset(worker, id));
       if (superseded()) return;
       const { byId, order } = indexSamples(detail.samples);
       set({
@@ -608,7 +608,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       });
       if (detail.activeJobId) {
         try {
-          const job = await queryClient.fetchQuery(tq.job(worker, detail.activeJobId));
+          const job = await queryClient.query(tq.job(worker, detail.activeJobId));
           if (!superseded()) set({ activeJob: job });
         } catch { /* job may have just ended */ }
       } else if (isSwitch) {
@@ -794,7 +794,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) { set({ preprocessStatus: null }); return; }
     set({ preprocessLoading: true });
     try {
-      const preprocessStatus = await queryClient.fetchQuery(tq.preprocessStatus(worker, id));
+      const preprocessStatus = await queryClient.query(tq.preprocessStatus(worker, id));
       // A slow request must not overwrite a newer dataset's status — but it must
       // still clear the spinner, or a stale response landing last leaves it
       // spinning forever next to the "Tensor caches" heading.
@@ -834,7 +834,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const seq = ++trainLmSeq;
     set({ trainLmLoading: true });
     try {
-      const trainLmStatus = await queryClient.fetchQuery(tq.trainLmStatus(worker, id, query));
+      const trainLmStatus = await queryClient.query(tq.trainLmStatus(worker, id, query));
       // A superseded request must not win: a newer one is in flight and owns the
       // spinner. A slow request must not overwrite a newer dataset's status, but
       // it must still clear the spinner — same rule as loadPreprocessStatus.
@@ -936,7 +936,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const seq = ++trainDitSeq;
     set({ trainDitLoading: true });
     try {
-      const trainDitStatus = await queryClient.fetchQuery(tq.trainDitStatus(worker, id, query));
+      const trainDitStatus = await queryClient.query(tq.trainDitStatus(worker, id, query));
       if (seq !== trainDitSeq) return;
       if (!isCurrent(get, worker, id)) { set({ trainDitLoading: false }); return; }
       set({ trainDitStatus, trainDitLoading: false });
@@ -960,7 +960,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const { trainingWorker: worker, selectedDatasetId: id } = get();
     if (!id) { set({ auditions: [] }); return; }
     try {
-      const res = await queryClient.fetchQuery(tq.auditions(worker, id));
+      const res = await queryClient.query(tq.auditions(worker, id));
       // A slow read must not attribute one dataset's previews to the next.
       if (!isCurrent(get, worker, id)) return;
       set({ auditions: res.previews });
@@ -1031,7 +1031,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     try {
       // Read by the Monitor's own interval poll: fresh for one poll period
       // only, so a mount and a tick share a read but the poll never stalls.
-      const pipelines = await queryClient.fetchQuery({ ...tq.pipelines(worker), staleTime: ACTIVE_POLL_MS });
+      const pipelines = await queryClient.query({ ...tq.pipelines(worker), staleTime: ACTIVE_POLL_MS });
       // A stage that moved changed some dataset on this worker. Structural
       // sharing keeps an unchanged list the same object.
       if (pipelines !== get().pipelines) invalidate(TD.datasets, worker);
@@ -1060,7 +1060,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const worker = get().trainingWorker;
     try {
       // Polled by the batch panel every 3 s; same rule as loadPipelines.
-      const yue2Batches = await queryClient.fetchQuery({ ...tq.yue2Batches(worker), staleTime: ACTIVE_POLL_MS });
+      const yue2Batches = await queryClient.query({ ...tq.yue2Batches(worker), staleTime: ACTIVE_POLL_MS });
       if (get().trainingWorker === worker) set({ yue2Batches });
     } catch (err) { console.warn('[Training] yue2 batches failed:', errMessage(err)); }
   },
@@ -1591,7 +1591,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
  * never opened, so the terminal refresh has to happen here instead.
  */
 async function adoptJob(set: SetState, get: GetState, worker: string | null, datasetId: string, jobId: string): Promise<void> {
-  const job = await queryClient.fetchQuery(tq.job(worker, jobId));
+  const job = await queryClient.query(tq.job(worker, jobId));
   if (!isCurrent(get, worker, datasetId)) return;
   set({ activeJob: job });
   if (job.status !== 'queued' && job.status !== 'running') refreshAfterJob(get, job.id);
@@ -1637,11 +1637,11 @@ async function followYue2Preparation(
 ): Promise<boolean> {
   let lastJobId: string | null = null;
   for (;;) {
-    const pipeline = await queryClient.fetchQuery(tq.preparation(id));
+    const pipeline = await queryClient.query(tq.preparation(id));
     if (get().trainingWorker !== worker) return false;
     const running = pipeline.stages.findIndex(s => s.status === 'running');
     set({ yue2RunAllStage: running < 0 ? null : running + 1 });
-    const job = await queryClient.fetchQuery(tq.preparationJob(id));
+    const job = await queryClient.query(tq.preparationJob(id));
     if (get().trainingWorker !== worker) return false;
     if (job && isCurrent(get, worker, datasetId)) {
       if (job.id !== lastJobId) {

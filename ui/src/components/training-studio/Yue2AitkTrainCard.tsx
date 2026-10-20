@@ -437,11 +437,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (!autoCaption) return;
     const started = await runCommand(client, trainingWorker, () => captionMissingYue2(datasetId, autoCaption, { worker: trainingWorker }));
     if (!started.jobId) return;
-    let j = await client.fetchQuery(trainingQueries.job(trainingWorker, started.jobId));
+    let j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
     setCaptioning(j);
     while (j.status === 'queued' || j.status === 'running') {
       await new Promise(r => setTimeout(r, 1500));
-      j = await client.fetchQuery(trainingQueries.job(trainingWorker, started.jobId));
+      j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
       setCaptioning(j);
     }
     setCaptioning(null);
@@ -678,13 +678,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const restore = async () => {
       if (storedPrepareId) {
         try {
-          const restored = await client.fetchQuery(trainingQueries.job(trainingWorker, storedPrepareId));
+          const restored = await client.query(trainingQueries.job(trainingWorker, storedPrepareId));
           if (!cancelled && isPrepareJob(restored, datasetId)) setPrepareJob(restored);
         } catch { /* Fall back to the job list below. */ }
       }
       if (storedId) {
         try {
-          const restored = await client.fetchQuery(trainingQueries.job(trainingWorker, storedId));
+          const restored = await client.query(trainingQueries.job(trainingWorker, storedId));
           if (!cancelled && isJointJob(restored, datasetId)) {
             setJob(restored);
             return;
@@ -692,7 +692,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         } catch { /* Fall back to the dataset job list. */ }
       }
       try {
-        const result = await client.fetchQuery(runQueries.jobs(trainingWorker, datasetId));
+        const result = await client.query(runQueries.jobs(trainingWorker, datasetId));
         const latestPrepare = result
           .filter(item => isPrepareJob(item, datasetId))
           .sort((a, b) => b.createdAt - a.createdAt)[0];
@@ -913,7 +913,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const, base: form.base } : {}) }, { worker: trainingWorker }));
       setPrepareManifest(result.manifest);
       setAppliedPrepareJobId('');
-      setPrepareJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
+      setPrepareJob(await client.query(trainingQueries.job(trainingWorker, result.jobId)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally { setStarting(false); }
@@ -926,7 +926,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         await runCommand(client, trainingWorker, () => preparationApi.commandYue2Preparation(jointPipelineId, 'cancel'));
       } else if (job) {
         await runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker }));
-        setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, job.id)));
+        setJob(await client.query(trainingQueries.job(trainingWorker, job.id)));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -937,7 +937,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setError('');
     try {
       await runCommand(client, trainingWorker, () => cancelJob(prepareJob.id, { worker: trainingWorker }));
-      setPrepareJob(await client.fetchQuery(trainingQueries.job(trainingWorker, prepareJob.id)));
+      setPrepareJob(await client.query(trainingQueries.job(trainingWorker, prepareJob.id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }

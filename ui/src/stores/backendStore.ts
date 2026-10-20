@@ -264,7 +264,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
   fetchBackends: async () => {
     set({ loading: true, error: null });
     try {
-      const data = await queryClient.fetchQuery(backendsOptions());
+      const data = await queryClient.query(backendsOptions());
       const activeId = data.activeId || 'ace';
       writeActiveMirror(activeId);
       set({
@@ -285,7 +285,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const backendId = id || get().activeBackendId;
     if (!backendId) return;
     try {
-      await queryClient.fetchQuery(capabilitiesOptions(backendId));
+      await queryClient.query(capabilitiesOptions(backendId));
     } catch (err) {
       console.warn(`[Backends] capabilities fetch failed for "${backendId}":`, err instanceof Error ? err.message : String(err));
     }
@@ -295,7 +295,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     const backendId = id || get().activeBackendId;
     if (!backendId) return;
     try {
-      await queryClient.fetchQuery(backendModelsOptions(backendId));
+      await queryClient.query(backendModelsOptions(backendId));
     } catch (err) {
       // Advisory, like fetchCapabilities: an empty catalogue renders as
       // "no models found", which is the honest degrade.

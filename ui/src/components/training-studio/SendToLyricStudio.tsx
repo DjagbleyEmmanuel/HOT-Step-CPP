@@ -51,7 +51,7 @@ export const SendToLyricStudio: React.FC = () => {
     setError('');
     try {
       // Seeds the editable artist/album fields, so it is a one-shot read.
-      const p = await queryClient.fetchQuery(tq.lyricStudioPreview(worker, datasetId));
+      const p = await queryClient.query(tq.lyricStudioPreview(worker, datasetId));
       setPreview(p);
       setArtist(p.artist);
       setAlbum(p.album);

@@ -49,7 +49,7 @@ export function peaksCached(url: string): Peaks | null {
  */
 export async function fetchPeaks(url: string): Promise<Peaks | null> {
   try {
-    const data = await queryClient.fetchQuery(peaksOptions(url));
+    const data = await queryClient.query(peaksOptions(url));
     if (data.unsupported) console.warn(`[peaks] ${url}: ${data.unsupported}`);
     return usable(data);
   } catch (err) {

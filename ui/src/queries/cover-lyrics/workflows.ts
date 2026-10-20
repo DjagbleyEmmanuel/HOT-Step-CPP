@@ -22,8 +22,8 @@ export const documentOptions = (token: string, id: string, options: ReadOptions 
 
 export const coverLyricWorkflowApi = {
   ...workflowApi,
-  get: (token: string, id: string, after = 0, options: ReadOptions = {}) => queryClient.fetchQuery(workflowOptions(token, id, after, options)),
-  getDocument: (token: string, id: string, options: ReadOptions = {}) => queryClient.fetchQuery(documentOptions(token, id, options)),
+  get: (token: string, id: string, after = 0, options: ReadOptions = {}) => queryClient.query(workflowOptions(token, id, after, options)),
+  getDocument: (token: string, id: string, options: ReadOptions = {}) => queryClient.query(documentOptions(token, id, options)),
   updateDocument: async (...args: Parameters<typeof workflowApi.updateDocument>) => {
     const key = documentOptions(args[0], args[1]).queryKey;
     await queryClient.cancelQueries({ queryKey: key });

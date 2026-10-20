@@ -207,7 +207,7 @@ export const SongBuilder: React.FC = () => {
   const loadView = useCallback(async (projectId: string) => {
     const options = projectOptions(token!, projectId);
     await client.cancelQueries({ queryKey: options.queryKey });
-    return client.fetchQuery(options);
+    return client.query(options);
   }, [token, client]);
 
   // Follow a section job: each variant event reloads the project, so its

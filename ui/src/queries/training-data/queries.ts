@@ -110,7 +110,7 @@ export const trainingQueries = {
     queryFn: ({ signal }) => api.getWorkerDispatch(name, { signal }),
   }),
 
-  // One-shot reads below are fetched with fetchQuery, never observed: they
+  // One-shot reads below are fetched with query(), never observed: they
   // seed a form or a wizard row, so no background refetch can write over the
   // user's edits. staleTime 0 asks the server on every open; concurrent reads
   // still share a request. A caller that moves on cancels its old key.

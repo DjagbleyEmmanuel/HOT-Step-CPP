@@ -199,8 +199,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
       setEnvLoading(true);
       const [data, gpuData] = await Promise.all([
-        queryClient.fetchQuery(envOptions()),
-        queryClient.fetchQuery(gpusOptions()).catch(() => ({ gpus: [] })),
+        queryClient.query(envOptions()),
+        queryClient.query(gpusOptions()).catch(() => ({ gpus: [] })),
       ]);
       setEnvValues(data.values);
       setEnvOriginal(data.values);

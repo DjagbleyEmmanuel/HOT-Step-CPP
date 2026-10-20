@@ -21,7 +21,7 @@ export function snapshotOptions<T>(domain: Domain, path: string, token?: string,
 }
 
 export function readSnapshot<T>(domain: Domain, path: string, token?: string, options: ReadOptions = {}, staleTime?: number): Promise<T> {
-  return queryClient.fetchQuery(snapshotOptions<T>(domain, path, token, options, staleTime));
+  return queryClient.query(snapshotOptions<T>(domain, path, token, options, staleTime));
 }
 
 /** Cancel before invalidating: an older read must never repopulate a changed document. */

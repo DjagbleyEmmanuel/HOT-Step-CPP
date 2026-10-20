@@ -40,7 +40,7 @@ async function write<R>(key: readonly unknown[], command: () => Promise<R>): Pro
 export const queriedPresetsApi: typeof preferencesApi.presets = {
   ...preferencesApi.presets,
   list: <T>(family: PresetFamily) =>
-    queryClient.fetchQuery(presetsOptions<T>(family)) as Promise<{ documents: TypedDocument<T>[] }>,
+    queryClient.query(presetsOptions<T>(family)) as Promise<{ documents: TypedDocument<T>[] }>,
   create: <T>(family: PresetFamily, body: T) =>
     write(presetsOptions(family).queryKey, () => preferencesApi.presets.create(family, body)),
   update: <T>(family: PresetFamily, id: string, revision: number, body: T) =>
@@ -54,7 +54,7 @@ export const queriedPresetsApi: typeof preferencesApi.presets = {
 export const queriedSettingsApi: typeof preferencesApi.settings = {
   ...preferencesApi.settings,
   get: <T>(family: SettingsFamily) =>
-    queryClient.fetchQuery(settingOptions<T>(family)) as Promise<{ document: TypedDocument<T> | null }>,
+    queryClient.query(settingOptions<T>(family)) as Promise<{ document: TypedDocument<T> | null }>,
   upsert: <T>(family: SettingsFamily, expectedRevision: number | undefined, body: T) =>
     write(settingOptions(family).queryKey, () => preferencesApi.settings.upsert(family, expectedRevision, body)),
   import: (family: SettingsFamily, item: ImportPreferenceItem) =>

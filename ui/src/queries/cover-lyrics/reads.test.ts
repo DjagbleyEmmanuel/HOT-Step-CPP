@@ -39,7 +39,7 @@ test('Cover writes, deletes and render completion refresh every cached song view
   const observers = options.map(option => new QueryObserver(queryClient, option));
   const off = observers.map(observer => observer.subscribe(() => {}));
   try {
-    await Promise.all(options.map(option => queryClient.fetchQuery(option)));
+    await Promise.all(options.map(option => queryClient.query(option)));
     revision++;
     await songsChanged();
     for (const option of options) assert.equal(queryClient.getQueryData(option.queryKey).revision, 1);
@@ -127,7 +127,7 @@ test('build snapshots share one request for simultaneous observers and terminal 
   const first = new QueryObserver(client, options); const second = new QueryObserver(client, options);
   const off = [first.subscribe(() => {}), second.subscribe(() => {})];
   try {
-    await client.fetchQuery(options);
+    await client.query(options);
     assert.equal(calls, 1);
     const interval = pollWhile<{ pending: unknown[] }>(data => !data || data.pending.length > 0);
     assert.equal(interval({ state: client.getQueryState(options.queryKey)! }), false);
@@ -154,7 +154,7 @@ test('deleting a cover cancels a late list and only removes data after success',
     signal = opts?.signal ?? undefined;
     return new Promise(resolve => { release = resolve; });
   };
-  const old = queryClient.fetchQuery({ ...coverSongsOptions('test'), staleTime: 0 }).catch(error => error);
+  const old = queryClient.query({ ...coverSongsOptions('test'), staleTime: 0 }).catch(error => error);
   await tick();
   await deleteCovers('test', ['remove']);
   release(json({ songs: [{ id: 'remove' }, { id: 'keep' }] })); await old;

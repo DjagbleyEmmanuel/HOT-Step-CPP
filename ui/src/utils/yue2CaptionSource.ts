@@ -223,7 +223,7 @@ export async function fetchYue2CaptionSource(
   try {
     // Query owns the read (fresh each time, concurrent asks share one
     // request); a failure is caught here, never cached as an empty answer.
-    const data = await queryClient.fetchQuery({
+    const data = await queryClient.query({
       queryKey: serverKey('shell-queue/yue2-captions', { filters: Object.fromEntries(params) }),
       queryFn: ({ signal }) => apiClient.get<{
         datasetId?: string; datasetName?: string; tracks?: Yue2SourceTrack[];

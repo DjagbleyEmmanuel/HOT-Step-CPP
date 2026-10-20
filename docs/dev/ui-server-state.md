@@ -130,7 +130,7 @@ so a resumed read never shares an entry with a full one. Both workflow reads
 throw `ApiError` (from `apiClient`), so the retry policy applies to them as to
 any other read. `workflowApi` remains the command transport. The `adapterScan`
 read is a POST, but a read-only one: run it on explicit request
-(`enabled: false` plus `refetch`, or `fetchQuery` with `staleTime: 0`).
+(`enabled: false` plus `refetch`, or `query()` with `staleTime: 0`).
 Sidecar ids are the sidecar URL, not the audio URL, so a mastered or
 cache-busted variant shares the base render's entry. Peaks are keyed by the
 audio URL as played; `forgetPeaks(url)` removes the entry when a file is

@@ -23,9 +23,9 @@ test('global and shell adapter scans share a request and retain folder isolation
   const cache = client();
   let calls = 0;
   globalThis.fetch = async () => { calls++; await tick(); return json({ files: [] }); };
-  await Promise.all([cache.fetchQuery(adapterScanOptions('folder-A')), cache.fetchQuery(shellScanOptions('folder-A'))]);
+  await Promise.all([cache.query(adapterScanOptions('folder-A')), cache.query(shellScanOptions('folder-A'))]);
   assert.equal(calls, 1);
-  await cache.fetchQuery(adapterScanOptions('folder-B'));
+  await cache.query(adapterScanOptions('folder-B'));
   assert.equal(calls, 2);
 });
 
@@ -34,7 +34,7 @@ test('simultaneous plugin, capability and VRAM consumers share one request per k
   const requests: string[] = [];
   globalThis.fetch = async input => { requests.push(String(input)); await tick(); return json({ up: true }); };
   for (const options of [pluginsOptions(), capabilitiesOptions('a'), vramOptions()]) {
-    await Promise.all([c.fetchQuery(options), c.fetchQuery(options), c.fetchQuery(options)]);
+    await Promise.all([c.query(options), c.query(options), c.query(options)]);
   }
   assert.deepEqual(requests, ['/api/plugins', '/api/capabilities?backend=a', '/api/logs/vram']);
 });
@@ -46,7 +46,7 @@ test('plugin reload refetches once and notifies every subscribed consumer', asyn
   const a = new QueryObserver(c, pluginsOptions()), b = new QueryObserver(c, pluginsOptions());
   const stopA = a.subscribe(() => {}), stopB = b.subscribe(() => {});
   try {
-    await c.fetchQuery(pluginsOptions());
+    await c.query(pluginsOptions());
     await c.invalidateQueries({ queryKey: sharedKeys.plugins() });
     assert.equal(calls, 2);
     assert.equal(a.getCurrentResult().data?.solvers[0].name, 'solver-2');
@@ -62,8 +62,8 @@ test('a late backend A response cannot overwrite B, and recovery preserves the u
     if (String(input).endsWith('backend=A')) { await pendingA; return json({ up: false, core: { modelsMissing: true } }); }
     return json({ up: true, core: { modelsMissing: false } });
   };
-  const a = c.fetchQuery(capabilitiesOptions('A'));
-  const b = await c.fetchQuery(capabilitiesOptions('B'));
+  const a = c.query(capabilitiesOptions('A'));
+  const b = await c.query(capabilitiesOptions('B'));
   release();
   const down = await a;
   assert.equal(c.getQueryData(capabilitiesOptions('B').queryKey), b);
@@ -73,7 +73,7 @@ test('a late backend A response cannot overwrite B, and recovery preserves the u
   assert.equal(capabilitiesOptions('A').refetchInterval(query as never), 10_000);
   globalThis.fetch = async () => json({ up: true });
   await c.invalidateQueries({ queryKey: query.queryKey });
-  const recovered = await c.fetchQuery(capabilitiesOptions('A'));
+  const recovered = await c.query(capabilitiesOptions('A'));
   assert.equal(recovered.up, true);
   assert.equal(capabilitiesOptions('A').refetchInterval(query as never), false);
 });
@@ -84,15 +84,15 @@ test('unmount/remount reuses model registry and consumed signals abort cancelled
   globalThis.fetch = async () => { calls++; return json({ files: [], packs: [] }); };
   const observer = new QueryObserver(c, registryOptions());
   const stop = observer.subscribe(() => {});
-  await c.fetchQuery(registryOptions()); stop();
-  await c.fetchQuery(registryOptions());
+  await c.query(registryOptions()); stop();
+  await c.query(registryOptions());
   assert.equal(calls, 1);
   let signal!: AbortSignal;
   globalThis.fetch = async (_input, opts) => {
     signal = opts!.signal!;
     return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
   };
-  const read = c.fetchQuery(backendModelsOptions('A')).catch(error => error);
+  const read = c.query(backendModelsOptions('A')).catch(error => error);
   await c.cancelQueries({ queryKey: backendModelsOptions('A').queryKey });
   await read;
   assert.equal(signal.aborted, true);
@@ -102,7 +102,7 @@ test('unmount/remount reuses model registry and consumed signals abort cancelled
 test('failed reads throw their HTTP status and do not cache an empty snapshot', async () => {
   const c = client();
   globalThis.fetch = async () => new Response('{"error":"missing"}', { status: 404 });
-  await assert.rejects(c.fetchQuery(registryOptions()), (error: unknown) => error instanceof ApiError && error.status === 404);
+  await assert.rejects(c.query(registryOptions()), (error: unknown) => error instanceof ApiError && error.status === 404);
   assert.equal(c.getQueryData(registryOptions().queryKey), undefined);
 });
 

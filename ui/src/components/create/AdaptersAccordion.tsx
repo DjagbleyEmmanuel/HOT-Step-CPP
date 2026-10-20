@@ -137,7 +137,7 @@ export const AdaptersAccordion: React.FC<AdaptersAccordionProps> = ({
     setScanning(true);
     setScanError(null);
     try {
-      const result = await queryClient.fetchQuery(adapterScanOptions(dir));
+      const result = await queryClient.query(adapterScanOptions(dir));
       setAdapterFiles(result.files);
       if (result.files.length === 0) {
         setScanError('No .safetensors files found in this folder');

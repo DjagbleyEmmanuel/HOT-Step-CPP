@@ -130,7 +130,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ scanning: true, scanError: null });
     try {
       await queryClient.invalidateQueries({ queryKey: localOptions('vst-scan', '/vst/scan').queryKey });
-      await queryClient.fetchQuery(localOptions<{ plugins: VstPlugin[] }>('vst-scan', '/vst/scan'));
+      await queryClient.query(localOptions<{ plugins: VstPlugin[] }>('vst-scan', '/vst/scan'));
       set({ scanning: false });
     } catch (err: any) {
       set({ scanning: false, scanError: err.message });
@@ -139,7 +139,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
   loadChain: async () => {
     try {
-      await queryClient.fetchQuery(localOptions<{ plugins: VstChainEntry[] }>('vst-chain', '/vst/chain'));
+      await queryClient.query(localOptions<{ plugins: VstChainEntry[] }>('vst-chain', '/vst/chain'));
     } catch {
       set({ chainLoaded: true });
     }
@@ -326,7 +326,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   },
 
   pollMonitorStatus: async () => {
-    try { await queryClient.fetchQuery(monitorOptions()); }
+    try { await queryClient.query(monitorOptions()); }
     catch { /* Keep the last successful scoped projection. */ }
   },
 

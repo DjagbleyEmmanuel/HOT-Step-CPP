@@ -138,7 +138,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const mib = (b: number) => b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GiB` : `${(b / 1048576).toFixed(0)} MiB`;
   const finishPick = async (pickRun: string, dir: string, step: number) => {
     try {
-      const fresh = await client.fetchQuery({ ...runQueries.ladder(datasetId, pickRun), staleTime: 0 });
+      const fresh = await client.query({ ...runQueries.ladder(datasetId, pickRun), staleTime: 0 });
       const pick = pickFromLadder(fresh, step);
       if (pick.checkpointDir !== dir) throw new Error('The selected checkpoint changed. Reload the ladder.');
       const { plan } = await runCommand(client, null, () => selectReviewRung(pick));

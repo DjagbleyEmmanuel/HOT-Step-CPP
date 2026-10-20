@@ -26,9 +26,9 @@ test('library and recent consumers share one request per key; sources and sessio
   const c = client();
   const requests: string[] = [];
   globalThis.fetch = async input => { requests.push(String(input)); await tick(); return json({ songs: [song('a')] }); };
-  await Promise.all([c.fetchQuery(songsOptions('t')), c.fetchQuery(songsOptions('t')), c.fetchQuery(songsOptions('t'))]);
-  await Promise.all([c.fetchQuery(recentSongsOptions('t', 'create')), c.fetchQuery(recentSongsOptions('t', 'create'))]);
-  await c.fetchQuery(recentSongsOptions('t', 'all'));
+  await Promise.all([c.query(songsOptions('t')), c.query(songsOptions('t')), c.query(songsOptions('t'))]);
+  await Promise.all([c.query(recentSongsOptions('t', 'create')), c.query(recentSongsOptions('t', 'create'))]);
+  await c.query(recentSongsOptions('t', 'all'));
   assert.deepEqual(requests, ['/api/songs', '/api/songs/recent?limit=50&source=create', '/api/songs/recent?limit=50']);
   // The token never enters a key, and a new session gets its own entries.
   assert.ok(!JSON.stringify(songsOptions('secret-token').queryKey).includes('secret-token'));
@@ -50,8 +50,8 @@ test('a song write refetches every song view, studios recent feed included', asy
   const studios = serverKey('studios/recent-songs', { auth: true, filters: { limit: 50 } });
   c.setQueryData(studios, { songs: [] });
   try {
-    await c.fetchQuery(songsOptions('t'));
-    await c.fetchQuery(recentSongsOptions('t'));
+    await c.query(songsOptions('t'));
+    await c.query(recentSongsOptions('t'));
     version = 1;
     await invalidateSongs(c);
     assert.equal(library.getCurrentResult().data?.songs[0].id, 's1');
@@ -214,11 +214,11 @@ test('lyric sidecars: missing is cached as none, failures throw, crop/retranscri
     if (url.includes('broken')) return new Response('', { status: 500 });
     return url.endsWith('.lrc') ? new Response('[00:01.00] Words', { status: 200 }) : json({ version: 1, lines: [] });
   };
-  assert.equal(await c.fetchQuery(lrcOptions('/audio/missing.wav')), null);
-  assert.equal(await c.fetchQuery(lyricsJsonOptions('/audio/shell.wav')), null);
-  assert.equal(await c.fetchQuery(lrcOptions('/audio/ok.wav')), '[00:01.00] Words');
-  assert.deepEqual(await c.fetchQuery(lyricsJsonOptions('/audio/ok.wav')), { version: 1, lines: [] });
-  await assert.rejects(c.fetchQuery({ ...lrcOptions('/audio/broken.wav'), retry: false }), /500/);
+  assert.equal(await c.query(lrcOptions('/audio/missing.wav')), null);
+  assert.equal(await c.query(lyricsJsonOptions('/audio/shell.wav')), null);
+  assert.equal(await c.query(lrcOptions('/audio/ok.wav')), '[00:01.00] Words');
+  assert.deepEqual(await c.query(lyricsJsonOptions('/audio/ok.wav')), { version: 1, lines: [] });
+  await assert.rejects(c.query({ ...lrcOptions('/audio/broken.wav'), retry: false }), /500/);
   await invalidateSidecars(c);
   assert.equal(c.getQueryState(lrcOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
   assert.equal(c.getQueryState(lyricsJsonOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
@@ -234,10 +234,10 @@ test('ABC lead sheet: read from the base render, missing or SPA shell is none', 
     if (url.includes('shell')) return new Response('<html>spa</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
     return new Response('X:1\nK:C\nCDEF|\n', { status: 200 });
   };
-  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/ok_mastered.wav?_t=1')), 'X:1\nK:C\nCDEF|');
+  assert.equal(await c.query(scoreAbcOptions('/audio/ok_mastered.wav?_t=1')), 'X:1\nK:C\nCDEF|');
   assert.equal(requests[0], '/audio/ok.score.abc');
-  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/missing.wav')), null);
-  assert.equal(await c.fetchQuery(scoreAbcOptions('/audio/shell.wav')), null);
+  assert.equal(await c.query(scoreAbcOptions('/audio/missing.wav')), null);
+  assert.equal(await c.query(scoreAbcOptions('/audio/shell.wav')), null);
 });
 
 test('peaks: concurrent reads share a request, failures are not cached, forget drops the entry', async () => {

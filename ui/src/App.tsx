@@ -411,7 +411,7 @@ const AppContent: React.FC = () => {
             await new Promise(r => setTimeout(r, 5000));
             if (cancelled) return;
             try {
-              const { song: s } = await queryClient.fetchQuery({ ...songOptions(currentTrack.id), staleTime: 0 });
+              const { song: s } = await queryClient.query({ ...songOptions(currentTrack.id), staleTime: 0 });
               const ddUrl = s.disco_data_url || '';
               if (ddUrl) {
                 console.log(`[Disco] Disco data ready for ${currentTrack.id}: ${ddUrl}`);

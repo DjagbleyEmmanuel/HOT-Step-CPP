@@ -36,7 +36,7 @@ test('pollWhile: real fetches back off per failed cycle, reset on success, stop 
   const queryKey = ['hs', 'test/poll'];
   let reply: () => { status: string } = () => ({ status: 'running' });
   let calls = 0;
-  const cycle = () => client.fetchQuery({
+  const cycle = () => client.query({
     queryKey, staleTime: 0, retryDelay: 1,
     queryFn: async () => { calls++; return reply(); },
   }).catch(() => undefined);
@@ -67,7 +67,7 @@ test('client: a 5xx read is retried twice, then fails without caching data', asy
   const client = createQueryClient();
   let calls = 0;
   const key = ['hs', 'test/a'];
-  await assert.rejects(client.fetchQuery({
+  await assert.rejects(client.query({
     queryKey: key,
     queryFn: async () => { calls++; throw new ApiError(500, 'boom', null); },
     retryDelay: 1,
@@ -81,7 +81,7 @@ test('client: a 5xx read is retried twice, then fails without caching data', asy
 test('client: a 4xx read is not retried', async () => {
   const client = createQueryClient();
   let calls = 0;
-  await assert.rejects(client.fetchQuery({
+  await assert.rejects(client.query({
     queryKey: ['hs', 'test/b'],
     queryFn: async () => { calls++; throw new ApiError(404, 'missing', null); },
   }));

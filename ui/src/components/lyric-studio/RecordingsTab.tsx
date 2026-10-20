@@ -120,7 +120,7 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                 } else {
                   // Fallback: check job status
                   try {
-                    const status = await queryClient.fetchQuery({ queryKey: serverKey('shell-queue/generation-status', { id: ag.hotstep_job_id }), queryFn: ({ signal }) => apiClient.get<GenerationJob>(`/generate/status/${encodeURIComponent(ag.hotstep_job_id)}`, { signal: AbortSignal.any([signal, controller.signal]) }), staleTime: 0 });
+                    const status = await queryClient.query({ queryKey: serverKey('shell-queue/generation-status', { id: ag.hotstep_job_id }), queryFn: ({ signal }) => apiClient.get<GenerationJob>(`/generate/status/${encodeURIComponent(ag.hotstep_job_id)}`, { signal: AbortSignal.any([signal, controller.signal]) }), staleTime: 0 });
                     if (status?.status === 'succeeded' && status.result?.audioUrls) {
                       for (const audioUrl of status.result.audioUrls) {
                         songs.push({
