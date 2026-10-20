@@ -330,11 +330,8 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         const std::size_t count = (request.positions - offset < kArChunk) ?
             request.positions - offset : kArChunk;
         ChunkWorkspace uncached_workspace;
-        ChunkWorkspace & cached_workspace = count == kArChunk ? full_workspace : tail_workspace;
-        // A cached workspace built for the other KL mode (e.g. a measure-KL eval step) is not reused.
-        const bool use_uncached = std::getenv("YUE2_AITK_BASELINE") ||
-            (cached_workspace.tmp.ctx && cached_workspace.skip_kl != want_skip_kl(request));
-        ChunkWorkspace & workspace = use_uncached ? uncached_workspace : cached_workspace;
+        ChunkWorkspace & workspace = std::getenv("YUE2_AITK_BASELINE") ? uncached_workspace :
+            (count == kArChunk ? full_workspace : tail_workspace);
         const Status init_status = workspace.init(request, count, error);
         if (init_status != Status::success) return init_status;
         ggml_tensor * adapted = workspace.adapted;

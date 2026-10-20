@@ -86,7 +86,15 @@ S = 7,668). It is kept only if the device still has
 step footprint) free on top, otherwise the
 trainer warns and recomputes, and it is freed as that backward returns.
 `YUE2_AITK_ATTENTION_RECOMPUTE=1` restores the recompute; CUDA, CPU and Vulkan
-always recompute. ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
+always recompute. Two more Metal and non-CUDA savings are on by default, and each has a rollback
+switch. On Metal the NAR's attention, which sees every key, is built with no mask and no
+causal hint, so the attention backward can take its dS path; `YUE2_AITK_NAR_NOMASK=0`
+restores the masked graph. Other backends always keep the mask (CUDA's pipelined kernels
+need the hint). With `--kl-weight 0` and no teacher, the non-CUDA head loss skips the base
+logits and the KL term and reports `ar_kl` as 0; `YUE2_AITK_HEAD_SKIPKL=0` restores the full
+graph. This covers CPU, Vulkan and Metal, but has only been measured on Metal; CUDA uses
+`joint_loss_cuda.cu` and is unaffected. On an M2 Max both left the losses and gradient
+norm unchanged and cut about 1 s from a 13 s step. ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
 directory. Each `checkpoint-stepN` contains the combined
