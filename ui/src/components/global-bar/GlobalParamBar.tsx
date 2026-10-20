@@ -17,7 +17,6 @@ import { useBackendStore } from '../../stores/backendStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { BackendModelsDropdown, BackendModelsBadge } from './BackendModelsDropdown';
-import { BackendToggle } from './BackendToggle';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { Mm3LmAdapterDropdown, Mm3LmAdapterBadge } from './Mm3LmAdapterDropdown';
 import { Yue2LmAdapterDropdown, Yue2LmAdapterBadge } from './Yue2LmAdapterDropdown';
@@ -26,7 +25,6 @@ import { BackendGenerationDropdown, BackendGenerationBadge } from './BackendGene
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
 import { BackendLmDropdown, BackendLmBadge } from './BackendLmDropdown';
 import { PostProcessingDropdown, PostProcessingBadge } from './PostProcessingDropdown';
-import { VramIndicator } from '../shared/VramIndicator';
 import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
 import { MonitorBar } from './MonitorBar';
 import { useVstChainStore } from '../../stores/vstChainStore';
@@ -369,7 +367,6 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
           )}
           {!showModels && <SectionSpacer />}
 
-          <BackendToggle />
 
           {showAdapters && (
           <DiscoPulseWrapper hue={72} stem="snare" className="flex-1 min-w-0">
@@ -467,8 +464,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
           )}
         </div>
 
-        {/* Right — MonitorBar when active, otherwise Export/Import + VRAM */}
-        <div className={`flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5 transition-all overflow-hidden ${monitoring ? 'w-[300px]' : 'w-[240px]'}`}>
+        {/* Right — MonitorBar when active, otherwise Profiles (VRAM lives in the Terminal box) */}
+        <div className={`flex items-center gap-2 flex-shrink-0 px-3 border-l border-zinc-200 dark:border-white/5 transition-all overflow-hidden ${monitoring ? 'w-[300px]' : 'w-auto'}`}>
           {monitoring ? (
             <MonitorBar />
           ) : (
@@ -481,8 +478,6 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
                   {t('globalBar.profiles')}
                 </span>
               </button>
-              <div className="w-px h-4 bg-white/5" />
-              <VramIndicator compact />
             </>
           )}
         </div>

@@ -9,7 +9,7 @@ A live streaming performance mode. Instead of queuing one song and waiting for i
 
 The "STORM" entry in the sidebar (`/storm`). The engine must be ready first.
 
-STORM only works on the ACE-Step 1.5 backend. On any other active backend the page shows "Not supported by the active backend — switch back to ACE-Step 1.5 in the global bar" instead of the studio.
+STORM only works on the ACE-Step 1.5 backend, so the sidebar lists it only while ACE-Step 1.5 is the active engine.
 
 Streaming and the normal generation queue can't run at the same time: starting a stream while any job is active in the queue is refused ("N generation job(s) active — wait for the queue to drain before streaming"), and while a stream is running you can't start a normal generation elsewhere.
 

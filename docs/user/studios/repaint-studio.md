@@ -13,9 +13,8 @@ rather than a full re-generation.
 
 Sidebar: Repaint, between Cover Studio and Stem Separator.
 
-Repaint only runs on the ACE-Step 1.5 backend. If MiniMax-Music3 or YuE2 is
-active in the global bar, the studio shows a not-supported message instead of
-its controls; switch back to ACE-Step 1.5 (see [Backends](../backends.md)).
+Repaint only runs on the ACE-Step 1.5 backend, so the sidebar lists it only while
+ACE-Step 1.5 is the active engine (see [Backends](../backends.md)).
 
 A source track is required before the waveform and lyrics panels appear:
 either a song from the [Library](library.md) or an uploaded audio file.

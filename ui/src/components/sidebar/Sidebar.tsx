@@ -7,6 +7,38 @@ import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Setti
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useJobBadge } from '../../hooks/useJobProgress';
+import { useCapabilities } from '../../hooks/useCapabilities';
+import { useBackendStore, type BackendCapabilities } from '../../stores/backendStore';
+import { BackendToggle } from '../global-bar/BackendToggle';
+
+// ── Studios per generation engine ───────────────────────────────────────────
+// A studio that only works on some engines is listed only while one of them
+// is active. Unlisted views (Auto-Gen, Custom-Gen, Library, Lyric Studio,
+// Stem Separator, Compare, MIDI Studio, Settings) work on every engine.
+// Unknown capabilities (still loading, or the engine is down and reports
+// every feature off) list everything rather than flicker the menu.
+const STUDIO_NEEDS: Record<string, (caps: BackendCapabilities, backendId: string) => boolean> = {
+  'cover-studio': caps => caps.features.cover,
+  'repaint': caps => caps.features.repaint,
+  'stem-builder': caps => caps.features.stems,
+  // Section regeneration is repaint outpainting.
+  'song-builder': caps => caps.features.repaint,
+  'storm': caps => caps.features.streaming,
+  // Training has ACE-Step, MiniMax-Music3 and YuE2 paths; the manifest's
+  // `training` flag predates the YuE2 trainer, so go by engine.
+  'training-studio': (_caps, backendId) => backendId !== 'sa3',
+};
+
+/** Which views the active engine supports. */
+export function useStudioAvailable(): (view: string) => boolean {
+  const { capabilities } = useCapabilities();
+  const backendId = useBackendStore(s => s.activeBackendId);
+  return (view: string) => {
+    const needs = STUDIO_NEEDS[view];
+    if (!needs || !capabilities || !capabilities.up) return true;
+    return needs(capabilities, backendId);
+  };
+}
 
 interface SidebarProps {
   activeView: string;
@@ -53,6 +85,7 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
 }) => {
   const { t } = useTranslation();
   const jobBadge = useJobBadge();
+  const available = useStudioAvailable();
   return (
     <nav className="flex-1 flex flex-col gap-2 w-full px-3">
       {/* ── Create section — framed by purple bars ── */}
@@ -95,21 +128,21 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         isExpanded={isExpanded}
       />
 
-      <NavItem
+      {available('cover-studio') && <NavItem
         icon={<Guitar size={20} />}
         label={t('sidebar.coverStudio')}
         active={activeView === 'cover-studio'}
         onClick={() => onNav('cover-studio')}
         isExpanded={isExpanded}
-      />
+      />}
 
-      <NavItem
+      {available('repaint') && <NavItem
         icon={<Paintbrush size={20} />}
         label={t('sidebar.repaint')}
         active={activeView === 'repaint'}
         onClick={() => onNav('repaint')}
         isExpanded={isExpanded}
-      />
+      />}
 
       <NavItem
         icon={<Scissors size={20} />}
@@ -127,29 +160,29 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         isExpanded={isExpanded}
       />
 
-      <NavItem
+      {available('stem-builder') && <NavItem
         icon={<Layers size={20} />}
         label={t('sidebar.stemBuilder')}
         active={activeView === 'stem-builder'}
         onClick={() => onNav('stem-builder')}
         isExpanded={isExpanded}
-      />
+      />}
 
-      <NavItem
+      {available('song-builder') && <NavItem
         icon={<Blocks size={20} />}
         label={t('sidebar.songBuilder')}
         active={activeView === 'song-builder'}
         onClick={() => onNav('song-builder')}
         isExpanded={isExpanded}
-      />
+      />}
 
-      <NavItem
+      {available('storm') && <NavItem
         icon={<Zap size={20} />}
         label={t('sidebar.storm')}
         active={activeView === 'storm'}
         onClick={() => onNav('storm')}
         isExpanded={isExpanded}
-      />
+      />}
 
       <NavItem
         icon={<Piano size={20} />}
@@ -159,13 +192,13 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         isExpanded={isExpanded}
       />
 
-      <NavItem
+      {available('training-studio') && <NavItem
         icon={<GraduationCap size={20} />}
         label={t('sidebar.trainingStudio')}
         active={activeView === 'training-studio'}
         onClick={() => onNav('training-studio')}
         isExpanded={isExpanded}
-      />
+      />}
 
       <NavItem
         icon={<Settings size={20} />}
@@ -265,6 +298,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = usePersistedState('hs-sidebar-open', true);
 
+  // Switching to an engine that does not list the open studio moves to Custom-Gen.
+  const available = useStudioAvailable();
+  const activeAvailable = available(activeView);
+  useEffect(() => {
+    if (!activeAvailable) onViewChange('create');
+  }, [activeAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Nav handler for mobile overlay: navigate then close the drawer
   const handleMobileNav = (view: string) => {
     onViewChange(view);
@@ -320,6 +360,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <X size={16} className="text-zinc-600 dark:text-zinc-400" />
             </button>
           </div>
+          <div className="px-3 mb-4">
+            <BackendToggle />
+          </div>
           <SidebarNav
             activeView={activeView}
             isExpanded={true}
@@ -340,7 +383,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         'max-[1023px]:hidden portrait:hidden',
         isOpen ? 'w-[200px]' : 'w-[72px]',
       ].join(' ')}>
-        {/* Collapse / Expand toggle (logo moved to GlobalParamBar) */}
+        {/* Generation engine — directly under the logo (GlobalParamBar) */}
+        <div className="px-3 mb-3">
+          <BackendToggle collapsed={!isOpen} />
+        </div>
+
+        {/* Collapse / Expand toggle */}
         <div className={`mb-6 flex items-center ${isOpen ? 'px-3' : 'justify-center'}`}>
           <button
             className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-white/5 hover:bg-zinc-300 dark:hover:bg-white/10 flex items-center justify-center transition-all flex-shrink-0"

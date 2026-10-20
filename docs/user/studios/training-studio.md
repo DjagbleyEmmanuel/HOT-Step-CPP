@@ -9,7 +9,7 @@ Builds a labeled dataset from your own audio and trains a style adapter on it, e
 
 The "Training" entry in the sidebar (`/training-studio`). Labeling with local BPM/key analysis works even if the engine is down; AI captioning needs either the local MOSS captioner or a configured cloud LLM provider (Settings > AI Services); preprocessing and training need the `ace-train` binary bundled with the app.
 
-Training follows whichever generation backend is active (ACE-Step, MiniMax-Music3, or YuE2). A pill next to the title names it when more than one backend is available, and the phases below change shape with it. Switch backends from the pill in the top bar, not from inside this studio.
+Training follows whichever generation backend is active (ACE-Step, MiniMax-Music3, or YuE2). A pill next to the title names it when more than one backend is available, and the phases below change shape with it. Switch backends from the engine picker at the top of the sidebar, not from inside this studio.
 
 An external agent (Claude Code, Codex) can also drive the dataset and training pipeline through the `hotstep` MCP server. See [Driving HOT-Step with an agent](../mcp.md).
 

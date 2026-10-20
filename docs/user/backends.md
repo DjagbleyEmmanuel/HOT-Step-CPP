@@ -17,10 +17,10 @@ page covers what each backend is and what it can do.
 
 ## Switching backends
 
-The backend picker is in the global bar at the top of the app, a small button labelled
-with the active backend's name. Click it and choose another backend from the list. The picker
-appears whenever two or more backends are registered with the server, and is hidden
-when there is only one.
+The engine picker is at the top of the left sidebar, directly under the logo: a pink box
+headed "Generation engine" with the active backend's name. Click it and choose another
+backend from the list. The picker appears whenever two or more backends are registered with
+the server, and is hidden when there is only one.
 
 - The choice is stored on the server, so it survives a restart. A new install starts on
   ACE-Step 1.5.
@@ -29,8 +29,12 @@ when there is only one.
   loads the new backend's models first.
 - The global bar reshapes to the active backend. The Models, Adapters, Generation and
   LM / Thinking clusters show that backend's own controls, and controls that do nothing
-  on it are hidden. Cover Studio works under ACE-Step and YuE2; Repaint, Stem
-  Builder and STORM need ACE-Step. MiniMax-Music3 cannot open Cover Studio.
+  on it are hidden.
+- The sidebar lists only the studios the active backend can use. Cover Studio is listed
+  under ACE-Step and YuE2; Repaint, Stem Builder, Song Builder and STORM under ACE-Step
+  only; Training under every backend except Stable Audio 3. The rest are always listed.
+  If the open studio is not listed for the backend you switch to, the app moves to
+  Custom-Gen.
 - If the active backend's model files are not installed, the bar says so and shows a
   Get models button that opens the [Model Manager](studios/model-manager.md).
 

@@ -405,8 +405,8 @@ settings, since those are kept per backend.
 
 ## VRAM indicator
 
-The figure at the right of the bar is GPU memory used and total, in GB, with a bar that
-turns yellow above 70% and red above 90%. It refreshes every five seconds. Hover it to list
+The VRAM badge at the top of the Terminal box, in the right-hand column, is GPU memory used
+and total, in GB, with a bar that turns yellow above 70% and red above 90%. It refreshes about every 1.5 seconds. Hover it to list
 the models the engine currently holds in VRAM, each with its size and an unload button.
 A model in use cannot be unloaded, and an unloaded model reloads the next time it is
 needed. Whatever is not listed is working memory and cannot be unloaded.

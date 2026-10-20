@@ -1811,7 +1811,7 @@
     "globalBar.mm3RendererNeedsBuild": "First render builds the engine once (a few minutes) — every render after that loads instantly.",
     "globalBar.mm3RendererUnavailableFallback": "TensorRT is not available.",
     "globalBar.mm3RendererGetTensorrt": "Get TensorRT",
-    "backendGate.notSupported": "Not supported by the active backend — switch back to ACE-Step 1.5 in the global bar.",
+    "backendGate.notSupported": "Not supported by the active backend — switch back to ACE-Step 1.5 with the engine picker at the top of the sidebar.",
     "profiles.title": "Parameter Profiles",
     "profiles.namePlaceholder": "New profile name…",
     "profiles.saveCurrent": "Save",
