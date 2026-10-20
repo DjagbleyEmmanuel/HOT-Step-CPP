@@ -2,8 +2,8 @@
 //
 // The two detached-refresh callers (train/lm-graph.h lm_lora_dora_refresh and
 // minimax/mm3-lm-dora.h mm3_lm_dora_prepare) built this graph inline before it
-// was extracted. Their pre-extraction sequences are copied verbatim below as
-// legacy_lm / legacy_mm3, and every case requires the helper to match them
+// was extracted. Their pre-extraction sequences are frozen below with the
+// production GGML_PREC_F32 delta precision contract, and every case requires the helper to match them
 // BIT FOR BIT on the selected backend, plus a double-precision host reference
 // within tolerance. Covers orientation (in != out both ways), zero norm, bias
 // outside the rescale, and the cast variants each caller uses (F32/F16/Q8_0
@@ -156,8 +156,9 @@ static std::vector<float> run_lm(Site & s, float scale, bool legacy) {
     ggml_tensor *        nr;
     ggml_tensor *        wf = s.w->type == GGML_TYPE_F32 ? s.w : ggml_cast(ctx, s.w, GGML_TYPE_F32);  // qwen3_f32
     if (legacy) {
-        // VERBATIM lm-graph.h lm_lora_dora_refresh before extraction.
+        // Frozen lm-graph.h lm_lora_dora_refresh with production delta precision.
         ggml_tensor * delta = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, s.a)), s.b);
+        ggml_mul_mat_set_prec(delta, GGML_PREC_F32);
         ggml_tensor * wd    = ggml_add(ctx, wf, ggml_scale(ctx, delta, scale));
         nr                  = ggml_sqrt(ctx, ggml_sum_rows(ctx, ggml_sqr(ctx, wd)));  // [1, out]
     } else {
@@ -179,10 +180,11 @@ static std::vector<float> run_mm3(Site & s, float scale, bool legacy) {
     ggml_context *       ctx = graph_ctx(arena);
     ggml_tensor *        outt;
     if (legacy) {
-        // VERBATIM mm3-lm-dora.h mm3_lm_dora_prepare before extraction.
+        // Frozen mm3-lm-dora.h mm3_lm_dora_prepare with production delta precision.
         ggml_tensor * a_t   = ggml_cont(ctx, ggml_transpose(ctx, s.a));   // [r, in] f16
         ggml_tensor * b32   = ggml_cast(ctx, s.b, GGML_TYPE_F32);         // [r, out]
         ggml_tensor * delta = ggml_mul_mat(ctx, a_t, b32);                // [in, out] f32
+        ggml_mul_mat_set_prec(delta, GGML_PREC_F32);
         ggml_tensor * basef = ggml_cast(ctx, s.w, GGML_TYPE_F32);
         ggml_tensor * wd    = ggml_add(ctx, basef, ggml_scale(ctx, delta, scale));
         ggml_tensor * nr    = ggml_sqrt(ctx, ggml_sum_rows(ctx, ggml_sqr(ctx, wd)));  // [1, out]
