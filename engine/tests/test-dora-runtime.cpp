@@ -5,6 +5,7 @@
 #include "backend.h"
 #include "train/st-write.h"
 #include "train/dit-resume.h"
+#include "train/lm-resume.h"
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -106,6 +107,54 @@ static void compare(const WeightSource & ws, ggml_backend_t backend,
     dit_lora_free(&lora);
 }
 
+static void check_lm_resume_norm(const BackendPair & bp) {
+    Weights base;
+    CHECK(wctx_alloc(&base.ctx,bp.backend));
+    Qwen3LM model{};
+    model.layers[0].q_proj=base.tensor;
+    LmLora bank{};
+    bank.model=&model; bank.dora=true; bank.layer_lo=0; bank.layer_hi=1;
+    ggml_init_params ip{ggml_tensor_overhead()*5+1024,nullptr,true};
+    bank.ctx=ggml_init(ip);
+    auto & pr=bank.layers[0].p[QW_LORA_Q];
+    pr.A=ggml_new_tensor_2d(bank.ctx,GGML_TYPE_F32,in,1);
+    pr.B=ggml_new_tensor_2d(bank.ctx,GGML_TYPE_F32,1,out);
+    pr.m=ggml_new_tensor_1d(bank.ctx,GGML_TYPE_F32,out);
+    pr.nrm=ggml_new_tensor_1d(bank.ctx,GGML_TYPE_F32,out);
+    pr.scale=1;
+    bank.buf=ggml_backend_alloc_ctx_tensors(bank.ctx,bp.backend);
+    std::vector<float> initial(out), expected(out), held(out);
+    for(int row=0;row<out;++row) {
+        double norm0=0,norm1=0;
+        for(int col=0;col<in;++col) {
+            double v=w[row*in+col]; norm0+=v*v;
+            v+=b[row]*a[col]; norm1+=v*v;
+        }
+        initial[row]=(float)std::sqrt(norm0);
+        expected[row]=(float)std::sqrt(norm1);
+    }
+    ggml_backend_tensor_set(pr.nrm,initial.data(),0,out*sizeof(float));
+    const auto dir=root/"lm-resume";
+    std::filesystem::create_directories(dir);
+    const std::string key="base_model.model.model.layers.0.self_attn.q_proj";
+    CHECK(st_write_file((dir/"adapter_model.safetensors").string().c_str(),
+        {{key+".lora_A.weight",{1,in},a.data()},{key+".lora_B.weight",{out,1},b.data()},
+         {key+".lora_magnitude_vector.weight",{out},m.data()}},{},STW_F32));
+    int loaded=0; std::string err;
+    CHECK(lm_resume_load(&bank,dir.string(),&loaded,&err));
+    CHECK(loaded==3);
+    ggml_backend_tensor_get(pr.nrm,held.data(),0,out*sizeof(float));
+    CHECK(held==initial && held!=expected); // repro: resume leaves the fresh norm
+    auto sched=backend_sched_new(bp,256);
+    CHECK(lm_lora_dora_refresh(&bank,sched,&err));
+    ggml_backend_tensor_get(pr.nrm,held.data(),0,out*sizeof(float));
+    for(int row=0;row<out;++row) CHECK(std::isfinite(held[row]) && std::abs(held[row]-expected[row])<1e-5f);
+    ggml_backend_sched_free(sched);
+    ggml_backend_buffer_free(bank.buf);
+    ggml_free(bank.ctx);
+    puts("PASS: resumed LM A/B/m need and receive a pre-window norm refresh");
+}
+
 int main() {
     if (!getenv("GGML_BACKEND")) {
 #ifdef _WIN32
@@ -185,6 +234,7 @@ int main() {
     CHECK(runtime(plain,false)==runtime(plain,true));
     g_hotstep_params.adapter_group_scales.self_attn=0.25f;
     compare(ws,bp.backend,{{first,0.5f}});
+    check_lm_resume_norm(bp);
     backend_release(bp.backend,bp.cpu_backend);
     st_close(&sm.shards.back());
     printf("%s: DoRA runtime fixture (%d failures)\n",failures?"FAIL":"PASS",failures);
