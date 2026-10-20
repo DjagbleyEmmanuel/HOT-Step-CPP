@@ -19,12 +19,9 @@ import { backendModelsOptions } from '../../queries/global-models/options';
 // merge — not one list with both halves jumbled into it, which is a choice
 // nobody can get right by reading it.
 //
-// THE DIALS ARE NOT COMMITTED PER TICK. Each slot keeps a local draft and an
-// Apply button. A slider that posted on every drag frame would tear the model
-// down and re-merge it dozens of times per drag, and on a K-quant base each
-// re-merge is a requant of the patched tensors. The draft/commit split is the
-// one real departure from MM3's panel, where the same dials are free because
-// they ride on the request.
+// THE DIALS ARE NOT COMMITTED PER TICK. Each slot keeps a local draft and
+// commits it when a drag ends, or when a typed value is confirmed (blur or
+// Enter), never on every drag frame.
 //
 // The trigger word is not decoration. A YuE2 adapter is addressed by the word
 // it was trained under, and a style prompt that does not lead with it gets a
@@ -36,7 +33,7 @@ import { backendModelsOptions } from '../../queries/global-models/options';
 // text is YUE2_LICENSE_NOTICE in the server's backends/yue2/index.ts and
 // arrives here as `capabilities.license` — rendered verbatim, never retyped.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, FileInput, FolderOpen, Loader2, RotateCcw, Search } from 'lucide-react';
 import { useBackendStore } from '../../stores/backendStore';
@@ -172,8 +169,18 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
   kind, title, blurb, paths, meta, selected, dials, inForce, disabled, onCommit,
 }) => {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState<Dials>(dials);
+  const [draft, setDraftState] = useState<Dials>(dials);
   const [showDepth, setShowDepth] = useState(false);
+  // The latest draft, readable in the same event that changed it: a reset
+  // sets the value and commits in one handler, before React re-renders.
+  const draftRef = useRef(draft);
+  const setDraft = (next: Dials) => { draftRef.current = next; setDraftState(next); };
+  const edit = (patch: Partial<Dials>) => setDraft({ ...draftRef.current, ...patch });
+  // Called when a drag ends, a typed value is confirmed, or on reset.
+  const requestCommit = () => {
+    const d = draftRef.current;
+    if (!disabled && !sameDials(d, dials)) void onCommit(kind, selected, d);
+  };
 
   // The server is the source of truth for what is committed. Whenever it says
   // something different — another tab, a reconcile after an engine restart,
@@ -182,7 +189,6 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
   useEffect(() => { setDraft(dials); }, [dials.scale, dials.attn, dials.mlp, dials.early, dials.mid, dials.late, dials.plan]);
 
   const entry = selected ? meta[selected] : undefined;
-  const dirty = !sameDials(draft, dials);
 
   return (
     <div className="space-y-3">
@@ -280,9 +286,10 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               info={t('globalBar.yue2AdapterPlannerStrengthHint',
                 'Strength while the AR writes the score: the lead sheet of melody, chords and sections it plans before any audio. Lower it to keep the base model\'s songwriting while the adapter still shapes the sound. It follows Composer Strength until you move it; Reset makes it follow again. Only used with Chain of Thought on. When it differs from Composer Strength, planning and rendering each load the model at their own strength, so every generation reloads the model twice.')}
               value={draft.plan ?? draft.scale}
-              onChange={v => setDraft(d => ({ ...d, plan: v }))}
+              onChange={v => edit({ plan: v })}
               min={0} max={2} step={0.05} showInput
               defaultValue={UNITY.scale}
+              onCommit={requestCommit}
             />
           )}
           <Slider
@@ -295,27 +302,30 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               : t('globalBar.yue2AdapterStrengthHint',
                 'Master strength for this half. Every other dial multiplies on top of it, so 0 here turns the adapter off without clearing the pick.')}
             value={draft.scale}
-            onChange={v => setDraft(d => ({ ...d, scale: v }))}
+            onChange={v => edit({ scale: v })}
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.scale}
+            onCommit={requestCommit}
           />
           <Slider
             label={t('globalBar.yue2AdapterAttn', 'Attention')}
             info={t('globalBar.yue2AdapterGroupHint',
               'Hold the attention and MLP sites at different strengths. Timbre tends to sit in attention and phrasing in the MLPs, so pulling one back is how you keep half of what an adapter learned.')}
             value={draft.attn}
-            onChange={v => setDraft(d => ({ ...d, attn: v }))}
+            onChange={v => edit({ attn: v })}
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.attn}
+            onCommit={requestCommit}
           />
           <Slider
             label={t('globalBar.yue2AdapterMlp', 'MLP')}
             info={t('globalBar.yue2AdapterGroupHint',
               'Hold the attention and MLP sites at different strengths. Timbre tends to sit in attention and phrasing in the MLPs, so pulling one back is how you keep half of what an adapter learned.')}
             value={draft.mlp}
-            onChange={v => setDraft(d => ({ ...d, mlp: v }))}
+            onChange={v => edit({ mlp: v })}
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.mlp}
+            onCommit={requestCommit}
           />
 
           <div className="flex items-center justify-between gap-2 pt-1">
@@ -329,7 +339,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setDraft(UNITY)}
+              onClick={() => { setDraft(UNITY); requestCommit(); }}
               title={t('globalBar.yue2AdapterResetHint', 'Back to 1.0 on every dial') as string}
               className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
             >
@@ -353,49 +363,34 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 info={t('globalBar.yue2AdapterEarlyInfo',
                   'Multiplies this adapter\'s strength in the first third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. On the MM3 planner these blocks drove tempo and basic feel; nothing yet confirms YuE2 keeps the same things there. Lower it if the adapter is bending tempo or groove in ways you do not want, raise it if the render ignores the artist\'s feel, and leave it at 1.0 for renders you want to keep.')}
                 value={draft.early}
-                onChange={v => setDraft(d => ({ ...d, early: v }))}
+                onChange={v => edit({ early: v })}
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.early}
+                onCommit={requestCommit}
               />
               <Slider
                 label={t('globalBar.yue2AdapterMid', 'Middle third')}
                 info={t('globalBar.yue2AdapterMidInfo',
                   'Multiplies this adapter\'s strength in the middle third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. Nothing yet says what YuE2 keeps in its middle blocks, so this is a probe: lower it and listen for what changes, and leave it at 1.0 for renders you want to keep.')}
                 value={draft.mid}
-                onChange={v => setDraft(d => ({ ...d, mid: v }))}
+                onChange={v => edit({ mid: v })}
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.mid}
+                onCommit={requestCommit}
               />
               <Slider
                 label={t('globalBar.yue2AdapterLate', 'Late third')}
                 info={t('globalBar.yue2AdapterLateInfo',
                   'Multiplies this adapter\'s strength in the last third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. On the MM3 planner these blocks carried sequence termination: halving this dial produced songs that faded out or never ended, so if a render loses its ending after you lower it, that is the same effect. Nothing confirms YuE2 divides its blocks the same way; treat it as a probe and leave it at 1.0 for renders you want to keep.')}
                 value={draft.late}
-                onChange={v => setDraft(d => ({ ...d, late: v }))}
+                onChange={v => edit({ late: v })}
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.late}
+                onCommit={requestCommit}
               />
             </div>
           )}
 
-          {/* The commit. Deliberately a button and not a live write: see the
-              file header — each commit evicts the resident model. */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={disabled || !dirty}
-              onClick={() => void onCommit(kind, selected, draft)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400
-                         hover:bg-emerald-500/25 disabled:opacity-40 disabled:hover:bg-emerald-500/15 transition-colors"
-            >
-              {t('globalBar.yue2AdapterApply', 'Apply strengths')}
-            </button>
-            {dirty && (
-              <span className="text-[10px] text-zinc-500 leading-snug">
-                {t('globalBar.yue2AdapterDirty', 'Not applied yet — applying reloads the model.')}
-              </span>
-            )}
-          </div>
         </>
       )}
     </div>

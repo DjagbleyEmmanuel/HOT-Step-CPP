@@ -18,7 +18,7 @@ The **Adapters** section of the generation bar. Its contents follow the active b
 |---|---|
 | ACE-Step 1.5 | A DiT adapter picker or stack, loading mode and VRAM options, basin re-base, group scales, and a planner (LM) adapter |
 | MiniMax-Music3 | One LM adapter picker with strength dials |
-| YuE2 | Two LM adapter slots, NAR (renderer) and AR (composer), each with its own dials and an Apply button |
+| YuE2 | Two LM adapter slots, NAR (renderer) and AR (composer), each with its own dials |
 
 A backend without adapter support shows a "not yet" panel instead.
 
@@ -265,8 +265,9 @@ structure and phrasing. An adapter trained on one half is refused by the other.
    subfolders included, is added.
 2. Pick an adapter for either slot or both. Each row shows its trigger, dataset, rank,
    steps and training loss.
-3. Set **Strength**, **Attention** and **MLP** (0 to 2), and optionally the depth thirds,
-   then click **Apply strengths**.
+3. Set **Strength**, **Attention** and **MLP** (0 to 2), and optionally the depth thirds.
+   Each dial saves when you let go of the slider, or when you leave or press Enter in its
+   number box.
 
 The AR slot splits Strength in two. **Planner Strength** applies while the AR writes the
 score (melody, chords and sections); **Composer Strength** applies while it turns that
