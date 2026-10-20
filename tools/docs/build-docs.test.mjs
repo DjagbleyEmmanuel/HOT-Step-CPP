@@ -1,15 +1,15 @@
 // node --test tools/docs/build-docs.test.mjs
-// The training operation route discovery, on temporary fixture trees and on
+// Plugin metadata and training operation route discovery, on fixture trees and on
 // the real repository. Nothing here writes a generated doc.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { trainingOperationRoutes } from './build-docs.mjs';
+import { parsePlugin, trainingOperationRoutes } from './build-docs.mjs';
 
 function fixture(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'build-docs-'));
+  fs.mkdirSync(path.join(import.meta.dirname, '..', '..', '.scratch'), { recursive: true });
+  const root = fs.mkdtempSync(path.join(import.meta.dirname, '..', '..', '.scratch', 'build-docs-'));
   const base = {
     'server/src/index.ts': "import trainingRoutes from './routes/training.js';\napp.use('/api/training', trainingRoutes);\n",
     'server/src/routes/training.ts': "router.use('/ops', trainingOperationsRouter);\n",
@@ -22,6 +22,33 @@ function fixture(files) {
 }
 
 const routes = (root) => trainingOperationRoutes(root).map((r) => `${r.verb} ${r.path}`);
+
+for (const eol of ['\n', '\r\n']) {
+  test(`plugin declarations longer than 2500 characters are complete with ${JSON.stringify(eol)}`, () => {
+    const source = [
+      'solver = {',
+      '  name = "long_plugin",',
+      '  params = {',
+      '    { key = "first", options = { { value = "one", label = "One" } },',
+      `      hint = "${'Long parameter hint. '.repeat(150)}" },`,
+      '    { key = "last", type = "slider", default = 1 },',
+      '  },',
+      '  display = "Long plugin",',
+      '}',
+      'local unrelated = {',
+      '  { key = "not_a_parameter" },',
+      '}',
+    ].join(eol);
+    const root = fixture({ 'plugin.lua': source, 'empty.lua': 'scheduler = {\n  name = "empty",\n}\n', 'helper.lua': 'local helper = {}\n' });
+    try {
+      const plugin = parsePlugin(path.join(root, 'plugin.lua'));
+      assert.equal(plugin.params, 2);
+      assert.equal(plugin.display, 'Long plugin');
+      assert.equal(parsePlugin(path.join(root, 'empty.lua')).params, 0);
+      assert.equal(parsePlugin(path.join(root, 'helper.lua')), null);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
 
 test('registered domains are read from their mount functions, loops expanded', () => {
   const root = fixture({

@@ -50,12 +50,12 @@ function fill(file, blocks) {
 }
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
-// Each plugin declares one Lua table: solver = { name = "...", display = "...", ... }.
-function parsePlugin(file) {
+// Each plugin declares one Lua table, ending at its unindented closing brace.
+export function parsePlugin(file) {
   const src = read(file);
-  const m = src.match(/^(solver|scheduler|guidance|postprocess)\s*=\s*\{/m);
+  const m = src.match(/^(solver|scheduler|guidance|postprocess)\s*=\s*\{[\s\S]*?^\}/m);
   if (!m) return null;
-  const head = src.slice(m.index, m.index + 2500);
+  const head = m[0];
   const field = (k) => head.match(new RegExp(`^\\s*${k}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([\\w.-]+))`, 'm'))?.slice(1).find((x) => x !== undefined);
   const params = (head.match(/^\s*\{\s*key\s*=\s*"/gm) || []).length;
   return { type: m[1], file, name: field('name') ?? path.basename(file, '.lua'), display: field('display') ?? '', description: field('description') ?? '',
