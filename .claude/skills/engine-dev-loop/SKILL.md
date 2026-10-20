@@ -239,6 +239,11 @@ Measured 2026-10-20 on the RTX 5090, turbo BF16 DiT: 6.4 s end to end (4.2 s for
 the five-track self-test straight after); peak -1.1 dBFS, rms 0.102, DC about 3e-4,
 nothing past full scale. Normal values sit far inside every threshold.
 
+Mac Metal works the same (finds `engine/build/ace-synth`). The Mac server holds only
+the Q4_K_M turbo DiT, so pass it: `node tools/engine-smoke.mjs --models ~/hot-step-models
+--dit acestep-v15-turbo-Q4_K_M.gguf`. Measured there 2026-10-20: 5.0 s, peak -0.3 dBFS,
+rms 0.066, PASS; `--self-test` catches all four faults.
+
 If you only changed `ace-synth.cpp` or a header it uses, building just that target
 leaves a running app alone: `cmake --build engine/build --config Release --target ace-synth`.
 Anything ace-server links still goes through the full rebuild above.
