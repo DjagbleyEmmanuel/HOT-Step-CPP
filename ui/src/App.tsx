@@ -559,6 +559,10 @@ const AppContent: React.FC = () => {
 
   // Play a song from the library (used by SongList, RightSidebar)
   const playSong = useCallback((song: Song) => {
+    if (currentTrack?.id === song.id) {
+      pbTogglePlay();
+      return;
+    }
     // A live render is played on its own, not inside a list: it is not in
     // `songs` (it has no row yet), so playFromList would place it at index 0 of
     // somebody else's list and skip/next would jump into the library the moment
@@ -570,7 +574,7 @@ const AppContent: React.FC = () => {
     setSelectedSong(song);
     setShowRightSidebar(true);
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
-  }, [songs]);
+  }, [currentTrack?.id, songs]);
 
   // Notification click: open the finished song in the details panel.
   useEffect(() => {
@@ -1102,7 +1106,7 @@ const AppContent: React.FC = () => {
                   onClose={() => setShowRightSidebar(false)}
                   onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                   onDelete={handleDelete}
-                  onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
+                  onPlay={playSong}
                   isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
                   onDownload={handleDownload}
                   onRename={handleRename}
@@ -1202,7 +1206,7 @@ const AppContent: React.FC = () => {
                   onClose={() => setShowRightSidebar(false)}
                   onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                   onDelete={handleDelete}
-                  onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
+                  onPlay={playSong}
                   isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
                   onDownload={handleDownload}
                   onRename={handleRename}
@@ -1346,7 +1350,7 @@ const AppContent: React.FC = () => {
                 onClose={() => setShowRightSidebar(false)}
                 onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
                 onDelete={handleDelete}
-                onPlay={(song) => playFromList(songToTrack(song), songs.map(songToTrack), 'library')}
+                onPlay={playSong}
                 isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
                 onDownload={handleDownload}
                 onRename={handleRename}
