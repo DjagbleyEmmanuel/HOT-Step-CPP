@@ -278,7 +278,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             <Slider
               label={t('globalBar.yue2AdapterPlannerStrength', 'Planner Strength')}
               info={t('globalBar.yue2AdapterPlannerStrengthHint',
-                'Strength while the AR writes the score: the lead sheet of melody, chords and sections it plans before any audio. Lower it to keep the base model\'s songwriting while the adapter still shapes the sound. It follows Composer Strength until you move it; Reset makes it follow again. Only used with Chain of Thought on. When it differs from Composer Strength, planning and rendering each load the model at their own strength, so every generation pays an extra reload.')}
+                'Strength while the AR writes the score: the lead sheet of melody, chords and sections it plans before any audio. Lower it to keep the base model\'s songwriting while the adapter still shapes the sound. It follows Composer Strength until you move it; Reset makes it follow again. Only used with Chain of Thought on. When it differs from Composer Strength, planning and rendering each load the model at their own strength, so every generation reloads the model twice.')}
               value={draft.plan ?? draft.scale}
               onChange={v => setDraft(d => ({ ...d, plan: v }))}
               min={0} max={2} step={0.05} showInput

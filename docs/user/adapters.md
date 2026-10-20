@@ -268,6 +268,12 @@ structure and phrasing. An adapter trained on one half is refused by the other.
 3. Set **Strength**, **Attention** and **MLP** (0 to 2), and optionally the depth thirds,
    then click **Apply strengths**.
 
+The AR slot splits Strength in two. **Planner Strength** applies while the AR writes the
+score (melody, chords and sections); **Composer Strength** applies while it turns that
+score into audio. Planner Strength follows Composer Strength until you move it, and
+**Reset** makes it follow again. It needs Chain of Thought on. When the two differ, the
+score is planned in its own job, so each generation reloads the model twice: once to plan, once to render.
+
 The picker sets the default for songs you queue from then on. Each song keeps the adapters
 it was queued with, including an album's own adapters when it comes from Lyric Studio, so
 changing the picker while songs wait does not change what they render with. Queued songs
