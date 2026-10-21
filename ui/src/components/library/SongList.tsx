@@ -26,6 +26,29 @@ import { openImportTracks } from './ImportTracksModal';
 import { CoverImage } from '../shared/CoverImage';
 import { displayTitle, displaySubtext } from '../../utils/songDisplay';
 import { applySelectClick } from '../../utils/rangeSelect';
+import { buildSongBadges, coverTag } from './songBadges';
+
+function SongParameterBadges({ song }: { song: Song }) {
+  const { t } = useTranslation();
+  const { isDisguised } = useDisguiseMode();
+  const tag = isDisguised ? '' : coverTag(song);
+  const badges = buildSongBadges(song);
+  if (!tag && !badges.length) return null;
+  return (
+    <div className="mt-1 min-w-0 space-y-1">
+      {tag && <div className="text-[11px] text-cyan-700 dark:text-cyan-300 truncate"
+        title={`${t('library.badge.tag')}: ${tag}`}>{t('library.badge.tag')}: {tag}</div>}
+      {badges.length > 0 && <div className="flex flex-wrap gap-1">
+        {badges.map(badge => (
+          <span key={badge.label} title={`${t(`library.badge.${badge.label}`)}: ${badge.value}`}
+            className="max-w-full truncate rounded border border-zinc-200 dark:border-white/10 bg-zinc-100 dark:bg-white/5 px-1.5 py-0.5 text-[10px] leading-tight text-zinc-600 dark:text-zinc-300">
+            {t(`library.badge.${badge.label}`)}: {badge.value}
+          </span>
+        ))}
+      </div>}
+    </div>
+  );
+}
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
@@ -1036,6 +1059,7 @@ const SongItem: React.FC<SongItemProps> = ({
         <div className="text-xs text-zinc-500 truncate mt-0.5">
           {isDisguised ? '' : (displaySubtext(song) || t('library.noDescription'))}
         </div>
+        <SongParameterBadges song={song} />
       </div>
 
       {/* Metadata Badges */}
@@ -1296,6 +1320,7 @@ const SongCard: React.FC<SongCardProps> = ({
           </div>
         )}
 
+        <SongParameterBadges song={song} />
         {/* Subject, or the caption when there is no subject */}
         <div className="text-[11px] text-zinc-600 dark:text-white/55 leading-snug line-clamp-2 min-h-[2rem]">
           {isDisguised ? '' : (displaySubtext(song) || t('library.noDescription'))}
@@ -1745,7 +1770,10 @@ const SongTable: React.FC<SongTableProps> = ({
                 </div>
               ),
 
-              title: <TableTitleCell song={song} isActive={isActive} onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined} disguiseTitle={disguiseTitle} />,
+              title: <div className="min-w-0">
+                <TableTitleCell song={song} isActive={isActive} onRename={onRename ? (newTitle) => onRename(song, newTitle) : undefined} disguiseTitle={disguiseTitle} />
+                <SongParameterBadges song={song} />
+              </div>,
               style: <TableStyleCell text={isDisguised ? '—' : (displaySubtext(song) || '—')} />,
               source: badge ? <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badge.cls}`}>{badge.label}</span> : null,
               bpm: <span className="text-zinc-500 font-mono">{bpm || '—'}</span>,

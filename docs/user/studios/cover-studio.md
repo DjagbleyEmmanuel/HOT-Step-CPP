@@ -79,6 +79,20 @@ AR composer and NAR renderer. Existing Artist lists only artists with at least o
 album preset containing both YuE2 adapter paths. The selected mode and choices
 are saved with the draft.
 
+## Cover details in Library
+
+Finished covers keep their Covering band label visible as a Tag on Library
+cards and rows. YuE2's AR scale and VAE badges help compare takes. In the
+track's **How it was made** panel, the Cover Studio group shows the stored
+source label and identity, score voices, chord choice, tempo, key and cover
+CFG when available. MusicXML sources are identified as scores, without a
+source audio ID. A source identity can be a stored URL or ID; a recording
+hash is not currently saved with the song.
+
+Export Params retains the stored cover metadata and YuE2 score. Edit still
+opens Create and does not reload Cover Studio or its source. Use a saved
+Cover Studio draft to resume the workflow.
+
 ## YuE2 workflow
 
 1. Choose **Source Audio** or **Import MusicXML** in the left panel. Source Audio

@@ -378,12 +378,41 @@ function sa3Facts(gp: any): FactGroup[] {
 export function buildFactGroups(song: Song): FactGroup[] {
   const gp = params(song);
   if (!gp) return [];
-  switch (songBackend(song)) {
-    case 'minimax-m3': return mm3Facts(gp);
-    case 'yue2': return yue2Facts(gp);
-    case 'sa3': return sa3Facts(gp);
-    default: return aceFacts(gp);
+  const backend = songBackend(song);
+  const cover = coverFacts(gp, backend);
+  let groups: FactGroup[];
+  switch (backend) {
+    case 'minimax-m3': groups = mm3Facts(gp); break;
+    case 'yue2': groups = yue2Facts(gp); break;
+    case 'sa3': groups = sa3Facts(gp); break;
+    default: groups = aceFacts(gp);
   }
+  return cover.length ? [{ title: 'Cover Studio', facts: cover }, ...groups] : groups;
+}
+
+function coverFacts(gp: any, backend: Backend): Fact[] {
+  const cover = backend === 'yue2' ? gp.yue2Cover : undefined;
+  if (!cover && gp.source !== 'cover-studio') return [];
+  const facts: Fact[] = [];
+  add(facts, 'Workflow', 'Cover Studio');
+  if (gp.artistName) add(facts, 'Covering band', String(gp.artistName));
+  if (gp.sourceArtist) add(facts, 'Source artist', String(gp.sourceArtist));
+  if (cover) {
+    add(facts, 'Source type', cover.sourceKind === 'musicxml' ? 'MusicXML' : 'Audio');
+    if (cover.sourceLabel) add(facts, 'Source', String(cover.sourceLabel));
+    if (cover.sourceId) add(facts, 'Source ID', String(cover.sourceId), { mono: true });
+    if (cover.voices) add(facts, 'Score voices', cover.voices === 'both' ? 'Vocal and accompaniment' : 'Vocal');
+    if (cover.keepChords !== undefined) add(facts, 'Keep chords', cover.keepChords ? 'On' : 'Off');
+    if (cover.tempo !== undefined) add(facts, 'Tempo', typeof cover.tempo === 'number' ? `${cover.tempo} bpm` : pretty(String(cover.tempo)));
+    if (cover.key) add(facts, 'Key', String(cover.key));
+    if (cover.keyShift !== undefined) add(facts, 'Key shift', `${cover.keyShift} semitones`);
+    add(facts, 'Cover CFG', num(cover.cfgScale));
+  } else {
+    if (gp.sourceAudioUrl) add(facts, 'Source ID', String(gp.sourceAudioUrl), { mono: true });
+    add(facts, 'Structure fidelity', num(gp.audioCoverStrength));
+    add(facts, 'Source preservation', num(gp.coverNoiseStrength));
+  }
+  return facts;
 }
 
 /** The handful of musical facts shown as chips above the parameters. Only the

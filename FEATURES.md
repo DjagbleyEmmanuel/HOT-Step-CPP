@@ -152,6 +152,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Feature | What it does |
 |---|---|
 | Three views | Grid with cover art, list, or table, remembered per browser. |
+| Parameter badges | Backend-specific saved parameters and Cover Studio tags on cards and rows; source identity and cover choices in "How it was made". |
 | Source filters | Tabs per studio plus Imported, with counts. |
 | Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
 | Multi-select | Bulk download, zip export (up to 256 MB), add to playlist or delete. Shift+click range select, Ctrl/Cmd+click toggle, long-press range select on touch. |

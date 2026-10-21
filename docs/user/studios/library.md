@@ -45,6 +45,25 @@ the list before its file exists, with a live percentage badge and progress
 bar instead of the normal controls. It is already playable, just not
 downloadable yet.
 
+## Comparing generation settings
+
+Grid cards, list rows and table titles show small parameter badges. YuE2 shows
+the saved AR adapter scale and VAE variant. ACE-Step shows CFG, solver and
+model quantization when the model filename identifies it. MiniMax-Music3 shows
+flow CFG, adapter scale and model quantization when recorded. Stable Audio 3
+shows its saved guidance and sampler. Missing values stay hidden; settings
+from another backend's panel do not appear.
+
+Cover Studio's **Covering band** label appears as a Tag line under the title
+in grid cards and table titles, and beneath the description in list rows.
+Long values truncate with their full text on hover. Disguise mode hides the
+tag. Open **How it was made** for the saved source identity and cover choices.
+Older tracks can only show the information saved at generation time.
+
+**Export Params** includes stored cover provenance and the YuE2 score, when
+present. **Edit** opens Create; it does not restore the Cover Studio workflow
+or reload its source. Keep a Cover Studio draft to resume that workflow.
+
 ## Player
 
 The transport bar at the bottom of the window is global: it stays visible
