@@ -330,11 +330,11 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
 // input, conditioned by the BASE planner so the number measures the decoder
 // alone, however far the planner has moved. `nar` null = the base decoder.
 inline bool nar_probe_prefix(ggml_backend_t backend, const Yue2AitkModel & model, const yue2_aitk::Batch & batch,
-                             Yue2AitkPrefixHost * prefix, std::string * error) {
+                             Yue2AitkPrefixHost * prefix, std::string * error, const Yue2AitkExpertAdapters * ar = nullptr) {
     Yue2AitkEndpointHost condition;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.nar.ar.input_ids.data(),batch.nar.ar.input_ids.size(),&condition,error)) return false;
     Yue2AitkStackTape tape;
-    return yue2_aitk_stack::forward(backend,model,nullptr,false,condition.values,batch.nar.ar.input_ids.size(),nullptr,false,&tape,prefix,error);
+    return yue2_aitk_stack::forward(backend,model,ar,false,condition.values,batch.nar.ar.input_ids.size(),nullptr,false,&tape,prefix,error);
 }
 inline bool nar_probe_predict(ggml_backend_t backend, const Yue2AitkModel & model, const Yue2AitkExpertAdapters * nar,
                               const Yue2AitkPrefixHost & prefix, const std::vector<float> & noisy, float timestep,
@@ -350,11 +350,12 @@ inline bool nar_probe_predict(ggml_backend_t backend, const Yue2AitkModel & mode
     return true;
 }
 
-// Base planner CE on one batch (--eval-base-loss): the frozen-teacher forward
-// (no adapter, no tape) and the head kernel at KL weight 0. The kernel always
+// Planner CE on one batch (--eval-base-loss; --eval-adapted passes the AR
+// adapters): the forward with `ar` null = the frozen base (no adapter, no tape) and the head kernel at KL weight 0. The kernel always
 // writes a hidden gradient; it lands in a scratch buffer and is dropped.
 inline bool base_ar_ce(ggml_backend_t backend, const Yue2AitkModel & model, const yue2_aitk::Batch & batch,
-                       double * ce_out, size_t * tokens, std::string * error) {
+                       double * ce_out, size_t * tokens, std::string * error,
+                       const Yue2AitkExpertAdapters * ar = nullptr) {
     using yue2_aitk_executor_detail::fail;
     constexpr size_t H=2048;
     const size_t N=batch.ar.target_ids.size(), len=batch.ar.input_ids.size();
@@ -364,7 +365,7 @@ inline bool base_ar_ce(ggml_backend_t backend, const Yue2AitkModel & model, cons
     Yue2AitkEndpointHost embeds;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),len,&embeds,error)) return false;
     Yue2AitkStackTape tape;
-    if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,len,nullptr,false,&tape,nullptr,error)) return false;
+    if(!yue2_aitk_stack::forward(backend,model,ar,false,embeds.values,len,nullptr,false,&tape,nullptr,error)) return false;
     std::vector<float> zeros(tape.final_hidden.size(),0.0f);
     Yue2AitkEndpointHost norm;
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,tape.final_hidden.data(),zeros.data(),tape.length,&norm,error)) return false;

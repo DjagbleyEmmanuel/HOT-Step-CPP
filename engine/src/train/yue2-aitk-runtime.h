@@ -128,6 +128,13 @@ struct Config {
     // {"stage":"eval"} line each to stdout and <output>/base-loss.jsonl, then a
     // summary. --steps and --save-every are not needed.
     bool eval_base_loss = false;
+    // Held-out adapted-loss evaluation: with --resume, restore the checkpoint's
+    // adapters and, for every item of --eval-dataset (a prepared dataset kept
+    // apart from the training one; default: --dataset), score the base and the
+    // adapted planner CE and decoder flow MSE on the same samples (the
+    // --eval-base-loss recipe). No update, no dropout. Pass the run's --steps.
+    bool eval_adapted = false;
+    std::string eval_dataset;
     // Spike guard. A step whose pre-clip gradient norm exceeds spike_factor x
     // the median of the last 50 applied steps skips its update (0 = off; it
     // arms once 20 norms are in the window, and the window restarts when the
@@ -304,6 +311,7 @@ inline void usage(FILE * out) {
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
+        "[--eval-adapted (with --resume: held-out base vs adapted planner CE and decoder MSE to <output>/adapted-loss.jsonl, no training)] [--eval-dataset <dataset.json> (the held-out set for --eval-adapted)] "
         "[--eval-base-loss (no training: per-item base planner CE and decoder flow MSE to <output>/base-loss.jsonl)] "
         "[--recon-stop F (planner frozen: stop when a line fitted through the last --recon-stop-window 3 reconstruction readings gains under F)] [--recon-reset (with --resume: empty window)] "
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
@@ -575,6 +583,10 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--eval-base-loss")) {
             parsed.eval_base_loss = true;
+        } else if (!std::strcmp(arg, "--eval-adapted")) {
+            parsed.eval_adapted = true;
+        } else if (!std::strcmp(arg, "--eval-dataset")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.eval_dataset, error)) return ParseResult::error;
         } else if (!std::strcmp(arg, "--meter-only")) {
             parsed.meter_only = true; parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {

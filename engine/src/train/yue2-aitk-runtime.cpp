@@ -877,6 +877,76 @@ static int run_impl(Config config, std::string * error) {
             std::cout << meters.str() << std::flush;
             return 0;
         }
+        if (config.eval_adapted) {
+            // --eval-adapted: the restored adapters scored on a held-out set.
+            // Same recipe as --eval-base-loss (per-item seeded crop, t = 250 /
+            // 500 / 750, full prompt, no dropout, no update), once with the base
+            // and once with the adapters, on identical samples. The adapted
+            // decoder is conditioned by the ADAPTED planner prefix, as at
+            // generation and in a training step.
+            if (config.resume.empty()) { fail(error, "--eval-adapted needs --resume (the checkpoint whose adapters are scored)"); return 1; }
+            yue2_aitk::Dataset held_out;
+            if (!config.eval_dataset.empty() && !yue2_aitk::read_dataset(config.eval_dataset, &held_out, error)) return 1;
+            const auto & items = config.eval_dataset.empty() ? dataset.items : held_out.items;
+            if (items.empty()) { fail(error, "the evaluation dataset has no items"); return 1; }
+            event("eval");
+            std::ofstream out(std::filesystem::u8path(config.output) / "adapted-loss.jsonl", std::ios::binary);
+            if (!out) { fail(error, "cannot create adapted-loss JSONL"); return 1; }
+            const auto esc = [](const std::string & v) { std::string r; for (char c : v) { if (c == '"' || c == '\\') r += '\\'; if ((unsigned char) c >= 0x20) r += c; } return r; };
+            const float levels[3] = {250.0f, 500.0f, 750.0f};
+            double ar_b = 0.0, ar_a = 0.0, nar_b = 0.0, nar_a = 0.0, arw_b = 0.0, arw_a = 0.0; size_t tokens_total = 0;
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (yue2_aitk_cancel_requested()) { fail(error, "cancelled"); return 1; }
+                const auto & item = items[i];
+                size_t window = config.nar_crop_frames > 0 ? (size_t) config.nar_crop_frames : item.song.semantic_tokens.size();
+                {
+                    const auto & p = item.prompt;
+                    const size_t used = std::max({p.retained_prefix_ids.size() + p.abc_ids.size(), p.dropped_prefix_ids.size(),
+                                                  p.retained_nocap_prefix_ids.size() + p.abc_ids.size(), p.dropped_nocap_prefix_ids.size()}) + 5;
+                    const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
+                    window = std::max<size_t>(1, std::min(window, fit));
+                }
+                double ce_b = 0.0, ce_a = 0.0, mse_b[3] = {0, 0, 0}, mse_a[3] = {0, 0, 0}; size_t tokens = 0;
+                Yue2AitkPrefixHost prefix_b, prefix_a;
+                for (int k = 0; k < 3; ++k) {
+                    yue2_aitk::Yue2NativeSampler item_sampler(config.seed * 1000003ull + 104729ull * (i + 1));
+                    auto sampled = item_sampler.sample(item.song, item.prompt, window, std::vector<float>{levels[k]}, 0.0f, 0, 0, 0.0f, base_targets);
+                    if (k == 0) {
+                        if (!yue2_aitk_joint::base_ar_ce(backend.value, model, sampled.batch, &ce_b, &tokens, error) ||
+                            !yue2_aitk_joint::base_ar_ce(backend.value, model, sampled.batch, &ce_a, nullptr, error, &state.ar_adapters()) ||
+                            !yue2_aitk_joint::nar_probe_prefix(backend.value, model, sampled.batch, &prefix_b, error) ||
+                            !yue2_aitk_joint::nar_probe_prefix(backend.value, model, sampled.batch, &prefix_a, error, &state.ar_adapters())) return 1;
+                    }
+                    for (int adapted = 0; adapted < 2; ++adapted) {
+                        std::vector<float> prediction;
+                        if (!yue2_aitk_joint::nar_probe_predict(backend.value, model, adapted ? &state.nar_adapters() : nullptr, adapted ? prefix_a : prefix_b,
+                                                                sampled.noisy_bf16, sampled.timestep_bf16, &prediction, error)) return 1;
+                        double sq = 0.0;
+                        for (size_t j = 0; j < prediction.size(); ++j) { const double d = double(prediction[j]) - sampled.target_f32[j]; sq += d * d; }
+                        (adapted ? mse_a : mse_b)[k] = prediction.empty() ? 0.0 : sq / double(prediction.size());
+                    }
+                }
+                const double m_b = (mse_b[0] + mse_b[1] + mse_b[2]) / 3.0, m_a = (mse_a[0] + mse_a[1] + mse_a[2]) / 3.0;
+                if (!std::isfinite(ce_a) || !std::isfinite(m_a) || !std::isfinite(m_b)) { fail(error, "nonfinite held-out loss"); return 1; }
+                ar_b += ce_b; ar_a += ce_a; nar_b += m_b; nar_a += m_a; arw_b += ce_b * double(tokens); arw_a += ce_a * double(tokens); tokens_total += tokens;
+                std::ostringstream line; line.precision(9);
+                line << "{\"stage\":\"eval_adapted\",\"item\":" << i << ",\"id\":\"" << esc(item.id) << "\",\"window\":" << window << ",\"ar_tokens\":" << tokens
+                     << ",\"ar_ce_base\":" << ce_b << ",\"ar_ce_adapted\":" << ce_a << ",\"nar_mse_base\":" << m_b << ",\"nar_mse_adapted\":" << m_a
+                     << ",\"nar_mse_adapted_t\":[" << mse_a[0] << "," << mse_a[1] << "," << mse_a[2] << "]}\n";
+                out << line.str() << std::flush; std::cout << line.str() << std::flush;
+            }
+            const double n = double(items.size());
+            std::ostringstream summary; summary.precision(9);
+            summary << "{\"stage\":\"eval_adapted_summary\",\"items\":" << items.size() << ",\"adapter\":\"" << config.adapter_type << "\",\"step\":" << completed
+                    << ",\"held_out\":" << (config.eval_dataset.empty() ? "false" : "true")
+                    << ",\"ar_ce_token_mean_base\":" << (tokens_total ? arw_b / tokens_total : 0.0) << ",\"ar_ce_token_mean_adapted\":" << (tokens_total ? arw_a / tokens_total : 0.0)
+                    << ",\"ar_ce_mean_base\":" << ar_b / n << ",\"ar_ce_mean_adapted\":" << ar_a / n
+                    << ",\"nar_mse_mean_base\":" << nar_b / n << ",\"nar_mse_mean_adapted\":" << nar_a / n
+                    << ",\"nar_timesteps\":[250,500,750],\"nar_window\":" << config.nar_crop_frames << ",\"ar_targets\":\"" << config.ar_targets << "\"}\n";
+            out << summary.str() << std::flush; std::cout << summary.str() << std::flush;
+            event("done");
+            return 0;
+        }
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         // The planner's KL at the moment a checkpoint is written, for meters.json.
