@@ -127,10 +127,36 @@ inline ggml_tensor * join_rows(ggml_context * ctx, const std::vector<ggml_tensor
     }
     return out;
 }
+// DoRA output rescale over output rows [first, first + width) of a site:
+// y * m / nrm. The factor stays F32: m / nrm starts at exactly 1 and moves in
+// small steps, which a BF16 round (spacing 2^-7 near 1) would erase. Only the product is
+// rounded, as every other branch output is. nrm is a constant input, so the
+// backward trains m (and A/B through y) without differentiating the norm.
+inline ggml_tensor * dora_factor(ggml_context * ctx, const Yue2AitkFusedLora & site) {
+    return ggml_div(ctx, site.m, site.nrm);
+}
+inline ggml_tensor * dora_rescale(ggml_context * ctx, ggml_tensor * y, const Yue2AitkFusedLora & site,
+                                  ggml_tensor * factor, int64_t first, int64_t width) {
+    GGML_ASSERT(y->ne[0] == width && y->ne[2] == 1 && y->ne[3] == 1 && first >= 0 && first + width <= factor->ne[0]);
+    ggml_tensor * f = width == factor->ne[0] ? factor
+        : ggml_view_1d(ctx, factor, width, size_t(first) * sizeof(float));
+    // [width, S] = f (x) 1_S as a K=1 GEMM, so the backward sums f's gradient
+    // over S in OUT_PROD. A broadcast mul would sum it in REPEAT_BACK, whose
+    // CUDA kernel walks S serially per row; that doubled the AR backward.
+    // The ones come from the constant nrm (0 * nrm + 1), so they take no
+    // gradient; F32 precision keeps f exact.
+    ggml_tensor * shape = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, y->ne[1]);
+    ggml_tensor * ones = ggml_repeat(ctx, ggml_scale_bias(ctx, ggml_view_1d(ctx, site.nrm, 1, 0), 0.0f, 1.0f), shape);
+    ggml_tensor * rows = ggml_mul_mat(ctx, ggml_reshape_2d(ctx, f, 1, width), ones);
+    ggml_mul_mat_set_prec(rows, GGML_PREC_F32);
+    return round(ctx, ggml_mul(ctx, y, rows));
+}
 inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
                             ggml_tensor * x, const Yue2AitkFusedLora * adapter = nullptr,
                             ggml_tensor * bias = nullptr) {
     GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols);
+    // Bias never enters the DoRA rescale; no adapted site has one.
+    GGML_ASSERT(!bias || !adapter || !adapter->is_dora());
     ggml_tensor * base;
     if (w.dense) {
         // Companion full-weight replacement (llm2vae): F32 maths, BF16 output.
@@ -184,7 +210,8 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
     // x * 1.0f is exact: alpha == rank skips the scale pass and its backward.
     // Bit-identical either way, so this has no rollback switch.
     delta = round(ctx, adapter->scale == 1.0f ? delta : ggml_scale(ctx, delta, adapter->scale));
-    return round(ctx, ggml_add(ctx, base, delta));
+    ggml_tensor * y = round(ctx, ggml_add(ctx, base, delta));
+    return adapter->is_dora() ? dora_rescale(ctx, y, *adapter, dora_factor(ctx, *adapter), 0, y->ne[0]) : y;
 }
 inline ggml_tensor * slice_rows(ggml_context * ctx, ggml_tensor * x, int64_t first, int64_t width) {
     GGML_ASSERT(first >= 0 && width > 0 && first + width <= x->ne[0]);
@@ -222,6 +249,7 @@ inline std::vector<ggml_tensor *> linear_split(ggml_context * ctx, const Yue2Ait
     ggml_tensor * xr = round(ctx, x);
     ggml_tensor * ca = w.frozen_a ? mm_f32(ctx, w.frozen_a, round(ctx, x)) : nullptr;
     ggml_tensor * ax = adapter ? mm(ctx, adapter->a, round(ctx, x)) : nullptr;
+    ggml_tensor * factor = adapter && adapter->is_dora() ? dora_factor(ctx, *adapter) : nullptr;
     int64_t first = 0;
     for (int64_t width : widths) {
         ggml_tensor * base = round(ctx, mm(ctx, weight_rows(ctx, w.parts[0], first, width), xr));
@@ -230,12 +258,70 @@ inline std::vector<ggml_tensor *> linear_split(ggml_context * ctx, const Yue2Ait
             ggml_tensor * delta = mm(ctx, weight_rows(ctx, adapter->b, first, width), ax);
             delta = round(ctx, adapter->scale == 1.0f ? delta : ggml_scale(ctx, delta, adapter->scale));
             base = round(ctx, ggml_add(ctx, base, delta));
+            if (factor) base = dora_rescale(ctx, base, *adapter, factor, first, width);
         }
         out.push_back(base);
         first += width;
     }
     GGML_ASSERT(first == w.rows);
     return out;
+}
+// ── DoRA row norms ─────────────────────────────────────────────────────────
+//
+// W0 is a site's frozen base, companion delta included, applied in plain F32:
+// no BF16 value boundaries, so its products are the matrix and nothing else.
+// x is [in, n] F32; the result is [out, n] = W0 x.
+inline ggml_tensor * base_apply_f32(ggml_context * ctx, const Yue2AitkConvRotLinear & w, ggml_tensor * x) {
+    GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols && !w.dense);
+    ggml_tensor * y;
+    if (!w.parts.empty()) {
+        std::vector<ggml_tensor *> ys;
+        for (ggml_tensor * p : w.parts) {
+            ggml_tensor * yp = ggml_mul_mat(ctx, p, x);
+            ggml_mul_mat_set_prec(yp, GGML_PREC_F32);
+            ys.push_back(yp);
+        }
+        y = join_rows(ctx, ys);
+    } else {
+        y = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32, nullptr, w.rotation, false);
+    }
+    if (w.frozen_a) {
+        ggml_tensor * ca = ggml_mul_mat(ctx, w.frozen_a, x);
+        ggml_mul_mat_set_prec(ca, GGML_PREC_F32);
+        ggml_tensor * cd = ggml_mul_mat(ctx, w.frozen_b, ca);
+        ggml_mul_mat_set_prec(cd, GGML_PREC_F32);
+        y = ggml_add(ctx, y, cd);
+    }
+    return y;
+}
+// Exact: nrm [1, out] = max(||W0 + s*BA||_row, floor) with W0 materialized
+// as base_apply_f32(I) ([out, in], so transposed for dora-common.h). Costs
+// an in*in*out GEMM per site: init (where it also yields ||W0||) and checks.
+inline ggml_tensor * dora_norm_exact(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
+                                     const Yue2AitkFusedLora & site, ggml_tensor * eye) {
+    GGML_ASSERT(eye->ne[0] == w.cols && eye->ne[1] == w.cols);
+    return yue2_aitk_dora_norm(ctx, ggml_cont(ctx, ggml_transpose(ctx, base_apply_f32(ctx, w, eye))), site);
+}
+// Expanded, for the per-update refresh: the same norm from rank-r products,
+//   ||W0 + s BA||^2 = ||W0||^2 + 2s <W0, BA> + s^2 ||BA||^2   (per row),
+// with <W0, BA>_o = sum_r B[o,r] (W0 A^T)[o,r] and ||BA||_o^2 = B_o (A A^T) B_o^T.
+// w0sq [1, out] is ||W0||_row^2, constant for the run (init_dora keeps it).
+// The square never cancels in practice (the delta is a small fraction of the
+// row); a clamp still keeps a negative rounding residue at the floor.
+inline ggml_tensor * dora_norm_expanded(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
+                                        const Yue2AitkFusedLora & site, ggml_tensor * w0sq) {
+    GGML_ASSERT(site.is_dora() && !site.is_lokr() && w0sq->ne[0] == 1 && w0sq->ne[1] == site.output_width);
+    ggml_tensor * p = base_apply_f32(ctx, w, site.a);  // [out, r] = W0 A^T
+    ggml_tensor * cross = ggml_sum_rows(ctx, ggml_mul(ctx, site.b, ggml_cont(ctx, ggml_transpose(ctx, p))));
+    ggml_tensor * gram = ggml_mul_mat(ctx, site.a, site.a);  // [r, r] = A A^T, symmetric
+    ggml_mul_mat_set_prec(gram, GGML_PREC_F32);
+    ggml_tensor * gb = ggml_mul_mat(ctx, gram, site.b);      // [r, out]
+    ggml_mul_mat_set_prec(gb, GGML_PREC_F32);
+    ggml_tensor * ba = ggml_sum_rows(ctx, ggml_mul(ctx, site.b, gb));
+    // [r, out] -> [1, out] sums leave ne = (1, out), the shape of w0sq.
+    ggml_tensor * sq = ggml_add(ctx, ggml_add(ctx, w0sq, ggml_scale(ctx, cross, 2.0f * site.scale)),
+                                ggml_scale(ctx, ba, site.scale * site.scale));
+    return ggml_sqrt(ctx, ggml_clamp(ctx, sq, kYue2AitkDoraNormFloor * kYue2AitkDoraNormFloor, FLT_MAX));
 }
 inline ggml_tensor * join_halves(ggml_context * ctx, ggml_tensor * a, ggml_tensor * b) {
     GGML_ASSERT(ggml_are_same_shape(a, b));

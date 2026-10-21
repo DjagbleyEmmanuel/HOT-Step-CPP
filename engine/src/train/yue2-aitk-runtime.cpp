@@ -216,6 +216,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     // Only LoKr records carry these keys, so a LoRA record is byte-identical
     // to one written before LoKr existed (the reader defaults to lora).
     if (config.adapter_type=="lokr") { yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","lokr"); yyjson_mut_obj_add_int(doc,root,"lokr_dim",config.lokr_dim); yyjson_mut_obj_add_int(doc,root,"lokr_factor",config.lokr_factor); }
+    else if (config.adapter_type=="dora") yyjson_mut_obj_add_strcpy(doc,root,"adapter_type","dora");
     if (config.cautious) yyjson_mut_obj_add_bool(doc,root,"cautious",true);
     yyjson_mut_obj_add_real(doc,root,"kl_weight",config.kl_weight); yyjson_mut_obj_add_real(doc,root,"abc_dropout",config.abc_dropout); yyjson_mut_obj_add_real(doc,root,"caption_dropout",config.caption_dropout); yyjson_mut_obj_add_real(doc,root,"planner_lr_scale",config.planner_lr_scale); yyjson_mut_obj_add_real(doc,root,"target_kl",config.target_kl);
     // Only runs with a target stop carry these, so other records are unchanged.
@@ -348,7 +349,8 @@ static int run_impl(Config config, std::string * error) {
         fail(error, "--cautious needs an LmOptim optimizer: --optimizer adamw-lm, prodigy or muon (the native AdamW8bit kernel has no update tensor to mask)"); return 1;
     }
     const bool lokr = config.adapter_type == "lokr";
-    if (!lokr && config.adapter_type != "lora") { fail(error, "invalid runtime configuration"); return 1; }
+    const bool dora = config.adapter_type == "dora";
+    if (!lokr && !dora && config.adapter_type != "lora") { fail(error, "invalid runtime configuration"); return 1; }
     if (lokr) {
         if (config.lokr_dim < 1 || config.lokr_dim > 65536 || config.lokr_factor < 1 || config.lokr_factor > 65536) {
             fail(error, "--lokr-dim and --lokr-factor must be within [1, 65536]"); return 1;
@@ -579,7 +581,12 @@ static int run_impl(Config config, std::string * error) {
             return 0;
         }
         if (!state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
-                              lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
+                              lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0, dora)) return 1;
+        if (dora) {
+            if (!state.init_dora(model, error)) return 1;
+            std::fprintf(stderr, "[yue2-aitk] adapter dora: rank %d alpha %.4g, %zu trainable parameters, norm pass %.0f ms\n",
+                         config.rank, (double) config.alpha, state.parameter_count(), state.dora_refresh_ms());
+        }
         if (gguf_base) std::fprintf(stderr, "[yue2-aitk] base: GGUF %s\n", config.checkpoint.c_str());
         if (model.companion()) std::fprintf(stderr, "[yue2-aitk] companion decoder adapter: %s (frozen)\n", config.companion.c_str());
         if (lokr) std::fprintf(stderr, "[yue2-aitk] adapter lokr: dim %d factor %d alpha %.4g, %zu trainable parameters\n",
@@ -829,6 +836,8 @@ static int run_impl(Config config, std::string * error) {
                 if (adamw->step() != resume_plan.completed) { fail(error, "resume optimizer step does not match completed step"); return 1; }
                 resume_plan.record = {};
             }
+            // The restored A/B are not the ones init_dora normed.
+            if (dora && !state.refresh_dora(model, error)) return 1;
         }
         // A frozen record resumes frozen: its planner weights, just restored,
         // are the held ones.

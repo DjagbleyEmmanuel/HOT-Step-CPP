@@ -1007,4 +1007,11 @@ if(BUILD_TESTING)
     target_link_libraries(sa3-dora-load-test PRIVATE yyjson)
     add_test(NAME sa3-dora-load COMMAND sa3-dora-load-test)
     set_tests_properties(sa3-dora-load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+
+    # YuE2 joint/AITK DoRA graph fixture: LoRA identity at m == nrm, rescale
+    # forward/backward, exact vs expanded row norms.
+    add_executable(yue2-aitk-dora-test tests/test-yue2-aitk-dora.cpp)
+    link_ggml_backends(yue2-aitk-dora-test)
+    target_link_libraries(yue2-aitk-dora-test PRIVATE yyjson)
+    add_test(NAME yue2-aitk-dora COMMAND yue2-aitk-dora-test)
 endif()

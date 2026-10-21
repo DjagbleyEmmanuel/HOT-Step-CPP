@@ -319,6 +319,9 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         result.step=optimizer->step();
     }
     if(planner_frozen) { state.hold_planner(); ggml_backend_synchronize(backend); }
+    // DoRA: A/B just moved (or were held back), so the detached norms follow.
+    // A skipped update returns above with the norms still exact.
+    if(state.is_dora()) { YUE2_PROF("opt: DoRA norm refresh"); if(!state.refresh_dora(model,error)) return false; }
     *metrics=result;
     return true;
 }

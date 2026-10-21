@@ -39,6 +39,9 @@ struct Config {
     // LoKr alpha, defaulting to --lokr-dim (scale 1) when not given. The DiT
     // defaults (dim 512 / factor 6) are a trap at YuE2's dims: larger than a
     // rank-64 LoRA. dim 32 / factor 8 is 14 MB.
+    // "dora" is LoRA plus a learned magnitude per output row (detached norm,
+    // refreshed after every update); --rank and --alpha mean what they do
+    // for lora.
     std::string adapter_type = "lora";
     std::int32_t lokr_dim = 32;
     std::int32_t lokr_factor = 8;
@@ -293,7 +296,7 @@ inline void usage(FILE * out) {
         "--dataset <schema1-manifest.json> --output <new-run-dir> "
         "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] "
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
-        "[--adapter-type lora|lokr] [--lokr-dim 32] [--lokr-factor 8] "
+        "[--adapter-type lora|lokr|dora] [--lokr-dim 32] [--lokr-factor 8] "
         "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
@@ -434,8 +437,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             parsed.alpha_explicit = true;
         } else if (!std::strcmp(arg, "--adapter-type")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.adapter_type, error)) return ParseResult::error;
-            if (parsed.adapter_type != "lora" && parsed.adapter_type != "lokr") {
-                if (error) *error = "--adapter-type must be lora or lokr";
+            if (parsed.adapter_type != "lora" && parsed.adapter_type != "lokr" && parsed.adapter_type != "dora") {
+                if (error) *error = "--adapter-type must be lora, lokr or dora";
                 return ParseResult::error;
             }
         } else if (!std::strcmp(arg, "--lokr-dim")) {
