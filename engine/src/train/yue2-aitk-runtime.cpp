@@ -251,8 +251,8 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
-            yyjson_mut_obj_add_real(doc,root,"prodigy_d",float(prodigy_d));
-            yyjson_mut_obj_add_real(doc,root,"prodigy_r",float(prodigy_r));
+            yyjson_mut_obj_add_real(doc,root,"prodigy_d",prodigy_d);
+            yyjson_mut_obj_add_real(doc,root,"prodigy_r",prodigy_r);
         }
     }
     size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
@@ -767,7 +767,10 @@ static int run_impl(Config config, std::string * error) {
         }
         if (!config.resume.empty()) {
             if (use_lm) {
-                if (resume_plan.record.version != 2) { fail(error, ("resume record format is not compatible with --optimizer " + config.optimizer).c_str()); return 1; }
+                if (resume_plan.record.version != 2 && resume_plan.record.version != 3) { fail(error, ("resume record format is not compatible with --optimizer " + config.optimizer).c_str()); return 1; }
+                // Older records stored the moments 8-bit; they still load, but
+                // the run drifts from an uninterrupted one from the next step.
+                if (resume_plan.record.version == 2) std::fprintf(stderr, "[yue2-aitk] resume note: this record predates exact optimizer state (8-bit moments); the run continues, but will not match an uninterrupted one\n");
                 const auto & snap = resume_plan.record.state;
                 const auto named = state.named_tensors();
                 if (snap.names.size() != named.size() || snap.step != resume_plan.completed) { fail(error, "resume record does not match the run shape"); return 1; }
@@ -779,7 +782,7 @@ static int run_impl(Config config, std::string * error) {
                     *present_out = f || q;
                     if (!*present_out) return !required;
                     if (f) {
-                        if (n >= 4096 || fp32.size() != n) return false;
+                        if (fp32.size() != n) return false;
                         for (float v : fp32) if (!std::isfinite(v)) return false;
                         return true;
                     }
@@ -982,22 +985,12 @@ static int run_impl(Config config, std::string * error) {
                         ggml_backend_tensor_get(t, values.data(), 0, values.size() * sizeof(float));
                         ggml_backend_synchronize(backend.value);
                         for (float v : values) if (!std::isfinite(v)) return false;
-                        if (n >= 4096) {
-                            std::vector<uint8_t> q; std::vector<float> am;
-                            if (!yue2_aitk::resume_detail::quantize_f32(values, &q, &am)) return false;
-                            switch (slot) {
-                                case 1: snap.state1_u8[i] = std::move(q); snap.absmax1[i] = std::move(am); break;
-                                case 2: snap.state2_u8[i] = std::move(q); snap.absmax2[i] = std::move(am); break;
-                                case 3: snap.state3_u8[i] = std::move(q); snap.absmax3[i] = std::move(am); break;
-                                default: snap.state4_u8[i] = std::move(q); snap.absmax4[i] = std::move(am); break;
-                            }
-                        } else {
-                            switch (slot) {
-                                case 1: snap.state1_fp32[i] = std::move(values); break;
-                                case 2: snap.state2_fp32[i] = std::move(values); break;
-                                case 3: snap.state3_fp32[i] = std::move(values); break;
-                                default: snap.state4_fp32[i] = std::move(values); break;
-                            }
+                        // F32 as held: 8-bit storage zeroed small second moments.
+                        switch (slot) {
+                            case 1: snap.state1_fp32[i] = std::move(values); break;
+                            case 2: snap.state2_fp32[i] = std::move(values); break;
+                            case 3: snap.state3_fp32[i] = std::move(values); break;
+                            default: snap.state4_fp32[i] = std::move(values); break;
                         }
                         return true;
                     };
