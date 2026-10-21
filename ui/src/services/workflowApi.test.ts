@@ -6,7 +6,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkflowTestServer, z } from '../../../server/src/services/workflows/testServer';
 import type { WorkflowEvent } from '../../../server/src/contracts/workflow';
-import { followJob, revisionedRequest, workflowApi, WorkflowRequestError } from './workflowApi';
+import { followJob, revisionedRequest, workflowApi } from './workflowApi';
+// Stale-revision 409s now surface as the shared ApiError (status +
+// currentRevision + reason), not a workflow-local error class.
+import { ApiError } from './apiError';
+import { setAuthToken } from './axiosClient';
 
 test('followJob resumes after a dropped stream without losing or repeating events', async () => {
   const http = await startWorkflowTestServer();
@@ -45,11 +49,12 @@ test('followJob resumes after a dropped stream without losing or repeating event
   }) as typeof fetch;
 
   try {
-    const { job } = await workflowApi.submit('t', 'count', 'k', { n: 5 });
+    setAuthToken('t');  // the session accessor is the bearer's source of truth now
+    const { job } = await workflowApi.submit('count', 'k', { n: 5 });
     const events: WorkflowEvent[] = [];
     const errors: unknown[] = [];
     const snapshots: boolean[] = [];
-    const done = followJob('t', job.id, {
+    const done = followJob(job.id, {
       onEvent: e => { events.push(e); if (e.type === 'progress' && (e.data as { i: number }).i === 1) setTimeout(release, 20); },
       onSnapshot: (_, gap) => snapshots.push(gap),
       onError: e => errors.push(e),
@@ -61,13 +66,14 @@ test('followJob resumes after a dropped stream without losing or repeating event
     assert.deepEqual(events.map(e => e.seq), Array.from({ length: total }, (_, i) => i + 1));
 
     // A stale document write surfaces the current revision.
-    const { document } = await workflowApi.createDocument('t', 'draft', { a: 1 });
-    await workflowApi.updateDocument('t', document.id, 1, { a: 2 });
-    await assert.rejects(workflowApi.updateDocument('t', document.id, 1, { a: 3 }),
-      (e: unknown) => e instanceof WorkflowRequestError && e.status === 409 && e.currentRevision === 2);
-    await assert.rejects(followJob('t', 'missing', { onEvent: () => {} }),
-      (e: unknown) => e instanceof WorkflowRequestError && e.status === 404);
+    const { document } = await workflowApi.createDocument('draft', { a: 1 });
+    await workflowApi.updateDocument(document.id, 1, { a: 2 });
+    await assert.rejects(workflowApi.updateDocument(document.id, 1, { a: 3 }),
+      (e: unknown) => e instanceof ApiError && e.status === 409 && e.currentRevision === 2);
+    await assert.rejects(followJob('missing', { onEvent: () => {} }),
+      (e: unknown) => e instanceof ApiError && e.status === 404);
   } finally {
+    setAuthToken(null);
     globalThis.fetch = realFetch;
     await http.close();
   }
@@ -82,17 +88,19 @@ test('followJob on a retried job ends at the current attempt, not the first fail
   const realFetch = globalThis.fetch;
   globalThis.fetch = ((url: string, init?: RequestInit) => realFetch(http.origin + url, init)) as typeof fetch;
   try {
-    const { job } = await workflowApi.submit('t', 'flaky', 'k', {});
+    setAuthToken('t');
+    const { job } = await workflowApi.submit('flaky', 'k', {});
     await http.jobs.settled();
-    await workflowApi.retry('t', job.id);
+    await workflowApi.retry(job.id);
     await http.jobs.settled();
     const seen: string[] = [];
-    const status = await followJob('t', job.id, {
+    const status = await followJob(job.id, {
       onEvent: e => { if (e.type === 'status') seen.push((e.data as { status: string }).status); },
     });
     assert.equal(status, 'succeeded');
     assert.deepEqual(seen, ['pending', 'running', 'failed', 'pending', 'running', 'succeeded']);
   } finally {
+    setAuthToken(null);
     globalThis.fetch = realFetch;
     await http.close();
   }
@@ -112,17 +120,21 @@ test('revisionedRequest carries the stale revision and the unsupported-version r
     return new Response(JSON.stringify(body), { status });
   }) as typeof fetch;
   try {
-    const stale = await revisionedRequest('tok', '/api/presets/x', 'PUT', { expectedRevision: 3 }).catch(e => e);
-    assert.ok(stale instanceof WorkflowRequestError);
+    // The bearer no longer travels per call — the request interceptor injects
+    // it from the session accessor, so the test sets the session.
+    setAuthToken('tok');
+    const stale = await revisionedRequest('/api/presets/x', 'PUT', { expectedRevision: 3 }).catch(e => e);
+    assert.ok(stale instanceof ApiError);
     assert.equal(stale.status, 409);
     assert.equal(stale.currentRevision, 4);
-    const newer = await revisionedRequest('tok', '/api/presets/y').catch(e => e);
+    const newer = await revisionedRequest('/api/presets/y').catch(e => e);
     assert.equal(newer.reason, 'unsupported-version');
     assert.equal(newer.message, 'Saved as version 3');
-    assert.deepEqual(await revisionedRequest('tok', '/api/presets/z'), { ok: true });
+    assert.deepEqual(await revisionedRequest('/api/presets/z'), { ok: true });
     assert.equal((seen[0].init?.headers as Record<string, string>).Authorization, 'Bearer tok');
     assert.equal(seen[0].init?.body, JSON.stringify({ expectedRevision: 3 }));
   } finally {
+    setAuthToken(null);
     globalThis.fetch = realFetch;
   }
 });

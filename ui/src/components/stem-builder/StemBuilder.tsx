@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { submitStudioRender, followStudioRender, type SourceRef } from '../../services/repaintLayerWorkflowApi';
+import { useUpload } from '../../queries/writes';
 import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
 import { useBackendStore } from '../../stores/backendStore';
 import { TrackPicker, type TrackName } from './TrackPicker';
@@ -55,7 +56,7 @@ export const StemBuilder: React.FC = () => {
   const sourceUrlRef = useRef(sourceAudioUrl);
   sourceUrlRef.current = sourceAudioUrl;
   const [sourceFileName, setSourceFileName] = useState(() => localStorage.getItem('hs-sb-sourceFile') || '');
-  const [isUploading, setIsUploading] = useState(false);
+  const { mutate: uploadSource, isPending: isUploading } = useUpload<{ audio_url: string; asset_id?: string }>();
 
   // ── Track selection ──
   const [selectedTrack, setSelectedTrack] = useState<TrackName | null>(null);
@@ -120,10 +121,10 @@ export const StemBuilder: React.FC = () => {
     const observation = new AbortController();
     setIsGenerating(true);
     setActiveJobId(id);
-    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
+    void followStudioRender(id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
       .then(async result => {
         if (!mounted) return;
-        const { job } = await workflowApi.get(token, id);
+        const { job } = await workflowApi.get(id);
         if (!mounted) return;
         const captured = job.input as { source?: SourceRef; trackName?: string; caption?: string };
         const audioUrl = result.audio?.audioUrls?.[0];
@@ -158,31 +159,25 @@ export const StemBuilder: React.FC = () => {
   }, [modelsQuery.data, buildModel]);
 
   // ── File upload ──
-  const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = ''; // reset so same file can be re-selected
 
     setSourceFileName(file.name);
     setSourceRef(null);
-    setIsUploading(true);
     setLayers([]); // reset layer stack on new source
 
-    try {
-      const fd = new FormData();
-      fd.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
-      if (!res.ok) throw new Error('Upload failed');
-      const data = await res.json();
-      setSourceAudioUrl(data.audio_url || '');
-      setSourceRef(data.asset_id ? { kind: 'asset', id: data.asset_id, expectedUrl: data.audio_url } : null);
-      showToast('Source audio uploaded!');
-    } catch (err: any) {
-      showToast(`Upload failed: ${err.message}`);
-    } finally {
-      setIsUploading(false);
-    }
-  }, [token]);
+    uploadSource({
+      path: '/upload/audio',
+      files: [{ field: 'audio', file }],
+      onSuccess: data => {
+        setSourceAudioUrl(data.audio_url || '');
+        setSourceRef(data.asset_id ? { kind: 'asset', id: data.asset_id, expectedUrl: data.audio_url } : null);
+        showToast('Source audio uploaded!');
+      },
+    });
+  }, [uploadSource]);
 
   const handleClearSource = () => {
     setSourceAudioUrl('');
@@ -239,16 +234,16 @@ export const StemBuilder: React.FC = () => {
     setGenStage('Submitting...');
     let submittedJobId: string | null = null;
     try {
-      const { job } = await submitStudioRender(token, 'layer-render', {
+      const { job } = await submitStudioRender('layer-render', {
         source: sourceRef, expectedBackend: useBackendStore.getState().activeBackendId,
         engineParams: gp.getGlobalParams(), trackName: selectedTrack, buildModel, caption,
       }, key);
-      if (submissionKeyRef.current !== key) { await workflowApi.cancel(token, job.id); return; }
+      if (submissionKeyRef.current !== key) { await workflowApi.cancel(job.id); return; }
       setActiveJobId(job.id);
       submittedJobId = job.id;
       localStorage.setItem('hs-sb-workflowJob', job.id);
       showToast(`Building ${selectedTrack} layer...`);
-      const result = await followStudioRender(token, job.id, stage => setGenStage(stage));
+      const result = await followStudioRender(job.id, stage => setGenStage(stage));
       const audio = result.audio || {};
       setGenStage('Complete!');
       setRefreshTrigger(p => p + 1);
@@ -279,7 +274,7 @@ export const StemBuilder: React.FC = () => {
   const handleCancel = async () => {
     submissionKeyRef.current = null;
     if (activeJobId && token) {
-      try { await workflowApi.cancel(token, activeJobId); } catch { /* ignore */ }
+      try { await workflowApi.cancel(activeJobId); } catch { /* ignore */ }
     }
     localStorage.removeItem('hs-sb-workflowJob');
     setIsGenerating(false);

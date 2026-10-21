@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useStudioSongs } from '../../queries/studios/shared';
 import { sharedKeys } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 // RecentBuilds.tsx — Recent stem builds sidebar section
 //
 // Fetches recent songs generated via Stem Builder (source = 'stem-builder')
@@ -79,7 +80,7 @@ export const RecentBuilds: React.FC<RecentBuildsProps> = ({
       return stemBuilds;
   }, [songsQuery.data]);
   useEffect(() => {
-    if (refreshTrigger) void client.invalidateQueries({ queryKey: sharedKeys.songs() });
+    if (refreshTrigger) void queryManager.keys(client, sharedKeys.songs());
   }, [client, refreshTrigger]);
 
   /** Delete a build. A stem build is an ordinary song row (source
@@ -93,11 +94,11 @@ export const RecentBuilds: React.FC<RecentBuildsProps> = ({
     try {
       const key = sharedKeys.songs();
       await client.cancelQueries({ queryKey: key });
-      await songApi.delete(build.id, token);
+      await songApi.delete(build.id);
       await client.cancelQueries({ queryKey: key });
       client.setQueryData<typeof songsQuery.data>(key, data => data && ({ ...data, songs: data.songs.filter(song => song.id !== build.id) }));
       client.removeQueries({ queryKey: sharedKeys.song(build.id) });
-      await client.invalidateQueries({ queryKey: key });
+      await queryManager.keys(client, key);
     } catch (err) {
       console.error('[RecentBuilds] Delete failed:', err);
     } finally {

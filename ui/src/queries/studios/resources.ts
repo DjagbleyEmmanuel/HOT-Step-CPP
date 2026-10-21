@@ -36,10 +36,10 @@ export const separationResultOptions = (id: string) => queryOptions({
 export const streamSessionOptions = (id: string) => queryOptions({
   queryKey: serverKey('studios/stream-session', { id }), queryFn: ({ signal }) => getStreamSession(id, { signal }),
 });
-export const projectsOptions = (token: string) => queryOptions({
-  queryKey: serverKey('studios/projects', { auth: true }), queryFn: ({ signal }) => builderApi.listProjects(token, { signal }),
+export const projectsOptions = () => queryOptions({
+  queryKey: serverKey('studios/projects', { auth: true }), queryFn: ({ signal }) => builderApi.listProjects({ signal }),
 });
-export const projectOptions = (token: string, id: string) => queryOptions({
-  queryKey: serverKey('studios/project', { auth: true, id }), queryFn: ({ signal }) => builderApi.getProject(id, token, { signal }),
+export const projectOptions = (id: string) => queryOptions({
+  queryKey: serverKey('studios/project', { auth: true, id }), queryFn: ({ signal }) => builderApi.getProject(id, { signal }),
   staleTime: 0,
 });

@@ -1,11 +1,17 @@
 // workflowApi.ts — client for /api/workflows: durable workflow jobs and
 // revisioned documents (server/src/routes/workflows.ts).
 //
-// followJob reads the job's event stream with fetch rather than EventSource,
-// so it can send the bearer token. It resumes from the last event it saw
-// after a drop, and hands back a fresh snapshot (gap: true) when the server
-// no longer holds the events in between.
-import type { ReadOptions } from './httpClient';
+// JSON goes through the shared client (httpClient.ts → axiosClient.ts), so a
+// stale-revision 409 comes back as ApiError with currentRevision/reason — the
+// old WorkflowRequestError class was folded into it. followJob reads the job's
+// event stream with fetch rather than EventSource, so it can send the bearer
+// token (now read from the auth session accessor). It resumes from the last
+// event it saw after a drop, and hands back a fresh snapshot (gap: true) when
+// the server no longer holds the events in between.
+
+import { getAuthToken } from './axiosClient';
+import { ApiError } from './apiError';
+import { apiClient, type ClientOptions } from './httpClient';
 import type {
   WorkflowDocument, WorkflowEvent, WorkflowJob, WorkflowJobStatus, WorkflowReplay,
 } from '../../../server/src/contracts/workflow';
@@ -14,63 +20,39 @@ export type {
   DocumentImportReceipt, DocumentProvenance, DocumentScope, TypedDocument, UnsupportedDocumentVersion,
 } from '../../../server/src/contracts/workflow';
 
-export class WorkflowRequestError extends Error {
-  readonly status: number;
-  /** Set on a 409 caused by a stale revision. */
-  readonly currentRevision?: number;
-  /** 'unsupported-version' on a 409 for a stored document this build cannot
-   *  read; the server left it unchanged. */
-  readonly reason?: string;
-  constructor(status: number, message: string, currentRevision?: number, reason?: string) {
-    super(message);
-    this.status = status;
-    this.currentRevision = currentRevision;
-    this.reason = reason;
-  }
+/** A JSON request that throws ApiError carrying the stale revision or
+ *  unsupported-version reason. Shared by the typed-document domain clients,
+ *  whose routes live outside /api/workflows. `url` may carry the `/api` base;
+ *  it is stripped because the shared client adds its own. */
+export async function revisionedRequest<T>(url: string, method = 'GET', body?: unknown, opts: ClientOptions = {}): Promise<T> {
+  return apiClient.request<T>(method, url.replace(/^\/api/, ''), body, opts);
 }
 
-/** A JSON request with the bearer token that throws WorkflowRequestError,
- *  carrying the stale revision or unsupported-version reason. Shared by the
- *  typed-document domain clients, whose routes live outside /api/workflows. */
-export async function revisionedRequest<T>(token: string, url: string, method = 'GET', body?: unknown, opts: ReadOptions = {}): Promise<T> {
-  const response = await fetch(url, {
-    method,
-    signal: opts.signal,
-    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new WorkflowRequestError(response.status, value.error || `Request failed (${response.status})`, value.currentRevision, value.reason);
-  }
-  return value as T;
-}
-
-const call = <T>(token: string, path: string, method = 'GET', body?: unknown, opts?: ReadOptions): Promise<T> =>
-  revisionedRequest<T>(token, `/api/workflows${path}`, method, body, opts);
+const call = <T>(path: string, method = 'GET', body?: unknown, opts?: ClientOptions): Promise<T> =>
+  revisionedRequest<T>(`/api/workflows${path}`, method, body, opts);
 
 const id = (v: string) => encodeURIComponent(v);
 const FINAL = new Set<WorkflowJobStatus>(['succeeded', 'failed', 'cancelled', 'interrupted']);
 
 export const workflowApi = {
-  submit: (token: string, kind: string, idempotencyKey: string, input: Record<string, unknown>) =>
-    call<{ job: WorkflowJob; created: boolean }>(token, '/jobs', 'POST', { kind, idempotencyKey, input }),
-  list: (token: string, filter: { kind?: string; status?: WorkflowJobStatus } = {}) =>
-    call<{ jobs: WorkflowJob[] }>(token, `/jobs?${new URLSearchParams(filter as Record<string, string>)}`),
-  get: (token: string, jobId: string, after = 0, opts?: ReadOptions) =>
-    call<WorkflowReplay>(token, `/jobs/${id(jobId)}?after=${after}`, 'GET', undefined, opts),
-  cancel: (token: string, jobId: string) => call<{ job: WorkflowJob }>(token, `/jobs/${id(jobId)}/cancel`, 'POST', {}),
-  retry: (token: string, jobId: string) => call<{ job: WorkflowJob }>(token, `/jobs/${id(jobId)}/retry`, 'POST', {}),
+  submit: (kind: string, idempotencyKey: string, input: Record<string, unknown>) =>
+    call<{ job: WorkflowJob; created: boolean }>('/jobs', 'POST', { kind, idempotencyKey, input }),
+  list: (filter: { kind?: string; status?: WorkflowJobStatus } = {}) =>
+    call<{ jobs: WorkflowJob[] }>(`/jobs?${new URLSearchParams(filter as Record<string, string>)}`),
+  get: (jobId: string, after = 0, opts?: ClientOptions) =>
+    call<WorkflowReplay>(`/jobs/${id(jobId)}?after=${after}`, 'GET', undefined, opts),
+  cancel: (jobId: string) => call<{ job: WorkflowJob }>(`/jobs/${id(jobId)}/cancel`, 'POST', {}),
+  retry: (jobId: string) => call<{ job: WorkflowJob }>(`/jobs/${id(jobId)}/retry`, 'POST', {}),
 
-  createDocument: (token: string, kind: string, data: Record<string, unknown>) =>
-    call<{ document: WorkflowDocument }>(token, '/documents', 'POST', { kind, data }),
-  listDocuments: (token: string, kind: string) => call<{ documents: WorkflowDocument[] }>(token, `/documents?kind=${id(kind)}`),
-  getDocument: (token: string, docId: string) => call<{ document: WorkflowDocument }>(token, `/documents/${id(docId)}`),
-  /** Throws WorkflowRequestError with status 409 and currentRevision when stale. */
-  updateDocument: (token: string, docId: string, expectedRevision: number, data: Record<string, unknown>) =>
-    call<{ document: WorkflowDocument }>(token, `/documents/${id(docId)}`, 'PUT', { expectedRevision, data }),
-  removeDocument: (token: string, docId: string, expectedRevision: number) =>
-    call<{ removed: true }>(token, `/documents/${id(docId)}?expectedRevision=${expectedRevision}`, 'DELETE'),
+  createDocument: (kind: string, data: Record<string, unknown>) =>
+    call<{ document: WorkflowDocument }>('/documents', 'POST', { kind, data }),
+  listDocuments: (kind: string) => call<{ documents: WorkflowDocument[] }>(`/documents?kind=${id(kind)}`),
+  getDocument: (docId: string) => call<{ document: WorkflowDocument }>(`/documents/${id(docId)}`),
+  /** Throws ApiError with status 409 and currentRevision when stale. */
+  updateDocument: (docId: string, expectedRevision: number, data: Record<string, unknown>) =>
+    call<{ document: WorkflowDocument }>(`/documents/${id(docId)}`, 'PUT', { expectedRevision, data }),
+  removeDocument: (docId: string, expectedRevision: number) =>
+    call<{ removed: true }>(`/documents/${id(docId)}?expectedRevision=${expectedRevision}`, 'DELETE'),
 };
 
 export interface FollowHandlers {
@@ -85,20 +67,21 @@ export interface FollowHandlers {
 
 /** Follow a job until it finishes or `signal` aborts. Resolves with the
  *  final status, or null when aborted. `after` resumes from a known event. */
-export async function followJob(token: string, jobId: string, handlers: FollowHandlers,
+export async function followJob(jobId: string, handlers: FollowHandlers,
   opts: { after?: number; signal?: AbortSignal; retryMs?: number } = {}): Promise<WorkflowJobStatus | null> {
   let last = opts.after ?? 0;
   let delay = opts.retryMs ?? 1000;
   while (!opts.signal?.aborted) {
     try {
+      const token = getAuthToken();
       const response = await fetch(`/api/workflows/jobs/${id(jobId)}/events?after=${last}`, {
-        headers: { Authorization: `Bearer ${token}` }, signal: opts.signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: opts.signal,
       });
       if (!response.ok || !response.body) {
         const value = await response.json().catch(() => ({}));
         // A missing job or a bad request will not fix itself by retrying.
         if (response.status === 404 || response.status === 401 || response.status === 400) {
-          throw new WorkflowRequestError(response.status, value.error || `Cannot follow job (${response.status})`);
+          throw new ApiError(response.status, value.error || `Cannot follow job (${response.status})`, value);
         }
         throw new Error(value.error || `Cannot follow job (${response.status})`);
       }
@@ -136,7 +119,7 @@ export async function followJob(token: string, jobId: string, handlers: FollowHa
       delay = opts.retryMs ?? 1000;  // a clean end without a final status: reconnect promptly
     } catch (err) {
       if (opts.signal?.aborted) return null;
-      if (err instanceof WorkflowRequestError) throw err;
+      if (err instanceof ApiError) throw err;
       handlers.onError?.(err);
       delay = Math.min(delay * 2, 10_000);
     }

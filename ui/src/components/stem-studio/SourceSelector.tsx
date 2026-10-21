@@ -6,6 +6,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import { Upload, Music, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
+import { useUpload } from '../../queries/writes';
 
 interface Song {
   id: string;
@@ -38,7 +39,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
   void sessionEpoch;
   const { t } = useTranslation();
   const [uploadDragging, setUploadDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const { mutate: uploadAudio, isPending: uploading } = useUpload<{ audio_url?: string }>();
   const [showPicker, setShowPicker] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -46,7 +47,7 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
 
   const songsQuery = useQuery({
     queryKey: serverKey('studios/recent-songs', { auth: true, filters: { source: filter === 'all' ? undefined : filter, limit: 50 } }),
-    queryFn: ({ signal }) => apiClient.get<{ songs: Song[] }>(`/songs/recent?limit=50${filter === 'all' ? '' : `&source=${encodeURIComponent(filter)}`}`, { token, signal }),
+    queryFn: ({ signal }) => apiClient.get<{ songs: Song[] }>(`/songs/recent?limit=50${filter === 'all' ? '' : `&source=${encodeURIComponent(filter)}`}`, { signal }),
     enabled: showPicker && !!token,
   });
   const songs = songsQuery.data?.songs ?? [];
@@ -56,21 +57,13 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
     (s.artist_name || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleUpload = useCallback(async (file: File) => {
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error('Upload failed');
-      const data = await res.json();
-      onSourceChange(data.audio_url, file.name);
-    } catch (err: any) {
-      console.error('Upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
-  }, [onSourceChange]);
+  const handleUpload = useCallback((file: File) => {
+    uploadAudio({
+      path: '/upload/audio',
+      files: [{ field: 'audio', file }],
+      onSuccess: data => { if (data.audio_url) onSourceChange(data.audio_url, file.name); },
+    });
+  }, [onSourceChange, uploadAudio]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();

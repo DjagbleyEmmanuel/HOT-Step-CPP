@@ -6,11 +6,12 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { getSongPostProcessingStatus, songApi, type PostProcessJobStatus } from '../../services/api';
 import type { Song } from '../../types';
 import { pollWhile } from '../contract';
-import { invalidateSongViews, resourceKey, serverKey, sharedKeys, SHARED, SONG_VIEWS } from '../keys';
+import { resourceKey, serverKey, sharedKeys, SHARED, SONG_VIEWS } from '../keys';
+import { queryManager } from '../invalidation';
 
-export const songsOptions = (token: string) => queryOptions({
+export const songsOptions = () => queryOptions({
   queryKey: sharedKeys.songs(),
-  queryFn: ({ signal }) => songApi.list(token, { signal }),
+  queryFn: ({ signal }) => songApi.list({ signal }),
 });
 
 export const songOptions = (id: string) => queryOptions({
@@ -18,9 +19,9 @@ export const songOptions = (id: string) => queryOptions({
   queryFn: ({ signal }) => songApi.get(id, { signal }),
 });
 
-export const recentSongsOptions = (token: string, source = 'all') => queryOptions({
+export const recentSongsOptions = (source = 'all') => queryOptions({
   queryKey: serverKey('shell-queue/recent-songs', { auth: true, filters: { source: source === 'all' ? undefined : source } }),
-  queryFn: ({ signal }) => songApi.getRecentSongs(token, source, 50, { signal }),
+  queryFn: ({ signal }) => songApi.getRecentSongs(source, 50, { signal }),
 });
 
 const POST_PROCESS_ACTIVE = new Set(['starting', 'pending', 'running']);
@@ -42,7 +43,7 @@ const RECENT = resourceKey('shell-queue/recent-songs');
  *  never edited from here: their shapes belong to their areas. */
 export { SONG_VIEWS };
 
-export const invalidateSongs = (client: QueryClient): Promise<unknown> => invalidateSongViews(client);
+export const invalidateSongs = (client: QueryClient): Promise<unknown> => queryManager.songs.views(client);
 
 type SongList = { songs: Song[] };
 

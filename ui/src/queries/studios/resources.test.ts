@@ -74,15 +74,15 @@ test('late project A response cannot replace project B, and project reads consum
     return json({ project: { id: 'B' }, sections: [] });
   };
   try {
-    const first = client.query(projectOptions('test-token', 'A')).catch(error => error);
+    const first = client.query(projectOptions('A')).catch(error => error);
     await tick();
-    await client.cancelQueries({ queryKey: projectOptions('test-token', 'A').queryKey });
+    await client.cancelQueries({ queryKey: projectOptions('A').queryKey });
     assert.equal(signal?.aborted, true);
-    await client.query(projectOptions('test-token', 'B'));
+    await client.query(projectOptions('B'));
     resolveA(json({ project: { id: 'A' }, sections: [] }));
     await first;
-    assert.equal(client.getQueryData(projectOptions('test-token', 'B').queryKey)?.project.id, 'B');
-    assert.equal(client.getQueryData(projectOptions('test-token', 'A').queryKey), undefined);
+    assert.equal(client.getQueryData(projectOptions('B').queryKey)?.project.id, 'B');
+    assert.equal(client.getQueryData(projectOptions('A').queryKey), undefined);
   } finally { globalThis.fetch = original; client.clear(); }
 });
 

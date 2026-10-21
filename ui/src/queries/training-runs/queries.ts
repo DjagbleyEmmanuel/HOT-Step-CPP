@@ -8,6 +8,7 @@ import type { TrainingRecipeFamily } from '../../../../server/src/contracts/trai
 import { settingsApi } from '../../services/api';
 import { scopeOf, serverKey, sharedKeys, resourceKey, SHARED } from '../keys';
 import { pollWhile } from '../contract';
+import { queryManager } from '../invalidation';
 
 export type Worker = string | null;
 export const activeJob = (job: { status: string } | null | undefined) =>
@@ -137,12 +138,11 @@ export const runQueries = {
 export async function runCommand<T>(client: QueryClient, worker: Worker, command: () => Promise<T>): Promise<T> {
   const result = await command();
   await Promise.all([
-    ...[SHARED.preparation, SHARED.preparationJob].map(resource =>
-      client.invalidateQueries({ queryKey: resourceKey(resource) })),
-    client.invalidateQueries({ queryKey: ['hs'], predicate: q =>
+    queryManager.keys(client, ...[SHARED.preparation, SHARED.preparationJob].map(r => resourceKey(r))),
+    queryManager.filter(client, { queryKey: ['hs'], predicate: q =>
       String(q.queryKey[1]).startsWith('training-runs/') &&
       (scopeOf(q.queryKey)?.worker === undefined || scopeOf(q.queryKey)?.worker === worker) }),
-    client.invalidateQueries({ queryKey: ['hs'], predicate: q =>
+    queryManager.filter(client, { queryKey: ['hs'], predicate: q =>
       String(q.queryKey[1]).startsWith('training-data/') && scopeOf(q.queryKey)?.worker === worker }),
   ]);
   return result;

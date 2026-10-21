@@ -10,6 +10,7 @@ import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-rea
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { submitStudioRender, followStudioRender } from '../../services/repaintLayerWorkflowApi';
+import { useUpload } from '../../queries/writes';
 import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
 import { useBackendStore } from '../../stores/backendStore';
 import { useQuery } from '@tanstack/react-query';
@@ -63,7 +64,7 @@ export const RepaintStudio: React.FC = () => {
   const [sourceAssetId, setSourceAssetId] = useState(() => restore<string>('sourceAssetId', ''));
   const [sourceAudioUrl, setSourceAudioUrl] = useState(() => restore<string>('sourceAudioUrl', ''));
   const [sourceName, setSourceName] = useState(() => restore<string>('sourceName', ''));
-  const [isUploading, setIsUploading] = useState(false);
+  const { mutate: uploadAudio, isPending: isUploading } = useUpload<{ audio_url: string; asset_id: string }>();
   const [duration, setDuration] = useState(0);
 
   // ── LRC state ──
@@ -135,10 +136,10 @@ export const RepaintStudio: React.FC = () => {
     const observation = new AbortController();
     setIsGenerating(true);
     setActiveJobId(id);
-    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
+    void followStudioRender(id, stage => { if (mounted) setGenStage(stage); }, { signal: observation.signal })
       .then(async result => {
         if (!mounted) return;
-        const { job } = await workflowApi.get(token, id);
+        const { job } = await workflowApi.get(id);
         if (!mounted) return;
         const captured = job.input as { sourceName?: string; styleCaption?: string };
         const qId = addManualQueueItem({ title: captured.sourceName ? `${captured.sourceName} (Repaint)` : 'Repaint',
@@ -182,28 +183,22 @@ export const RepaintStudio: React.FC = () => {
   }, []);
 
   // ── File upload ──
-  const handleFileUpload = useCallback(async (file: File) => {
+  const handleFileUpload = useCallback((file: File) => {
     if (!token) return;
-    setIsUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-      if (!res.ok) throw new Error('Upload failed');
-      const { audio_url, asset_id } = await res.json();
-      setSourceAudioUrl(audio_url);
-      setSourceAssetId(asset_id);
-      setSourceName(file.name);
-      setSourceSong(null);
-      setRegionStart(0);
-      setRegionEnd(0);
-      showToast('Audio uploaded');
-    } catch (err: any) {
-      showToast(`Upload failed: ${err.message}`);
-    } finally {
-      setIsUploading(false);
-    }
-  }, [token]);
+    uploadAudio({
+      path: '/upload/audio',
+      files: [{ field: 'audio', file }],
+      onSuccess: ({ audio_url, asset_id }) => {
+        setSourceAudioUrl(audio_url);
+        setSourceAssetId(asset_id);
+        setSourceName(file.name);
+        setSourceSong(null);
+        setRegionStart(0);
+        setRegionEnd(0);
+        showToast('Audio uploaded');
+      },
+    });
+  }, [token, uploadAudio]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -248,13 +243,13 @@ export const RepaintStudio: React.FC = () => {
     let submittedJobId: string | null = null;
     try {
       const engineParams = gp.getGlobalParams();
-      const { job } = await submitStudioRender(token, 'repaint-render', {
+      const { job } = await submitStudioRender('repaint-render', {
         source, expectedBackend: useBackendStore.getState().activeBackendId,
         engineParams, regionStart, regionEnd: effEnd, lyrics, styleCaption,
         sourceName, repaintMode: repaintMode as 'conservative' | 'balanced' | 'aggressive',
         crossfadeFrames,
       }, key);
-      if (submissionKeyRef.current !== key) { await workflowApi.cancel(token, job.id); return; }
+      if (submissionKeyRef.current !== key) { await workflowApi.cancel(job.id); return; }
       setActiveJobId(job.id);
       submittedJobId = job.id;
       localStorage.setItem('hs-repaint-workflowJob', job.id);
@@ -265,7 +260,7 @@ export const RepaintStudio: React.FC = () => {
         caption: styleCaption || String(engineParams.style || ''),
       });
       setQueueItemId(qId);
-      await followStudioRender(token, job.id, stage => setGenStage(stage)).then(result => {
+      await followStudioRender(job.id, stage => setGenStage(stage)).then(result => {
         setGenStage('Complete!');
         const audio = result.audio || {};
         completeManualQueueItem(qId, {
@@ -294,7 +289,7 @@ export const RepaintStudio: React.FC = () => {
 
   const handleCancel = async () => {
     submissionKeyRef.current = null;
-    if (activeJobId && token) { try { await workflowApi.cancel(token, activeJobId); } catch {} }
+    if (activeJobId && token) { try { await workflowApi.cancel(activeJobId); } catch {} }
     localStorage.removeItem('hs-repaint-workflowJob');
     if (queueItemId) failManualQueueItem(queueItemId, 'Cancelled by user');
     setIsGenerating(false);

@@ -40,7 +40,7 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
   const { token, sessionEpoch } = useAuth();
   void sessionEpoch;
   const queryClient = useQueryClient();
-  const query = useQuery({ ...recentSongsOptions(token || '', source || 'all'), enabled: !!token, select: playable });
+  const query = useQuery({ ...recentSongsOptions(source || 'all'), enabled: !!token, select: playable });
   const songs = query.data ?? NO_SONGS;
   // Spin only with nothing cached at all; an empty result is an answer.
   const loading = query.isPending && !!token;
@@ -61,7 +61,7 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
   const handleDelete = useCallback(async (rs: UnifiedRecentSong) => {
     if (!token || !rs.audio_url) return;
     try {
-      await songApi.delete(rs.id, token);
+      await songApi.delete(rs.id);
       void removeSongs(queryClient, [rs.id]);
       showToast('Song deleted');
     } catch {

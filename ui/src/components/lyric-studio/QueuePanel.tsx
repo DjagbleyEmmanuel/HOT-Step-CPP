@@ -311,9 +311,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     const skipped = items.length - pending.length;
     try {
       if (pending.length) {
-        const job = await lyricWorkflowApi.submitBatch(token, pending.map(({ item }) => ({ type: 'fetch', artist: item.artist, album: item.album, maxSongs: fetchMaxSongs })));
+        const job = await lyricWorkflowApi.submitBatch(pending.map(({ item }) => ({ type: 'fetch', artist: item.artist, album: item.album, maxSongs: fetchMaxSongs })));
         fetchJobRef.current = job.id;
-        const status = await lyricWorkflowApi.follow(token, job.id, {
+        const status = await lyricWorkflowApi.follow(job.id, {
           onEvent: event => {
             const data = event.data as { index?: number; value?: { songs_fetched?: number }; error?: string } | null;
             const row = data?.index === undefined ? undefined : pending[data.index];
@@ -324,7 +324,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
           },
         });
         if (status === 'succeeded') {
-          const final = await lyricWorkflowApi.get(token, job.id);
+          const final = await lyricWorkflowApi.get(job.id);
           const results = (final.job.result as { results?: Array<{ index: number; status: 'done' | 'error'; value?: { songs_fetched?: number }; error?: string }> } | null)?.results || [];
           completed = results.filter(result => result.status === 'done').length;
           failed = results.filter(result => result.status === 'error').length;
@@ -354,7 +354,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     onFetchComplete?.();
   };
 
-  const stopFetchQueue = () => { if (token && fetchJobRef.current) void lyricWorkflowApi.cancel(token, fetchJobRef.current); };
+  const stopFetchQueue = () => { if (token && fetchJobRef.current) void lyricWorkflowApi.cancel(fetchJobRef.current); };
   const clearFetchQueue = () => { if (!fetchRunning) setFetchQueue([]); };
 
   const fetchQueuePending = fetchQueue.filter(q => q.status === 'pending').length;
@@ -465,9 +465,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     let queued = 0;
     if (intents.length) {
       try {
-        const job = await lyricWorkflowApi.submitRenders(token, intents);
+        const job = await lyricWorkflowApi.submitRenders(intents);
         queued = intents.length;
-        void lyricWorkflowApi.follow(token, job.id, { onEvent: event => {
+        void lyricWorkflowApi.follow(job.id, { onEvent: event => {
           if (event.type === 'item-error') showToast?.(`Render failed: ${(event.data as { error?: string })?.error || 'Unknown error'}`);
         } }).catch(err => showToast?.(`Render status unavailable: ${err.message}`));
       } catch (err) {

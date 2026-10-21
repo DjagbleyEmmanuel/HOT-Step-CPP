@@ -13,8 +13,8 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   startAuthSession(queryClient, 'test-A');
   const keys = [sharedKeys.workflowJob('job'), sharedKeys.workflowJob('job', 7),
     sharedKeys.workflowDocument('doc'), sharedKeys.songs()];
-  assert.deepEqual(workflowOptions('test-A', 'job', 7).queryKey, keys[1]);
-  assert.deepEqual(documentOptions('test-A', 'doc').queryKey, keys[2]);
+  assert.deepEqual(workflowOptions('job', 7).queryKey, keys[1]);
+  assert.deepEqual(documentOptions('doc').queryKey, keys[2]);
   for (const key of keys) queryClient.setQueryData(key, {});
   let invalidations = 0;
   const unsubscribe = queryClient.getQueryCache().subscribe(event => {
@@ -24,7 +24,7 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   globalThis.fetch = async () => new Response(finished + status + status, { headers: { 'Content-Type': 'text/event-stream' } });
   let effects = 0;
   try {
-    assert.equal(await followStudioJob('test-A', 'job', { onEvent: () => { effects++; } }), 'succeeded');
+    assert.equal(await followStudioJob('job', { onEvent: () => { effects++; } }), 'succeeded');
     assert.equal(effects, 1);
     assert.equal(invalidations, 4);
     for (const key of keys) assert.equal(queryClient.getQueryState(key)?.isInvalidated, true);
@@ -43,7 +43,7 @@ test('a delayed old-session stream cannot deliver effects or invalidate the new 
   globalThis.fetch = async (_url, opts) => { signal = opts?.signal ?? undefined; return held; };
   let effects = 0;
   try {
-    const following = followStudioJob('test-old', 'job', { onEvent: () => { effects++; } });
+    const following = followStudioJob('job', { onEvent: () => { effects++; } });
     startAuthSession(queryClient, 'test-new');
     const key = sharedKeys.songs();
     queryClient.setQueryData(key, { songs: [] });

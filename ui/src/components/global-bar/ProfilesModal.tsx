@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { localOptions } from '../../queries/global-models/options';
+import { queryManager } from '../../queries/invalidation';
 // ProfilesModal.tsx — named parameter-profile manager
 //
 // Lists server-stored profiles (every generation parameter as a raw
@@ -45,7 +46,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(() => client.invalidateQueries({ queryKey: options.queryKey }), [client, backend]);
+  const refresh = useCallback(() => { void queryManager.keys(client, options.queryKey); }, [client, backend]);
   useEffect(() => { if (query.error) setError(query.error.message); }, [query.error]);
 
   const saveAs = useCallback((name: string) => {
@@ -129,7 +130,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
           return;
         }
         // The server unwraps a full profile wrapper ({ name, saved_at, data }) and checks the shape
-        const { name, data } = await validateProfileImport(file.name, parsed, token);
+        const { name, data } = await validateProfileImport(file.name, parsed);
         if (profiles.some(p => p.name.toLowerCase() === name.toLowerCase())) {
           setConfirmAction({ kind: 'import', name, data });
         } else {

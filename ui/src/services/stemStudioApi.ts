@@ -1,5 +1,6 @@
 import { queryClient } from '../queries/client';
 import { serverKey, resourceKey } from '../queries/keys';
+import { queryManager } from '../queries/invalidation';
 import { ACTIVE_POLL_MS } from '../queries/contract';
 import { waitForSnapshot } from '../queries/studios/wait';
 import { apiClient, type ReadOptions } from './httpClient';
@@ -8,6 +9,8 @@ import { apiClient, type ReadOptions } from './httpClient';
 // Communicates with Node server /api/stem-studio endpoints.
 
 const API_BASE = '/api/stem-studio';
+/** Path prefix for apiClient calls (the client already adds `/api`). */
+const P = '/stem-studio';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -110,42 +113,24 @@ export const TRACK_LABELS: Record<string, string> = {
 
 /** Submit a new extraction job. Returns the job ID. */
 export async function submitExtraction(params: ExtractParams): Promise<string> {
-  const res = await fetch(`${API_BASE}/extract`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(err.error || `Extraction failed: ${res.status}`);
-  }
-  const data = await res.json();
+  const data = await apiClient.post<{ id: string }>(`${P}/extract`, params);
   return data.id;
 }
 
 /** Submit a new SuperSep separation job. Returns the job ID. */
 export async function submitSupersep(params: SupersepParams): Promise<string> {
-  const res = await fetch(`${API_BASE}/supersep`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(err.error || `Separation failed: ${res.status}`);
-  }
-  const data = await res.json();
+  const data = await apiClient.post<{ id: string }>(`${P}/supersep`, params);
   return data.id;
 }
 
 /** Poll extraction job progress. */
 export async function getExtractProgress(jobId: string, opts?: ReadOptions): Promise<ExtractProgress> {
-  return apiClient.get<ExtractProgress>(`${API_BASE}/${jobId}/progress`.replace('/api', ''), opts);
+  return apiClient.get<ExtractProgress>(`${P}/${jobId}/progress`, opts);
 }
 
 /** Get completed extraction result with stem metadata. */
 export async function getExtractResult(jobId: string, opts?: ReadOptions): Promise<ExtractJobResult> {
-  return apiClient.get<ExtractJobResult>(`${API_BASE}/${jobId}/result`.replace('/api', ''), opts);
+  return apiClient.get<ExtractJobResult>(`${P}/${jobId}/result`, opts);
 }
 
 /** Get the direct URL for a specific stem's audio. */
@@ -160,24 +145,22 @@ export function getDownloadAllUrl(jobId: string): string {
 
 /** List all past extraction jobs (newest first). */
 export async function listJobs(opts?: ReadOptions): Promise<ExtractJobSummary[]> {
-  return apiClient.get<ExtractJobSummary[]>(`${API_BASE}/jobs`.replace('/api', ''), opts);
+  return apiClient.get<ExtractJobSummary[]>(`${P}/jobs`, opts);
 }
 
 /** Delete a single extraction job and its files. */
 export async function deleteJob(jobId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/${jobId}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  await apiClient.delete(`${P}/${jobId}`);
 }
 
 /** Delete ALL extraction jobs and stems. */
 export async function deleteAllJobs(): Promise<void> {
-  const res = await fetch(`${API_BASE}/all`, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`Delete all failed: ${res.status}`);
+  await apiClient.delete(`${P}/all`);
 }
 
 /** Get stem storage statistics for the Settings page. */
 export async function getStemStats(opts?: ReadOptions): Promise<StemStats> {
-  return apiClient.get<StemStats>(`${API_BASE}/stats`.replace('/api', ''), opts);
+  return apiClient.get<StemStats>(`${P}/stats`, opts);
 }
 
 /**
@@ -197,7 +180,7 @@ export async function waitForExtraction(
     queryKey: serverKey('studios/extract-result', { id: jobId }),
     queryFn: ({ signal }) => getExtractResult(jobId, { signal }),
   });
-  await queryClient.invalidateQueries({ queryKey: resourceKey('studios/extractions') });
+  await queryManager.keys(queryClient, resourceKey('studios/extractions'));
   return result;
 }
 

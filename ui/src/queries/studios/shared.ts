@@ -5,16 +5,16 @@ import { apiClient } from '../../services/httpClient';
 import type { PluginRegistry } from '../../types/pluginTypes';
 import { sharedKeys } from '../keys';
 
-// Shared reads retain their canonical wire shapes. Credentials are captured
-// by the function, never the key; observers own selection and polling cadence.
-export const songsOptions = (token: string) => queryOptions({
+// Shared reads retain their canonical wire shapes. The transport injects the
+// bearer from the session accessor; observers own selection and polling cadence.
+export const songsOptions = () => queryOptions({
   queryKey: sharedKeys.songs(),
-  queryFn: ({ signal }) => songApi.list(token, { signal }),
+  queryFn: ({ signal }) => songApi.list({ signal }),
 });
 export function useStudioSongs(enabled = true) {
   const { token, sessionEpoch } = useAuth();
-  void sessionEpoch;
-  return useQuery({ ...songsOptions(token || ''), enabled: enabled && !!token });
+  void sessionEpoch; // re-render on login/logout so the key's epoch stays current
+  return useQuery({ ...songsOptions(), enabled: enabled && !!token });
 }
 export const studioPluginsOptions = () => queryOptions({
   queryKey: sharedKeys.plugins(),

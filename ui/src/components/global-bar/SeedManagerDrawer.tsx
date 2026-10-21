@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { localOptions } from '../../queries/global-models/options';
+import { queryManager } from '../../queries/invalidation';
 import { apiClient } from '../../services/httpClient';
 // SeedManagerDrawer.tsx — Seed save/load popover for STORM Live Controls
 // MDMAchine / A&E Concepts 2026
@@ -86,7 +87,7 @@ export const SeedManagerDrawer: React.FC<SeedManagerDrawerProps> = ({
   const query = useQuery({ ...options, enabled: isOpen });
   const seeds = query.data?.seeds ?? [];
   const loading = query.isPending;
-  const refresh = () => client.invalidateQueries({ queryKey: options.queryKey });
+  const refresh = () => queryManager.keys(client, options.queryKey);
   const [filter,      setFilter]      = React.useState('');
   const [saveName,    setSaveName]    = React.useState('');
   const [saveDesc,    setSaveDesc]    = React.useState('');

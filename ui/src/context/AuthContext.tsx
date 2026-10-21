@@ -6,6 +6,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authApi } from '../services/api';
 import { queryClient } from '../queries/client';
 import { getSessionEpoch, startAuthSession } from '../queries/keys';
+import { setAuthToken, setOnUnauthorized } from '../services/axiosClient';
 import type { User } from '../types';
 
 interface AuthContextValue {
@@ -37,21 +38,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    authApi.autoLogin()
+    // Re-runnable auto-login: runs once on mount, and again via the axios
+    // interceptor's setOnUnauthorized callback when a request hits 401 (the
+    // interceptor dedupes bursts to one re-login per cooldown).
+    const login = () => authApi.autoLogin()
       .then(({ user, token }) => {
         // Before the token reaches any consumer, so no render pairs the new
-        // token with the old session's keys.
+        // token with the old session's keys. The transport reads the same
+        // accessor (axiosClient.ts), updated here at the same site.
+        setAuthToken(token);
         setSessionEpoch(startAuthSession(queryClient, token));
         setUser(user);
         setToken(token);
       })
       .catch(err => console.error('[Auth] Auto-login failed:', err))
       .finally(() => setIsLoading(false));
+
+    login();
+    setOnUnauthorized(login);
+    return () => setOnUnauthorized(null);
   }, []);
 
   const updateUsername = async (name: string) => {
     if (!token) return;
-    const { user: updated } = await authApi.updateUsername(name, token);
+    const { user: updated } = await authApi.updateUsername(name);
     if (updated) setUser(updated);
   };
 

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { inspireProvidersOptions, inspirePromptOptions } from '../../queries/studios/resources';
 import { sharedKeys } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 // InstaGenPanel.tsx — Main Insta-Gen studio container
 //
 // Genre-first music generation with three lyric modes:
@@ -154,7 +155,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     const id = localStorage.getItem('hs-instagen-preview-document');
     if (!id) return;
     let alive = true;
-    instaWorkflowApi.getDocument(token, id).then(({ document }) => {
+    instaWorkflowApi.getDocument(id).then(({ document }) => {
       if (!alive || document.kind !== 'insta-preview') return;
       const data = document.data as { result: InspireResult; edits: { lyrics: string; caption: string } };
       setPreviewDocument({ id, revision: document.revision, lyrics: data.edits.lyrics, caption: data.edits.caption });
@@ -182,7 +183,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   const trackRender = useCallback(async (jobId: string, queueId: string, capturedToken: string) => {
     updateManualQueueItem(queueId, { workflowJob: { id: jobId, token: capturedToken }, stage: 'Preparing song...' });
     try {
-      await followJob(capturedToken, jobId, {
+      await followJob(jobId, {
         onSnapshot: job => {
           if (job.status === 'interrupted') updateManualQueueItem(queueId, { stage: 'Interrupted by server restart' });
         },
@@ -197,7 +198,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
           }
         },
       });
-      const { job } = await instaWorkflowApi.get(capturedToken, jobId);
+      const { job } = await instaWorkflowApi.get(jobId);
       if (job.status !== 'succeeded') throw new Error(job.error || `Song ${job.status}`);
       const output = job.result as { audio?: { audioUrls?: string[]; songIds?: string[]; masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number } };
       const audio = output.audio || {};
@@ -221,14 +222,14 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     if (!canSubmit || !token) return;
     setError(''); setPhase('inspiring'); setInspireProgress('Starting...');
     try {
-      const { job } = await instaWorkflowApi.preview(token, captureInput());
+      const { job } = await instaWorkflowApi.preview(captureInput());
       setActivePreviewJob(job.id);
-      await followJob(token, job.id, {
+      await followJob(job.id, {
         onEvent: event => {
           if (event.type === 'stage') setInspireProgress((event.data as { stage?: string } | null)?.stage || 'Working...');
         },
       });
-      const { job: finished } = await instaWorkflowApi.get(token, job.id);
+      const { job: finished } = await instaWorkflowApi.get(job.id);
       if (finished.status !== 'succeeded') throw new Error(finished.error || `Preview ${finished.status}`);
       const output = finished.result as { documentId: string; revision: number; result: InspireResult };
       localStorage.setItem('hs-instagen-preview-document', output.documentId);
@@ -247,14 +248,14 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     try {
       let revision = previewDocument.revision;
       if (editedLyrics !== previewDocument.lyrics || editedCaption !== previewDocument.caption) {
-        const current = await instaWorkflowApi.getDocument(token, previewDocument.id);
+        const current = await instaWorkflowApi.getDocument(previewDocument.id);
         if (current.document.revision !== revision) throw new Error('Preview changed elsewhere; reopen it before generating');
-        const { document } = await instaWorkflowApi.updateDocument(token, previewDocument.id, revision, {
+        const { document } = await instaWorkflowApi.updateDocument(previewDocument.id, revision, {
           ...current.document.data, edits: { lyrics: editedLyrics, caption: editedCaption },
         });
         revision = document.revision;
       }
-      const { job } = await instaWorkflowApi.approve(token, previewDocument.id, revision);
+      const { job } = await instaWorkflowApi.approve(previewDocument.id, revision);
       const queueId = addManualQueueItem({ title: inspireResult.title || editedCaption || 'Auto-Gen', caption: editedCaption });
       void trackRender(job.id, queueId, token);
       localStorage.removeItem('hs-instagen-preview-document');
@@ -267,7 +268,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     const input = captureInput();
     setError('');
     try {
-      const { job } = await instaWorkflowApi.direct(token, input);
+      const { job } = await instaWorkflowApi.direct(input);
       const queueId = addManualQueueItem({ title: input.caption || 'Auto-Gen', caption: input.caption });
       void trackRender(job.id, queueId, token);
     } catch (err: any) { setError(err.message || 'Generation failed'); }
@@ -425,7 +426,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
                           if (!confirm('Reset to default prompt? Your customizations will be lost.')) return;
                           try {
                             await resetInstagenPrompt();
-                            await client.invalidateQueries({ queryKey: inspirePromptOptions().queryKey });
+                            await queryManager.keys(client, inspirePromptOptions().queryKey);
                             setPromptContent(promptDefault);
                             setPromptIsCustom(false);
                             setPromptDirty(false);
@@ -443,7 +444,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
                       setPromptSaving(true);
                       try {
                         await saveInstagenPrompt(promptContent);
-                        await client.invalidateQueries({ queryKey: inspirePromptOptions().queryKey });
+                        await queryManager.keys(client, inspirePromptOptions().queryKey);
                         setPromptDirty(false);
                         setPromptIsCustom(true);
                       } catch { /* ignore */ }
@@ -638,7 +639,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
               <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
               {inspireProgress || t('instaGen.inspireLoading')}
             </button>
-            {activePreviewJob && <button onClick={() => { if (token) void instaWorkflowApi.cancel(token, activePreviewJob); }} className="w-full py-2 text-sm text-zinc-400 hover:text-white">{t('common.cancel')}</button>}
+            {activePreviewJob && <button onClick={() => { if (token) void instaWorkflowApi.cancel(activePreviewJob); }} className="w-full py-2 text-sm text-zinc-400 hover:text-white">{t('common.cancel')}</button>}
           </div>
         ) : lyricMode !== 'instrumental' && previewEnabled ? (
           <button

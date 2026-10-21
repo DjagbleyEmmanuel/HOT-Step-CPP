@@ -12,7 +12,9 @@ import type { Yue2PreparationPayload } from '../services/trainingPreparationApi'
 import { snapshotFor, type TrainingWorkerRef } from '../services/trainingOperations';
 import { queryClient } from '../queries/client';
 import { ACTIVE_POLL_MS } from '../queries/contract';
-import { resourceKey, type Resource } from '../queries/keys';
+import { resourceKey } from '../queries/keys';
+import { queryManager } from '../queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '../queries/writes';
 import { cancelWorkerReads, TD, trainingQueries as tq, workerReads } from '../queries/training-data/queries';
 import { TRAINING_RECIPE_VERSION } from '../../../server/src/contracts/trainingRecipes';
 import { computeTrainingEta, type TrainingEta } from '../utils/trainingEta';
@@ -621,9 +623,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   createDataset: async (input) => {
     const worker = get().trainingWorker;
-    const detail = await trainingApi.createDataset(input, { worker });
+    const detail = await writeAndInvalidate(queryClient, () => trainingApi.createDataset(input, { worker }),
+      keysPlan(resourceKey(TD.datasets, { worker })));
     queryClient.setQueryData(tq.dataset(worker, detail.id).queryKey, detail);
-    invalidate(TD.datasets, worker);
     if (get().trainingWorker !== worker) return detail.id;
     ++openSeq;
     const { byId, order } = indexSamples(detail.samples);
@@ -647,7 +649,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const { trainingWorker: worker, selectedDatasetId: id } = get();
     if (!id) return;
     try {
-      const summary = await trainingApi.patchDataset(id, patch, { worker });
+      const summary = await writeAndInvalidate(queryClient, () => trainingApi.patchDataset(id, patch, { worker }),
+        keysPlan(resourceKey(TD.dataset, { worker }, id), resourceKey(TD.datasets, { worker })));
       // The cache is updated for the scope the rename was made in, whatever
       // is selected now; the store only while it still shows that worker.
       queryClient.setQueryData(tq.dataset(worker, id).queryKey, d => d && { ...d, ...summary });
@@ -665,9 +668,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   deleteDataset: async (id) => {
     const worker = get().trainingWorker;
-    await trainingApi.deleteDataset(id, { worker });
+    await writeAndInvalidate(queryClient, () => trainingApi.deleteDataset(id, { worker }),
+      keysPlan(resourceKey(TD.datasets, { worker })));
     queryClient.removeQueries({ queryKey: resourceKey(TD.dataset, { worker }, id) });
-    invalidate(TD.datasets, worker);
     if (get().trainingWorker !== worker) return;
     if (get().selectedDatasetId === id) get().closeDataset();
     await get().loadDatasets();
@@ -678,9 +681,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     if (!id) return;
     set({ loading: true, error: null });
     try {
-      const detail = await trainingApi.rescanDataset(id, { worker });
+      const detail = await writeAndInvalidate(queryClient, () => trainingApi.rescanDataset(id, { worker }),
+        keysPlan(resourceKey(TD.datasets, { worker })));
       queryClient.setQueryData(tq.dataset(worker, id).queryKey, detail);
-      invalidate(TD.datasets, worker);
       if (!isCurrent(get, worker, id)) { set({ loading: false }); return; }
       const { byId, order } = indexSamples(detail.samples);
       set({ detail, samplesById: byId, sampleOrder: order, loading: false });
@@ -722,7 +725,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     // allows an exclude-only change on a missing file. Route it there.
     if (sample.fileMissing) {
       try {
-        const result = await trainingApi.bulkSetSamples(id, [sampleId], { excluded }, { worker });
+        const result = await writeAndInvalidate(queryClient, () => trainingApi.bulkSetSamples(id, [sampleId], { excluded }, { worker }),
+          keysPlan(resourceKey(TD.dataset, { worker }, id)));
         if (result.failed.length > 0) throw new Error(result.failed[0].error);
         cacheSample(worker, id, { ...sample, excluded });
         if (!isCurrent(get, worker, id)) return;
@@ -764,8 +768,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const ids = Array.from(get().selectedSampleIds);
     if (!id || ids.length === 0) return;
     try {
-      await trainingApi.bulkSetSamples(id, ids, bulk, { worker });
-      invalidate(TD.dataset, worker, id);
+      await writeAndInvalidate(queryClient, () => trainingApi.bulkSetSamples(id, ids, bulk, { worker }),
+        keysPlan(resourceKey(TD.dataset, { worker }, id)));
       if (isCurrent(get, worker, id)) await get().openDataset(id);
     } catch (err) {
       if (isCurrent(get, worker, id)) set({ saveError: { sampleId: '', message: errMessage(err) } });
@@ -814,8 +818,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const { trainingWorker: worker, selectedDatasetId: id } = get();
     if (!id) return;
     try {
-      await trainingApi.deletePreprocessVariant(id, variantKey, { worker });
-      invalidate(TD.preprocessStatus, worker, id);
+      await writeAndInvalidate(queryClient, () => trainingApi.deletePreprocessVariant(id, variantKey, { worker }),
+        keysPlan(resourceKey(TD.preprocessStatus, { worker }, id)));
       if (!isCurrent(get, worker, id)) return;
       set({ error: null });
       await get().loadPreprocessStatus();
@@ -1013,8 +1017,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     const { trainingWorker: worker, activeJob: job } = get();
     if (!job) return;
     try {
-      await trainingApi.cancelJob(job.id, { worker });
-      invalidate(TD.job, worker, job.id);
+      await writeAndInvalidate(queryClient, () => trainingApi.cancelJob(job.id, { worker }),
+        keysPlan(resourceKey(TD.job, { worker }, job.id)));
       if (get().trainingWorker !== worker || get().activeJob?.id !== job.id) return;
       set({ activeJob: { ...job, status: 'cancelled' } });
       // That status change unmounts the EventSource, so the server's terminal
@@ -1033,8 +1037,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       // only, so a mount and a tick share a read but the poll never stalls.
       const pipelines = await queryClient.query({ ...tq.pipelines(worker), staleTime: ACTIVE_POLL_MS });
       // A stage that moved changed some dataset on this worker. Structural
-      // sharing keeps an unchanged list the same object.
-      if (pipelines !== get().pipelines) invalidate(TD.datasets, worker);
+      // sharing keeps an unchanged list the same object. Not a write — the
+      // read itself detected the drift, so it goes straight to the manager.
+      if (pipelines !== get().pipelines) void queryManager.keys(queryClient, resourceKey(TD.datasets, { worker }));
       set(get().trainingWorker === worker ? { pipelines, pipelinesLoading: false } : { pipelinesLoading: false });
     } catch (err) {
       // Advisory — a failed poll must never blank the monitor panel mid-run.
@@ -1066,8 +1071,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   },
   startYue2Batch: async (input) => {
     const worker = get().trainingWorker;
-    const batch = await trainingApi.startYue2Batch(input, { worker });
-    invalidate(TD.yue2Batches, worker);
+    const batch = await writeAndInvalidate(queryClient, () => trainingApi.startYue2Batch(input, { worker }),
+      keysPlan(resourceKey(TD.yue2Batches, { worker })));
     if (get().trainingWorker === worker) {
       set({ yue2BatchDraft: null });
       await get().loadYue2Batches();
@@ -1078,16 +1083,16 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   resumeYue2Batch: (id) => workerCommand(set, get, t => trainingApi.resumeYue2Batch(id, t), 'loadYue2Batches'),
   addToYue2Batch: async (id, datasetIds) => {
     const worker = get().trainingWorker;
-    await trainingApi.addToYue2Batch(id, datasetIds, { worker });
-    invalidate(TD.yue2Batches, worker);
+    await writeAndInvalidate(queryClient, () => trainingApi.addToYue2Batch(id, datasetIds, { worker }),
+      keysPlan(resourceKey(TD.yue2Batches, { worker })));
     if (get().trainingWorker === worker) await get().loadYue2Batches();
   },
   cancelYue2Batch: (id) => workerCommand(set, get, t => trainingApi.cancelYue2Batch(id, t), 'loadYue2Batches'),
 
   startPipeline: async (input) => {
     const worker = get().trainingWorker;
-    const pipeline = await trainingApi.startPipeline(input, { worker });
-    invalidate(TD.pipelines, worker);
+    const pipeline = await writeAndInvalidate(queryClient, () => trainingApi.startPipeline(input, { worker }),
+      keysPlan(resourceKey(TD.pipelines, { worker })));
     if (get().trainingWorker === worker) await get().loadPipelines();
     return pipeline;
   },
@@ -1470,12 +1475,6 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 type SetState = (partial: Partial<TrainingState>) => void;
 type GetState = () => TrainingState;
 
-/** Mark a resource stale for the captured worker (and dataset/job id). The
- *  next load refetches it; a mounted reader refetches at once. */
-function invalidate(resource: Resource, worker: string | null, id?: string): void {
-  void queryClient.invalidateQueries({ queryKey: resourceKey(resource, { worker }, id) });
-}
-
 /** Replace one sample row in the cached detail of the scope it belongs to. */
 function cacheSample(worker: string | null, datasetId: string, sample: TrainingSample): void {
   queryClient.setQueryData(tq.dataset(worker, datasetId).queryKey, d => {
@@ -1527,10 +1526,10 @@ async function startJob<R extends { jobId: string }>(
   const { trainingWorker: worker, selectedDatasetId: id } = get();
   if (!id) return undefined;
   try {
-    const res = await call(id, { worker });
-    // The dataset now has an active job, and its list row may show it.
-    invalidate(TD.dataset, worker, id);
-    invalidate(TD.datasets, worker);
+    // The write dirties the open dataset (it now has an active job) and the
+    // list (its row may show one).
+    const res = await writeAndInvalidate(queryClient, () => call(id, { worker }),
+      keysPlan(resourceKey(TD.dataset, { worker }, id), resourceKey(TD.datasets, { worker })));
     if (!isCurrent(get, worker, id)) return res;
     set({ jobLog: [], error: null, ...reset?.() });
     await adoptJob(set, get, worker, id, res.jobId);
@@ -1549,8 +1548,8 @@ async function workerCommand(
 ): Promise<void> {
   const worker = get().trainingWorker;
   try {
-    await call({ worker });
-    invalidate(reload === 'loadPipelines' ? TD.pipelines : TD.yue2Batches, worker);
+    await writeAndInvalidate(queryClient, () => call({ worker }),
+      keysPlan(resourceKey(reload === 'loadPipelines' ? TD.pipelines : TD.yue2Batches, { worker })));
     if (get().trainingWorker === worker) await get()[reload]();
   } catch (err) {
     if (get().trainingWorker === worker) set({ error: errMessage(err) });
@@ -1565,7 +1564,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   refreshedJobs.add(jobId);
   // Everything a job can change on this worker is stale now: mounted readers
   // refetch, the rest refetch when next asked.
-  void queryClient.invalidateQueries(workerReads(get().trainingWorker));
+  void queryManager.filter(queryClient, workerReads(get().trainingWorker));
   void get().openDataset(id);
   void get().loadDatasets();
   // A finished train-lm job wrote (or failed to write) the adapter dir — the
@@ -1573,7 +1572,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   if (get().activeJob?.kind === 'train-lm') {
     void get().loadTrainLmStatus();
     // ...and the adapter pickers list what is under adapters/lm.
-    void queryClient.invalidateQueries({ queryKey: resourceKey(TD.lmAdapters) });
+    void queryManager.keys(queryClient, resourceKey(TD.lmAdapters));
   }
   // Same for the DiT adapter dir — the per-epoch export means even a cancelled
   // run usually leaves one on disk, so this refresh matters on every terminal
@@ -1718,7 +1717,8 @@ async function flushFields(set: SetState, get: GetState, sampleId: string, field
     return done;
   };
   try {
-    const sample = await trainingApi.patchSample(datasetId, sampleId, patch, { worker });
+    const sample = await writeAndInvalidate(queryClient, () => trainingApi.patchSample(datasetId, sampleId, patch, { worker }),
+      keysPlan(resourceKey(TD.dataset, { worker }, datasetId)));
     cacheSample(worker, datasetId, sample);
     if (!isCurrent(get, worker, datasetId)) return;
     set({

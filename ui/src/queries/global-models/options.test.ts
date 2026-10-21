@@ -93,6 +93,10 @@ test('unmount/remount reuses model registry and consumed signals abort cancelled
     return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
   };
   const read = c.query(backendModelsOptions('A')).catch(error => error);
+  // The axios chain reaches the transport a microtask or two after the query
+  // starts; let it dispatch before cancelling so the abort lands mid-flight.
+  await tick();
+  assert.ok(signal, 'the request reached the transport');
   await c.cancelQueries({ queryKey: backendModelsOptions('A').queryKey });
   await read;
   assert.equal(signal.aborted, true);

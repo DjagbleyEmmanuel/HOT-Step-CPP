@@ -16,6 +16,7 @@ import { deleteAllJobs, formatBytes, type StemStats } from '../../services/stemS
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
 import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
+import { queryManager } from '../../queries/invalidation';
 import { DataFolderPanel } from './DataFolderPanel';
 import { AdapterReferencesAction } from './AdapterReferencesAction';
 import { lireekApi } from '../../services/lireekApi';
@@ -109,7 +110,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setNukeRunning(true);
     setNukeResult(null);
     try {
-      const res = await songApi.nukeGenerations(token);
+      const res = await songApi.nukeGenerations();
       setNukeResult(
         `Nuked ${res.songsDeleted} songs, ${res.filesDeleted} audio files, ${res.lireekAudioGensDeleted} Lyric Studio entries.`
       );
@@ -156,7 +157,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
       await deleteAllJobs();
       queryClient.setQueryData<StemStats>(stemStatsOptions().queryKey, { totalBytes: 0, jobCount: 0, stemCount: 0 });
-      void queryClient.invalidateQueries({ queryKey: stemStatsOptions().queryKey });
+      void queryManager.keys(queryClient, stemStatsOptions().queryKey);
       setStemClearConfirm(false);
     } catch (err: any) {
       console.error('[Settings] Clear stems failed:', err);
@@ -251,7 +252,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     try {
       const res = await settingsApi.updateEnv(diff);
       setEnvOriginal({ ...envValues });
-      void queryClient.invalidateQueries({ queryKey: envOptions().queryKey });
+      void queryManager.keys(queryClient, envOptions().queryKey);
       if (res.restartRequired) {
         // Name them. "Some changes require a restart" left the user to work out
         // which value on screen is a lie about what the engine is running.

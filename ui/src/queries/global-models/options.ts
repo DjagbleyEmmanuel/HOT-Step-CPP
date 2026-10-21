@@ -3,6 +3,7 @@ import { ApiClient } from '../../services/httpClient';
 import { adapterApi } from '../../services/api';
 import { serverKey, sharedKeys, scopeOf, resourceKey, type ServerKey } from '../keys';
 import { pollWhile } from '../contract';
+import { queryManager } from '../invalidation';
 import type { PluginRegistry } from '../../types/pluginTypes';
 import type { ModelRegistry, AceModels } from '../../types';
 import type { BackendCapabilities, BackendInfo, BackendModelCatalogue } from '../../stores/backendStore';
@@ -72,5 +73,5 @@ export const modelChangeKeys = () => [
   resourceKey('global-models/sa3-adapters'), resourceKey('global-models/mm3-adapters'),
 ];
 export async function invalidateModels(client: QueryClient) {
-  await Promise.all(modelChangeKeys().map(queryKey => client.invalidateQueries({ queryKey })));
+  await queryManager.keys(client, ...modelChangeKeys());
 }

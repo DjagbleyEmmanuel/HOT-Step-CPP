@@ -4,6 +4,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import { queryManager } from '../../queries/invalidation';
 import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
@@ -21,7 +22,7 @@ interface LlmProviderInfo {
 
 // ── Global provider cache ─────────────────────────────────────────────────
 export async function getCachedProviders(forceRefresh = false): Promise<LlmProviderInfo[]> {
-  if (forceRefresh) await queryClient.invalidateQueries({ queryKey: snapshotOptions('lireek', '/lireek/providers').queryKey });
+  if (forceRefresh) await queryManager.keys(queryClient, snapshotOptions('lireek', '/lireek/providers').queryKey);
   return (await lireekApi.getProviders()).filter(p => p.available);
 }
 

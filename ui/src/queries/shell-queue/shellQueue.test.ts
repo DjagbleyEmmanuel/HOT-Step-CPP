@@ -26,12 +26,13 @@ test('library and recent consumers share one request per key; sources and sessio
   const c = client();
   const requests: string[] = [];
   globalThis.fetch = async input => { requests.push(String(input)); await tick(); return json({ songs: [song('a')] }); };
-  await Promise.all([c.query(songsOptions('t')), c.query(songsOptions('t')), c.query(songsOptions('t'))]);
-  await Promise.all([c.query(recentSongsOptions('t', 'create')), c.query(recentSongsOptions('t', 'create'))]);
-  await c.query(recentSongsOptions('t', 'all'));
+  await Promise.all([c.query(songsOptions()), c.query(songsOptions()), c.query(songsOptions())]);
+  await Promise.all([c.query(recentSongsOptions('create')), c.query(recentSongsOptions('create'))]);
+  await c.query(recentSongsOptions());
   assert.deepEqual(requests, ['/api/songs', '/api/songs/recent?limit=50&source=create', '/api/songs/recent?limit=50']);
-  // The token never enters a key, and a new session gets its own entries.
-  assert.ok(!JSON.stringify(songsOptions('secret-token').queryKey).includes('secret-token'));
+  // The token never enters a key (it is not part of one any more), and a new
+  // session gets its own entries.
+  assert.ok(!JSON.stringify(songsOptions().queryKey).includes('secret-token'));
   const before = sharedKeys.songs();
   startAuthSession(c, 'another-token');
   assert.notDeepEqual(sharedKeys.songs(), before);
@@ -44,14 +45,14 @@ test('a song write refetches every song view, studios recent feed included', asy
     await tick();
     return String(input).includes('/recent') ? json({ songs: [song(`r${version}`)] }) : json({ songs: [song(`s${version}`)] });
   };
-  const library = new QueryObserver(c, songsOptions('t'));
-  const recent = new QueryObserver(c, recentSongsOptions('t'));
+  const library = new QueryObserver(c, songsOptions());
+  const recent = new QueryObserver(c, recentSongsOptions());
   const stops = [library.subscribe(() => {}), recent.subscribe(() => {})];
   const studios = serverKey('studios/recent-songs', { auth: true, filters: { limit: 50 } });
   c.setQueryData(studios, { songs: [] });
   try {
-    await c.query(songsOptions('t'));
-    await c.query(recentSongsOptions('t'));
+    await c.query(songsOptions());
+    await c.query(recentSongsOptions());
     version = 1;
     await invalidateSongs(c);
     assert.equal(library.getCurrentResult().data?.songs[0].id, 's1');
@@ -69,8 +70,8 @@ test('a deleted row is gone at once and a list read already in flight cannot bri
     if (!deleted) { await new Promise<void>(resolve => { release = resolve; }); return json({ songs: [song('a'), song('b')] }); }
     return json({ songs: [song('b')] });
   };
-  c.setQueryData(songsOptions('t').queryKey, { songs: [song('a'), song('b')] as never[] });
-  const observer = new QueryObserver(c, { ...songsOptions('t'), staleTime: 0 });
+  c.setQueryData(songsOptions().queryKey, { songs: [song('a'), song('b')] as never[] });
+  const observer = new QueryObserver(c, { ...songsOptions(), staleTime: 0 });
   const stop = observer.subscribe(() => {});
   try {
     while (!release) await tick();
@@ -86,15 +87,15 @@ test('a deleted row is gone at once and a list read already in flight cannot bri
 
 test('patchSong edits the library, the detail and the recent feed in place', () => {
   const c = client();
-  c.setQueryData(songsOptions('t').queryKey, { songs: [song('a'), song('b')] as never[] });
+  c.setQueryData(songsOptions().queryKey, { songs: [song('a'), song('b')] as never[] });
   c.setQueryData(sharedKeys.song('a'), { song: song('a') });
-  c.setQueryData(recentSongsOptions('t', 'create').queryKey, { songs: [song('a')] as never[] });
+  c.setQueryData(recentSongsOptions('create').queryKey, { songs: [song('a')] as never[] });
   void patchSong(c, 'a', { mastered_audio_url: '/audio/a_m.wav' });
-  const lib = c.getQueryData<{ songs: Record<string, unknown>[] }>(songsOptions('t').queryKey)!;
+  const lib = c.getQueryData<{ songs: Record<string, unknown>[] }>(songsOptions().queryKey)!;
   assert.equal(lib.songs[0].mastered_audio_url, '/audio/a_m.wav');
   assert.equal(lib.songs[1].mastered_audio_url, undefined);
   assert.equal(c.getQueryData<{ song: Record<string, unknown> }>(sharedKeys.song('a'))!.song.mastered_audio_url, '/audio/a_m.wav');
-  assert.equal(c.getQueryData<{ songs: Record<string, unknown>[] }>(recentSongsOptions('t', 'create').queryKey)!.songs[0].mastered_audio_url, '/audio/a_m.wav');
+  assert.equal(c.getQueryData<{ songs: Record<string, unknown>[] }>(recentSongsOptions('create').queryKey)!.songs[0].mastered_audio_url, '/audio/a_m.wav');
 });
 
 test('a completion patch reconciles every song view; an older read in flight cannot undo it', async () => {
@@ -106,10 +107,10 @@ test('a completion patch reconciles every song view; an older read in flight can
     if (served++ === 0) { await new Promise<void>(resolve => { release = resolve; }); return json({ songs: [song('a')] }); }
     return json({ songs: [song('a', { mastered_audio_url: '/audio/a_m.wav' })] });
   };
-  c.setQueryData(songsOptions('t').queryKey, { songs: [song('a')] as never[] });
+  c.setQueryData(songsOptions().queryKey, { songs: [song('a')] as never[] });
   const studios = serverKey('studios/recent-songs', { auth: true, filters: { limit: 50 } });
   c.setQueryData(studios, { songs: [song('a')] });
-  const library = new QueryObserver(c, { ...songsOptions('t'), staleTime: 0 });
+  const library = new QueryObserver(c, { ...songsOptions(), staleTime: 0 });
   const stop = library.subscribe(() => {});
   try {
     while (!release) await tick();
@@ -133,17 +134,17 @@ test('queue status reads: concurrent loops share one request, and failures are n
   calls = 0;
   globalThis.fetch = async () => { calls++; return json({ error: 'down' }, 503); };
   await assert.rejects(readGenerationStatus('other'));
-  await assert.rejects(readAudioQueue('t'));
+  await assert.rejects(readAudioQueue());
   assert.equal(calls, 2, 'one request per read: the executor owns what a failure means');
 });
 
 test('a waiter that accepts a recent list rides the projection read instead of asking again', async () => {
   let calls = 0;
   globalThis.fetch = async () => { calls++; return json({ items: [{ id: 'x', status: 'pending' }] }); };
-  await readAudioQueue('t');           // the projection: always asks
-  await readAudioQueue('t', 1500);     // the enqueue waiter: a list under one poll old is enough
+  await readAudioQueue();              // the projection: always asks
+  await readAudioQueue(1500);          // the enqueue waiter: a list under one poll old is enough
   assert.equal(calls, 1);
-  await readAudioQueue('t');
+  await readAudioQueue();
   assert.equal(calls, 2);
 });
 

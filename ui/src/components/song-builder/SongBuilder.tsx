@@ -1,6 +1,8 @@
 import { getSessionEpoch } from '../../queries/keys';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectsOptions, projectOptions } from '../../queries/studios/resources';
+import { queryManager } from '../../queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '../../queries/writes';
 // SongBuilder.tsx — Udio-style section-by-section song assembly
 //
 // Build a song one section at a time. Each section generates N candidate
@@ -23,7 +25,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { builderApi } from '../../services/api';
 import type { BuilderProject, BuilderSection, BuilderDirection } from '../../services/api';
-import { WorkflowRequestError } from '../../services/workflowApi';
+import { ApiError } from '../../services/apiError';
 import { followSection as followSectionJob } from './followSection';
 import { useBackendStore } from '../../stores/backendStore';
 import { getGenerationTimeoutMinutes } from '../../utils/generationTimer';
@@ -79,10 +81,10 @@ export const SongBuilder: React.FC = () => {
   }, [playingTrackId]);
 
   // Project list / current project
-  const projectsQuery = useQuery({ ...projectsOptions(token || ''), enabled: !!token });
+  const projectsQuery = useQuery({ ...projectsOptions(), enabled: !!token });
   const projects = projectsQuery.data?.projects ?? [];
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const projectQuery = useQuery({ ...projectOptions(token || '', activeProjectId || ''), enabled: !!token && !!activeProjectId });
+  const projectQuery = useQuery({ ...projectOptions(activeProjectId || ''), enabled: !!token && !!activeProjectId });
   const project = projectQuery.data?.project ?? null;
   const sections = projectQuery.data?.sections ?? [];
   const [, setLoading] = useState(false);
@@ -137,20 +139,20 @@ export const SongBuilder: React.FC = () => {
   // Project snapshots stay in Query. Local fields above are composer drafts.
   const setProjects = (update: (previous: BuilderProject[]) => BuilderProject[]) => {
     if (getSessionEpoch() !== sessionEpoch) return;
-    client.setQueryData(projectsOptions(token || '').queryKey,
+    client.setQueryData(projectsOptions().queryKey,
       (previous: { projects: BuilderProject[] } | undefined) => ({ projects: update(previous?.projects ?? []) }));
   };
   const setProject = (value: BuilderProject | null | ((previous: BuilderProject | null) => BuilderProject | null)) => {
     if (getSessionEpoch() !== sessionEpoch) return;
     const next = typeof value === 'function' ? value(project) : value;
     setActiveProjectId(next?.id ?? null);
-    if (next) client.setQueryData(projectOptions(token || '', next.id).queryKey,
+    if (next) client.setQueryData(projectOptions(next.id).queryKey,
       (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => ({ project: next, sections: previous?.sections ?? [] }));
   };
   const setSections = (next: BuilderSection[]) => {
     if (getSessionEpoch() !== sessionEpoch) return;
     const id = projectIdRef.current;
-    if (id) client.setQueryData(projectOptions(token || '', id).queryKey,
+    if (id) client.setQueryData(projectOptions(id).queryKey,
       (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => previous && ({ ...previous, sections: next }));
   };
 
@@ -205,10 +207,10 @@ export const SongBuilder: React.FC = () => {
   useEffect(() => { setClipPoint(null); setSeedSectionId(null); }, [head?.id, direction]);
 
   const loadView = useCallback(async (projectId: string) => {
-    const options = projectOptions(token!, projectId);
+    const options = projectOptions(projectId);
     await client.cancelQueries({ queryKey: options.queryKey });
     return client.query(options);
-  }, [token, client]);
+  }, [client]);
 
   // Follow a section job: each variant event reloads the project, so its
   // candidates appear as they land.
@@ -218,7 +220,7 @@ export const SongBuilder: React.FC = () => {
     const ctl = new AbortController();
     followRef.current = ctl;
     setIsGenerating(true);
-    void followSectionJob(token, projectId, jobId, {
+    void followSectionJob(projectId, jobId, {
       load: loadView,
       isCurrent: id => projectIdRef.current === id,
       onView: v => { setProject(v.project); setSections(v.sections); },
@@ -263,17 +265,16 @@ export const SongBuilder: React.FC = () => {
   const createProject = useCallback(async () => {
     if (!token) return;
     try {
-      const { project: p } = await builderApi.createProject(
+      const { project: p } = await writeAndInvalidate(client, () => builderApi.createProject(
         {
           title: newTitle || 'Untitled Song', style: newStyle,
           bpm: newBpm || 0, keyScale: newKey, timeSignature: newTimeSig,
           variantCount: 4, sectionLength: 30,
-        }, token);
+        }), keysPlan(projectsOptions().queryKey));
       projectIdRef.current = p.id;
       setProject(p); setSections([]); setNewTitle('');
       setProjects(prev => [p, ...prev]);
-      void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
-    } catch (e: any) { showToast(`Create failed: ${e.message}`); }
+    } catch { /* transport failure already toasted by the global handler */ }
   }, [token, newTitle, newStyle, newBpm, newKey, newTimeSig]);
 
   // Persist a project field change (optimistic local update + background PATCH).
@@ -286,33 +287,33 @@ export const SongBuilder: React.FC = () => {
     if ('timeSignature' in patch) local.time_signature = patch.timeSignature;
     setProject(prev => prev ? { ...prev, ...local } : prev);
     try {
-      const { project: saved } = await builderApi.updateProject(project.id, patch, token);
+      const { project: saved } = await builderApi.updateProject(project.id, patch);
       if (getSessionEpoch() !== sessionEpoch) return;
-      client.setQueryData(projectOptions(token, saved.id).queryKey,
+      client.setQueryData(projectOptions(saved.id).queryKey,
         (previous: { project: BuilderProject; sections: BuilderSection[] } | undefined) => previous && ({ ...previous, project: saved }));
-      void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
-    } catch { /* non-fatal */ }
+      void queryManager.keys(client, projectsOptions().queryKey);
+    } catch { /* non-fatal — transport failure already toasted by the global handler */ }
   }, [project, token]);
 
   const deleteProject = async (id: string) => {
     if (!token) return;
-    const listKey = projectsOptions(token).queryKey;
-    const detailKey = projectOptions(token, id).queryKey;
+    const listKey = projectsOptions().queryKey;
+    const detailKey = projectOptions(id).queryKey;
     try {
       await Promise.all([client.cancelQueries({ queryKey: listKey }), client.cancelQueries({ queryKey: detailKey })]);
-      await builderApi.deleteProject(id, token);
+      await builderApi.deleteProject(id);
       await Promise.all([client.cancelQueries({ queryKey: listKey }), client.cancelQueries({ queryKey: detailKey })]);
       client.setQueryData(listKey, (previous: { projects: BuilderProject[] } | undefined) => previous && ({ projects: previous.projects.filter(project => project.id !== id) }));
       client.removeQueries({ queryKey: detailKey });
-    } catch (error) { showToast(error instanceof Error ? error.message : String(error)); }
-    finally { await client.invalidateQueries({ queryKey: listKey }); }
+    } catch { /* transport failure already toasted by the global handler */ }
+    finally { await queryManager.keys(client, listKey); }
   };
 
   const backToList = useCallback(() => {
     followRef.current?.abort(); followRef.current = null;
     projectIdRef.current = null;
     setProject(null); setSections([]); setIsGenerating(false);
-    if (token) void client.invalidateQueries({ queryKey: projectsOptions(token).queryKey });
+    if (token) void queryManager.keys(client, projectsOptions().queryKey);
   }, [token]);
 
   const refresh = useCallback(async () => {
@@ -376,7 +377,7 @@ export const SongBuilder: React.FC = () => {
   const runOp = useCallback(async (op: () => Promise<{ project: BuilderProject; sections: BuilderSection[] }>, what: string) => {
     try { applyView(await op()); return true; }
     catch (e: any) {
-      if (e instanceof WorkflowRequestError && e.status === 409) {
+      if (e instanceof ApiError && e.status === 409) {
         showToast(`${e.message} Reloaded.`);
         await refresh().catch(() => {});
       } else showToast(`${what}: ${e.message}`);
@@ -418,12 +419,12 @@ export const SongBuilder: React.FC = () => {
         overlap: transitionOverlap, clipPoint, seedSectionId, seedStrength, previewMastering, coResident,
         headDuration: effHeadDuration > 0 ? effHeadDuration : undefined,
         engineParams,
-      }, token);
+      });
       applyView(v);
       followSection(project.id, v.jobId);
     } catch (e: any) {
       setIsGenerating(false); setGenStage('');
-      if (e instanceof WorkflowRequestError && e.status === 409) {
+      if (e instanceof ApiError && e.status === 409) {
         showToast(`${e.message} Reloaded.`);
         await refresh().catch(() => {});
       } else showToast(`Generation failed: ${e.message}`);
@@ -436,7 +437,7 @@ export const SongBuilder: React.FC = () => {
   const chooseVariant = useCallback(async (sectionId: string, song: Song) => {
     if (!token || !project) return;
     if (sectionId === activeSection?.id) stopFollowing();
-    if (await runOp(() => builderApi.chooseCandidate(sectionId, song.id, project.revision, token), 'Could not select')) {
+    if (await runOp(() => builderApi.chooseCandidate(sectionId, song.id, project.revision), 'Could not select')) {
       // Advance composer: default to appending the next section.
       setDirection('append');
       setNextLabel('Verse');
@@ -448,7 +449,7 @@ export const SongBuilder: React.FC = () => {
     if (!token || !project) return;
     // Deleting the section mid-generation stops its renders too (server side).
     if (sectionId === activeSection?.id) stopFollowing();
-    await runOp(() => builderApi.deleteSection(sectionId, project.revision, token), 'Delete failed');
+    await runOp(() => builderApi.deleteSection(sectionId, project.revision), 'Delete failed');
   }, [token, project, activeSection, stopFollowing, runOp]);
 
   // Stop the remaining variants but keep the options that already finished,
@@ -456,7 +457,7 @@ export const SongBuilder: React.FC = () => {
   const stopGenerating = useCallback(async (sectionId: string) => {
     if (!token || !project) return;
     stopFollowing();
-    await runOp(() => builderApi.stopSection(sectionId, project.revision, token), 'Stop failed');
+    await runOp(() => builderApi.stopSection(sectionId, project.revision), 'Stop failed');
   }, [token, project, stopFollowing, runOp]);
 
   // The composer's Cancel: the same as Stop on the section being generated.
@@ -473,7 +474,7 @@ export const SongBuilder: React.FC = () => {
   }, []);
   const saveLyricEdit = useCallback(async () => {
     if (!token || !project || !editingSectionId) return;
-    if (await runOp(() => builderApi.editSection(editingSectionId, { label: editLabel, lyrics: editLyrics }, project.revision, token), 'Save failed')) {
+    if (await runOp(() => builderApi.editSection(editingSectionId, { label: editLabel, lyrics: editLyrics }, project.revision), 'Save failed')) {
       setEditingSectionId(null);
     }
   }, [token, project, editingSectionId, editLabel, editLyrics, runOp]);

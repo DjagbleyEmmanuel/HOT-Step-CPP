@@ -15,6 +15,7 @@ import {
 import type { TypedDocument } from '../../services/workflowApi';
 import { queryClient } from '../client';
 import { serverKey } from '../keys';
+import { queryManager } from '../invalidation';
 
 const presetsOptions = <T>(family: PresetFamily) => queryOptions({
   queryKey: serverKey('shell-queue/presets', { filters: { family } }),
@@ -34,7 +35,7 @@ const settingOptions = <T>(family: SettingsFamily) => queryOptions({
 async function write<R>(key: readonly unknown[], command: () => Promise<R>): Promise<R> {
   await queryClient.cancelQueries({ queryKey: key });
   try { return await command(); }
-  finally { await queryClient.invalidateQueries({ queryKey: key }); }
+  finally { await queryManager.keys(queryClient, key); }
 }
 
 export const queriedPresetsApi: typeof preferencesApi.presets = {

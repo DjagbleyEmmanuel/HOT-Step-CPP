@@ -3,9 +3,10 @@ import * as api from '../../services/trainingApi';
 import { bridgeEvents, type BridgeOptions } from '../sseBridge';
 import { resourceKey, scopeOf, SHARED } from '../keys';
 import type { Worker } from './queries';
+import { queryManager } from '../invalidation';
 
 export function invalidateRunReads(client: QueryClient, worker: Worker) {
-  return client.invalidateQueries({ queryKey: ['hs'], predicate: q =>
+  return queryManager.filter(client, { queryKey: ['hs'], predicate: q =>
     (q.queryKey[1] === SHARED.preparation || q.queryKey[1] === SHARED.preparationJob ||
       String(q.queryKey[1]).startsWith('training-runs/') || String(q.queryKey[1]).startsWith('training-data/')) &&
     (scopeOf(q.queryKey)?.worker === undefined || scopeOf(q.queryKey)?.worker === worker) });

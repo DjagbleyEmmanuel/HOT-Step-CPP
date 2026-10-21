@@ -1,4 +1,4 @@
-import type { ReadOptions } from './httpClient';
+import { apiClient, type ReadOptions } from './httpClient';
 
 export type DataFolderOperation = 'move' | 'repoint' | 'create' | 'import';
 export interface DataFolderPending {
@@ -28,12 +28,9 @@ export interface DataFolderPreview {
   blockers: string[];
 }
 async function request<T>(suffix = '', body?: unknown, opts: ReadOptions = {}): Promise<T> {
-  const response = await fetch(`/api/settings/data-folder${suffix}`, body === undefined ? { signal: opts.signal } : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `API error: ${response.status}`);
-  return data as T;
+  return body === undefined
+    ? apiClient.get<T>(`/settings/data-folder${suffix}`, opts)
+    : apiClient.post<T>(`/settings/data-folder${suffix}`, body, opts);
 }
 export const dataFolderApi = {
   location: (opts?: ReadOptions) => request<DataFolderLocation>('', undefined, opts),

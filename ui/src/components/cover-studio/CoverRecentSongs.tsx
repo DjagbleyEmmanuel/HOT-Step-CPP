@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { coverSongsOptions, deleteCovers } from '../../queries/cover-lyrics/songs';
 import { queryClient } from '../../queries/client';
+import { queryManager } from '../../queries/invalidation';
 import React, { useEffect, useCallback, useRef } from 'react';
 import { Play, Loader2, Music, ListPlus, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -27,7 +28,7 @@ interface CoverRecentSongsProps {
 export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, refreshKey = 0 }) => {
   const { token } = useAuth();
   const currentTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
-  const options = coverSongsOptions(token ?? '');
+  const options = coverSongsOptions();
   const snapshot = useQuery({ ...options, enabled: !!token });
   const songs = (snapshot.data?.songs ?? []).filter(s => !!s.audioUrl).slice().sort((a, b) =>
     new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()).slice(0, 50);
@@ -37,11 +38,11 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
   useEffect(() => {
     if (previousRefresh.current !== refreshKey) {
       previousRefresh.current = refreshKey;
-      void queryClient.invalidateQueries({ queryKey: options.queryKey });
+      void queryManager.keys(queryClient, options.queryKey);
     }
   }, [refreshKey, options.queryKey]);
   useEffect(() => {
-    const refresh = () => { void queryClient.invalidateQueries({ queryKey: options.queryKey }); };
+    const refresh = () => { void queryManager.keys(queryClient, options.queryKey); };
     window.addEventListener('song-postprocessed', refresh);
     window.addEventListener('song-postprocess-reverted', refresh);
     return () => {
@@ -59,7 +60,7 @@ export const CoverRecentSongs: React.FC<CoverRecentSongsProps> = ({ showToast, r
   const handleDelete = useCallback(async (song: Song) => {
     if (!token) return;
     try {
-      await deleteCovers(token, [song.id]);
+      await deleteCovers([song.id]);
       showToast('Cover deleted');
     } catch {
       showToast('Failed to delete', 'error');

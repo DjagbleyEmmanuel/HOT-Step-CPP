@@ -1,11 +1,13 @@
 import { serverKey } from '../queries/keys';
 import { waitForSnapshot } from '../queries/studios/wait';
 import { apiClient, type ReadOptions } from './httpClient';
+import { getAuthToken } from './axiosClient';
 // inspireApi.ts — Frontend API client for the inspire endpoint
 //
 // Provides submit + poll interface for the Insta-Gen inspire flow.
 
-const BASE = '/api/inspire';
+/** External LLM calls can run well past the 60s default; give them a wide margin. */
+const LLM_TIMEOUT_MS = 300_000;
 
 export interface InspireParams {
   caption: string;
@@ -45,36 +47,19 @@ export interface InspireJobStatus {
 }
 
 /** Submit an inspire request, returns job ID */
-export async function submitInspire(params: InspireParams, token?: string): Promise<string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(BASE, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `Inspire failed (${res.status})`);
-  }
-
-  const data = await res.json();
+export async function submitInspire(params: InspireParams): Promise<string> {
+  const data = await apiClient.post<{ jobId: string }>('/inspire', params);
   return data.jobId;
 }
 
 /** Poll inspire job status */
-export async function pollInspireStatus(jobId: string, token?: string, opts?: ReadOptions): Promise<InspireJobStatus> {
-  return apiClient.get<InspireJobStatus>(`${BASE}/status/${jobId}`.replace('/api', ''), { ...opts, token });
+export async function pollInspireStatus(jobId: string, opts?: ReadOptions): Promise<InspireJobStatus> {
+  return apiClient.get<InspireJobStatus>(`/inspire/status/${jobId}`, opts);
 }
 
 /** Cancel an inspire job */
-export async function cancelInspire(jobId: string, token?: string): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  await fetch(`${BASE}/cancel/${jobId}`, { method: 'POST', headers });
+export async function cancelInspire(jobId: string): Promise<void> {
+  await apiClient.post(`/inspire/cancel/${jobId}`);
 }
 
 /**
@@ -83,13 +68,12 @@ export async function cancelInspire(jobId: string, token?: string): Promise<void
  */
 export async function runInspireAndWait(
   params: InspireParams,
-  token?: string,
   onProgress?: (stage: string, progress: number) => void,
 ): Promise<InspireResult> {
-  const jobId = await submitInspire(params, token);
+  const jobId = await submitInspire(params);
 
-  const status = await waitForSnapshot(serverKey('studios/inspire-job', { auth: !!token, id: jobId }),
-    signal => pollInspireStatus(jobId, token, { signal }),
+  const status = await waitForSnapshot(serverKey('studios/inspire-job', { auth: getAuthToken() !== null, id: jobId }),
+    signal => pollInspireStatus(jobId, { signal }),
     job => job.status === 'pending' || job.status === 'running',
     job => { if (job.stage && job.progress !== undefined) onProgress?.(job.stage, job.progress); }, { timeoutMs: 240_000 });
   if (status.status === 'succeeded' && status.result) return status.result;
@@ -131,50 +115,20 @@ export interface InspireProvider {
 /** Generate lyrics via an external LLM provider (synchronous call) */
 export async function runLlmInspire(
   params: LlmInspireParams,
-  token?: string,
 ): Promise<LlmInspireResult> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/llm`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `LLM inspire failed (${res.status})`);
-  }
-
-  return res.json();
+  return apiClient.post<LlmInspireResult>('/inspire/llm', params, { timeout: LLM_TIMEOUT_MS });
 }
 
 /** Fetch available LLM providers for the Insta-Gen provider dropdown */
 export async function fetchInspireProviders(opts?: ReadOptions): Promise<InspireProvider[]> {
-  return apiClient.get<InspireProvider[]>(`${BASE}/llm/providers`.replace('/api', ''), opts);
+  return apiClient.get<InspireProvider[]>('/inspire/llm/providers', opts);
 }
 
 /** Ask the LLM to generate a random song subject for the given genres */
 export async function generateRandomSubject(
   params: { provider: string; model?: string; genres?: string[] },
-  token?: string,
 ): Promise<string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}/llm/subject`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `Random subject generation failed (${res.status})`);
-  }
-
-  const data = await res.json();
+  const data = await apiClient.post<{ subject?: string }>('/inspire/llm/subject', params, { timeout: LLM_TIMEOUT_MS });
   return data.subject || '';
 }
 
@@ -188,29 +142,17 @@ export interface InstagenPromptData {
 
 /** Fetch the current InstaGen system prompt (custom + default) */
 export async function fetchInstagenPrompt(opts?: ReadOptions): Promise<InstagenPromptData> {
-  return apiClient.get<InstagenPromptData>(`${BASE}/llm/prompt`.replace('/api', ''), opts);
+  return apiClient.get<InstagenPromptData>('/inspire/llm/prompt', opts);
 }
 
 /** Save a custom InstaGen system prompt */
 export async function saveInstagenPrompt(value: string): Promise<void> {
-  const res = await fetch(`${BASE}/llm/prompt`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `Save failed (${res.status})`);
-  }
+  await apiClient.put('/inspire/llm/prompt', { value });
 }
 
 /** Reset the InstaGen system prompt to its default */
 export async function resetInstagenPrompt(): Promise<void> {
-  const res = await fetch(`${BASE}/llm/prompt`, { method: 'DELETE' });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `Reset failed (${res.status})`);
-  }
+  await apiClient.delete('/inspire/llm/prompt');
 }
 
 // Durable Insta-Gen workflows. The preview document is the authority for
@@ -226,12 +168,12 @@ export interface InstaWorkflowInput {
 }
 
 export const instaWorkflowApi = {
-  preview: (token: string, input: InstaWorkflowInput, key = crypto.randomUUID()) =>
-    workflowApi.submit(token, 'insta-preview', key, input as unknown as Record<string, unknown>),
-  direct: (token: string, input: InstaWorkflowInput, key = crypto.randomUUID()) =>
-    workflowApi.submit(token, 'insta-direct', key, input as unknown as Record<string, unknown>),
-  approve: (token: string, documentId: string, revision: number, key = `approve:${documentId}:${revision}`) =>
-    workflowApi.submit(token, 'insta-approve', key, { documentId, revision }),
+  preview: (input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+    workflowApi.submit('insta-preview', key, input as unknown as Record<string, unknown>),
+  direct: (input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+    workflowApi.submit('insta-direct', key, input as unknown as Record<string, unknown>),
+  approve: (documentId: string, revision: number, key = `approve:${documentId}:${revision}`) =>
+    workflowApi.submit('insta-approve', key, { documentId, revision }),
   get: workflowApi.get,
   list: workflowApi.list,
   cancel: workflowApi.cancel,

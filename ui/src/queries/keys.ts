@@ -186,11 +186,6 @@ export const SONG_VIEWS: QueryKey[] = [
   resourceKey('studios/recent-songs'), resourceKey('cover-lyrics/cover-songs'),
 ];
 
-export function invalidateSongViews(client: QueryClient): Promise<unknown> {
-  return Promise.all(SONG_VIEWS.map(queryKey => client.invalidateQueries({ queryKey })));
-}
-
-/** A track's lyric sidecars, after a crop or retranscription rewrote them. */
-export function invalidateSidecars(client: QueryClient): Promise<unknown> {
-  return Promise.all([SHARED.lrc, SHARED.lyricsJson].map(r => client.invalidateQueries({ queryKey: resourceKey(r) })));
-}
+/** P2.4: invalidation moved to the one global manager (invalidation.ts);
+ *  these re-exports keep existing importers compiling until P6 deletes them. */
+export { invalidateSidecars, invalidateSongViews } from './invalidation';

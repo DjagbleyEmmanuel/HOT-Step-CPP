@@ -19,10 +19,12 @@ export const ACTIVE_POLL_MS = 1_500;
 /** Ceiling for the doubling interval while a poll keeps failing. */
 export const ERROR_POLL_MAX_MS = 30_000;
 
-/** A request that was aborted, by Query or by the caller. Never retried. */
+/** A request that was aborted, by Query or by the caller. Never retried.
+ *  The axios path rejects with a CanceledError; the SSE and upload paths
+ *  reject with an AbortError — both mean "the caller stopped asking". */
 export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
-    || (error instanceof Error && error.name === 'AbortError');
+    || (error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError'));
 }
 
 /** Worth retrying: fetch's network TypeError, an XHR transport failure

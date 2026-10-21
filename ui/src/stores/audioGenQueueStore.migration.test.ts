@@ -29,7 +29,9 @@ const realSetTimeout = globalThis.setTimeout;
   return handle;
 }) as typeof setTimeout;
 
-(globalThis as any).window = { addEventListener() {}, removeEventListener() {} };
+// The shared axios client sniffs `window` to pick its browser platform, which
+// reads window.location — the stub must provide it or module load crashes.
+(globalThis as any).window = { addEventListener() {}, removeEventListener() {}, location: { href: 'http://localhost' } };
 (globalThis as any).document = { createElement: () => ({ click() {}, href: '', download: '' }) };
 (globalThis.URL as any).createObjectURL = () => 'blob:fake';
 (globalThis.URL as any).revokeObjectURL = () => {};
@@ -156,7 +158,7 @@ test('an explicit rollback is the only way back to browser ownership from a stuc
     await assert.rejects(() => retryQueueMigration('tok'));
     assert.equal(getAudioQueueOwner(), 'migrating');
 
-    await rollbackAudioQueue('tok');
+    await rollbackAudioQueue();
     assert.equal(getAudioQueueOwner(), 'browser');
     assert.equal(api.rollbackCalls, 1);
 
@@ -183,7 +185,7 @@ test('rollback refused with 409 (submission in flight) stays fenced; reload neit
     seedBackup(idbData, 'bk-r1', ['a']);
     api.serverItems = [srvItem('a', 'submitting')];
 
-    await assert.rejects(() => rollbackAudioQueue('tok'), /in flight/);
+    await assert.rejects(() => rollbackAudioQueue(), /in flight/);
     assert.equal(getAudioQueueOwner(), 'migrating', 'never back to server after a failed rollback');
     assert.equal(isAudioQueueRollbackPending(), true);
     assert.equal(api.paused, true, 'the server queue stays paused, as the real route leaves it');
@@ -200,7 +202,7 @@ test('rollback refused with 409 (submission in flight) stays fenced; reload neit
 
     // The submission settles; the user retries the rollback.
     api.serverItems[0].status = 'pending';
-    await rollbackAudioQueue('tok');
+    await rollbackAudioQueue();
     assert.equal(getAudioQueueOwner(), 'browser');
     assert.equal(isAudioQueueRollbackPending(), false);
     assert.equal(api.serverItems[0].status, 'cancelled');
@@ -220,12 +222,12 @@ test('a rollback that fails part-way through its cancels finishes the same plan 
     ];
     api.failNext((c: any) => c.path === '/api/audio-queue/items/srv-b/cancel');
 
-    await assert.rejects(() => rollbackAudioQueue('tok'));
+    await assert.rejects(() => rollbackAudioQueue());
     assert.equal(getAudioQueueOwner(), 'migrating');
     assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'pending']);
     assert.ok(idbData.get(ROLLBACK_PLAN_KEY), 'the plan was saved before the first cancel');
 
-    await rollbackAudioQueue('tok');
+    await rollbackAudioQueue();
     assert.equal(api.rollbackCalls, 1, 'the retry reuses the plan instead of exporting a half-cancelled server');
     assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'cancelled']);
     assert.equal(getAudioQueueOwner(), 'browser');
@@ -249,7 +251,7 @@ test('after a failed rollback, choosing Retry hands the queue back to the server
     api.serverItems = [srvItem('a', 'pending')];
     api.failNext((c: any) => c.path === '/api/audio-queue/migration/rollback-export');
 
-    await assert.rejects(() => rollbackAudioQueue('tok'));
+    await assert.rejects(() => rollbackAudioQueue());
     assert.equal(getAudioQueueOwner(), 'migrating');
     assert.equal(isAudioQueueRollbackPending(), true);
 
@@ -283,13 +285,13 @@ test('a rollback interrupted before browser ownership is recorded keeps its plan
     api.serverItems = [srvItem('a', 'pending')];
     crashOnce(storage, 'setItem', (key, value) => key === OWNER_KEY && value === 'browser');
 
-    await assert.rejects(() => rollbackAudioQueue('tok'), /tab closed/);
+    await assert.rejects(() => rollbackAudioQueue(), /tab closed/);
     assert.equal(getAudioQueueOwner(), 'migrating');
     assert.equal(api.serverItems[0].status, 'cancelled', 'the cancel already happened');
     assert.ok(idbData.get(ROLLBACK_PLAN_KEY), 'the plan survives the interruption');
 
     _resetAudioQueueForTests([fixtureItem('a')]);
-    await rollbackAudioQueue('tok');
+    await rollbackAudioQueue();
     assert.equal(api.rollbackCalls, 1, 'no second export of the already-cancelled server');
     assert.equal(getAudioQueueOwner(), 'browser');
     assert.deepEqual(restoredItems(idbData).map(i => i.status), ['pending'], 'not restored as failed');
@@ -304,7 +306,7 @@ test('a rollback interrupted after browser ownership is recorded stands; the nex
     api.serverItems = [srvItem('a', 'pending')];
     crashOnce(storage, 'removeItem', key => key === ROLLBACK_REQUESTED_KEY);
 
-    await rollbackAudioQueue('tok');
+    await rollbackAudioQueue();
     assert.equal(getAudioQueueOwner(), 'browser', 'a failed tidy-up does not reopen the rollback');
     assert.equal(isAudioQueueRollbackPending(), true, 'the marker was left behind');
 

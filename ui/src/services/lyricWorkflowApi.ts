@@ -1,4 +1,4 @@
-import type { ReadOptions } from './httpClient';
+import { apiClient, type ReadOptions } from './httpClient';
 import { readSnapshot } from '../queries/cover-lyrics/reads';
 import { coverLyricWorkflowApi as workflowApi, followCoverLyricJob as followJob } from '../queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
@@ -14,36 +14,30 @@ export type LyricBatchRequest = {
 export type LyricItemResult = { index: number; status: 'done' | 'error'; value?: any; error?: string };
 export type LyricBatchResult = { results: LyricItemResult[] };
 
-async function submit(token: string, path: string, body: unknown): Promise<WorkflowJob> {
-  const response = await fetch(`/api/lireek/${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value.error || `Lyric workflow failed (${response.status})`);
-  return value.job as WorkflowJob;
+async function submit(path: string, body: unknown): Promise<WorkflowJob> {
+  const value = await apiClient.post<{ job: WorkflowJob }>(`/lireek/${path}`, body);
+  return value.job;
 }
 
 export const lyricWorkflowApi = {
-  submitBatch: (token: string, items: LyricBatchRequest[], options: { concurrency?: number } = {}, idempotencyKey = crypto.randomUUID()) =>
-    submit(token, 'workflow-batches', { items, idempotencyKey, concurrency: options.concurrency }),
-  submitRenders: (token: string, intents: WrittenSongIntent[], idempotencyKey = crypto.randomUUID()) =>
-    submit(token, 'workflow-renders', { intents, idempotencyKey }),
-  cancel: (token: string, id: string) => workflowApi.cancel(token, id),
-  list: (token: string, options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-batch', token, options, 0),
-  get: (token: string, id: string, options: ReadOptions = {}) => workflowApi.get(token, id, 0, options),
+  submitBatch: (items: LyricBatchRequest[], options: { concurrency?: number } = {}, idempotencyKey = crypto.randomUUID()) =>
+    submit('workflow-batches', { items, idempotencyKey, concurrency: options.concurrency }),
+  submitRenders: (intents: WrittenSongIntent[], idempotencyKey = crypto.randomUUID()) =>
+    submit('workflow-renders', { intents, idempotencyKey }),
+  cancel: (id: string) => workflowApi.cancel(id),
+  list: (options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-batch', options, 0),
+  get: (id: string, options: ReadOptions = {}) => workflowApi.get(id, 0, options),
   follow: followJob,
 };
 
-export async function runLyricOperation(token: string, request: LyricBatchRequest, handlers: {
+export async function runLyricOperation(request: LyricBatchRequest, handlers: {
   onChunk?: (text: string) => void; onPhase?: (phase: string) => void;
   onResult?: (value: unknown) => void; onError?: (message: string) => void;
 } = {}): Promise<void> {
-  const job = await lyricWorkflowApi.submitBatch(token, [request]);
+  const job = await lyricWorkflowApi.submitBatch([request]);
   let failure: string | undefined;
   const seen = new Set<number>();
-  const status = await lyricWorkflowApi.follow(token, job.id, {
+  const status = await lyricWorkflowApi.follow(job.id, {
     onEvent: event => {
       const data = event.data as { text?: string; phase?: string; value?: unknown; error?: string } | null;
       if (event.type === 'chunk' && data?.text) handlers.onChunk?.(data.text);
@@ -54,7 +48,7 @@ export async function runLyricOperation(token: string, request: LyricBatchReques
     },
   });
   if (status === 'succeeded') {
-    const final = await lyricWorkflowApi.get(token, job.id);
+    const final = await lyricWorkflowApi.get(job.id);
     const results = (final.job.result as LyricBatchResult | null)?.results || [];
     for (const result of results) {
       if (seen.has(result.index)) continue;

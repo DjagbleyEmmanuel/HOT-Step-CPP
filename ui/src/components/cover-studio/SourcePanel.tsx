@@ -4,6 +4,7 @@ import { serverKey } from '../../queries/keys';
 import { useQuery } from '@tanstack/react-query';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { queryClient } from '../../queries/client';
+import { queryManager } from '../../queries/invalidation';
 import React, { useCallback, useState } from 'react';
 import { Upload, Music, Loader2, X, Layers, Volume2, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -97,10 +98,10 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
     if (!token) return;
     try {
       setIsTimbreUploading(true);
-      const result = await masteringApi.uploadReference(file, token);
+      const result = await masteringApi.uploadReference(file);
       onTimbreOverridePathChange(result.name);
       // Refresh list if browser is open
-      await queryClient.invalidateQueries({ queryKey: referenceOptions.queryKey });
+      await queryManager.keys(queryClient, referenceOptions.queryKey);
     } catch (err) {
       console.error('[Timbre] Upload failed:', err);
     } finally {

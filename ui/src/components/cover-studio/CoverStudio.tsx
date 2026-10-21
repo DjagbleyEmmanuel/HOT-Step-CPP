@@ -18,6 +18,7 @@ import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
+import { apiClient, ApiError } from '../../services/httpClient';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
 import {
@@ -233,7 +234,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>(() => restore('coverLyricSchedule', 'off'));
   const [captionMode, setCaptionMode] = useState(() => restore('captionMode', 'custom'));
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
-  const readinessQuery = useQuery({ ...snapshotOptions<Yue2CoverReadiness>('cover', '/yue2-cover/readiness', token ?? undefined), enabled: yue2Mode && !!token });
+  const readinessQuery = useQuery({ ...snapshotOptions<Yue2CoverReadiness>('cover', '/yue2-cover/readiness'), enabled: yue2Mode && !!token });
   const readiness = readinessQuery.data ?? null;
   const [sheetJob, setSheetJob] = useState<Yue2CoverJob | null>(null);
   const [sheetJobId, setSheetJobId] = useState('');
@@ -332,7 +333,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sheetRequestRef.current += 1;
     setApprovedSheet(null); setSheetAbc(''); setScoreSections([]);
     setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
-    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
+    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId('');
   }, [sourceKey, token]);
 
@@ -352,7 +353,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   }, [yue2Mode, renderMode, yue2Ar, yue2Nar, yue2Albums, selectedYue2LyricsSetId]);
 
   const sheetSnapshot = useQuery({
-    ...snapshotOptions<Yue2CoverResult>('cover', `/yue2-cover/transcriptions/${encodeURIComponent(sheetJobId)}`, token ?? undefined),
+    ...snapshotOptions<Yue2CoverResult>('cover', `/yue2-cover/transcriptions/${encodeURIComponent(sheetJobId)}`),
     enabled: !!sheetJobId && !!token,
     refetchInterval: pollWhile<Yue2CoverResult>(data => !data || !!data.job && ['queued', 'running'].includes(data.job.status)),
   });
@@ -375,7 +376,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     let live = true;
     const timer = setTimeout(() => {
       // The sections only: the lyrics are paired with them by Prepare's own check.
-      void yue2CoverApi.reviewSections(sheetAbc, '', token).then(review => {
+      void yue2CoverApi.reviewSections(sheetAbc, '').then(review => {
         if (live) setScoreSections(review.sections);
       }).catch(() => {});
     }, 250);
@@ -554,7 +555,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const lookupDatasetMetadata = async (input: { songId?: string; sourceAudioUrl?: string }) => {
     if (!token) return null;
-    try { return await yue2CoverApi.sourceMetadata(input, token); }
+    try { return await yue2CoverApi.sourceMetadata(input); }
     catch { return null; }
   };
 
@@ -565,8 +566,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     _lastConsumedCoverTs = coverSource.timestamp;
     const s = coverSource.song;
     captionRequestRef.current++;
-    if (captionJobRef.current && token) void workflowApi.cancel(token, captionJobRef.current).catch(() => {});
-    if (coverWorkflowJobRef.current && token) void workflowApi.cancel(token, coverWorkflowJobRef.current).catch(() => {});
+    if (captionJobRef.current && token) void workflowApi.cancel(captionJobRef.current).catch(() => {});
+    if (coverWorkflowJobRef.current && token) void workflowApi.cancel(coverWorkflowJobRef.current).catch(() => {});
     const gpData: any = s.generationParams || s.generation_params || {};
     const audioUrl = s.audioUrl || s.audio_url || '';
     setSourceAssetId(''); setCoverDraftId(''); setCoverDraftRevision(0);
@@ -653,10 +654,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     metadata: AudioMetadata; analysis: AudioAnalysis;
   }): Promise<CoverDraftResult | null> => {
     if (!token || !assetId) return null;
-    const { job } = await coverWorkflowApi.open(token, assetId, cached);
+    const { job } = await coverWorkflowApi.open(assetId, cached);
     coverWorkflowJobRef.current = job.id;
     try {
-      const done = await waitForCoverJob(token, job.id, () => sourceLookupRef.current !== lookup);
+      const done = await waitForCoverJob(job.id, () => sourceLookupRef.current !== lookup);
       if (sourceLookupRef.current !== lookup) return null;
       const result = done.result as CoverDraftResult;
       setCoverDraftId(result.documentId);
@@ -671,9 +672,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSourceMode('audio');
     if (!token) { showToast(t('cover.signInFirst')); return; }
     const lookup = ++sourceLookupRef.current;
-    if (coverWorkflowJobRef.current) void workflowApi.cancel(token, coverWorkflowJobRef.current).catch(() => {});
+    if (coverWorkflowJobRef.current) void workflowApi.cancel(coverWorkflowJobRef.current).catch(() => {});
     captionRequestRef.current++;
-    if (captionJobRef.current) void workflowApi.cancel(token, captionJobRef.current).catch(() => {});
+    if (captionJobRef.current) void workflowApi.cancel(captionJobRef.current).catch(() => {});
     setSourceAssetId(''); setCoverDraftId(''); setCoverDraftRevision(0);
     const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
     // The last source's lyrics never carry over: the sidecar, cache or a search fills them.
@@ -697,24 +698,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       // Still upload the file
       setIsUploading(true);
       try {
-        const fd = new FormData(); fd.append('audio', file);
-        const r = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-        if (r.ok) {
-          const d = await r.json();
-          if (sourceLookupRef.current !== lookup) return;
-          setSourceAudioUrl(d.audio_url || '');
-          setSourceAssetId(d.asset_id || '');
-          setIsUploading(false); setIsAnalyzing(true);
-          const opened = await openUploadedAsset(d.asset_id || '', lookup,
-            Number.isFinite(cached.bpm) && cached.key ? {
-            metadata: { artist: cached.artist || '', title: cached.title || '',
-              album: cached.album || '', duration: cached.duration ?? null },
-            analysis: { bpm: cached.bpm, key: cached.key, scale: cached.scale },
-          } : undefined);
-          if (useDetectedDetails && opened?.analysis) setAnalysis(opened.analysis);
-          const dataset = await lookupDatasetMetadata({ sourceAudioUrl: d.audio_url });
-          if (sourceLookupRef.current === lookup && dataset) applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit);
-        }
+        const d = await apiClient.upload<{ audio_url?: string; asset_id?: string }>('/upload/audio', [{ field: 'audio', file }]);
+        if (sourceLookupRef.current !== lookup) return;
+        setSourceAudioUrl(d.audio_url || '');
+        setSourceAssetId(d.asset_id || '');
+        setIsUploading(false); setIsAnalyzing(true);
+        const opened = await openUploadedAsset(d.asset_id || '', lookup,
+          Number.isFinite(cached.bpm) && cached.key ? {
+          metadata: { artist: cached.artist || '', title: cached.title || '',
+            album: cached.album || '', duration: cached.duration ?? null },
+          analysis: { bpm: cached.bpm, key: cached.key, scale: cached.scale },
+        } : undefined);
+        if (useDetectedDetails && opened?.analysis) setAnalysis(opened.analysis);
+        const dataset = await lookupDatasetMetadata({ sourceAudioUrl: d.audio_url });
+        if (sourceLookupRef.current === lookup && dataset) applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit);
       } catch {} finally { if (sourceLookupRef.current === lookup) { setIsUploading(false); setIsAnalyzing(false); } }
       return;
     }
@@ -725,10 +722,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     let extractedDuration: number | null = null;
     try {
       // Upload once; the Node workflow reads metadata and analyses that asset.
-      const upFd = new FormData(); upFd.append('audio', file);
-      const upRes = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: upFd });
-      if (!upRes.ok) throw new Error('Upload failed');
-      const upData = await upRes.json();
+      const upData = await apiClient.upload<{ audio_url?: string; asset_id?: string }>('/upload/audio', [{ field: 'audio', file }]);
       if (sourceLookupRef.current !== lookup) return;
       const audioUrl = upData.audio_url || '';
       setSourceAudioUrl(audioUrl);
@@ -767,8 +761,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         artist: extractedArtist, title: extractedTitle, album: extractedAlbum, duration: extractedDuration,
         ...(analysed ? { bpm, key, scale } : {}),
       });
-    } catch (err: any) {
-      showToast(`Error: ${err.message}`);
+    } catch (err) {
+      // Transport failures already toast via the global handler; surface only
+      // domain errors (a failed cover-draft job throws a plain Error).
+      if (!(err instanceof ApiError)) showToast(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally { if (sourceLookupRef.current === lookup) { setIsUploading(false); setIsAnalyzing(false); } }
   };
 
@@ -804,11 +800,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const request = ++captionRequestRef.current;
     const key = sourceKey;
     const { provider, model } = loadSelections().coverCaption;
-    const { job } = await coverWorkflowApi.caption(token, coverDraftId, coverDraftRevision,
+    const { job } = await coverWorkflowApi.caption(coverDraftId, coverDraftRevision,
       artistId, provider, model || '', force);
     captionJobRef.current = job.id;
     try {
-      const done = await waitForCoverJob(token, job.id, () =>
+      const done = await waitForCoverJob(job.id, () =>
         captionRequestRef.current !== request || sourceKeyRef.current !== key);
       if (captionRequestRef.current !== request || sourceKeyRef.current !== key) return null;
       const result = done.result as CoverDraftResult;
@@ -894,7 +890,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const handleSelectArtist = async (artist: Artist) => {
     captionRequestRef.current++;
-    if (captionJobRef.current && token) void workflowApi.cancel(token, captionJobRef.current).catch(() => {});
+    if (captionJobRef.current && token) void workflowApi.cancel(captionJobRef.current).catch(() => {});
     setSelectedArtistId(artist.id);
     await loadArtistPresets(artist);
   };
@@ -934,10 +930,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (advancedMode && sepStems?.length && sepJobId) {
       const controls = stemControls.map(c => ({ index: c.index, volume: c.muted ? 0 : c.volume, muted: c.muted }));
       const blob = await recombineStems(sepJobId, controls);
-      const fd = new FormData(); fd.append('audio', blob, 'recombined-stems.wav');
-      const response = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-      if (!response.ok) throw new Error('Could not upload the recombined source');
-      const uploaded = await response.json() as { audio_url?: string };
+      const uploaded = await apiClient.upload<{ audio_url?: string }>('/upload/audio', [{ field: 'audio', file: blob, name: 'recombined-stems.wav' }]);
       if (!uploaded.audio_url) throw new Error('Recombined source has no audio URL');
       return { sourceAudioUrl: uploaded.audio_url, audioUrl: uploaded.audio_url };
     }
@@ -956,10 +949,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSheetError(''); setSheetPreparing(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
-        const { job } = await coverWorkflowApi.transcribe(token, coverDraftId, coverDraftRevision, !!sheetAbc);
+        const { job } = await coverWorkflowApi.transcribe(coverDraftId, coverDraftRevision, !!sheetAbc);
         workflowId = job.id;
         coverWorkflowJobRef.current = job.id;
-        const done = await waitForCoverJob(token, job.id, () =>
+        const done = await waitForCoverJob(job.id, () =>
           sourceKeyRef.current !== key || sheetRequestRef.current !== request);
         if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
         const result = done.result as CoverDraftResult;
@@ -971,9 +964,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       }
       const source = await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
-      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), force: !!sheetAbc }, token);
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), force: !!sheetAbc });
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) {
-        if (result.jobId) await yue2CoverApi.cancel(result.jobId, token);
+        if (result.jobId) await yue2CoverApi.cancel(result.jobId);
         return;
       }
       setSheetAudioUrl(source.audioUrl);
@@ -1008,12 +1001,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (coverWorkflowJobRef.current && token) {
       const id = coverWorkflowJobRef.current;
       coverWorkflowJobRef.current = '';
-      await workflowApi.cancel(token, id).catch(() => {});
+      await workflowApi.cancel(id).catch(() => {});
     }
     const id = sheetJobRef.current;
     sheetJobRef.current = ''; setSheetJobId(''); setSheetPreparing(false);
     setSheetJob(null); setSheetError('Transcription cancelled');
-    if (id && token) try { await yue2CoverApi.cancel(id, token); } catch (err: any) { setSheetError(err.message); }
+    if (id && token) try { await yue2CoverApi.cancel(id); } catch (err: any) { setSheetError(err.message); }
   };
 
   const handleApproveSheet = async () => {
@@ -1031,7 +1024,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSheetError(''); setSheetPreparing(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
-        const result = await coverWorkflowApi.approveScore(token, coverDraftId, coverDraftRevision, sheetAbc);
+        const result = await coverWorkflowApi.approveScore(coverDraftId, coverDraftRevision, sheetAbc);
         if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
         setCoverDraftRevision(result.document.revision);
         setApprovedSheet({ abc: result.abc || sheetAbc.trim(), sourceId: result.sourceId,
@@ -1043,7 +1036,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         ? { audioUrl: sheetAudioUrl, ...(sheetAudioUrl === sourceAudioUrl && sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl: sheetAudioUrl }) }
         : await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
-      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), abc: sheetAbc }, token);
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), abc: sheetAbc });
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
       setApprovedSheet({ abc: result.abc || sheetAbc.trim(), sourceId: result.sourceId,
         sourceLabel: result.sourceLabel, audioUrl: source.audioUrl, key });
@@ -1071,7 +1064,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const settle = (result: object) => setRemeter(current =>
       current?.from === from && current.pickup === pickup ? { ...current, ...result } : current);
     setRemeter({ from, pickup });
-    try { settle(await yue2CoverApi.remeterScore(from, pickup, token)); }
+    try { settle(await yue2CoverApi.remeterScore(from, pickup)); }
     catch (err) { settle({ error: (err as Error).message }); }
   };
   const applyRemeter = () => {
@@ -1083,7 +1076,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const sectionSource = () => sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl };
   /** Lyric assignment proposals for the current document; the recording only when asked for. */
   const suggestAssignments = (useRecording: boolean) => token
-    ? yue2CoverApi.suggestAssignments({ ...(useRecording ? sectionSource() : {}), prepare: prep.doc, useRecording }, token)
+    ? yue2CoverApi.suggestAssignments({ ...(useRecording ? sectionSource() : {}), prepare: prep.doc, useRecording })
     : Promise.reject(new Error('Sign in first.'));
 
   // The score's tempo and key, offered for a dataset song whose .txt differs.
@@ -1101,11 +1094,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setScoreDetailsSaving(true);
     try {
       if (sourceAssetId && coverDraftId && coverDraftRevision && !advancedMode) {
-        const saved = await coverWorkflowApi.saveScoreDetails(token, coverDraftId,
+        const saved = await coverWorkflowApi.saveScoreDetails(coverDraftId,
           coverDraftRevision, sheetAbc, scoreTempoFactor);
         bpm = saved.bpm; musicalKey = saved.key;
       } else {
-        await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), bpm, key: musicalKey }, token);
+        await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), bpm, key: musicalKey });
       }
       if (sourceKeyRef.current === key) {
         setAnalysis({ bpm, key: musicalKey, scale: musicalKey.split(' ')[1] });
@@ -1200,7 +1193,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     void (async () => {
     let workflowId = '';
     try {
-      const { job } = await coverWorkflowApi.render(token, input);
+      const { job } = await coverWorkflowApi.render(input);
       workflowId = job.id;
       coverRenderJobRef.current = job.id;
       setActiveJobId(job.id); setQueueItemId(qId);
@@ -1208,7 +1201,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       // Name the workflow's state only when it changes: the queue store follows
       // the render itself and fills in the engine's stage and progress.
       let shown = '';
-      const done = await waitForCoverJob(token, job.id, () => false, current => {
+      const done = await waitForCoverJob(job.id, () => false, current => {
         const running = current.status === 'running';
         const stage = running ? 'Generating…' : 'Queued…';
         if (stage !== shown) updateManualQueueItem(qId, { stage: shown = stage, status: running ? 'generating' : 'pending' });
@@ -1290,7 +1283,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setIsGenerating(true);
     enqueueCoverJob(async () => {
       try {
-        const res = await generateApi.submit(params as any, token);
+        const res = await generateApi.submit(params as any);
         updateManualQueueItem(qId, { jobId: res.jobId });
         const outcome = await pollJobAsync(res.jobId, qId);
         // Only a saved song starts the next build, and only if this build is
@@ -1412,7 +1405,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       setIsGenerating(true);
       enqueueCoverJob(async () => {
         try {
-          const res = await generateApi.submit(params as any, token);
+          const res = await generateApi.submit(params as any);
           updateManualQueueItem(qId, { jobId: res.jobId });
           await pollJobAsync(res.jobId, qId);
         } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
@@ -1454,15 +1447,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           console.log('[CoverStudio] Auto-recombine controls:', JSON.stringify(effectiveControls));
           console.log('[CoverStudio] Stem names:', sepStems.map(s => `[${s.index}] ${s.name}`).join(', '));
           const blob = await recombineStems(sepJobId, effectiveControls);
-          // Upload recombined WAV to get a server-side URL
-          const fd = new FormData();
-          fd.append('audio', blob, 'recombined-stems.wav');
-          const upRes = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-          if (upRes.ok) {
-            const { audio_url } = await upRes.json();
-            effectiveSourceUrl = audio_url;
-            console.log('[CoverStudio] Using recombined stems:', audio_url);
-          }
+          // Upload recombined WAV to get a server-side URL; on failure keep the original.
+          try {
+            const { audio_url } = await apiClient.upload<{ audio_url?: string }>('/upload/audio', [{ field: 'audio', file: blob, name: 'recombined-stems.wav' }]);
+            if (audio_url) {
+              effectiveSourceUrl = audio_url;
+              console.log('[CoverStudio] Using recombined stems:', audio_url);
+            }
+          } catch { /* upload failed — fall back to the original source */ }
         } catch (err: any) {
           console.warn('[CoverStudio] Stem recombine failed, using original:', err.message);
           showToast(`Stem recombine failed: ${err.message}. Using original audio.`);
@@ -1537,7 +1529,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         params.timbreReference = engineParams.timbreReference;
       }
 
-      const res = await generateApi.submit(params as any, token);
+      const res = await generateApi.submit(params as any);
       updateManualQueueItem(qId, { jobId: res.jobId });
       await pollJobAsync(res.jobId, qId);
       } catch (err: any) {
@@ -1621,7 +1613,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // resolves, and the queue advances to the next item.
   const handleCancel = async () => {
     if (coverRenderJobRef.current && token) {
-      await workflowApi.cancel(token, coverRenderJobRef.current).catch(() => {});
+      await workflowApi.cancel(coverRenderJobRef.current).catch(() => {});
     } else if (activeJobId) { try { await generateApi.cancel(activeJobId); } catch {} }
     if (queueItemId) failManualQueueItem(queueItemId, 'Cancelled by user');
   };
@@ -1629,8 +1621,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const handleClearSource = () => {
     sourceLookupRef.current++;
     captionRequestRef.current++;
-    if (captionJobRef.current && token) void workflowApi.cancel(token, captionJobRef.current).catch(() => {});
-    if (coverWorkflowJobRef.current && token) void workflowApi.cancel(token, coverWorkflowJobRef.current).catch(() => {});
+    if (captionJobRef.current && token) void workflowApi.cancel(captionJobRef.current).catch(() => {});
+    if (coverWorkflowJobRef.current && token) void workflowApi.cancel(coverWorkflowJobRef.current).catch(() => {});
     setSourceAssetId(''); setCoverDraftId(''); setCoverDraftRevision(0);
     setSourceFileName(''); setSourceAudioUrl(''); setSourceSongId('');
     setMetadata(null); setAnalysis(null);
@@ -1647,7 +1639,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sheetRequestRef.current++;
     setApprovedSheet(null); setSheetAbc(''); setScoreSections([]);
     setSheetAudioUrl(''); setSheetError('');
-    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
+    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId(''); setSheetJob(null); setSheetPreparing(false);
     setSourceMode(mode);
   };

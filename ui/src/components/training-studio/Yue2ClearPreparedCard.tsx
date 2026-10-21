@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { clearPreparedData } from '../../services/trainingApi';
 import { trainingQueries } from '../../queries/training-data/queries';
+import { queryManager } from '../../queries/invalidation';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
 import { FORM_KEY, PREP_KEY } from './Yue2AitkTrainCard';
@@ -29,7 +30,7 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
   const [includeCore, setIncludeCore] = useState(false);
   const [note, setNote] = useState('');
 
-  const load = () => queryClient.invalidateQueries({ queryKey: prepared.queryKey });
+  const load = () => queryManager.keys(queryClient, prepared.queryKey);
   useEffect(() => { setIncludeCore(false); }, [datasetId]);
 
   const targets = info ? info.caches.filter(c => includeCore || !c.core) : [];

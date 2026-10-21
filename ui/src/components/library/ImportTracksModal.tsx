@@ -133,7 +133,7 @@ export const ImportTracksModal: React.FC = () => {
         try {
           uploaded.push({
             file,
-            assetId: await uploadImportAsset(file, token, (fraction) => setProgress((index + fraction) / files.length)),
+            assetId: await uploadImportAsset(file, (fraction) => setProgress((index + fraction) / files.length)),
           });
         }
         catch (err) { errors.push({ file: file.name, error: (err as Error).message }); }
@@ -141,7 +141,7 @@ export const ImportTracksModal: React.FC = () => {
       }
       setPhase('converting');
       const results = uploaded.length
-        ? await importAssets(uploaded.map(({ assetId }) => ({ assetId, description })), token) : [];
+        ? await importAssets(uploaded.map(({ assetId }) => ({ assetId, description }))) : [];
       const songs = results.flatMap((result) => result.song ? [result.song] : []);
       for (const result of results) {
         if (result.error) errors.push({ file: uploaded[result.index]?.file.name || result.assetId, error: result.error });

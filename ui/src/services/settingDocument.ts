@@ -14,7 +14,7 @@
 import type { ImportPreferenceItem, SettingsFamily } from './preferencesApi';
 import { hashImportValue, preferencesApi } from './preferencesApi';
 import { queriedSettingsApi } from '../queries/shell-queue/preferences';
-import { WorkflowRequestError } from './workflowApi';
+import { ApiError } from './apiError';
 
 export type SettingStatus = 'loading' | 'idle' | 'saving' | 'conflict' | 'failed';
 
@@ -142,7 +142,7 @@ export class SettingDocument {
     } catch (err) {
       // What retry will send: the latest edit, never an older value over it.
       this.pending = undefined;
-      const is409 = err instanceof WorkflowRequestError && err.status === 409;
+      const is409 = err instanceof ApiError && err.status === 409;
       // Moved on elsewhere (or created by another client first): a conflict.
       let current: { revision: number; body: Record<string, unknown> } | null = null;
       let readBack = true;

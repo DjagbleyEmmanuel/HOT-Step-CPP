@@ -5,6 +5,7 @@ import { bridgeRunEvents } from './events';
 import { pollWhile } from '../contract';
 import { trainingQueries } from '../training-data/queries';
 import { activeJob, type Worker } from './queries';
+import { queryManager } from '../invalidation';
 
 /** The stream is shared with the chart/log reducers. Replayed terminal
  * frames invalidate once per job; they never start a command or audition. */
@@ -61,7 +62,7 @@ export function useReload(key: readonly unknown[], revision: unknown) {
     const before = previous.current;
     previous.current = { encoded, revision };
     if (revision === undefined || before.encoded !== encoded || Object.is(before.revision, revision)) return;
-    void client.invalidateQueries({ queryKey: key });
+    void queryManager.keys(client, key);
   // The resource key is structural, not the allocation made each render.
   }, [client, encoded, revision]);
 }

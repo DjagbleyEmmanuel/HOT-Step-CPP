@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { coverSongsOptions, deleteCovers } from '../../queries/cover-lyrics/songs';
 import { queryClient } from '../../queries/client';
+import { queryManager } from '../../queries/invalidation';
 import React, { useState, useEffect, useRef } from 'react';
 import { Music, Play, Pause, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -17,7 +18,7 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
   const { token } = useAuth();
   const currentTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
-  const options = coverSongsOptions(token ?? '');
+  const options = coverSongsOptions();
   const snapshot = useQuery({ ...options, enabled: !!token });
   const covers = (snapshot.data?.songs ?? []).slice().sort((a, b) =>
     new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()).slice(0, 20);
@@ -27,7 +28,7 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
   useEffect(() => {
     if (previousRefresh.current !== refreshTrigger) {
       previousRefresh.current = refreshTrigger;
-      void queryClient.invalidateQueries({ queryKey: options.queryKey });
+      void queryManager.keys(queryClient, options.queryKey);
     }
   }, [refreshTrigger, options.queryKey]);
 
@@ -36,7 +37,7 @@ export const RecentCovers: React.FC<RecentCoversProps> = ({ refreshTrigger }) =>
     if (!window.confirm(`Delete all ${covers.length} covers?`)) return;
     setClearing(true);
     try {
-      await deleteCovers(token, covers.map(c => c.id));
+      await deleteCovers(covers.map(c => c.id));
     } finally {
       setClearing(false);
     }

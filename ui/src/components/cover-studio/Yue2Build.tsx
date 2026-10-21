@@ -181,7 +181,7 @@ export interface BuildLyricsDraft { text: string | null; set: (text: string | nu
 /** A Build-by-section session kept on the server, polled while takes render.
  *  Every change names the revision the page saw, so a stale page is refused. */
 export function useYue2Build(token: string | null, sessionId: string, setSessionId: (id: string) => void, draft: BuildLyricsDraft) {
-  const options = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${sessionId}`, token ?? undefined);
+  const options = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${sessionId}`);
   const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0 || s.preview?.status === 'rendering') });
   const session = sessionId ? snapshot.data ?? null : null;
   const [error, setError] = useState('');
@@ -189,7 +189,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
 
   const call = async (fn: () => Promise<Yue2BuildSession>) => {
     setBusy(true);
-    try { const next = await fn(); const key = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${next.id}`, token!).queryKey; queryClient.setQueryData([key[0], key[1], options.queryKey[2], key[3], key[4]], next); setError(''); return next; }
+    try { const next = await fn(); const key = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${next.id}`).queryKey; queryClient.setQueryData([key[0], key[1], options.queryKey[2], key[3], key[4]], next); setError(''); return next; }
     catch (err: any) { setError(err.message); void snapshot.refetch(); return null; }
     finally { setBusy(false); }
   };
@@ -200,45 +200,45 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
      *  `caption` is these takes' own; `lyrics` (occurrence id to lines) is applied first. */
     generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}) => call(async () => {
       let started = live;
-      if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
-      if (Object.keys(lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, lyrics, token!);
-      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, token!, caption || undefined);
+      if (!started) { started = await yue2CoverApi.buildStart(params, draft.text ?? undefined); setSessionId(started.id); }
+      if (Object.keys(lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, lyrics);
+      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, caption || undefined);
     }),
     /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
-    occurrenceLyrics: (edits: Record<string, string | null>) => call(() => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, edits, token!)),
+    occurrenceLyrics: (edits: Record<string, string | null>) => call(() => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, edits)),
     /** Applies new cover settings to the session (before its first keep). */
-    settings: (settings: Record<string, unknown>) => call(() => yue2CoverApi.buildSettings(live!.id, live!.revision, settings, token!)),
+    settings: (settings: Record<string, unknown>) => call(() => yue2CoverApi.buildSettings(live!.id, live!.revision, settings)),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
     plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
       let started = live;
-      if (!started) { started = await yue2CoverApi.buildStart(params, token!, draft.text ?? undefined); setSessionId(started.id); }
-      return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished, token!);
+      if (!started) { started = await yue2CoverApi.buildStart(params, draft.text ?? undefined); setSessionId(started.id); }
+      return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished);
     }),
     /** Keeps a take, then applies the crop set on it: the out point cuts the kept take, the in point starts the saved song later. */
     keep: (take: string, crop?: TakeCrop) => call(async () => {
-      let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take, token!);
-      if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined, token!);
-      if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in, token!);
+      let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take);
+      if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined);
+      if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in);
       return next;
     }),
     /** Renders everything kept so far once, for Play build. */
-    preview: () => call(() => yue2CoverApi.buildPreview(live!.id, token!)),
+    preview: () => call(() => yue2CoverApi.buildPreview(live!.id)),
     /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
-    trim: (take: string, seconds: number | null) => call(() => yue2CoverApi.buildTrim(live!.id, live!.revision, take, seconds, token!)),
-    undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, token!, section)),
-    remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take, token!)),
-    cancel: () => call(() => yue2CoverApi.buildCancel(live!.id, token!)),
+    trim: (take: string, seconds: number | null) => call(() => yue2CoverApi.buildTrim(live!.id, live!.revision, take, seconds)),
+    undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, section)),
+    remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take)),
+    cancel: () => call(() => yue2CoverApi.buildCancel(live!.id)),
     /** Cuts the last kept take at codec frame `frame`, or restores it (null). The take rows' crop goes through keep. */
     crop: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') =>
-      call(() => yue2CoverApi.buildCrop(live!.id, live!.revision, take, frame, mode, token!)),
+      call(() => yue2CoverApi.buildCrop(live!.id, live!.revision, take, frame, mode)),
     /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
      *  True once the server (or, before a session, its validation) accepted them. */
     applyLyrics: async (text: string) => {
       const target = lyricsTarget(sessionId, live);
       if (target === 'loading') { setError('This build is still loading; try again once it has.'); return false; }
-      if (live) return !!(await call(() => yue2CoverApi.buildLyrics(live.id, live.revision, text, token!)));
+      if (live) return !!(await call(() => yue2CoverApi.buildLyrics(live.id, live.revision, text)));
       setBusy(true);
-      try { await yue2CoverApi.buildLyricsCheck(text, token!); draft.set(text); setError(''); return true; }
+      try { await yue2CoverApi.buildLyricsCheck(text); draft.set(text); setError(''); return true; }
       catch (err: any) { setError(err.message); return false; }
       finally { setBusy(false); }
     },

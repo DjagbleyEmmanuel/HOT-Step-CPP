@@ -365,7 +365,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       const seedParams = freshSeed
         ? { ...params, randomSeed: true, seed: -1 }
         : { ...params, randomSeed: gp.randomSeed, seed: gp.seed };
-      const data = await generateApi.yue2Plan(seedParams, token);
+      const data = await generateApi.yue2Plan(seedParams);
       setScorePreview(prev => (prev.open ? { ...prev, data } : prev));
     } catch (err) {
       setScorePreview(prev => (prev.open ? { ...prev, error: err instanceof Error ? err.message : String(err) } : prev));

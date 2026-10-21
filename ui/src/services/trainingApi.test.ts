@@ -94,9 +94,12 @@ test('a captured target overrides the current selection; reads pass their signal
       '/api/workers/A/api/training/jobs/j1',
       '/api/training/datasets/ds1/yue2-joint-runs',
     ]);
-    assert.equal(calls[0].signal, ctl.signal);
+    // P2: the transport composes the caller's signal with the instance timeout,
+    // so fetch sees a composite — aborting the controller must abort it.
+    ctl.abort();
+    assert.equal(calls[0].signal?.aborted, true);
     assert.equal(calls[3].method, 'DELETE');
-    assert.equal(calls[4].signal, ctl.signal);
+    assert.equal(calls[4].signal?.aborted, true);
     assert.equal(jobStreamUrl('j1', { worker: null }), '/api/training/jobs/j1/stream');
     assert.equal(jobStreamUrl('j1'), '/api/workers/B/api/training/jobs/j1/stream');
   } finally { globalThis.fetch = real; setTrainingWorker(null); }

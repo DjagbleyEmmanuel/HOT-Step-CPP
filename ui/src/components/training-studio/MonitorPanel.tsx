@@ -19,6 +19,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { pollWhile } from '../../queries/contract';
 import { trainingQueries } from '../../queries/training-data/queries';
+import { queryManager } from '../../queries/invalidation';
 import { PIPELINE_STAGES, type PipelineItem, type PipelineStage, type PipelineSummary } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
@@ -263,7 +264,7 @@ export const MonitorPanel: React.FC = () => {
   const wasRunningRef = useRef(false);
   useEffect(() => {
     if (!activePipeline) {
-      if (wasRunningRef.current) { wasRunningRef.current = false; void client.invalidateQueries({ queryKey: trainingQueries.datasets(worker).queryKey }).then(() => loadDatasets()); }
+      if (wasRunningRef.current) { wasRunningRef.current = false; void queryManager.keys(client, trainingQueries.datasets(worker).queryKey).then(() => loadDatasets()); }
       return;
     }
     wasRunningRef.current = true;

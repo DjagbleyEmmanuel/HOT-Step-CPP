@@ -6,25 +6,12 @@
 // current "Train on" choice once, when the command is built, and the server
 // keeps that captured worker whatever this or another client selects later.
 import type {
-  TrainingDatasetRef, TrainingOperationError, TrainingSnapshot, TrainingSourceRef, TrainingWorkerRef,
+  TrainingDatasetRef, TrainingSnapshot, TrainingSourceRef, TrainingWorkerRef,
 } from '../../../server/src/contracts/trainingOperation';
 import { getTrainingWorker } from './trainingApi';
+import { apiClient, type ClientOptions } from './httpClient';
 
 export type { TrainingSnapshot, TrainingWorkerRef } from '../../../server/src/contracts/trainingOperation';
-
-export class TrainingOperationRequestError extends Error {
-  readonly status: number;
-  readonly reason?: TrainingOperationError['reason'];
-  readonly currentRevision?: string;
-  readonly issues?: TrainingOperationError['issues'];
-  constructor(status: number, body: TrainingOperationError) {
-    super(body.error);
-    this.status = status;
-    this.reason = body.reason;
-    this.currentRevision = body.currentRevision;
-    this.issues = body.issues;
-  }
-}
 
 /** The worker "Train on" points at now, as an explicit reference. */
 export const currentWorkerRef = (): TrainingWorkerRef => {
@@ -47,22 +34,13 @@ export function snapshotFor<P>(op: {
   };
 }
 
-/** Call a domain's operation route on this machine. Throws
- *  TrainingOperationRequestError with the server's status and reason. */
+/** Call a domain's operation route on this machine. Throws ApiError with the
+ *  server's status, reason and currentRevision (training ops use string
+ *  revisions — they ride in `err.currentRevision`); the full body, including
+ *  `issues`, is on `err.body`. */
 export async function trainingOperation<T>(domain: string, path: string,
-  init: { method?: string; body?: unknown; signal?: AbortSignal; token?: string } = {}): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (init.body !== undefined) headers['Content-Type'] = 'application/json';
-  // Training routes take no token; send one for a domain that runs workflow
-  // jobs, which belong to a user.
-  if (init.token) headers.Authorization = `Bearer ${init.token}`;
-  const res = await fetch(`/api/training/ops/${encodeURIComponent(domain)}${path}`, {
-    method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
-    headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    signal: init.signal,
-  });
-  const value = await res.json().catch(() => ({}));
-  if (!res.ok) throw new TrainingOperationRequestError(res.status, { error: value.error || `Training operation failed (${res.status})`, ...value });
-  return value as T;
+  init: { method?: string; body?: unknown } & ClientOptions = {}): Promise<T> {
+  const { body, ...opts } = init;
+  const method = init.method ?? (body === undefined ? 'GET' : 'POST');
+  return apiClient.request<T>(method, `/training/ops/${encodeURIComponent(domain)}${path}`, body, opts);
 }

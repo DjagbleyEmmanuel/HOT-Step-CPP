@@ -52,7 +52,7 @@ async function drain(): Promise<void> {
   setStatus({ ...status, saving: true });
   try {
     while (pending.length) {
-      const result = await studioDraftsApi.playlistCommand(serverToken, serverDocument?.revision ?? 0, pending[0]);
+      const result = await studioDraftsApi.playlistCommand(serverDocument?.revision ?? 0, pending[0]);
       serverDocument = result.document;
       pending.shift();
       if (!pending.length) { _snapshot = result.document.body.items; announce(); }
@@ -72,7 +72,7 @@ async function connect(token: string): Promise<void> {
   connecting = (async () => {
     try {
       if (_persistTimer) _persistPlaylistNow();
-      const result = await studioDraftsApi.playlist(token);
+      const result = await studioDraftsApi.playlist();
       serverDocument = result.document;
       const legacy = localStorage.getItem(STORAGE_KEY);
       const pointer = localStorage.getItem(SERVER_POINTER_KEY);
@@ -100,7 +100,7 @@ async function importBrowserPlaylist(): Promise<void> {
   try {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
     const sourceHash = `sha256:${Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('')}`;
-    const result = await studioDraftsApi.importValue(serverToken, {
+    const result = await studioDraftsApi.importValue({
       storageKey: STORAGE_KEY, raw, sourceHash, schemaVersion: 1,
       expectedRevision: serverDocument?.revision ?? 0,
       ...(serverDocument ? { resolution: 'replace' as const } : {}),
@@ -121,7 +121,7 @@ async function retryPlaylistSave(): Promise<void> {
   if (!serverToken) return;
   try {
     if (!connected) { initialized = false; await connect(serverToken); return; }
-    serverDocument = (await studioDraftsApi.playlist(serverToken)).document;
+    serverDocument = (await studioDraftsApi.playlist()).document;
     status = { ...status, saveError: '' };
     await drain();
     announce();

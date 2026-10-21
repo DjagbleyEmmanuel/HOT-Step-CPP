@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { serverKey, resourceKey } from '../keys';
 import { pollWhile } from '../contract';
+import { queryManager } from '../invalidation';
 import { getMidiStatus, listMidiJobs, getMidiProgress, getMidiNotes, deleteMidiJob, type MidiJobSummary, type MidiStudioStatus } from '../../services/midiStudioApi';
 
 export const midiActive = (job: { status: string }) => job.status === 'queued' || job.status === 'transcribing';
@@ -39,6 +40,6 @@ export async function removeMidiJob(client: QueryClient, id: string) {
     client.setQueriesData<MidiJobSummary[]>(list, jobs => jobs?.filter(job => job.id !== id));
     client.removeQueries(notes);
   } finally {
-    await client.invalidateQueries(list);
+    await queryManager.filter(client, list);
   }
 }

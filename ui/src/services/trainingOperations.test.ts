@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { z } from '../../../server/node_modules/zod/v4/index.js';
 import { trainingSnapshotSchema } from '../../../server/src/contracts/trainingOperation';
 import { setTrainingWorker } from './trainingApi';
-import { currentWorkerRef, snapshotFor, trainingOperation, TrainingOperationRequestError } from './trainingOperations';
+import { currentWorkerRef, snapshotFor, trainingOperation } from './trainingOperations';
+import { setAuthToken } from './axiosClient';
+import { ApiError } from './apiError';
 
 test('the client envelope is what the server contract accepts, and the worker is captured when it is built', () => {
   setTrainingWorker(null);
@@ -30,12 +32,14 @@ test('operations always go to this machine, and refusals keep their status, reas
   }) as typeof fetch;
   try {
     setTrainingWorker('Den');  // "Train on" a worker: operations still go here
-    assert.deepEqual(await trainingOperation('prep', '/start', { body: {}, token: 't' }), { ok: true });
+    setAuthToken('t');          // the bearer comes from the session accessor, not per call
+    assert.deepEqual(await trainingOperation('prep', '/start', { body: {} }), { ok: true });
     await assert.rejects(trainingOperation('prep', '/stale', { body: {} }), (e: unknown) =>
-      e instanceof TrainingOperationRequestError && e.status === 409 && e.reason === 'stale-dataset' && e.currentRevision === 'r2');
-    assert.deepEqual(calls, ['POST /api/training/ops/prep/start Bearer t', 'POST /api/training/ops/prep/stale -']);
+      e instanceof ApiError && e.status === 409 && e.reason === 'stale-dataset' && e.currentRevision === 'r2');
+    assert.deepEqual(calls, ['POST /api/training/ops/prep/start Bearer t', 'POST /api/training/ops/prep/stale Bearer t']);
   } finally {
     globalThis.fetch = realFetch;
+    setAuthToken(null);
     setTrainingWorker(null);
   }
 });

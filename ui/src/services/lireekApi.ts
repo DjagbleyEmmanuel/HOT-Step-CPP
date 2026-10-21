@@ -3,7 +3,7 @@
  * Ported from hot-step-9000 lyricStudioApi.ts for the cpp engine.
  */
 
-import { apiClient, type ReadOptions } from './httpClient';
+import { apiClient, sseFailure, type ReadOptions } from './httpClient';
 import { changed, readSnapshot } from '../queries/cover-lyrics/reads';
 
 const API_BASE = '';
@@ -11,11 +11,11 @@ const API_BASE = '';
 async function api<T>(endpoint: string, options: {
   method?: string; body?: unknown; timeoutMs?: number; signal?: AbortSignal;
 } = {}): Promise<T> {
-  const { method = 'GET', body, timeoutMs = 10000, signal } = options;
+  const { method = 'GET', body, timeoutMs = 10_000, signal } = options;
   const path = endpoint.replace(/^\/api/, '');
-  if (method === 'GET') return readSnapshot<T>('lireek', path, undefined, { signal });
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const opts = { signal: signal ? AbortSignal.any([timeout, signal]) : timeout };
+  if (method === 'GET') return readSnapshot<T>('lireek', path, { signal });
+  // LLM-backed writes run past the 60s default; each caller overrides timeoutMs.
+  const opts = { signal, timeout: timeoutMs };
   let result: T;
   if (method === 'DELETE') result = await apiClient.delete<T>(path, opts);
   else if (method === 'PUT') result = await apiClient.put<T>(path, body, opts);
@@ -457,8 +457,9 @@ async function consumeSSE(url: string, body: any, callbacks: StreamCallbacks): P
   });
 
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(text || `HTTP ${resp.status}`);
+    // SSE stays on fetch (axios doesn't stream), but failures still go
+    // through the one global catch so they toast like any other POST.
+    await sseFailure(resp, 'POST', `${API_BASE}${url}`);
   }
 
   const reader = resp.body?.getReader();

@@ -29,9 +29,9 @@ export function clearTrainingDraftQuery(): void {
   window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
 }
 
-export async function loadTrainingCreateDraft(id: string, token: string): Promise<TrainingCreateDraftData> {
+export async function loadTrainingCreateDraft(id: string): Promise<TrainingCreateDraftData> {
   const { draft } = await trainingOperation<{ draft: { data: TrainingCreateDraftData } }>(
-    'review', `/draft/${encodeURIComponent(id)}`, { token });
+    'review', `/draft/${encodeURIComponent(id)}`);
   return draft.data;
 }
 

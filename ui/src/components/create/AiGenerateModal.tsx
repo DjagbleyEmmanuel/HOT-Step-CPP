@@ -11,7 +11,6 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, Sparkles, Dice5, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
 import {
   runLlmInspire,
   generateRandomSubject,
@@ -57,7 +56,6 @@ function savePersisted(key: string, value: string) {
 // ── Component ────────────────────────────────────────────────────────────
 export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClose, onResult }) => {
   const { } = useTranslation();
-  const { token } = useAuth();
 
   // ── Provider state ──
   const providersQuery = useQuery({ ...inspireProvidersOptions(), enabled: isOpen });
@@ -134,7 +132,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
       const genres = parseGenres(genreText);
       const result = await generateRandomSubject(
         { provider: selectedProvider, model: selectedModel || undefined, genres: genres.length > 0 ? genres : undefined },
-        token || undefined,
       );
       setSubject(result);
     } catch (err: any) {
@@ -142,7 +139,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
     } finally {
       setRandomLoading(false);
     }
-  }, [selectedProvider, selectedModel, genreText, parseGenres, token]);
+  }, [selectedProvider, selectedModel, genreText, parseGenres]);
 
   // ── Submit ──
   const handleSubmit = useCallback(async () => {
@@ -165,7 +162,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
           subject: effectiveSubject,
           language,
         },
-        token || undefined,
       );
 
       // Build the result for the parent
@@ -194,7 +190,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
       setLoading(false);
       setLoadingStage('');
     }
-  }, [canSubmit, loading, parseGenres, genreText, subject, selectedProvider, selectedModel, language, token, onResult, onClose]);
+  }, [canSubmit, loading, parseGenres, genreText, subject, selectedProvider, selectedModel, language, onResult, onClose]);
 
   // ── Keyboard shortcuts ──
   useEffect(() => {

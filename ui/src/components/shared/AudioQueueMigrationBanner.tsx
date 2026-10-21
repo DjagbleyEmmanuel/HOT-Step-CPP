@@ -45,7 +45,7 @@ export const AudioQueueMigrationBanner: React.FC = () => {
     {error && <div role="alert" className="text-xs text-red-500">{error}</div>}
     <div className="mt-2 flex gap-2">
       <button type="button" disabled={busy} onClick={() => run(async () => { await retryQueueMigration(token); setReceipt('Move to the server finished.'); })} className="rounded bg-amber-500/20 px-3 py-1">Retry</button>
-      <button type="button" disabled={busy} onClick={() => run(async () => { await rollbackAudioQueue(token); setReceipt('Browser ownership restored.'); })} className="rounded bg-amber-500/20 px-3 py-1">Export and roll back</button>
+      <button type="button" disabled={busy} onClick={() => run(async () => { await rollbackAudioQueue(); setReceipt('Browser ownership restored.'); })} className="rounded bg-amber-500/20 px-3 py-1">Export and roll back</button>
     </div>
   </div>;
 };

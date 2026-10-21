@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { midiNotesOptions, midiJobsOptions } from '../../queries/studios/midi';
+import { queryManager } from '../../queries/invalidation';
 // MidiPlayer.tsx — live piano roll + synced playback for MIDI Studio
 //
 // Plays the ORIGINAL track (audio element) and the transcribed MIDI (WebAudio
@@ -121,8 +122,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
             setChunks({ done: ev.completed, total: ev.total });
             setFrontier(ev.completed * 5.0);
           } else if (ev.type === 'status') {
-            void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey });
-            void client.invalidateQueries({ queryKey: midiNotesOptions(jobId).queryKey });
+            void queryManager.keys(client, midiJobsOptions().queryKey);
+            void queryManager.keys(client, midiNotesOptions(jobId).queryKey);
             flush();
             setLiveDone(true);
             setFrontier(null);
@@ -130,8 +131,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
           }
         } catch { /* ignore malformed */ }
       };
-      es.onopen = () => { void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey }); };
-      es.onerror = () => { void client.invalidateQueries({ queryKey: midiJobsOptions().queryKey }); };
+      es.onopen = () => { void queryManager.keys(client, midiJobsOptions().queryKey); };
+      es.onerror = () => { void queryManager.keys(client, midiJobsOptions().queryKey); };
       return () => { window.clearInterval(flushTimer); es.close(); };
     }
     return undefined;

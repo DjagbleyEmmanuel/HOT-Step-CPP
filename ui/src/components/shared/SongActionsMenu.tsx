@@ -34,7 +34,7 @@ import {
 } from '../../stores/postProcessStore';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
 import { queryClient } from '../../queries/client';
-import { invalidateSidecars } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 import { invalidateSongs } from '../../queries/shell-queue/songs';
 import { scoreAbcOptions } from '../../queries/shell-queue/lyrics';
 import { BottomSheet, useIsMobile } from './BottomSheet';
@@ -279,7 +279,7 @@ async function retranscribe(song: Song): Promise<void> {
     const result = await retranscribeLyrics(song.id);
     console.log(`[Retranscribe] ${result.wordCount} words, ${result.lineCount} lines`);
     void invalidateSongs(queryClient);
-    void invalidateSidecars(queryClient);
+    void queryManager.sidecars.all(queryClient);
   } catch (err: any) {
     console.error('[Retranscribe] Failed:', err.message);
   }

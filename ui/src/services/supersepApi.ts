@@ -60,33 +60,26 @@ export const SEPARATION_LEVELS: { value: SeparationLevel; label: string; descrip
 ];
 
 const API_BASE = '/api/supersep';
+/** Path prefix for apiClient calls (the client already adds `/api`). */
+const P = '/supersep';
 
 /** Start a separation job. Returns the job ID. */
 export async function startSeparation(
   audioUrl: string,
   level: SeparationLevel = 0,
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/separate?level=${level}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audioUrl }),
-  });
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(errBody.error || `Separation failed: ${res.status}`);
-  }
-  const data: SeparateResult = await res.json();
+  const data = await apiClient.post<{ id: string }>(`${P}/separate?level=${level}`, { audioUrl });
   return data.id;
 }
 
 /** Poll job progress. */
 export async function getProgress(jobId: string, opts?: ReadOptions): Promise<ProgressResult> {
-  return apiClient.get<ProgressResult>(`${API_BASE}/${jobId}/progress`.replace('/api', ''), opts);
+  return apiClient.get<ProgressResult>(`${P}/${jobId}/progress`, opts);
 }
 
 /** Get stem list (metadata only, no audio). */
 export async function getStemList(jobId: string, opts?: ReadOptions): Promise<StemListResult> {
-  return apiClient.get<StemListResult>(`${API_BASE}/${jobId}/result`.replace('/api', ''), opts);
+  return apiClient.get<StemListResult>(`${P}/${jobId}/result`, opts);
 }
 
 /** Get the URL for a specific stem's audio. */
@@ -99,13 +92,7 @@ export async function recombineStems(
   jobId: string,
   stemControls: { index: number; volume: number; muted: boolean }[],
 ): Promise<Blob> {
-  const res = await fetch(`${API_BASE}/recombine`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: jobId, stems: stemControls }),
-  });
-  if (!res.ok) throw new Error(`Recombine failed: ${res.status}`);
-  return res.blob();
+  return apiClient.post<Blob>(`${P}/recombine`, { id: jobId, stems: stemControls }, { responseType: 'blob' });
 }
 
 /** Release a completed/abandoned job's server-side resources. Fire-and-forget:
@@ -114,8 +101,8 @@ export async function recombineStems(
  * throwing, since a missing release endpoint must never block the UI. */
 export async function releaseSeparation(jobId: string): Promise<void> {
   try {
-    const res = await fetch(`${API_BASE}/${jobId}/release`, { method: 'POST' });
-    if (!res.ok) console.warn(`[supersepApi] release ${jobId} returned ${res.status}`);
+    // silent: this call's failures are expected and handled below, not toasted.
+    await apiClient.post(`${P}/${jobId}/release`, undefined, { silent: true });
   } catch (err) {
     console.warn(`[supersepApi] release ${jobId} failed:`, err);
   }

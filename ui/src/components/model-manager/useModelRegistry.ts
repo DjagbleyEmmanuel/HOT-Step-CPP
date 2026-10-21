@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { registryOptions } from '../../queries/global-models/options';
+import { queryManager } from '../../queries/invalidation';
 // useModelRegistry.ts — Hook for fetching and querying the model registry
 
 import { useCallback, useMemo } from 'react';
@@ -20,7 +21,7 @@ export function useModelRegistry() {
   const loading = query.isPending;
   const error = query.error?.message ?? null;
   const fetchRegistry = useCallback(async (_silent = false) => {
-    await client.invalidateQueries({ queryKey: registryOptions().queryKey });
+    await queryManager.keys(client, registryOptions().queryKey);
   }, [client]);
   const silentRefresh = useCallback(() => fetchRegistry(true), [fetchRegistry]);
 

@@ -351,7 +351,7 @@ export const SongList: React.FC<SongListProps> = ({
     if (selected.length === 0) return;
     setBulkDownloading(true);
     try {
-      const failures = await downloadAll(selected, token);
+      const failures = await downloadAll(selected);
       if (failures.length) window.alert(`Some downloads failed:\n${failures.join('\n')}`);
     } catch (err) {
       window.alert(`Download failed: ${(err as Error).message}`);

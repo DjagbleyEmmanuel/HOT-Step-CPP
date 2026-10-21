@@ -20,6 +20,7 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { hashKey } from '@tanstack/react-query';
 import { subscribeEventSource } from '../services/sharedEventSource';
+import { invalidateKeys } from './invalidation';
 
 export interface BridgeEffect {
   invalidate?: QueryKey[];
@@ -71,7 +72,7 @@ export function bridgeEvents<E>(client: QueryClient, opts: BridgeOptions<E>): ()
     if (closed) return;
     const keys = [...pending.values()];
     pending.clear();
-    for (const queryKey of keys) void client.invalidateQueries({ queryKey });
+    void invalidateKeys(client, keys);
   };
   const queue = (keys: QueryKey[] | undefined) => {
     if (!keys?.length) return;

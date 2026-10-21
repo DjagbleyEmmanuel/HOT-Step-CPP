@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { extractionsOptions } from '../../queries/studios/resources';
 import { resourceKey } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 // RecentExtractions.tsx — List of past extraction jobs (right sidebar)
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -33,7 +34,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
   const loading = jobsQuery.isPending;
   const { t } = useTranslation();
   useEffect(() => {
-    if (refreshTrigger) void client.invalidateQueries({ queryKey: extractionsOptions().queryKey });
+    if (refreshTrigger) void queryManager.keys(client, extractionsOptions().queryKey);
   }, [client, refreshTrigger]);
 
   const handleDelete = async (e: React.MouseEvent, jobId: string) => {
@@ -45,7 +46,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
       await client.cancelQueries({ queryKey: extractionsOptions().queryKey });
       client.setQueryData<ExtractJobSummary[]>(extractionsOptions().queryKey, jobs => jobs?.filter(job => job.id !== jobId));
       client.removeQueries({ queryKey: resourceKey('studios/extract-result', undefined, jobId) });
-      await client.invalidateQueries({ queryKey: extractionsOptions().queryKey });
+      await queryManager.keys(client, extractionsOptions().queryKey);
     } catch (err) {
       console.error('Delete failed:', err);
     }

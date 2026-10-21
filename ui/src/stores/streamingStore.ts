@@ -145,7 +145,7 @@ export function removeFromQueue(id: string): void {
   const item = _state.queue.find(q => q.id === id);
   if (item?.jobId && _lastToken && item.status === 'running' &&
       !_state.queue.some(q => q.id !== id && q.jobId === item.jobId && q.status === 'running')) {
-    void lyricWorkflowApi.cancel(_lastToken, item.jobId);
+    void lyricWorkflowApi.cancel(item.jobId);
   }
   _state.queue = _state.queue.filter(q => q.id !== id);
   _emit();
@@ -168,11 +168,11 @@ async function _processQueue(): Promise<void> {
     userSubject: item.userSubject, noThink: item.noThink, count: item.count || 1,
   }));
   try {
-    const job = await lyricWorkflowApi.submitBatch(_lastToken, requests, { concurrency: _concurrency });
+    const job = await lyricWorkflowApi.submitBatch(requests, { concurrency: _concurrency });
     for (const item of pending) { item.jobId = job.id; item.status = 'running'; }
     _emit();
     _following.add(job.id);
-    try { await followQueueJob(_lastToken, job, expanded); }
+    try { await followQueueJob(job, expanded); }
     finally { _following.delete(job.id); }
   } catch (err) {
     for (const item of pending) { item.status = 'error'; item.error = (err as Error).message; }
@@ -186,7 +186,7 @@ async function _processQueue(): Promise<void> {
 /** Reattach after a page reload. The service replays the bounded event log. */
 export async function restoreLyricQueue(token: string): Promise<void> {
   _lastToken = token;
-  const { jobs } = await lyricWorkflowApi.list(token);
+  const { jobs } = await lyricWorkflowApi.list();
   for (const job of jobs) {
     if (job.status !== 'pending' && job.status !== 'running') continue;
     if (_following.has(job.id)) continue;
@@ -198,13 +198,13 @@ export async function restoreLyricQueue(token: string): Promise<void> {
     _state.queue.push(...items);
     _emit();
     _following.add(job.id);
-    void followQueueJob(token, job, items).finally(() => { _following.delete(job.id); });
+    void followQueueJob(job, items).finally(() => { _following.delete(job.id); });
   }
 }
 
-async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueItem[]): Promise<void> {
+async function followQueueJob(job: WorkflowJob, expanded: QueueItem[]): Promise<void> {
   let shown: number | null = null;
-  const status = await lyricWorkflowApi.follow(token, job.id, {
+  const status = await lyricWorkflowApi.follow(job.id, {
     onSnapshot: (snapshot, gap) => {
       if (gap) setPhase('Earlier progress was trimmed; waiting for current status');
       if (snapshot.status === 'interrupted') {
@@ -228,7 +228,7 @@ async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueIt
     },
   });
   if (status === 'succeeded') {
-    const final = await lyricWorkflowApi.get(token, job.id);
+    const final = await lyricWorkflowApi.get(job.id);
     const results = (final.job.result as LyricBatchResult | null)?.results || [];
     for (const result of results) {
       const item = expanded[result.index];
@@ -250,12 +250,11 @@ async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueIt
 export async function startStreamBuildProfile(
   lyricsSetId: number,
   req: { provider: string; model?: string },
-  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Building profile…');
   try {
-    await runLyricOperation(token, { type: 'profile', targetId: lyricsSetId, provider: req.provider, model: req.model },
+    await runLyricOperation({ type: 'profile', targetId: lyricsSetId, provider: req.provider, model: req.model },
       { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
     _state.text += `\n⚠ Error: ${(err as Error).message}`;
@@ -269,12 +268,11 @@ export async function startStreamBuildProfile(
 export async function startStreamGenerate(
   _profileId: number,
   req: { profile_id: number; provider: string; model?: string; extra_instructions?: string; user_subject?: string; no_think?: boolean; count?: number },
-  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Generating lyrics…');
   try {
-    await runLyricOperation(token, { type: 'generate', targetId: req.profile_id, provider: req.provider, model: req.model,
+    await runLyricOperation({ type: 'generate', targetId: req.profile_id, provider: req.provider, model: req.model,
       extraInstructions: req.extra_instructions, userSubject: req.user_subject, noThink: req.no_think, count: req.count },
       { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
@@ -289,12 +287,11 @@ export async function startStreamGenerate(
 export async function startStreamRefine(
   generationId: number,
   req: { provider: string; model?: string },
-  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Refining lyrics…');
   try {
-    await runLyricOperation(token, { type: 'refine', targetId: generationId, provider: req.provider, model: req.model },
+    await runLyricOperation({ type: 'refine', targetId: generationId, provider: req.provider, model: req.model },
       { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
     _state.text += `\n⚠ Error: ${(err as Error).message}`;

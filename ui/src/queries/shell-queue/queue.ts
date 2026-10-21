@@ -18,9 +18,9 @@ import { ACTIVE_POLL_MS } from '../contract';
 import { serverKey, sharedKeys } from '../keys';
 import { songOptions } from './songs';
 
-export const audioQueueItemsOptions = (token: string) => queryOptions({
+export const audioQueueItemsOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/audio-queue', { auth: true }),
-  queryFn: ({ signal }) => audioQueueApi.list(token, { signal }),
+  queryFn: ({ signal }) => audioQueueApi.list({ signal }),
   retry: false,
 });
 
@@ -30,47 +30,47 @@ export const generationStatusOptions = (jobId: string) => queryOptions({
   retry: false,
 });
 
-export const workflowJobOptions = (token: string, jobId: string) => queryOptions({
+export const workflowJobOptions = (jobId: string) => queryOptions({
   queryKey: sharedKeys.workflowJob(jobId),
-  queryFn: ({ signal }) => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(jobId)}?after=0`, { token, signal }),
+  queryFn: ({ signal }) => apiClient.get<WorkflowReplay>(`/workflows/jobs/${encodeURIComponent(jobId)}?after=0`, { signal }),
   retry: false,
 });
 
-export const songIdsOptions = (token: string) => queryOptions({
+export const songIdsOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/song-ids', { auth: true }),
-  queryFn: ({ signal }) => songApi.listIds(token, { signal }),
+  queryFn: ({ signal }) => songApi.listIds({ signal }),
   retry: false,
 });
 
-export const selectedPathOptions = (token: string) => queryOptions({
+export const selectedPathOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/selected-path', { auth: true }),
-  queryFn: ({ signal }) => generateApi.selectedPath(token, { signal }),
+  queryFn: ({ signal }) => generateApi.selectedPath({ signal }),
   retry: false,
 });
 
 /** The server queue's items. `maxAgeMs` 0 always asks the server (joining a
  *  request already in flight); a waiter that only needs "recent" passes the
  *  poll cadence and rides the projection's own reads. */
-export const readAudioQueue = (token: string, maxAgeMs = 0) =>
-  queryClient.query({ ...audioQueueItemsOptions(token), staleTime: maxAgeMs });
+export const readAudioQueue = (maxAgeMs = 0) =>
+  queryClient.query({ ...audioQueueItemsOptions(), staleTime: maxAgeMs });
 
 /** One job's status. Every loop that follows a job polls at about the active
  *  cadence, so answers younger than a poll are shared rather than re-asked. */
 export const readGenerationStatus = (jobId: string) =>
   queryClient.query({ ...generationStatusOptions(jobId), staleTime: ACTIVE_POLL_MS - 500 });
 
-export const readWorkflowJob = (token: string, jobId: string) =>
-  queryClient.query({ ...workflowJobOptions(token, jobId), staleTime: 0 });
+export const readWorkflowJob = (jobId: string) =>
+  queryClient.query({ ...workflowJobOptions(jobId), staleTime: 0 });
 
 /** A finished render's song row, fresh: the queue reads it the moment the
  *  render is saved. Shares the canonical song key with every other reader. */
 export const readSong = (id: string) =>
   queryClient.query({ ...songOptions(id), staleTime: 0 });
 
-export const readSongIds = (token: string) =>
-  queryClient.query({ ...songIdsOptions(token), staleTime: 0 });
+export const readSongIds = () =>
+  queryClient.query({ ...songIdsOptions(), staleTime: 0 });
 
 /** Which submit path the server runs. Asked fresh: Settings can switch it,
  *  and the next submit must follow. */
-export const readSelectedPath = (token: string) =>
-  queryClient.query({ ...selectedPathOptions(token), staleTime: 0 });
+export const readSelectedPath = () =>
+  queryClient.query({ ...selectedPathOptions(), staleTime: 0 });

@@ -34,7 +34,7 @@ export const TrainingDraftBar: React.FC = () => {
     if (!token) { setError(t('createPanel.trainingDraft.signIn', 'Sign in to open this audition setup.')); return; }
     setBusy(true); setError(null);
     try {
-      const data = await loadTrainingCreateDraft(draftId, token);
+      const data = await loadTrainingCreateDraft(draftId);
       applyTrainingCreateDraft(data, {
         store: useGlobalParamsStore, write: writePersistedState, storage: localStorage, scopedKey: base => scopedKey(base),
       });

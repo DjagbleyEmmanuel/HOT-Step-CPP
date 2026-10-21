@@ -1,48 +1,39 @@
-// httpClient.ts — one configurable transport for every /api/* call.
+// httpClient.ts — one configurable client for every /api/* call.
 //
-// Replaces the get/post/patch/del boilerplate that api.ts and several
-// per-studio clients each hand-rolled. Covers JSON, multipart upload (with
-// progress), bearer auth, AbortSignal cancellation and media/audio URLs. SSE
-// is not reimplemented here — it already has one shared connection manager
-// (sharedEventSource.ts); this module only builds the URL.
+// JSON traffic goes through the shared axios instance (axiosClient.ts): its
+// request interceptor injects the bearer from the auth session accessor, and
+// its response interceptor is the global catch that normalizes failures to
+// ApiError (status + optional currentRevision + reason) — `instanceof
+// ApiError` is enough, callers don't need a second error class.
 //
-// Incremental, not a rewrite: existing per-studio clients (lireekApi,
-// trainingApi, stemStudioApi, ...) keep their own fetch wrappers for now and
-// move onto this one in later slices. Nothing here changes a request body,
-// header or error shape that a server route already expects.
+// Multipart upload stays on XHR — fetch has no upload-progress event and only
+// XHR reports it — but its failures go through the same handleFailure() as the
+// axios path, so there is still exactly one place that decides what is logged
+// and toasted.
 //
-// Error shape: every non-OK response throws ApiError, a superset of
-// workflowApi's WorkflowRequestError (status + optional currentRevision +
-// reason), so a revisioned caller can switch to this client later without
-// losing that detail — `instanceof ApiError` is enough, callers don't need a
-// second error class.
+// SSE is not here: `streamEvents()` stays on fetch (axios does not stream
+// response bodies), and reconnecting streams are owned by sharedEventSource.ts.
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly body: unknown;
-  /** Set on a 409 caused by a stale revision (revisioned document/section writes). */
-  readonly currentRevision?: number;
-  /** e.g. 'unsupported-version' on a 409 for a stored document this build can't read. */
-  readonly reason?: string;
-  constructor(status: number, message: string, body: unknown, currentRevision?: number, reason?: string) {
-    super(message);
-    this.status = status;
-    this.body = body;
-    this.currentRevision = currentRevision;
-    this.reason = reason;
-  }
-}
+import { getAuthToken, handleFailure, http } from './axiosClient';
+import { ApiError } from './apiError';
+export { ApiError };
 
+/** Trailing options every entrypoint accepts, so a query function can pass
+ *  TanStack Query's AbortSignal without changing positional callers. The
+ *  bearer is no longer threaded per call — the transport reads it from the
+ *  auth session accessor (axiosClient.ts). */
 export interface ClientOptions {
-  /** Defaults to '/api'. A client for a different mount (e.g. a per-studio
-   *  prefix) sets its own; it does not need a second copy of this file. */
-  baseUrl?: string;
-  token?: string | null;
   signal?: AbortSignal;
+  /** Opt this request out of the global error toast (X-Skip-Global-Error). */
+  silent?: boolean;
+  /** Override the instance's default timeout for known-slow routes (ms). */
+  timeout?: number;
+  /** Talk to a different origin than this client's base (remote workers). */
+  baseURL?: string;
+  /** Return the raw body as a Blob instead of parsing JSON (binary routes). */
+  responseType?: 'json' | 'blob';
 }
 
-/** Trailing options every read entrypoint accepts, so a query function can
- *  pass TanStack Query's AbortSignal without changing positional callers. */
 export interface ReadOptions {
   signal?: AbortSignal;
 }
@@ -57,18 +48,22 @@ export interface ApiClientConfig {
   mediaRoot?: string;
 }
 
-function authHeaders(token?: string | null): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function axiosOpts(opts: ClientOptions): { signal?: AbortSignal; timeout?: number; headers?: Record<string, string>; baseURL?: string; responseType?: 'json' | 'blob' } {
+  const out: { signal?: AbortSignal; timeout?: number; headers?: Record<string, string>; baseURL?: string; responseType?: 'json' | 'blob' } = {};
+  if (opts.signal) out.signal = opts.signal;
+  if (opts.timeout !== undefined) out.timeout = opts.timeout;
+  if (opts.baseURL !== undefined) out.baseURL = opts.baseURL;
+  if (opts.responseType !== undefined) out.responseType = opts.responseType;
+  if (opts.silent) out.headers = { 'X-Skip-Global-Error': '1' };
+  return out;
 }
 
-async function parseErrorBody(res: Response): Promise<any> {
-  return res.json().catch(() => ({ error: res.statusText }));
-}
-
-async function throwIfNotOk(res: Response): Promise<void> {
-  if (res.ok) return;
-  const body = await parseErrorBody(res);
-  throw new ApiError(res.status, body.error || `API error: ${res.status}`, body, body.currentRevision, body.reason);
+/** A non-OK response on a fetch-based SSE route (streamEvents, consumeSSE):
+ *  the same ApiError and global catch as any other request — handleFailure
+ *  throws, so awaiting this never returns. */
+export async function sseFailure(res: Response, method: string, url: string, skip?: boolean): Promise<never> {
+  const body = await res.json().catch(() => null);
+  handleFailure({ status: res.status, body, method, url, skip });
 }
 
 export class ApiClient {
@@ -88,57 +83,55 @@ export class ApiClient {
     return path.startsWith('http') ? path : `${this.base}${path}`;
   }
 
+  /** The one JSON request path every verb below delegates to, and what
+   *  domain clients (workflowApi's revisionedRequest) use for a method the
+   *  verbs don't name. Failures come back as ApiError from the interceptor. */
+  async request<T>(method: string, path: string, body?: unknown, opts: ClientOptions = {}): Promise<T> {
+    const { data } = await http.request<T>({
+      method: method.toUpperCase(), url: path, data: body, baseURL: this.base, ...axiosOpts(opts),
+    });
+    return data;
+  }
+
   async get<T>(path: string, opts: ClientOptions = {}): Promise<T> {
-    const res = await fetch(this.url(path), { headers: authHeaders(opts.token), signal: opts.signal });
-    await throwIfNotOk(res);
-    return res.json();
+    return this.request<T>('GET', path, undefined, opts);
   }
 
   async post<T>(path: string, body?: unknown, opts: ClientOptions = {}): Promise<T> {
-    return this.send<T>('POST', path, body, opts);
+    return this.request<T>('POST', path, body, opts);
   }
 
   async patch<T>(path: string, body?: unknown, opts: ClientOptions = {}): Promise<T> {
-    return this.send<T>('PATCH', path, body, opts);
+    return this.request<T>('PATCH', path, body, opts);
   }
 
   async put<T>(path: string, body?: unknown, opts: ClientOptions = {}): Promise<T> {
-    return this.send<T>('PUT', path, body, opts);
+    return this.request<T>('PUT', path, body, opts);
   }
 
   async delete<T>(path: string, opts: ClientOptions = {}): Promise<T> {
-    const res = await fetch(this.url(path), { method: 'DELETE', headers: authHeaders(opts.token), signal: opts.signal });
-    await throwIfNotOk(res);
-    return res.json();
-  }
-
-  private async send<T>(method: string, path: string, body: unknown, opts: ClientOptions): Promise<T> {
-    const res = await fetch(this.url(path), {
-      method,
-      headers: { ...authHeaders(opts.token), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: opts.signal,
-    });
-    await throwIfNotOk(res);
-    return res.json();
+    return this.request<T>('DELETE', path, undefined, opts);
   }
 
   /** Multipart upload via XHR, so `onProgress` can report upload fraction —
    *  fetch has no upload-progress event. `fields` are appended before the
-   *  files, so a server that reads the form in order sees them first. */
+   *  files, so a server that reads the form in order sees them first. A
+   *  plain Blob (recombined stems) names itself with `name`; a File uses its
+   *  own name unless overridden. */
   upload<T>(
     path: string,
-    files: { field: string; file: File }[],
+    files: { field: string; file: File | Blob; name?: string }[],
     opts: ClientOptions & { fields?: Record<string, string>; onProgress?: (fraction: number) => void } = {},
   ): Promise<T> {
     const form = new FormData();
     for (const [key, value] of Object.entries(opts.fields ?? {})) form.append(key, value);
-    for (const { field, file } of files) form.append(field, file, file.name);
+    for (const { field, file, name } of files) form.append(field, file, name ?? (file instanceof File ? file.name : undefined));
 
     return new Promise<T>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', this.url(path));
-      if (opts.token) xhr.setRequestHeader('Authorization', `Bearer ${opts.token}`);
+      const token = getAuthToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       if (opts.onProgress) {
         xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress!(e.loaded / e.total); };
       }
@@ -146,25 +139,19 @@ export class ApiClient {
         if (opts.signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
         opts.signal.addEventListener('abort', () => xhr.abort());
       }
+      // handleFailure throws (it is written for the axios interceptor's promise
+      // chain); inside an event handler that throw would be uncaught and this
+      // promise would hang, so route it through reject instead.
+      const fail = (info: Parameters<typeof handleFailure>[0]) => {
+        try { handleFailure(info); } catch (err) { reject(err); }
+      };
       xhr.onload = () => {
         let parsed: unknown;
         try { parsed = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
-        // JSON.parse accepts `null`/numbers/strings as top-level values, so a
-        // non-object body (or one that failed to parse) must not be read as
-        // `{ error }` directly — that threw inside this handler, outside any
-        // try/catch the Promise executor can see, leaving the call pending
-        // forever instead of rejecting.
-        const obj = (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : {};
         if (xhr.status >= 200 && xhr.status < 300) { resolve(parsed as T); return; }
-        reject(new ApiError(
-          xhr.status,
-          (obj.error as string) || `Upload failed (HTTP ${xhr.status})`,
-          parsed ?? null,
-          obj.currentRevision as number | undefined,
-          obj.reason as string | undefined,
-        ));
+        fail({ status: xhr.status, body: parsed ?? null, method: 'POST', url: this.url(path), skip: opts.silent });
       };
-      xhr.onerror = () => reject(new ApiError(0, 'Upload failed — the server closed the connection', null));
+      xhr.onerror = () => fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent });
       xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
       xhr.send(form);
     });
@@ -186,10 +173,13 @@ export class ApiClient {
    *  `data:` payload to parse. Resolves when the server ends the stream;
    *  rejects on an aborted `signal` or a non-OK response (after throwing the
    *  same ApiError a JSON call would). Cancellation closes the underlying
-   *  connection, unlike sharedEventSource's auto-reconnect streams. */
+   *  connection, unlike sharedEventSource's auto-reconnect streams. Stays on
+   *  fetch deliberately — axios does not stream response bodies, and no
+   *  default timeout applies to an open stream. */
   async streamEvents(path: string, onData: (data: string) => void, opts: ClientOptions = {}): Promise<void> {
-    const res = await fetch(this.url(path), { headers: authHeaders(opts.token), signal: opts.signal });
-    if (!res.ok) { await throwIfNotOk(res); return; }
+    const token = getAuthToken();
+    const res = await fetch(this.url(path), { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: opts.signal });
+    if (!res.ok) await sseFailure(res, 'GET', this.url(path), opts.silent);
     if (!res.body) return;
     const reader = res.body.getReader();
     // A throwing onData (or a read error) must not leave the body locked and

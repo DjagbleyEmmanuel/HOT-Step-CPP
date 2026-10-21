@@ -72,7 +72,7 @@ export const GenerationDropdown: React.FC = () => {
     if (!file || !token) return;
     try {
       setTimbreUploading(true);
-      const result = await masteringApi.uploadReference(file, token);
+      const result = await masteringApi.uploadReference(file);
       gp.setTimbreAudioPath(result.name);
       await refreshReferences();
     } catch (err) {

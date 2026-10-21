@@ -5,12 +5,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { aiContinueState, _resetAiContinueStateForTests, TEMPLATE_KEY, USER_STYLE_KEY, DEFAULT_TEMPLATE, loadTemplate } from './AiContinuePresetModal';
-import { tick, withBrowser } from '../../services/preferencesTestFake';
+import { PreferencesFake, tick, withBrowser } from '../../services/preferencesTestFake';
+import { MAX_QUERY_RETRIES } from '../../queries/contract';
 
 const isGet = (c: { method: string; path: string }) => c.method === 'GET' && c.path.endsWith('/settings/ai-continue-template');
 const isPut = (c: { method: string; path: string }) => c.method === 'PUT' && c.path.endsWith('/settings/ai-continue-template');
 const serverTemplate = (fake: { docs: Array<{ family: string; body: any; revision: number }> }) =>
   fake.docs.find(d => d.family === 'ai-continue-template');
+
+/** Reads go through Query and retry 5xx (contract.ts), so a one-shot failure
+ *  is consumed by the first attempt — arm one per attempt to fail them all. */
+const failEveryAttempt = (fake: PreferencesFake, match: (c: { method: string; path: string }) => boolean): void => {
+  for (let i = 0; i <= MAX_QUERY_RETRIES; i++) fake.failNext(match, 500);
+};
+
+/** Reads retry with real delays, so a settled read is not instant anymore. */
+const until = async (cond: () => boolean): Promise<void> => {
+  for (let i = 0; i < 240 && !cond(); i++) await new Promise(resolve => setTimeout(resolve, 25));
+  if (!cond()) throw new Error('timed out waiting for the entry to settle');
+};
 
 test('a second browser hydrates the saved template and mirrors it for other readers', async () => {
   await withBrowser(async fake => {
@@ -166,7 +179,7 @@ test('a 409 pauses saving even when reading the current value back fails', async
     const { template } = aiContinueState();
     await template.hydrate();
     fake.touch(doc.id, { template: 'theirs' });
-    fake.failNext(c => isGet(c), 500);
+    failEveryAttempt(fake, c => isGet(c));
     template.edit('mine');
     await template.settled();
     assert.equal(template.getSnapshot().status, 'conflict');
@@ -185,9 +198,9 @@ test('presets: a conflict whose read-back fails is not taken as a deletion; reap
     const { style } = aiContinueState();
     await style.load();
     fake.touch(d.id, { label: 'One', value: 'theirs' });
-    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    failEveryAttempt(fake, c => c.method === 'GET' && c.path.includes('/presets/'));
     style.update(d.id, { label: 'One', value: 'mine' });
-    await tick(); await tick();
+    await until(() => style.getSnapshot().entries.find(x => x.key === d.id)?.status === 'conflict');
     const e = style.getSnapshot().entries.find(x => x.key === d.id)!;
     assert.equal(e.status, 'conflict');
     assert.equal(e.serverKnown, false);
@@ -208,10 +221,10 @@ test('presets: a pending delete whose conflict read-back fails is not dropped un
     const { style } = aiContinueState();
     await style.load();
     fake.touch(d.id, { label: 'One', value: 'theirs' });
-    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    failEveryAttempt(fake, c => c.method === 'GET' && c.path.includes('/presets/'));
     await style.remove(d.id);
     // Reapply while the server still cannot be read: nothing is decided.
-    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    failEveryAttempt(fake, c => c.method === 'GET' && c.path.includes('/presets/'));
     await style.reapply(d.id);
     assert.equal(style.getSnapshot().entries.some(x => x.key === d.id), true);
     assert.equal(fake.docs.length, 1);

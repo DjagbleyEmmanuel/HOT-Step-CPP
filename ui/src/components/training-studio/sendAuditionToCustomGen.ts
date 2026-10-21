@@ -8,13 +8,12 @@ import { trainingQueries } from '../../queries/training-data/queries';
 export type AuditionRenderCell = 'bare' | 'adapter';
 
 export async function sendAuditionToCustomGen(preview: AuditionPreview, side: AuditionSideResult,
-  cell: AuditionRenderCell, token: string): Promise<string> {
+  cell: AuditionRenderCell): Promise<string> {
   // The dataset's current revision, always from this PC: audition previews
   // and the draft they feed are local, whatever "Train on" says.
   const dataset = await queryClient.query({ ...trainingQueries.dataset(null, preview.datasetId), staleTime: 0 });
   if (typeof dataset.updatedAt !== 'string') throw new Error('Could not load the training dataset revision');
   const result = await trainingOperation<{ draftId: string }>('review', '/draft', {
-    token,
     body: snapshotFor({ kind: 'review:audition-draft', idempotencyKey: crypto.randomUUID(),
       worker: { kind: 'local' }, dataset: { id: preview.datasetId, revision: dataset.updatedAt },
       sources: [{ kind: 'audition-preview', id: preview.previewId, revision: preview.createdAt }],

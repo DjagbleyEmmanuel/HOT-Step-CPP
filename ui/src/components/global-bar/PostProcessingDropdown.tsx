@@ -141,7 +141,7 @@ const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
     if (!file || !token) return;
     try {
       setUploading(true);
-      const result = await masteringApi.uploadReference(file, token);
+      const result = await masteringApi.uploadReference(file);
       gp.setMasteringReference(result.name);
       await refreshReferences();
     } catch (err) {
@@ -155,7 +155,7 @@ const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
   const handleDelete = useCallback(async (name: string) => {
     if (!token) return;
     try {
-      await masteringApi.deleteReference(name, token);
+      await masteringApi.deleteReference(name);
       if (gp.masteringReference === name) gp.setMasteringReference('');
       await refreshReferences();
     } catch (err) {

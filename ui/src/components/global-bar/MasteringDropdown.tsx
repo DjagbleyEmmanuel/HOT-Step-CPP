@@ -36,7 +36,7 @@ export const MasteringDropdown: React.FC = () => {
     if (!file || !token) return;
     try {
       setUploading(true);
-      const result = await masteringApi.uploadReference(file, token);
+      const result = await masteringApi.uploadReference(file);
       gp.setMasteringReference(result.name);
       await refreshReferences();
     } catch (err) {
@@ -50,7 +50,7 @@ export const MasteringDropdown: React.FC = () => {
   const handleDelete = useCallback(async (name: string) => {
     if (!token) return;
     try {
-      await masteringApi.deleteReference(name, token);
+      await masteringApi.deleteReference(name);
       if (gp.masteringReference === name) gp.setMasteringReference('');
       await refreshReferences();
     } catch (err) {

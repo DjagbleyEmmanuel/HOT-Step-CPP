@@ -17,6 +17,7 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { pullWorkerAdapters, type WorkerDispatch } from '../../services/trainingApi';
 import { TD, trainingQueries } from '../../queries/training-data/queries';
 import { resourceKey } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-3';
 const HERE = '__here__';
@@ -50,8 +51,8 @@ export const TrainingWorkerBar: React.FC = () => {
   const queuedHere = dispatches.find(d => d.worker === worker)?.items.filter(i => i.status === 'queued').length ?? 0;
   useEffect(() => {
     if (!queuedHere) return;
-    void queryClient.invalidateQueries({ queryKey: resourceKey(TD.datasets, { worker }) });
-    void queryClient.invalidateQueries({ queryKey: resourceKey(TD.yue2Batches, { worker }) });
+    void queryManager.keys(queryClient, resourceKey(TD.datasets, { worker }));
+    void queryManager.keys(queryClient, resourceKey(TD.yue2Batches, { worker }));
     void loadDatasets(); void loadBatches();
   }, [queuedHere, worker, loadDatasets, loadBatches]);
 

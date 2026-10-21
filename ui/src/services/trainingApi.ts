@@ -22,7 +22,7 @@
 // `worker: undefined` keeps the current selection, `null` is this PC, a name
 // is that worker. Mutations take no signal: aborting a read is fine, but a
 // cancelled request must never be mistaken for cancelling a server job.
-import { ApiError, type ReadOptions } from './httpClient';
+import { apiClient, type ReadOptions } from './httpClient';
 
 export interface TrainingTarget { worker?: string | null }
 export interface TrainingReadOptions extends TrainingTarget, ReadOptions {}
@@ -2321,27 +2321,38 @@ export interface TrainingDefaults {
 export const PIPELINE_STAGES: readonly PipelineStage[] =
   ['label', 'build', 'preprocess', 'train-dit', 'train-lm', 'lyric-studio'];
 
-// ── fetch helpers ────────────────────────────────────────────────────────
+// ── request helpers ───────────────────────────────────────────────────────
 
-// Errors are ApiError (an Error subclass with the same message as before), so
-// query retry policy can tell a 4xx from a 5xx.
-async function parse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(res.status, err.error || `API error: ${res.status}`, err);
-  }
-  return res.json();
+// All JSON traffic goes through the shared axios instance (axiosClient.ts):
+// failures arrive as ApiError from the global interceptor, and the bearer is
+// injected from the session accessor. `init` keeps the legacy RequestInit
+// shape so call sites don't change; bodies are the JSON strings jsonBody()
+// makes, parsed back to objects for the adapter to re-serialize identically.
+
+type TrainingInit = RequestInit & { timeout?: number };
+
+function initToArgs(init?: TrainingInit): { method: string; body?: unknown } {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const body = init?.body == null ? undefined
+    : typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
+  return { method, body };
 }
 
-async function request<T>(path: string, init?: RequestInit, target?: TrainingReadOptions): Promise<T> {
-  return parse<T>(await fetch(`${trainingBase(target?.worker)}${path}`, { ...init, signal: target?.signal }));
+async function request<T>(path: string, init?: TrainingInit, target?: TrainingReadOptions): Promise<T> {
+  const { method, body } = initToArgs(init);
+  return apiClient.request<T>(method, path, body, {
+    signal: target?.signal, timeout: init?.timeout, baseURL: trainingBase(target?.worker),
+  });
 }
 
 /** Same as `request`, but always this machine — never "Train on". Use for
  *  run records, ladder review, finished-run previews, rung/album scores,
  *  cleanup and finish. See the API_BASE comment above. */
-async function localRequest<T>(path: string, init?: RequestInit, opts?: ReadOptions): Promise<T> {
-  return parse<T>(await fetch(`${LOCAL_BASE}${path}`, { ...init, signal: opts?.signal }));
+async function localRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
+  const { method, body } = initToArgs(init);
+  return apiClient.request<T>(method, path, body, {
+    signal: opts?.signal, timeout: init?.timeout, baseURL: LOCAL_BASE,
+  });
 }
 
 function jsonBody(body: unknown): RequestInit {
@@ -3152,11 +3163,11 @@ export interface TrainingWorkerStatus {
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
 export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
 
-async function workersRequest<T>(path: string, init?: RequestInit, opts?: ReadOptions): Promise<T> {
-  const res = await fetch(`/api/workers${path}`, { ...init, signal: opts?.signal });
-  const data = await res.json().catch(() => ({ error: res.statusText }));
-  if (!res.ok) throw new ApiError(res.status, data.error || `API error: ${res.status}`, data);
-  return data as T;
+async function workersRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
+  const { method, body } = initToArgs(init);
+  return apiClient.request<T>(method, path, body, {
+    signal: opts?.signal, timeout: init?.timeout, baseURL: '/api/workers',
+  });
 }
 export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<TrainingWorkerStatus[]> {
   return (await workersRequest<{ workers: TrainingWorkerStatus[] }>('', undefined, reqOpts)).workers;

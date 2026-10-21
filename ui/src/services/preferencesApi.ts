@@ -1,33 +1,24 @@
 // preferencesApi.ts — client for /api/preferences (server/src/routes/preferences.ts).
 //
 // No auth token: every family here is installation-scoped (no user id in any
-// source browser key), same as /api/vst/chain. Throws WorkflowRequestError
-// on a non-2xx response, carrying currentRevision for a 409 and 'name-conflict'
-// results come back inline (not an error) so a batch import can report
-// per-item outcomes.
+// source browser key), same as /api/vst/chain. Throws ApiError on a non-2xx
+// response, carrying currentRevision for a 409 and 'name-conflict' results
+// come back inline (not an error) so a batch import can report per-item
+// outcomes.
 import type {
   AiContinuePresetBody, AiContinueTemplateBody, ImportPreferenceItem, ImportPreferenceResult,
   StormTuningBody, VstChainPresetBody, Yue2JointPresetBody,
   ResolveYue2PresetResult,
 } from '../../../server/src/contracts/preferences';
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
-import { WorkflowRequestError } from './workflowApi';
-import type { ReadOptions } from './httpClient';
+import { apiClient, type ReadOptions } from './httpClient';
 
 export type { ImportPreferenceItem, ImportPreferenceResult };
 export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
 export type SettingsFamily = 'ai-continue-template' | 'storm-tuning';
 
 async function request<T>(url: string, method = 'GET', body?: unknown, opts: ReadOptions = {}): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    signal: opts.signal,
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const value = await res.json().catch(() => ({}));
-  if (!res.ok) throw new WorkflowRequestError(res.status, value.error || `Request failed (${res.status})`, value.currentRevision, value.reason);
-  return value as T;
+  return apiClient.request<T>(method, url.replace(/^\/api/, ''), body, opts);
 }
 
 const id = (v: string) => encodeURIComponent(v);

@@ -12,6 +12,8 @@
 import { create } from 'zustand';
 import { queryClient } from '../queries/client';
 import { backendsOptions, backendModelsOptions, capabilitiesOptions, usableCapabilities } from '../queries/global-models/options';
+import { queryManager } from '../queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '../queries/writes';
 import { scopeOf } from '../queries/keys';
 import { apiClient } from '../services/httpClient';
 import { projectQuery } from '../queries/global-models/projection';
@@ -308,23 +310,15 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     if (!backendId) return false;
     try {
       await queryClient.cancelQueries({ queryKey: backendModelsOptions(backendId).queryKey });
-      const res = await fetch('/api/backends/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ backend: backendId, selection }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error || `HTTP ${res.status}`);
-      }
       // Re-read rather than trusting the request: the engine may fall back to
       // a different quant if the requested file vanished.
-      await queryClient.invalidateQueries({ queryKey: backendModelsOptions(backendId).queryKey });
+      await writeAndInvalidate(queryClient,
+        () => apiClient.post('/backends/models', { backend: backendId, selection }),
+        keysPlan(backendModelsOptions(backendId).queryKey));
       await get().fetchModels(backendId);
       return true;
-    } catch (err) {
-      console.warn('[Backends] model selection failed:', err instanceof Error ? err.message : String(err));
-      set({ error: err instanceof Error ? err.message : String(err) });
+    } catch {
+      // Transport failure already toasted by the global handler.
       return false;
     }
   },
@@ -333,13 +327,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     set({ error: null });
     try {
       await queryClient.cancelQueries({ queryKey: backendsOptions().queryKey });
-      const res = await fetch('/api/backends/active', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: { activeId: string } = await res.json();
+      const data = await apiClient.post<{ activeId: string }>('/backends/active', { id });
       queryClient.setQueryData(backendsOptions().queryKey, old => old && ({
         ...old, activeId: data.activeId,
         backends: old.backends.map(b => ({ ...b, active: b.id === data.activeId })),
@@ -350,17 +338,19 @@ export const useBackendStore = create<BackendState>((set, get) => ({
         backends: get().backends.map(b => ({ ...b, active: b.id === data.activeId })),
       });
       // Refetch on success — the new active backend's manifest may not be
-      // cached yet (or may be stale from a previous session).
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: backendsOptions().queryKey }),
-        queryClient.invalidateQueries({ queryKey: capabilitiesOptions(data.activeId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: backendModelsOptions(data.activeId).queryKey }),
-      ]);
+      // cached yet (or may be stale from a previous session). The plan depends
+      // on the write's RESULT (data.activeId), so it is named here with the
+      // captured scope; the manager still owns the invalidateQueries call.
+      await queryManager.keys(
+        queryClient,
+        backendsOptions().queryKey,
+        capabilitiesOptions(data.activeId).queryKey,
+        backendModelsOptions(data.activeId).queryKey,
+      );
       await get().fetchCapabilities(data.activeId);
       await get().fetchModels(data.activeId);
-    } catch (err) {
-      console.warn('[Backends] switch failed:', err instanceof Error ? err.message : String(err));
-      set({ error: err instanceof Error ? err.message : String(err) });
+    } catch {
+      // Transport failure already toasted by the global handler.
     }
   },
 }));

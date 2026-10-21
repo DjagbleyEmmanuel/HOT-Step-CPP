@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { aceModelsOptions, localOptions, adapterScanOptions } from '../../queries/global-models/options';
+import { queryManager } from '../../queries/invalidation';
 // AdaptersDropdown.tsx — Adapter configuration UI for the global param bar
 //
 // Adapted from create/AdaptersAccordion.tsx to read from GlobalParamsContext.
@@ -67,7 +68,7 @@ export const AdaptersDropdown: React.FC = () => {
     'lm-adapters', `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`, { folder });
   const lmQuery = useQuery(lmOptions);
   const lmAdapters = lmQuery.data?.adapters ?? [];
-  const refreshLmAdapters = useCallback(() => client.invalidateQueries({ queryKey: lmOptions.queryKey }), [client, folder]);
+  const refreshLmAdapters = useCallback(() => { void queryManager.keys(client, lmOptions.queryKey); }, [client, folder]);
 
   const fileBrowserMode = gp.advancedAdapters ? 'folder' as const : 'file' as const;
   // In advanced mode the stack drives everything; in simple mode the single adapter does.
@@ -124,7 +125,7 @@ export const AdaptersDropdown: React.FC = () => {
     try {
       setScanFolder(dir);
       const key = adapterScanOptions(dir).queryKey;
-      await client.invalidateQueries({ queryKey: key });
+      await queryManager.keys(client, key);
       const result = await client.query(adapterScanOptions(dir));
       if (result.files.length === 0) {
         setScanError('No .safetensors files found in this folder');

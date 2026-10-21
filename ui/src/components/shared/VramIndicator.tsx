@@ -3,6 +3,7 @@ import { useVram } from '../../queries/global-models/hooks';
 import { loadedModelsOptions } from '../../queries/global-models/options';
 import { apiClient } from '../../services/httpClient';
 import { sharedKeys } from '../../queries/keys';
+import { queryManager } from '../../queries/invalidation';
 // VramIndicator.tsx — GPU VRAM usage badge (top of the Terminal box) +
 // manual model-unload dropdown
 //
@@ -57,10 +58,7 @@ export const VramIndicator: React.FC = () => {
     setUnloading(label);
     try {
       await apiClient.post('/logs/models-unload', { label });
-      await Promise.all([
-        client.invalidateQueries({ queryKey: sharedKeys.loadedModels() }),
-        client.invalidateQueries({ queryKey: sharedKeys.vram() }),
-      ]);
+      await queryManager.keys(client, sharedKeys.loadedModels(), sharedKeys.vram());
     } catch { /* ignore */ } finally {
       setUnloading(null);
     }

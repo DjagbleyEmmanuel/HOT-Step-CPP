@@ -162,7 +162,6 @@ export async function downloadTrack(
  */
 export async function downloadAll(
   songs: Song[],
-  token: string,
   options?: { artistName?: string; prepend?: string },
 ): Promise<string[]> {
   const settings = readSettings();
@@ -190,7 +189,6 @@ export async function downloadAll(
           format, bitrate, downloadVersion: settings.downloadVersion, includeLatent: settings.downloadIncludeLatent,
           ...(artist ? { artist } : {}), ...(prepend ? { prepend } : {}),
         },
-        token,
       );
       for (const result of results) {
         if (!result.url) {

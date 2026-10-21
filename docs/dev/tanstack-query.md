@@ -10,10 +10,19 @@ manifest) and the
 (per-path dispositions, area owners). The phases below are proposed work items
 for the named areas, following the R1–R6 request model used by that audit.
 
-**Status (2026-10-20):** P1 is executed on branch `tanstack-p1-fetchquery` —
+**Status (2026-10-21):** P1 is executed on branch `tanstack-p1-fetchquery` —
 all 73 sites renamed, ESLint guard rule in place, verified clean (`tsc -b` +
-full UI suite; zero non-test `fetchQuery`). The Scale table and F1 ledger are
-a pre-sweep snapshot.
+full UI suite; zero non-test `fetchQuery`). P2 is executed on branch
+`tanstack-p2-fetchquery` — JSON traffic and uploads run through one shared
+axios instance with a request interceptor (bearer from the auth session
+accessor) and one response interceptor as the global catch (status-mapped
+react-toastify toasts, GET errors silent, `X-Skip-Global-Error` escape),
+`queries/writes.ts` (`writeAndInvalidate`, `useUpload`), `queries/invalidation.ts`
+(the only `invalidateQueries` call site), and the hand-rolled upload blocks
+collapsed onto `apiClient.upload()`. Verified: `tsc -b` clean, full UI suite at
+the 354-test baseline (2 pre-existing `.css` import failures), lint at or below
+baseline with zero new issues, P2 exit-criteria greps pass. The Scale table and
+F1 ledger are a pre-sweep snapshot.
 
 ## Foundation in place
 
@@ -225,8 +234,10 @@ except when a filter says the request is silent:
 Status mapping on toast: no response → "server unreachable"; 401 → one deduped
 `toast.warn` (session expired) while AuthProvider runs the re-auth flow;
 403/404/5xx → short status-specific messages; otherwise the server's `error`
-field from the `ApiError` body. Aborts (`AbortError`) are never errors: no log,
-no toast.
+field from the `ApiError` body. Aborts are never errors: no log, no toast —
+the axios path rejects with a `CanceledError`, the SSE/upload paths with an
+`AbortError`, and `contract.ts`'s `isAbortError` recognizes both before any
+filter or toast runs.
 
 ### Operational guardrails
 
@@ -615,6 +626,9 @@ Per-phase greps (run from `ui/`):
 
 ```bash
 grep -rn "fetchQuery" src --include="*.ts" --include="*.tsx" | grep -v "\.test\.ts:"   # P1: empty
+grep -rn "fetch(" src/services --include="*.ts"                                        # P2: only transport internals and SSE — axiosClient's fetch adapter, httpClient streamEvents, workflowApi followJob, assistantApi chatStream, lireekApi consumeSSE
+grep -rn "\.invalidateQueries(" src --include="*.ts" --include="*.tsx" | grep -v "\.test\.ts:"   # P2: only queries/invalidation.ts
+grep -rn "new FormData(" src/services --include="*.ts"                                      # P2: only httpClient upload()
 grep -rn "queryKey:" src/components --include="*.tsx" | grep -v "Options()"            # P6: no inline keys
 ```
 

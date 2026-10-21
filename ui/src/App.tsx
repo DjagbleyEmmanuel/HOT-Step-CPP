@@ -296,7 +296,7 @@ const AppContent: React.FC = () => {
   void sessionEpoch;
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState(() => viewFromUrl());
-  const songsQuery = useQuery({ ...songsOptions(token || ''), enabled: !!token });
+  const songsQuery = useQuery({ ...songsOptions(), enabled: !!token });
   const songs = songsQuery.data?.songs ?? NO_SONGS;
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
@@ -721,7 +721,7 @@ const AppContent: React.FC = () => {
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
     if (!token) return;
-    await songApi.delete(song.id, token);
+    await songApi.delete(song.id);
     void removeSongs(queryClient, [song.id]);
     if (selectedSong?.id === song.id) setSelectedSong(null);
     showToast(`Deleted "${song.title}"`, 'success');
@@ -751,7 +751,7 @@ const AppContent: React.FC = () => {
       onConfirm: async () => {
         setConfirmDialog(null);
         try {
-          await songApi.bulkDelete(ids, token);
+          await songApi.bulkDelete(ids);
           const idSet = new Set(ids);
           void removeSongs(queryClient, ids);
           if (selectedSong && idSet.has(selectedSong.id)) setSelectedSong(null);
@@ -852,7 +852,7 @@ const AppContent: React.FC = () => {
   // Rename handler — PATCH title to server + update local state
   const handleRename = useCallback(async (song: Song, newTitle: string) => {
     try {
-      const { song: updated } = await songApi.update(song.id, { title: newTitle }, token!);
+      const { song: updated } = await songApi.update(song.id, { title: newTitle });
       const normalized = { ...song, ...updated, title: newTitle };
       handleSongUpdate(normalized);
     } catch (err: any) {
@@ -1658,7 +1658,6 @@ const AppContent: React.FC = () => {
       {metadataEditSong && token && (
         <MetadataEditorModal
           song={metadataEditSong}
-          token={token}
           onClose={() => setMetadataEditSong(null)}
           onSaved={(s) => { handleSongUpdate(s); setMetadataEditSong(null); }}
         />

@@ -477,7 +477,6 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
             no_think: noThink || undefined,
             count: genCount,
           },
-          token,
           () => onRefresh(),
         );
       showToast(`Generated ${genCount} new song${genCount > 1 ? 's' : ''}`);
@@ -502,7 +501,6 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
     setRefineStreamDone(false);
     try {
       await runLyricOperation(
-        token,
         { type: 'refine', targetId: gen.id, provider, model },
         {
           onChunk: (text) => setRefineStreamText(prev => {

@@ -71,7 +71,7 @@ test('resumed Create drafts reproduce every captured Create request', async () =
       const storage = new Map<string, unknown>();
       let error = '';
       const mirror = createDraftMirror({ api: {} as never, pointer: { read: () => null, write: () => {} }, onError: m => { error = m; } });
-      const loaded = await mirror.load('t', saved.id, {
+      const loaded = await mirror.load(saved.id, {
         get: async () => ({ document: { ...saved, body: resumed }, sourceError: null }),
         current: () => ({ studio: 'create', fields: {} }), confirm: () => true,
         refuse: draft => createDraftBackendRefusal(draft, active, id => `name:${id}`),
@@ -156,7 +156,7 @@ test('switching backend while a draft loads: the backend at apply time decides',
   let finish!: (value: { document: never; sourceError: null }) => void;
   const fetched = new Promise<{ document: never; sourceError: null }>(r => { finish = r; });
   const mirror = createDraftMirror({ api: {} as never, pointer: { read: () => null, write: () => {} }, onError: m => { error = m; } });
-  const loading = mirror.load('t', 'd1', {
+  const loading = mirror.load('d1', {
     get: () => fetched, current: () => ({ studio: 'create', fields: {} }), confirm: () => true,
     // CreatePanel's check, chosen while MiniMax-Music3 was active.
     refuse: liveBackendRefusal(() => active, id => (id === 'minimax-m3' ? 'MiniMax-Music3' : id)),

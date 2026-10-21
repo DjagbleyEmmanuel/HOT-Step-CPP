@@ -4,7 +4,6 @@
 
 import React from 'react';
 import { Loader2 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { runLlmInspire } from '../../services/inspireApi';
 import { AiContinuePresetModal, loadTemplate, DEFAULT_TEMPLATE, type AiPreset, type PresetCategory } from './AiContinuePresetModal';
 import { SeedManagerDrawer } from '../global-bar/SeedManagerDrawer';
@@ -118,8 +117,6 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
   hideAceControls = false,
   onSlotMetaUpdate,
 }) => {
-  const { token } = useAuth();
-
   const received = sa.currentSlot || 0;
   const playing  = sa.playingSlot || 0;
 
@@ -284,7 +281,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
             .replace('{direction}', aiContinueDir ? `\n\nDirection: ${aiContinueDir}.` : '')
             .replace('{lyrics}', contextLyrics)
             .replace('{style}', caption),
-        }, token || undefined),
+        }),
         new Promise<never>((_, r) => setTimeout(() => r(new Error('AI timeout')), 30000)),
       ]);
       if (result?.lyrics) {
@@ -329,7 +326,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
         setAiStatus({ msg: '3 failures — re-enable to retry', type: 'err' });
       }
     } finally { setAiContinuePending(false); }
-  }, [lyrics, caption, aiContinueDir, token, sa, slotMeta]);
+  }, [lyrics, caption, aiContinueDir, sa, slotMeta]);
 
   React.useEffect(() => {
     if (!sa.isPlaying || !aiContinueEnabled || aiWarnDisabled) return;
@@ -375,7 +372,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
         subject: caption || 'song continuation',
         language: 'en',
         systemPrompt: continuationPrompt,
-      }, token || undefined),
+      }),
       new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 30000)),
     ]).then(result => {
       if (result?.lyrics) {
@@ -386,7 +383,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
         }]);
       }
     }).catch(() => {}).finally(() => setAiContinuePending(false));
-  }, [aiTemplate, lyrics, caption, token, sa, received, slotMeta]);
+  }, [aiTemplate, lyrics, caption, sa, received, slotMeta]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const fireControl = (key: SlotKey, val: number) => {

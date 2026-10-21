@@ -44,7 +44,7 @@ export const AuditionPlayer: React.FC<AuditionPlayerProps> = ({
     setSending(true); setSendError(null);
     try {
       if (!token) throw new Error(t('createPanel.trainingDraft.signIn', 'Sign in to open this audition setup.'));
-      await sendAuditionToCustomGen(preview, side, cell, token);
+      await sendAuditionToCustomGen(preview, side, cell);
     } catch (e) {
       setSendError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -11,6 +11,7 @@ import { yue2CoverApi } from '../../services/yue2CoverApi';
 import { waitForSnapshot } from './wait';
 import { coverSongsOptions, deleteCovers } from './songs';
 import { waitForCoverJob } from '../../services/coverWorkflowApi';
+import { setAuthToken } from '../../services/axiosClient';
 
 const originalFetch = globalThis.fetch;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
@@ -43,10 +44,10 @@ test('Cover writes, deletes and render completion refresh every cached song view
     revision++;
     await songsChanged();
     for (const option of options) assert.equal(queryClient.getQueryData(option.queryKey).revision, 1);
-    await deleteCovers('cover-writes', ['remove']);
+    await deleteCovers(['remove']);
     for (const option of options) assert.equal(queryClient.getQueryData(option.queryKey).revision, 2);
     revision++;
-    await waitForCoverJob('cover-writes', 'render', () => false);
+    await waitForCoverJob('render', () => false);
     for (const option of options) {
       assert.equal(queryClient.getQueryData(option.queryKey).revision, 3);
       assert.deepEqual(queryClient.getQueryData(option.queryKey).songs.map((song: { id: string }) => song.id), ['keep']);
@@ -79,10 +80,10 @@ test('late source A is aborted and cannot populate source B or its cancelled cac
     }
     return json({ matched: true, lyrics: 'B' });
   };
-  const a = yue2CoverApi.sourceMetadata({ songId: 'A' }, 'source-test').catch(error => error);
+  const a = yue2CoverApi.sourceMetadata({ songId: 'A' }).catch(error => error);
   await tick();
   await queryClient.cancelQueries({ queryKey: ['hs', 'cover-lyrics/cover'] });
-  const b = await yue2CoverApi.sourceMetadata({ songId: 'B' }, 'source-test');
+  const b = await yue2CoverApi.sourceMetadata({ songId: 'B' });
   release(json({ matched: true, lyrics: 'A' }));
   await a;
   assert.equal(signal?.aborted, true);
@@ -92,6 +93,10 @@ test('late source A is aborted and cannot populate source B or its cancelled cac
 
 test('profile and draft writes refresh their snapshots and submit only once', async () => {
   startAuthSession(queryClient, 'write-test');
+  // The key's auth scope now derives from the session accessor (P2), so pair
+  // it like AuthProvider does — otherwise reads are unscoped and the
+  // session-scoped invalidation prefix never matches.
+  setAuthToken('write-test');
   let profile = 'before'; let revision = 1; let writes = 0;
   globalThis.fetch = async (url, opts) => {
     const write = opts?.method && opts.method !== 'GET';
@@ -99,13 +104,15 @@ test('profile and draft writes refresh their snapshots and submit only once', as
     if (String(url).includes('/studio-drafts')) return json({ document: { id: 'draft', revision } });
     return json({ id: 1, profile_data: { style_caption: profile } });
   };
-  assert.equal((await lireekApi.getProfile(1)).profile_data.style_caption, 'before');
-  await lireekApi.buildProfile(1, { provider: 'test' });
-  assert.equal((await lireekApi.getProfile(1)).profile_data.style_caption, 'after');
-  assert.equal((await studioDraftsApi.get('write-test', 'draft')).document.revision, 2);
-  await studioDraftsApi.update('write-test', 'draft', 2, { studio: 'cover', fields: {} });
-  assert.equal((await studioDraftsApi.get('write-test', 'draft')).document.revision, 3);
-  assert.equal(writes, 2);
+  try {
+    assert.equal((await lireekApi.getProfile(1)).profile_data.style_caption, 'before');
+    await lireekApi.buildProfile(1, { provider: 'test' });
+    assert.equal((await lireekApi.getProfile(1)).profile_data.style_caption, 'after');
+    assert.equal((await studioDraftsApi.get('draft')).document.revision, 2);
+    await studioDraftsApi.update('draft', 2, { studio: 'cover', fields: {} });
+    assert.equal((await studioDraftsApi.get('draft')).document.revision, 3);
+    assert.equal(writes, 2);
+  } finally { setAuthToken(null); }
 });
 
 test('read errors retain HTTP status, failed submits never retry and failures are not cached as empty lists', async () => {
@@ -156,7 +163,7 @@ test('deleting a cover cancels a late list and only removes data after success',
   };
   const old = queryClient.query({ ...coverSongsOptions('test'), staleTime: 0 }).catch(error => error);
   await tick();
-  await deleteCovers('test', ['remove']);
+  await deleteCovers(['remove']);
   release(json({ songs: [{ id: 'remove' }, { id: 'keep' }] })); await old;
   assert.equal(signal?.aborted, true);
   assert.deepEqual(queryClient.getQueryData(key)?.songs.map(s => s.id), ['keep']);

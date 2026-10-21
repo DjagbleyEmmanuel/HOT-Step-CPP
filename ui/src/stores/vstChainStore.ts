@@ -3,6 +3,8 @@ import { vstPresetsApi } from '../queries/global-models/presets';
 import type { MonitorStatus } from '../queries/global-models/options';
 import { queryClient } from '../queries/client';
 import { localOptions, monitorOptions } from '../queries/global-models/options';
+import { queryManager } from '../queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '../queries/writes';
 import { apiClient } from '../services/httpClient';
 // vstChainStore.ts — Zustand store for VST3 post-processing chain
 //
@@ -129,7 +131,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
   scanPlugins: async () => {
     set({ scanning: true, scanError: null });
     try {
-      await queryClient.invalidateQueries({ queryKey: localOptions('vst-scan', '/vst/scan').queryKey });
+      await queryManager.keys(queryClient, localOptions('vst-scan', '/vst/scan').queryKey);
       await queryClient.query(localOptions<{ plugins: VstPlugin[] }>('vst-scan', '/vst/scan'));
       set({ scanning: false });
     } catch (err: any) {
@@ -163,9 +165,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
     try {
       await updateCachedChain(newChain);
-    } catch (err) {
-      console.error('[VST] Failed to update chain:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   removeFromChain: async (uid: string) => {
@@ -175,9 +175,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
     try {
       await updateCachedChain(newChain);
-    } catch (err) {
-      console.error('[VST] Failed to update chain:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   toggleEnabled: async (uid: string) => {
@@ -189,9 +187,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
     try {
       await updateCachedChain(newChain);
-    } catch (err) {
-      console.error('[VST] Failed to update chain:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   reorderChain: async (fromIndex: number, toIndex: number) => {
@@ -203,9 +199,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
     try {
       await updateCachedChain(newChain);
-    } catch (err) {
-      console.error('[VST] Failed to update chain:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   openGui: async (plugin: VstChainEntry) => {
@@ -230,9 +224,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
           } catch { /* server unavailable; retry next tick */ }
         }, 1500);
       }
-    } catch (err) {
-      console.error('[VST] Failed to open GUI:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   closeGui: (uid: string) => {
@@ -245,84 +237,68 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
 
   startMonitor: async (trackPath: string) => {
     try {
-      await vstApi.monitorStart(trackPath);
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => vstApi.monitorStart(trackPath),
+        keysPlan(monitorOptions().queryKey));
       set({ monitoring: true, monitorPaused: false, monitorTrackPath: trackPath, pendingGuiChanges: false });
-    } catch (err) {
-      console.error('[VST] Failed to start monitor:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   stopMonitor: async () => {
     try {
-      await vstApi.monitorStop();
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => vstApi.monitorStop(),
+        keysPlan(monitorOptions().queryKey));
       set({ monitoring: false, monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
-    } catch (err) {
-      console.error('[VST] Failed to stop monitor:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   restartMonitor: async () => {
     const { monitorTrackPath } = get();
     if (!monitorTrackPath) return;
     try {
-      // Stop first, then restart with the same track
-      await apiClient.post('/vst/monitor/restart');
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => apiClient.post('/vst/monitor/restart'),
+        keysPlan(monitorOptions().queryKey));
       set({ monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
-    } catch (err) {
-      console.error('[VST] Failed to restart monitor:', err);
-      // Fallback: manual stop + start
+    } catch {
+      // Fallback: manual stop + start (the failed restart is already toasted).
       try {
-        await vstApi.monitorStop();
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
-        await vstApi.monitorStart(monitorTrackPath);
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+        await writeAndInvalidate(queryClient, () => vstApi.monitorStop(),
+          keysPlan(monitorOptions().queryKey));
+        await writeAndInvalidate(queryClient, () => vstApi.monitorStart(monitorTrackPath),
+          keysPlan(monitorOptions().queryKey));
         set({ monitoring: true, monitorPaused: false, monitorPosition: 0, pendingGuiChanges: false });
-      } catch (e) {
-        console.error('[VST] Restart fallback also failed:', e);
-      }
+      } catch { /* each failed step toasted by the global handler */ }
     }
   },
 
   pauseMonitor: async () => {
     try {
-      await apiClient.post('/vst/monitor/pause');
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => apiClient.post('/vst/monitor/pause'),
+        keysPlan(monitorOptions().queryKey));
       set({ monitorPaused: true });
-    } catch (err) {
-      console.error('[VST] Failed to pause monitor:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   resumeMonitor: async () => {
     try {
-      await apiClient.post('/vst/monitor/resume');
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => apiClient.post('/vst/monitor/resume'),
+        keysPlan(monitorOptions().queryKey));
       set({ monitorPaused: false });
-    } catch (err) {
-      console.error('[VST] Failed to resume monitor:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   switchMonitorTrack: async (trackPath: string) => {
     try {
-      await vstApi.monitorSwitch(trackPath);
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
+      await writeAndInvalidate(queryClient, () => vstApi.monitorSwitch(trackPath),
+        keysPlan(monitorOptions().queryKey));
       set({ monitorTrackPath: trackPath });
-    } catch (err) {
-      console.error('[VST] Failed to switch monitor track:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   seekMonitor: async (position: number) => {
     try {
-      await vstApi.monitorSeek(position);
-      void queryClient.invalidateQueries({ queryKey: monitorOptions().queryKey });
-    } catch (err) {
-      console.error('[VST] Failed to seek monitor:', err);
-    }
+      await writeAndInvalidate(queryClient, () => vstApi.monitorSeek(position),
+        keysPlan(monitorOptions().queryKey));
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   pollMonitorStatus: async () => {
@@ -344,9 +320,7 @@ export const useVstChainStore = create<VstChainState>((set, get) => {
     set({ chain: preset });
     try {
       await updateCachedChain(preset);
-    } catch (err) {
-      console.error('[VST] Failed to apply preset chain:', err);
-    }
+    } catch { /* transport failure already toasted by the global handler */ }
   },
 
   deletePreset: (key: string) => get().presetCollection.remove(key),
@@ -361,9 +335,10 @@ export function _resetVstPresetsForTests(): void {
 async function updateCachedChain(plugins: VstChainEntry[]) {
   const key = localOptions<{ plugins: VstChainEntry[] }>('vst-chain', '/vst/chain').queryKey;
   await queryClient.cancelQueries({ queryKey: key });
-  const result = await apiClient.put<{ plugins: VstChainEntry[] }>('/vst/chain', { plugins });
+  const result = await writeAndInvalidate(queryClient,
+    () => apiClient.put<{ plugins: VstChainEntry[] }>('/vst/chain', { plugins }),
+    keysPlan(key));
   queryClient.setQueryData(key, result);
-  await queryClient.invalidateQueries({ queryKey: key });
   return result;
 }
 

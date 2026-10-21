@@ -55,7 +55,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
     setDownloading(true);
     try {
       const songs = playlist.items.map(playlistItemToSong);
-      const failures = await downloadAll(songs, token);
+      const failures = await downloadAll(songs);
       if (failures.length) window.alert(`Some downloads failed:\n${failures.join('\n')}`);
     } catch (err) {
       window.alert(`Download failed: ${(err as Error).message}`);

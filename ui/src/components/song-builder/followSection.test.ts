@@ -6,7 +6,7 @@ import type { WorkflowJob, WorkflowEvent } from '../../../../server/src/contract
 
 /** A followJob that plays a snapshot, then the given events, then ends. */
 function fakeFollow(events: Array<Pick<WorkflowEvent, 'type' | 'data'>>, gate?: Promise<void>): typeof followJob {
-  return async (_token, _jobId, h) => {
+  return async (_jobId, h) => {
     h.onSnapshot?.({ input: { variants: 2 } } as unknown as WorkflowJob, false);
     for (const [i, e] of events.entries()) {
       if (i === 1 && gate) await gate;
@@ -26,7 +26,7 @@ test('reopened while running: every variant and the end reload the opened projec
   const loads: string[] = [];
   const views: string[] = [];
   let ended: [string | null, number] | null = null;
-  await followSection('t', 'p2', 'job', {
+  await followSection('p2', 'job', {
     follow: fakeFollow([variant(['a']), variant([])]),
     load: async id => { loads.push(id); return `view-${id}-${loads.length}`; },
     isCurrent: id => open === id,
@@ -47,7 +47,7 @@ test('after the user moves to another project, a late result changes nothing', a
   const gate = new Promise<void>(r => { release = r; });
   const views: string[] = [];
   let ended = false;
-  const done = followSection('t', 'p1', 'job', {
+  const done = followSection('p1', 'job', {
     follow: fakeFollow([variant(['a']), variant(['b'])], gate),
     load: async id => `view-${id}`,
     isCurrent: id => open === id,
@@ -68,8 +68,8 @@ test('after the user moves to another project, a late result changes nothing', a
 test('reconnect snapshots reload the current project even without a new variant event', async () => {
   const views: string[] = [];
   let loads = 0;
-  await followSection('t', 'project', 'job', {
-    follow: async (_token, _id, handlers) => {
+  await followSection('project', 'job', {
+    follow: async (_id, handlers) => {
       const job = { input: { variants: 2 } } as unknown as WorkflowJob;
       handlers.onSnapshot?.(job, false);
       handlers.onSnapshot?.(job, false);

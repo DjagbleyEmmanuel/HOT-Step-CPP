@@ -58,7 +58,7 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
     setIsCropping(true);
     setError(null);
     try {
-      const result = await songApi.crop(songId!, trimInPoint!, trimOutPoint!, token, audioUrl ?? undefined);
+      const result = await songApi.crop(songId!, trimInPoint!, trimOutPoint!, audioUrl ?? undefined);
       if (result.cropped) {
         onReload(result.newDuration);
         // The row's duration and file changed under every song view, and

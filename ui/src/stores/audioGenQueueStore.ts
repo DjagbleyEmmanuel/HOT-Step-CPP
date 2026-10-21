@@ -431,12 +431,12 @@ function backupItems(backup: QueueBackup): AudioQueueItem[] {
   return [...byId.values()];
 }
 
-async function resolvedRequestForImport(item: AudioQueueItem, token: string): Promise<Record<string, unknown> | undefined> {
+async function resolvedRequestForImport(item: AudioQueueItem): Promise<Record<string, unknown> | undefined> {
   if (item.mm3TakeOf) return undefined;
   if (item.jobId || item.status === 'succeeded' || item.status === 'failed') return undefined;
   if (item.generation.provider === 'create') return item.globalParams as Record<string, unknown>;
   if (item.generation.id && item.lyricsSetId) {
-    return (await generateApi.previewIntent(writtenSongIntentFor(item), token)).request;
+    return (await generateApi.previewIntent(writtenSongIntentFor(item))).request;
   }
   throw new Error(`Queue item ${item.id} has no render request; review it before migration`);
 }
@@ -479,12 +479,12 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
 
 /** Finished items are already reflected in the library; nothing needs to
  *  re-run them, so skip importing them into the live server queue. */
-async function _resolveImportItems(backup: QueueBackup, token: string): Promise<ImportAudioQueue['items']> {
+async function _resolveImportItems(backup: QueueBackup): Promise<ImportAudioQueue['items']> {
   const items: ImportAudioQueue['items'] = [];
   for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed')) {
     items.push({
       legacyId: item.id,
-      request: await resolvedRequestForImport(item, token),
+      request: await resolvedRequestForImport(item),
       meta: { view: item }, status: item.status, jobId: item.jobId,
       error: item.error,
     });
@@ -499,7 +499,7 @@ async function _resolveImportItems(backup: QueueBackup, token: string): Promise<
  *  browser executor stays fenced until an explicit retry or rollback
  *  resolves it (never a silent fall back to running locally again). */
 async function _submitImport(token: string, payload: ImportAudioQueue): Promise<Awaited<ReturnType<typeof audioQueueApi.importLegacy>>> {
-  const receipt = await audioQueueApi.importLegacy(token, payload);
+  const receipt = await audioQueueApi.importLegacy(payload);
   await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
   // The server owns the queue again: an unfinished rollback no longer
   // describes it. Marker and plan go before the owner changes. A crash in
@@ -529,7 +529,7 @@ export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume'
   localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
   await _idbSet(ROLLBACK_PLAN_KEY, null);
   localStorage.setItem(OWNER_KEY, 'migrating');
-  const items = await _resolveImportItems(backup, token);
+  const items = await _resolveImportItems(backup);
   const payload: ImportAudioQueue = { backupId: backup.id, choice, items };
   await _idbSet(PENDING_IMPORT_KEY, payload);
   const receipt = await _submitImport(token, payload);
@@ -554,7 +554,7 @@ export async function retryQueueMigration(token: string): Promise<void> {
   let payload = await _idbGet<ImportAudioQueue>(PENDING_IMPORT_KEY);
   if (!payload) {
     const backup = await exportQueueBackup(migrationStore());
-    payload = { backupId: backup.id, choice: 'resume', items: await _resolveImportItems(backup, token) };
+    payload = { backupId: backup.id, choice: 'resume', items: await _resolveImportItems(backup) };
     await _idbSet(PENDING_IMPORT_KEY, payload);
   }
   await _submitImport(token, payload);
@@ -630,7 +630,7 @@ async function refreshServerProjection(token: string): Promise<void> {
   if (_serverProjectionBusy) { _serverProjectionAgain = true; return; }
   _serverProjectionBusy = true;
   try {
-    const { items } = await readAudioQueue(token);
+    const { items } = await readAudioQueue();
     const previous = new Map(_state.items.map(item => [item.id, item]));
     // A studio's own row (addManualQueueItem) lives only in this tab until its
     // render reaches the server queue: a Cover workflow queued behind another
@@ -740,7 +740,7 @@ interface RollbackPlan {
  * never falls back to `'server'` or `'browser'`, because by then the server
  * may be paused or partly cancelled. Safe to retry: the plan is saved before
  * anything is changed, and only items still pending or held are cancelled. */
-export async function rollbackAudioQueue(token: string): Promise<void> {
+export async function rollbackAudioQueue(): Promise<void> {
   if (queueOwner() === 'browser') throw new Error('The browser already owns the audio queue');
   const receipt = await _idbGet<{ backupId: string }>(`${BACKUP_KEY}:receipt`);
   const pending = receipt ? undefined : await _idbGet<ImportAudioQueue>(PENDING_IMPORT_KEY);
@@ -762,7 +762,7 @@ export async function rollbackAudioQueue(token: string): Promise<void> {
   try {
     let plan = await _idbGet<RollbackPlan>(ROLLBACK_PLAN_KEY);
     if (!plan || plan.backupId !== backupId) {
-      const serverExport = await audioQueueApi.rollbackExport(token);
+      const serverExport = await audioQueueApi.rollbackExport();
       const exportKey = `${BACKUP_KEY}:rollback:${serverExport.exportedAt}`;
       await _idbSet(exportKey, serverExport);
       if (JSON.stringify(await _idbGet(exportKey)) !== JSON.stringify(serverExport)) {
@@ -801,10 +801,10 @@ export async function rollbackAudioQueue(token: string): Promise<void> {
     if (JSON.stringify(await _idbGet(IDB_KEY)) !== JSON.stringify(plan.restored)) throw new Error('Reconciled browser queue failed readback');
     // Cancel what is still waiting on the server. An earlier, partial attempt
     // may have cancelled some already; those are now terminal and skipped.
-    const live = new Map((await readAudioQueue(token)).items.map(item => [item.id, item.status]));
+    const live = new Map((await readAudioQueue()).items.map(item => [item.id, item.status]));
     for (const id of plan.cancelIds) {
       const status = live.get(id);
-      if (status === 'pending' || status === 'held') await audioQueueApi.cancel(token, id);
+      if (status === 'pending' || status === 'held') await audioQueueApi.cancel(id);
     }
     _state.items = plan.restored.items;
     _heldIds.clear();
@@ -983,9 +983,9 @@ export async function enqueueAudioGen(
 
   if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
   if (queueOwner() === 'server') {
-    const request = await resolvedRequestForImport(item, token);
+    const request = await resolvedRequestForImport(item);
     if (!request) throw new Error('Cannot resolve written-song request for server queue');
-    await audioQueueApi.enqueue(token, item.id, request, { view: item });
+    await audioQueueApi.enqueue(item.id, request, { view: item });
     _lastToken = token;
     await refreshServerProjection(token);
     return;
@@ -995,7 +995,7 @@ export async function enqueueAudioGen(
   _lastEnqueueAt = Date.now();
   _emit(true);
   _lastToken = token;
-  _processQueue(token);
+  _processQueue();
 }
 
 async function newLyricQueueItem(
@@ -1031,9 +1031,9 @@ export function removeFromAudioQueue(id: string): void {
   if (queueOwner() === 'server') {
     const serverId = _state.items.find(item => item.id === id)?.serverQueueId;
     if (serverId && _lastToken) {
-      void audioQueueApi.cancel(_lastToken, serverId)
+      void audioQueueApi.cancel(serverId)
         .catch(() => null)
-        .then(() => audioQueueApi.dismiss(_lastToken!, serverId))
+        .then(() => audioQueueApi.dismiss(serverId))
         .then(() => refreshServerProjection(_lastToken!));
     }
     return;
@@ -1052,12 +1052,12 @@ export function forceFailQueueItem(id: string): void {
   const workflowJobId = item?.workflowJobId;
   if (queueOwner() === 'server' && !workflowJobId) {
     const serverId = item?.serverQueueId;
-    if (serverId && _lastToken) void audioQueueApi.cancel(_lastToken, serverId).then(() => refreshServerProjection(_lastToken!));
+    if (serverId && _lastToken) void audioQueueApi.cancel(serverId).then(() => refreshServerProjection(_lastToken!));
     return;
   }
   if (item && (item.status === 'generating' || item.status === 'loading-adapter')) {
     if (workflowJobId) {
-      if (_lastToken) workflowApi.cancel(_lastToken, workflowJobId).catch(() => {});
+      if (_lastToken) workflowApi.cancel(workflowJobId).catch(() => {});
     } else if (item.jobId) {
       // Cancel on the server → triggers abort controller → cancels C++ engine job
       generateApi.cancel(item.jobId).catch(() => {});
@@ -1074,7 +1074,7 @@ export function clearFinishedFromAudioQueue(): void {
   if (queueOwner() === 'server') {
     if (_lastToken) void Promise.all(_state.items.filter(item => item.serverQueueId
       && (item.status === 'succeeded' || item.status === 'failed'))
-      .map(item => audioQueueApi.dismiss(_lastToken!, item.serverQueueId!)))
+      .map(item => audioQueueApi.dismiss(item.serverQueueId!)))
       .then(() => refreshServerProjection(_lastToken!));
     return;
   }
@@ -1088,7 +1088,7 @@ export function clearFinishedFromAudioQueue(): void {
 export function retryFailedInAudioQueue(): number {
   if (queueOwner() === 'server') {
     const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId);
-    if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(_lastToken!, item.serverQueueId!)))
+    if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
       .then(() => refreshServerProjection(_lastToken!));
     return failed.length;
   }
@@ -1105,7 +1105,7 @@ export function retryFailedInAudioQueue(): number {
   }
   if (retried > 0) {
     _emit(true);
-    if (_lastToken) _processQueue(_lastToken);
+    if (_lastToken) _processQueue();
     else console.warn('[AudioQueue] Retry requested before any token was seen — items are pending but idle');
   }
   return retried;
@@ -1161,7 +1161,7 @@ export function updateManualQueueItem(id: string, update: {
     const following = item.workflowJobId === update.workflowJob.id;
     item.workflowJobId = update.workflowJob.id;
     _lastToken = update.workflowJob.token;
-    if (!following) _followWorkflowRender(id, update.workflowJob.id, update.workflowJob.token);
+    if (!following) _followWorkflowRender(id, update.workflowJob.id);
   }
   if (update.progress !== undefined) item.progress = update.progress;
   if (update.stage !== undefined) item.stage = update.stage;
@@ -1175,16 +1175,16 @@ export function updateManualQueueItem(id: string, update: {
  *  workflow queued, so the row showed "Generating…" with no stage or step.
  *  Follow the workflow's newest audio item to its engine job, as the
  *  server-owned projection does (refreshServerProjection), until the row ends. */
-function _followWorkflowRender(id: string, workflowJobId: string, token: string): void {
+function _followWorkflowRender(id: string, workflowJobId: string): void {
   const ended = (status: AudioQueueStatus) => status === 'succeeded' || status === 'failed';
   const tick = async (): Promise<boolean> => {
     const item = _state.items.find(i => i.id === id);
     if (!item || item.workflowJobId !== workflowJobId || ended(item.status)) return false;
     if (queueOwner() === 'server') return true; // the projection fills it in
     try {
-      const { job } = await readWorkflowJob(token, workflowJobId);
+      const { job } = await readWorkflowJob(workflowJobId);
       const intentId = job.audioIntentIds[job.audioIntentIds.length - 1];
-      const intentItem = intentId ? (await readAudioQueue(token)).items.find(i => i.id === intentId) : undefined;
+      const intentItem = intentId ? (await readAudioQueue()).items.find(i => i.id === intentId) : undefined;
       // Real generation time is the server's (intentQueue's follow() loop),
       // same source projectServerItem reads — never this loop's own poll
       // cadence, which can miss a fast job entirely (F19).
@@ -1447,9 +1447,9 @@ export async function enqueueSimpleGen(
   };
   if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
   if (queueOwner() === 'server') {
-    const preview = intent ? await generateApi.resolveIfSelected(intent, token) : null;
+    const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
     const request = (preview?.request ?? params) as Record<string, unknown>;
-    await audioQueueApi.enqueue(token, id, request, { view: item });
+    await audioQueueApi.enqueue(id, request, { view: item });
     _lastToken = token;
     await refreshServerProjection(token);
     if (onSongCreated) {
@@ -1457,7 +1457,7 @@ export async function enqueueSimpleGen(
         for (;;) {
           await new Promise(resolve => setTimeout(resolve, 1500));
           // Rides the projection's reads: a list younger than one poll is reused.
-          const server = (await readAudioQueue(token, ACTIVE_POLL_MS)).items.find(entry => entry.idempotencyKey === id);
+          const server = (await readAudioQueue(ACTIVE_POLL_MS)).items.find(entry => entry.idempotencyKey === id);
           if (!server || ['failed', 'cancelled', 'interrupted'].includes(server.status)) return;
           if (server.status !== 'succeeded') continue;
           const ids = (server.result?.songIds as string[] | undefined) ?? [];
@@ -1479,9 +1479,9 @@ export async function enqueueSimpleGen(
   _emit(true);
 
   try {
-    const preview = intent ? await generateApi.resolveIfSelected(intent, token) : null;
+    const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
     if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit((preview?.request ?? params) as GenerationParams, token);
+    const res = await generateApi.submit((preview?.request ?? params) as GenerationParams);
     item.jobId = res.jobId;
     item.stage = 'Queued…';
     _emit(true);
@@ -1627,7 +1627,7 @@ export async function resumeQueue(token: string): Promise<void> {
   if (queueOwner() === 'server') { _startServerProjection(token); return; }
   if (queueOwner() === 'migrating') return;
 
-  _pruneDeletedSongs(token);
+  _pruneDeletedSongs();
 
   // Items that were mid-flight when the page went away are RECONNECTED, not
   // resubmitted, IF the server still knows the job (browser-only reload —
@@ -1668,7 +1668,7 @@ export async function resumeQueue(token: string): Promise<void> {
   // on a health check here, because a slow or hanging /api/health would then be
   // able to stop the queue from ever starting.
   console.log(`[AudioQueue] Resuming — ${reconnectable.length} to reconnect, ${neverSubmitted.length} held`);
-  _processQueue(token);
+  _processQueue();
 }
 
 /** User answered the restored-queue prompt with Resume. Release the held items
@@ -1679,7 +1679,7 @@ export function resumeRestoredQueue(token?: string): void {
     const t = token ?? _lastToken;
     if (t) {
       const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
-      void audioQueueApi.resumeHeld(t, ids).then(() => refreshServerProjection(t));
+      void audioQueueApi.resumeHeld(ids).then(() => refreshServerProjection(t));
     }
     return;
   }
@@ -1688,7 +1688,7 @@ export function resumeRestoredQueue(token?: string): void {
   _state.awaitingResume = 0;
   const t = token ?? _lastToken;
   _emit(true);
-  if (t) { _lastToken = t; _processQueue(t); }
+  if (t) { _lastToken = t; _processQueue(); }
 }
 
 /** User answered the restored-queue prompt with Discard. Drop only the items
@@ -1699,7 +1699,7 @@ export function discardRestoredQueue(): void {
     const t = _lastToken;
     if (t) {
       const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
-      void Promise.all(ids.map(id => audioQueueApi.cancel(t, id).then(() => audioQueueApi.dismiss(t, id))))
+      void Promise.all(ids.map(id => audioQueueApi.cancel(id).then(() => audioQueueApi.dismiss(id))))
         .then(() => refreshServerProjection(t));
     }
     return;
@@ -1718,14 +1718,14 @@ export function discardRestoredQueue(): void {
  * page load or from another tab. Candidates are captured BEFORE the fetch so
  * an item that completes mid-fetch can never be pruned by a stale id list.
  */
-async function _pruneDeletedSongs(token: string): Promise<void> {
+async function _pruneDeletedSongs(): Promise<void> {
   const candidates = _state.items
     .filter(i => i.status === 'succeeded' && i.songId)
     .map(i => i.id);
   if (candidates.length === 0) return;
 
   try {
-    const { ids } = await readSongIds(token);
+    const { ids } = await readSongIds();
     const existing = new Set(ids);
     const candidateSet = new Set(candidates);
     const before = _state.items.length;
@@ -1824,9 +1824,9 @@ function _submitWave(next: AudioQueueItem, pending: AudioQueueItem[]): AudioQueu
 
 /** Run one item to completion. 'done' whether it succeeded or failed; the
  *  engine-unavailable message when it was parked for a retry instead. */
-async function _runQueueItem(next: AudioQueueItem, token: string): Promise<'done' | string> {
+async function _runQueueItem(next: AudioQueueItem): Promise<'done' | string> {
   try {
-    await _executeItem(next, token);
+    await _executeItem(next);
     next.status = 'succeeded';
     _engineWaits.delete(next.id);
     _state.completionCounter++;
@@ -1865,7 +1865,7 @@ let _running = false;
  *  row (addManualQueueItem), which shows as pending while its studio waits. */
 const _runnable = (i: AudioQueueItem) => i.status === 'pending' && !_heldIds.has(i.id) && !_manualIds.has(i.id);
 
-async function _processQueue(token: string): Promise<void> {
+async function _processQueue(): Promise<void> {
   if (queueOwner() !== 'browser') return;
   if (_running) return;
   _running = true;
@@ -1884,7 +1884,7 @@ async function _processQueue(token: string): Promise<void> {
         // to the server job (browser-only reload). If the server doesn't know
         // about it (404 = full restart), clear the jobId and re-submit.
         if (next.jobId) {
-          const reconnected = await _tryReconnect(next, token);
+          const reconnected = await _tryReconnect(next);
           if (reconnected) {
             // _tryReconnect already set the item's status, audioUrl, songId, etc.
             // Just ensure it's counted and notified.
@@ -1937,7 +1937,7 @@ async function _processQueue(token: string): Promise<void> {
           }
         }
         if (wave.length > 1) console.log(`[AudioQueue] Submitting ${wave.length} songs together for server-side batching`);
-        const results = await Promise.all(wave.map(item => _runQueueItem(item, token)));
+        const results = await Promise.all(wave.map(item => _runQueueItem(item)));
         const held = wave.filter((_, i) => results[i] !== 'done');
         if (held.length) {
           // Park them and hold the whole queue until the engine is back.
@@ -1974,7 +1974,7 @@ async function _processQueue(token: string): Promise<void> {
  * Returns true if the job was found and polled to completion, false if
  * the server doesn't know about it (needs re-submit).
  */
-async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<boolean> {
+async function _tryReconnect(item: AudioQueueItem): Promise<boolean> {
   const jobId = item.jobId!;
   console.log(`[AudioQueue] Attempting to reconnect to job ${jobId}...`);
 
@@ -2017,7 +2017,7 @@ async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<bool
     item.progress = status.progress;
     _emit(true);
 
-    await _pollUntilDone(item, _token);
+    await _pollUntilDone(item);
 
     // _pollUntilDone sets audioUrl etc. on success, or throws on failure.
     // Mark succeeded here (poll doesn't set status).
@@ -2046,7 +2046,7 @@ async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<bool
   }
 }
 
-async function _executeItem(item: AudioQueueItem, token: string): Promise<void> {
+async function _executeItem(item: AudioQueueItem): Promise<void> {
   const gen = item.generation;
   // The preset as it is NOW, not as it was when the item was queued: a
   // training run that finishes while songs wait in the queue assigns its
@@ -2071,7 +2071,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     ? item.globalParams
     : useGlobalParamsStore.getState().getGlobalParams();
   const backendId = useBackendStore.getState().activeBackendId;
-  if ((await readSelectedPath(token)) === 'resolved') {
+  if ((await readSelectedPath()) === 'resolved') {
     if (backendId === YUE2_BACKEND_ID) await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
     const appSettings = (() => {
       try { return JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>; }
@@ -2110,7 +2110,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
         yue2Defaults: useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {},
       } : {}),
     };
-    const preview = await generateApi.previewIntent(intent, token);
+    const preview = await generateApi.previewIntent(intent);
     for (const effect of preview.uiEffects) {
       if (effect.key === 'backendParams.mm3LmAdapter') {
         try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', effect.value); } catch { /* store not ready */ }
@@ -2122,11 +2122,11 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     item.stage = 'Submitting to audio engine…';
     _emit(true);
     if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit(preview.request as unknown as GenerationParams, token);
+    const res = await generateApi.submit(preview.request as unknown as GenerationParams);
     item.jobId = res.jobId;
     _emit(true);
     if (res.jobId) await lireekApi.linkAudio(gen.id, res.jobId, item.lyricsSetId);
-    await _pollUntilDone(item, token);
+    await _pollUntilDone(item);
     return;
   }
   const params: Record<string, any> = { ...snapshot };
@@ -2344,7 +2344,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   _emit(true);
 
   if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-  const res = await generateApi.submit(params as any, token);
+  const res = await generateApi.submit(params as any);
   const jobId = res.jobId;
   item.jobId = jobId;
   _emit(true); // persist jobId immediately
@@ -2355,10 +2355,10 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   }
 
   // 7) Poll until done
-  await _pollUntilDone(item, token);
+  await _pollUntilDone(item);
 }
 
-async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<void> {
+async function _pollUntilDone(item: AudioQueueItem): Promise<void> {
   const jobId = item.jobId!;
   item.stage = 'Generating audio…';
   // Resume the clock from any persisted elapsed (reconnect after reload);

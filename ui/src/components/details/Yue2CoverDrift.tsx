@@ -44,7 +44,7 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
     setBusy(true);
     setError('');
     try {
-      const measured = await yue2CoverApi.measureDrift(song.id, token);
+      const measured = await yue2CoverApi.measureDrift(song.id);
       measuredThisSession.set(song.id, measured);
       setResult(measured);
     }

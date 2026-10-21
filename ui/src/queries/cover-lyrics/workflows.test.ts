@@ -11,7 +11,7 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   const original = globalThis.fetch;
   queryClient.clear();
   startAuthSession(queryClient, 'test-A');
-  const keys = [workflowOptions('test-A', 'job').queryKey, sharedKeys.workflowJob('job', 7), documentOptions('test-A', 'doc').queryKey, sharedKeys.songs()];
+  const keys = [workflowOptions('job').queryKey, sharedKeys.workflowJob('job', 7), documentOptions('doc').queryKey, sharedKeys.songs()];
   const otherJob = sharedKeys.workflowJob('other', 7);
   queryClient.setQueryData(otherJob, {});
   for (const key of keys) queryClient.setQueryData(key, {});
@@ -23,7 +23,7 @@ test('workflow bursts and replay invalidate captured snapshots once while reduce
   globalThis.fetch = async () => new Response(finished + status + status, { headers: { 'Content-Type': 'text/event-stream' } });
   let effects = 0;
   try {
-    assert.equal(await followCoverLyricJob('test-A', 'job', { onEvent: () => { effects++; } }), 'succeeded');
+    assert.equal(await followCoverLyricJob('job', { onEvent: () => { effects++; } }), 'succeeded');
     assert.equal(effects, 1);
     assert.equal(invalidations, 4);
     for (const key of keys) assert.equal(queryClient.getQueryState(key)?.isInvalidated, true);
@@ -46,8 +46,8 @@ test('Cover and canonical workflow consumers deduplicate raw job and document re
     return new Response(JSON.stringify(String(url).includes('/documents/') ? document : replay));
   };
   try {
-    const job = workflowOptions('shared-workflow', 'job');
-    const doc = documentOptions('shared-workflow', 'doc');
+    const job = workflowOptions('job');
+    const doc = documentOptions('doc');
     assert.deepEqual(job.queryKey, sharedKeys.workflowJob('job', 0));
     assert.deepEqual(doc.queryKey, sharedKeys.workflowDocument('doc'));
     const [cover, canonical, coverDoc, canonicalDoc] = await Promise.all([
@@ -75,7 +75,7 @@ test('a delayed old-session stream cannot deliver effects or invalidate the new 
   globalThis.fetch = async (_url, opts) => { signal = opts?.signal ?? undefined; return held; };
   let effects = 0;
   try {
-    const following = followCoverLyricJob('test-old', 'job', { onEvent: () => { effects++; } });
+    const following = followCoverLyricJob('job', { onEvent: () => { effects++; } });
     startAuthSession(queryClient, 'test-new');
     const key = sharedKeys.songs();
     queryClient.setQueryData(key, { songs: [] });

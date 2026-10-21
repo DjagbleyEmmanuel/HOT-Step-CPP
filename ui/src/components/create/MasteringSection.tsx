@@ -11,6 +11,7 @@ import { masteringApi } from '../../services/api';
 // The reference list is global-models' snapshot, shared with the top bar's
 // mastering controls so an upload here refreshes both.
 import { referencesOptions } from '../../queries/global-models/options';
+import { keysPlan, writeAndInvalidate } from '../../queries/writes';
 import { useAuth } from '../../context/AuthContext';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
@@ -52,8 +53,6 @@ export const MasteringSection: React.FC<MasteringSectionProps> = ({
   const queryClient = useQueryClient();
   const references: ReferenceTrack[] = useQuery(referencesOptions()).data?.references ?? [];
   const [uploading, setUploading] = useState(false);
-  const refreshReferences = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: referencesOptions().queryKey }), [queryClient]);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -61,27 +60,24 @@ export const MasteringSection: React.FC<MasteringSectionProps> = ({
 
     try {
       setUploading(true);
-      const result = await masteringApi.uploadReference(file, token);
+      // The write dirties the shared reference list (top bar included).
+      const result = await writeAndInvalidate(queryClient, () => masteringApi.uploadReference(file),
+        keysPlan(referencesOptions().queryKey));
       onMasteringReferenceChange(result.name);
-      void refreshReferences();
-    } catch (err) {
-      console.error('[Mastering] Upload failed:', err);
-    } finally {
+    } catch { /* transport failure already toasted by the global handler */ } finally {
       setUploading(false);
       e.target.value = '';
     }
-  }, [token, onMasteringReferenceChange, refreshReferences]);
+  }, [token, queryClient, onMasteringReferenceChange]);
 
   const handleDelete = useCallback(async (name: string) => {
     if (!token) return;
     try {
-      await masteringApi.deleteReference(name, token);
+      await writeAndInvalidate(queryClient, () => masteringApi.deleteReference(name),
+        keysPlan(referencesOptions().queryKey));
       if (masteringReference === name) onMasteringReferenceChange('');
-      void refreshReferences();
-    } catch (err) {
-      console.error('[Mastering] Delete failed:', err);
-    }
-  }, [token, masteringReference, onMasteringReferenceChange, refreshReferences]);
+    } catch { /* transport failure already toasted by the global handler */ }
+  }, [token, queryClient, masteringReference, onMasteringReferenceChange]);
 
   return (
     <div className="space-y-1 pt-3 border-t border-zinc-200 dark:border-white/5">

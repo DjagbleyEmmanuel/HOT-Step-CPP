@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { localOptions } from '../../queries/global-models/options';
 import { pollWhile } from '../../queries/contract';
+import { keysPlan, writeAndInvalidate } from '../../queries/writes';
 import { apiClient } from '../../services/httpClient';
 // CoverArtDropdown.tsx — AI cover art toggle + download status
 //
@@ -62,27 +63,21 @@ export const CoverArtContent: React.FC = () => {
   const { data: status } = useQuery({ ...options,
     refetchInterval: pollWhile<CoverArtStatusResponse>(data => data?.download.phase === 'downloading'),
   });
-  const fetchStatus = useCallback(() => client.invalidateQueries({ queryKey: options.queryKey }), [client]);
-
-  // Start download
+  // Start download (the write dirties the status it polls)
   const handleDownload = useCallback(async () => {
     if (!token) return;
     try {
-      await apiClient.post('/cover-art/download', undefined, { token });
-      fetchStatus();
-    } catch (err) {
-      console.error('[CoverArt] Download failed:', err);
-    }
-  }, [token, fetchStatus]);
+      await writeAndInvalidate(client, () => apiClient.post('/cover-art/download'), keysPlan(options.queryKey));
+    } catch { /* transport failure already toasted by the global handler */ }
+  }, [token, client, options.queryKey]);
 
   // Cancel download
   const handleCancel = useCallback(async () => {
     if (!token) return;
     try {
-      await apiClient.post('/cover-art/download/cancel', undefined, { token });
-      fetchStatus();
-    } catch {}
-  }, [token, fetchStatus]);
+      await writeAndInvalidate(client, () => apiClient.post('/cover-art/download/cancel'), keysPlan(options.queryKey));
+    } catch { /* transport failure already toasted by the global handler */ }
+  }, [token, client, options.queryKey]);
 
   const isDownloading = status?.download?.phase === 'downloading';
   const isInstalled = status?.installed ?? false;

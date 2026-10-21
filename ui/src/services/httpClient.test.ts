@@ -1,11 +1,18 @@
 // httpClient.test.ts — the shared transport's JSON/error/upload contract.
 //   (cd server && node --import tsx --test ../ui/src/services/httpClient.test.ts)
+//
+// The bearer is no longer threaded per call: tests set it on the auth session
+// accessor (axiosClient.setAuthToken) and reset it afterwards, exactly like
+// AuthProvider does in the app.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-type FakeResponse = { ok: boolean; status: number; statusText: string; json: () => Promise<any> };
+type FakeResponse = { ok: boolean; status: number; statusText: string; headers: Headers; json: () => Promise<any> };
 function jsonResponse(status: number, body: unknown): FakeResponse {
-  return { ok: status >= 200 && status < 300, status, statusText: 'x', json: async () => body };
+  // The axios adapter reads res.headers (toJSON/forEach), so fakes carry a
+  // real, if empty, Headers object like fetch always provides.
+  return { ok: status >= 200 && status < 300, status, statusText: 'x', headers: new Headers(), json: async () => body };
 }
 
 class FakeXhr {
@@ -34,30 +41,39 @@ class FakeXhr {
 
 Object.assign(globalThis, { XMLHttpRequest: FakeXhr });
 const { ApiClient, ApiError } = await import('./httpClient');
+const { setAuthToken } = await import('./axiosClient');
 
-test('get returns the parsed body and sends the bearer token', async () => {
-  const calls: { url: string; headers: HeadersInit | undefined }[] = [];
+/** Run fn with the auth session accessor holding `token`, then reset it —
+ *  the same pairing site AuthProvider owns in the app. */
+async function withToken<T>(token: string, fn: () => Promise<T>): Promise<T> {
+  setAuthToken(token);
+  try { return await fn(); } finally { setAuthToken(null); }
+}
+
+test('get returns the parsed body and sends the bearer from the auth session', async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
   (globalThis as any).fetch = async (url: string, init: RequestInit) => {
-    calls.push({ url, headers: init.headers });
+    calls.push({ url, headers: init.headers as Record<string, string> });
     return jsonResponse(200, { ok: true });
   };
   const client = new ApiClient();
-  const result = await client.get<{ ok: boolean }>('/songs', { token: 'tok' });
+  const result = await withToken('tok', () => client.get<{ ok: boolean }>('/songs'));
   assert.deepEqual(result, { ok: true });
   assert.equal(calls[0].url, '/api/songs');
-  assert.deepEqual(calls[0].headers, { Authorization: 'Bearer tok' });
+  assert.equal(calls[0].headers.Authorization, 'Bearer tok');
 });
 
-test('post sends JSON with Content-Type and no auth header when no token', async () => {
-  let seenBody = '', seenHeaders: HeadersInit | undefined;
+test('post sends JSON with the exact content type and no auth header when no session is set', async () => {
+  let seenBody = '', seenHeaders: Record<string, string> = {};
   (globalThis as any).fetch = async (_url: string, init: RequestInit) => {
-    seenBody = init.body as string; seenHeaders = init.headers;
+    seenBody = init.body as string; seenHeaders = init.headers as Record<string, string>;
     return jsonResponse(200, { created: true });
   };
   const client = new ApiClient({ baseUrl: '/api/custom' });
   await client.post('/things', { a: 1 });
   assert.equal(seenBody, JSON.stringify({ a: 1 }));
-  assert.deepEqual(seenHeaders, { 'Content-Type': 'application/json' });
+  assert.equal(seenHeaders['Content-Type'], 'application/json');
+  assert.equal(seenHeaders.Authorization, undefined);
 });
 
 test('a non-OK response throws ApiError carrying status, body and revision/reason', async () => {
@@ -76,12 +92,13 @@ test('a non-OK response throws ApiError carrying status, body and revision/reaso
   );
 });
 
-test('a non-JSON error body still throws, falling back to statusText', async () => {
-  (globalThis as any).fetch = async () => ({ ok: false, status: 500, statusText: 'Boom', json: async () => { throw new Error('not json'); } });
+test('a non-JSON error body still throws, falling back to a status-mapped message', async () => {
+  (globalThis as any).fetch = async () => ({ ok: false, status: 500, statusText: 'Boom', headers: new Headers(), json: async () => { throw new Error('not json'); } });
   const client = new ApiClient();
   await assert.rejects(() => client.get('/x'), (err: unknown) => {
     assert.ok(err instanceof ApiError);
-    assert.equal(err.message, 'Boom');
+    assert.equal(err.status, 500);
+    assert.equal(err.message, 'Server error (HTTP 500)');
     return true;
   });
 });
@@ -90,27 +107,32 @@ test('delete passes the auth header and no body', async () => {
   let seenInit: RequestInit = {};
   (globalThis as any).fetch = async (_url: string, init: RequestInit) => { seenInit = init; return jsonResponse(200, { ok: true }); };
   const client = new ApiClient();
-  await client.delete('/songs/1', { token: 't' });
+  await withToken('t', () => client.delete('/songs/1'));
   assert.equal(seenInit.method, 'DELETE');
   assert.equal(seenInit.body, undefined);
-  assert.deepEqual(seenInit.headers, { Authorization: 'Bearer t' });
+  assert.equal((seenInit.headers as Record<string, string>).Authorization, 'Bearer t');
 });
 
 test('upload sends fields before files, reports progress, and resolves the parsed body', async () => {
   const client = new ApiClient();
   const progress: number[] = [];
   const file = new File([new Uint8Array([1, 2, 3])], 'a.wav');
-  const result = client.upload<{ ok: boolean }>('/import', [{ field: 'audio', file }], {
-    token: 'tok', fields: { description: 'd' }, onProgress: f => progress.push(f),
-  });
-  const xhr = FakeXhr.made.at(-1)!;
-  assert.equal(xhr.method, 'POST');
-  assert.equal(xhr.url, '/api/import');
-  assert.equal(xhr.getHeader('Authorization'), 'Bearer tok');
-  xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
-  xhr.respond(200, { ok: true });
-  assert.deepEqual(await result, { ok: true });
-  assert.deepEqual(progress, [0.5]);
+  // The XHR is built synchronously by upload(), so the token only needs to be
+  // set for that call; the promise resolves later, when the test responds.
+  setAuthToken('tok');
+  try {
+    const result = client.upload<{ ok: boolean }>('/import', [{ field: 'audio', file }], {
+      fields: { description: 'd' }, onProgress: f => progress.push(f),
+    });
+    const xhr = FakeXhr.made.at(-1)!;
+    assert.equal(xhr.method, 'POST');
+    assert.equal(xhr.url, '/api/import');
+    assert.equal(xhr.getHeader('Authorization'), 'Bearer tok');
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+    xhr.respond(200, { ok: true });
+    assert.deepEqual(await result, { ok: true });
+    assert.deepEqual(progress, [0.5]);
+  } finally { setAuthToken(null); }
 });
 
 test('upload rejects with ApiError on a non-2xx response, carrying currentRevision/reason', async () => {
@@ -134,7 +156,7 @@ test('upload rejects instead of hanging when a non-2xx body is JSON null or not 
   await assert.rejects(result, (err: unknown) => {
     assert.ok(err instanceof ApiError);
     assert.equal(err.status, 500);
-    assert.equal(err.message, 'Upload failed (HTTP 500)');
+    assert.equal(err.message, 'Server error (HTTP 500)');
     return true;
   });
 });
@@ -185,15 +207,15 @@ function fakeReader(frames: string[]) {
 test('streamEvents sends the bearer token in a header, parses frames, and resolves when the body ends', async () => {
   const frames = ['data: {"n":1}\n\n', 'data: {"n":2}\n\n'];
   const fake = fakeReader(frames);
-  let sent: { url: string; headers: HeadersInit | undefined } | undefined;
+  let sent: { url: string; headers: Record<string, string> } | undefined;
   (globalThis as any).fetch = async (url: string, init: RequestInit) => {
-    sent = { url, headers: init.headers };
+    sent = { url, headers: init.headers as Record<string, string> };
     return { ok: true, status: 200, statusText: 'x', body: fake.body, json: async () => ({}) };
   };
   const client = new ApiClient();
   const seen: string[] = [];
-  await client.streamEvents('/workflows/jobs/1/events', d => seen.push(d), { token: 'tok' });
-  assert.deepEqual(sent?.headers, { Authorization: 'Bearer tok' });
+  await withToken('tok', () => client.streamEvents('/workflows/jobs/1/events', d => seen.push(d)));
+  assert.equal(sent?.headers.Authorization, 'Bearer tok');
   assert.equal(sent?.url, '/api/workflows/jobs/1/events');
   assert.deepEqual(seen, ['{"n":1}', '{"n":2}']);
   // The stream ended on its own; cleanup still runs (cancel on an already-done
@@ -215,6 +237,6 @@ test('a throwing onData still cancels the reader and releases its lock, instead 
 test('streamEvents rejects with ApiError on a non-OK response instead of reading a stream', async () => {
   (globalThis as any).fetch = async () => ({ ok: false, status: 401, statusText: 'x', json: async () => ({ error: 'Unauthorized' }) });
   const client = new ApiClient();
-  await assert.rejects(client.streamEvents('/workflows/jobs/1/events', () => {}, { token: 'bad' }),
+  await assert.rejects(client.streamEvents('/workflows/jobs/1/events', () => {}),
     (err: unknown) => { assert.ok(err instanceof ApiError); assert.equal(err.status, 401); return true; });
 });

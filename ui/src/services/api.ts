@@ -1,7 +1,9 @@
 // api.ts — Frontend API client
 //
-// Thin wrapper around fetch() for all server endpoints.
-// Each method is standalone — import only what you need.
+// Thin wrapper over the shared client (httpClient.ts → axiosClient.ts) for all
+// server endpoints; each method is standalone — import only what you need.
+// The bearer comes from the auth session accessor, so no function here takes
+// a token.
 
 import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, ModelRegistry } from '../types';
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
@@ -22,29 +24,25 @@ import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../../../serv
 import type {
   ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
 } from '../../../server/src/contracts/profiles';
-import { WorkflowRequestError } from './workflowApi';
-import { apiClient, ApiError, type ReadOptions } from './httpClient';
+import { apiClient, ApiError, type ClientOptions, type ReadOptions } from './httpClient';
 
 const BASE = '/api';
 
 // get/post/patch/del delegate to the shared client (httpClient.ts) — same
-// signatures and error text ("<server error> | API error: <status>") every
-// caller in this file already expects. ApiError is a plain Error subclass,
-// so existing `catch (e) { ... e.message }` call sites need no change.
-// Every read takes a trailing `opts?: ReadOptions` so a query function can
-// pass its AbortSignal; positional callers are unchanged.
-const get = <T>(path: string, token?: string | null, opts?: ReadOptions): Promise<T> =>
-  apiClient.get<T>(path, { token, signal: opts?.signal });
-const post = <T>(path: string, body?: unknown, token?: string | null): Promise<T> => apiClient.post<T>(path, body, { token });
-const patch = <T>(path: string, body: unknown, token?: string | null): Promise<T> => apiClient.patch<T>(path, body, { token });
-const del = <T>(path: string, token?: string | null): Promise<T> => apiClient.delete<T>(path, { token });
+// signatures and error shape (ApiError, a plain Error subclass with status +
+// body) every caller in this file already expects. Every read takes a trailing
+// `opts?: ReadOptions` so a query function can pass its AbortSignal; writes
+// take the wider ClientOptions when they need silent/timeout overrides.
+const get = <T>(path: string, opts?: ReadOptions): Promise<T> => apiClient.get<T>(path, { signal: opts?.signal });
+const post = <T>(path: string, body?: unknown, opts?: ClientOptions): Promise<T> => apiClient.post<T>(path, body, opts);
+const patch = <T>(path: string, body: unknown, opts?: ClientOptions): Promise<T> => apiClient.patch<T>(path, body, opts);
+const del = <T>(path: string, opts?: ClientOptions): Promise<T> => apiClient.delete<T>(path, opts);
 
 // ── Auth ────────────────────────────────────────────────────
 export const authApi = {
-  autoLogin: (opts?: ReadOptions) => get<AuthState>('/auth/auto', undefined, opts),
-  getMe: (token: string, opts?: ReadOptions) => get<{ user: AuthState['user'] }>('/auth/me', token, opts),
-  updateUsername: (username: string, token: string) =>
-    patch<AuthState>('/auth/username', { username }, token),
+  autoLogin: (opts?: ReadOptions) => get<AuthState>('/auth/auto', opts),
+  getMe: (opts?: ReadOptions) => get<{ user: AuthState['user'] }>('/auth/me', opts),
+  updateUsername: (username: string) => patch<AuthState>('/auth/username', { username }),
 };
 
 // ── Song Normalizer ─────────────────────────────────────────
@@ -93,33 +91,33 @@ export function normalizeSong(s: any): Song {
 
 // ── Songs ────────────────────────────────────────────────────
 export const songApi = {
-  list: async (token: string, opts?: ReadOptions) => {
-    const data = await get<{ songs: any[] }>('/songs', token, opts);
+  list: async (opts?: ReadOptions) => {
+    const data = await get<{ songs: any[] }>('/songs', opts);
     return { songs: data.songs.map(normalizeSong) };
   },
   get: async (id: string, opts?: ReadOptions) => {
-    const data = await get<{ song: any }>(`/songs/${id}`, undefined, opts);
+    const data = await get<{ song: any }>(`/songs/${id}`, opts);
     return { song: normalizeSong(data.song) };
   },
-  create: (song: Partial<Song>, token: string) => post<{ song: Song }>('/songs', song, token),
-  update: async (id: string, data: Partial<Song>, token: string) => {
-    const resp = await patch<{ song: any }>(`/songs/${id}`, data, token);
+  create: (song: Partial<Song>) => post<{ song: Song }>('/songs', song),
+  update: async (id: string, data: Partial<Song>) => {
+    const resp = await patch<{ song: any }>(`/songs/${id}`, data);
     return { song: normalizeSong(resp.song) };
   },
-  delete: (id: string, token: string) => del<{ success: boolean }>(`/songs/${id}`, token),
-  deleteAll: (token: string) => del<{ success: boolean; deletedCount: number }>('/songs', token),
-  bulkDelete: (ids: string[], token: string) =>
-    post<{ success: boolean; deletedCount: number }>('/songs/bulk-delete', { ids }, token),
-  nukeGenerations: (token: string) =>
+  delete: (id: string) => del<{ success: boolean }>(`/songs/${id}`),
+  deleteAll: () => del<{ success: boolean; deletedCount: number }>('/songs'),
+  bulkDelete: (ids: string[]) =>
+    post<{ success: boolean; deletedCount: number }>('/songs/bulk-delete', { ids }),
+  nukeGenerations: () =>
     post<{ success: boolean; songsDeleted: number; filesDeleted: number; lireekAudioGensDeleted: number }>(
-      '/songs/nuke-generations', {}, token
+      '/songs/nuke-generations', {}
     ),
-  crop: (id: string, inPoint: number, outPoint: number, token: string, audioUrl?: string) =>
-    post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint, audioUrl }, token),
-  listIds: (token: string, opts?: ReadOptions) => get<{ ids: string[] }>('/songs/ids', token, opts),
-  getRecentSongs: (token: string, source?: string, limit = 50, opts?: ReadOptions) =>
+  crop: (id: string, inPoint: number, outPoint: number, audioUrl?: string) =>
+    post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint, audioUrl }),
+  listIds: (opts?: ReadOptions) => get<{ ids: string[] }>('/songs/ids', opts),
+  getRecentSongs: (source?: string, limit = 50, opts?: ReadOptions) =>
     get<{ songs: UnifiedRecentSong[] }>(
-      `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, token, opts
+      `/songs/recent?limit=${limit}${source && source !== 'all' ? `&source=${source}` : ''}`, opts
     ),
   /**
    * Import audio files from disk into the library. Each becomes a song row
@@ -129,38 +127,18 @@ export const songApi = {
    * A file that cannot be read comes back in `errors` while the rest still
    * import; only an all-failed request rejects.
    */
+  /** XHR under the hood (apiClient.upload): an album of FLACs is a long
+   *  upload, and a progress bar is the difference between "working" and
+   *  "hung". */
   importTracks: async (
     files: File[],
-    token: string,
     opts?: { description?: string; onProgress?: (fraction: number) => void },
   ): Promise<{ songs: Song[]; errors: { file: string; error: string }[] }> => {
-    const onProgress = opts?.onProgress;
-    const form = new FormData();
-    // Before the files, so it is parsed early whatever the server does with it.
-    if (opts?.description) form.append('description', opts.description);
-    for (const file of files) form.append('audio', file, file.name);
-
-    // XHR rather than fetch: an album of FLACs is a long upload, and a
-    // progress bar is the difference between "working" and "hung".
-    const raw = await new Promise<any>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${BASE}/songs/import`);
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      if (onProgress) {
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) onProgress(e.loaded / e.total);
-        };
-      }
-      xhr.onload = () => {
-        let body: any = {};
-        try { body = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
-        if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-        else reject(new Error(body.error || `Import failed (HTTP ${xhr.status})`));
-      };
-      xhr.onerror = () => reject(new Error('Import failed — the server closed the connection'));
-      xhr.send(form);
+    const raw = await apiClient.upload<any>('/songs/import', files.map(file => ({ field: 'audio', file })), {
+      // Before the files, so it is parsed early whatever the server does with it.
+      fields: opts?.description ? { description: opts.description } : undefined,
+      onProgress: opts?.onProgress,
     });
-
     return {
       songs: (raw.songs || []).map(normalizeSong),
       errors: raw.errors || [],
@@ -200,12 +178,11 @@ export function withIntentTimeout<T extends ResolveIntent>(intent: T): T {
 }
 
 export const generateApi = {
-  preview: (intent: ResolveIntent, token: string) =>
-    post<ResolvePreviewResponse>('/resolve/preview', intent, token),
+  preview: (intent: ResolveIntent) => post<ResolvePreviewResponse>('/resolve/preview', intent),
   /** A missing switch endpoint is an older server and keeps the legacy path. */
-  selectedPath: async (token: string, opts?: ReadOptions): Promise<'old' | 'resolved'> => {
+  selectedPath: async (opts?: ReadOptions): Promise<'old' | 'resolved'> => {
     try {
-      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { token, signal: opts?.signal });
+      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { signal: opts?.signal });
       return path === 'resolved' ? 'resolved' : 'old';
     } catch (err) {
       if (err instanceof ApiError) {
@@ -215,18 +192,17 @@ export const generateApi = {
       throw err;
     }
   },
-  previewIntent: (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse> =>
-    generateApi.preview(withIntentTimeout(intent), token),
-  resolveIfSelected: async (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse | null> =>
-    (await generateApi.selectedPath(token)) === 'resolved' ? generateApi.previewIntent(intent, token) : null,
-  submit: (params: GenerationParams, token: string) =>
-    post<{ jobId: string; status: string }>('/generate', withTimeout(params), token),
+  previewIntent: (intent: ResolveIntent): Promise<ResolvePreviewResponse> =>
+    generateApi.preview(withIntentTimeout(intent)),
+  resolveIfSelected: async (intent: ResolveIntent): Promise<ResolvePreviewResponse | null> =>
+    (await generateApi.selectedPath()) === 'resolved' ? generateApi.previewIntent(intent) : null,
+  submit: (params: GenerationParams) => post<{ jobId: string; status: string }>('/generate', withTimeout(params)),
   /** YuE2 score preview: plan the lead sheet only and return it, no audio.
    *  `seed` is the one the plan used, so the follow-up render can pin it. */
-  yue2Plan: (params: Partial<GenerationParams>, token: string) =>
+  yue2Plan: (params: Partial<GenerationParams>) =>
     post<{ abc: string; seed: number; end_reason: string; health: { verdict: string; reason: string; bars: number; estSeconds?: number; sections: string[] } }>(
-      '/generate/yue2/plan', params, token),
-  status: (jobId: string, opts?: ReadOptions) => get<GenerationJob>(`/generate/status/${jobId}`, undefined, opts),
+      '/generate/yue2/plan', params),
+  status: (jobId: string, opts?: ReadOptions) => get<GenerationJob>(`/generate/status/${jobId}`, opts),
   cancel: (jobId: string) => post<{ success: boolean }>(`/generate/cancel/${jobId}`),
   cancelAll: () => post<{ success: boolean; cancelled: number }>('/generate/cancel-all'),
   queueStatus: (opts?: ReadOptions) => get<{
@@ -241,7 +217,7 @@ export const generateApi = {
       aceJobId?: string;
     } | null;
     pending: number;
-  }>('/generate/queue', undefined, opts),
+  }>('/generate/queue', opts),
   resetQueue: () => post<{ success: boolean; cancelled: number; drained: number }>('/generate/reset-queue'),
 };
 
@@ -318,56 +294,49 @@ export interface GenerateSectionInput {
 
 type BuilderView = { project: BuilderProject; sections: BuilderSection[] };
 
-/** Section operations throw WorkflowRequestError, so a stale revision (409)
- *  can be told apart and the project reloaded. */
-async function builderOp<T extends { project: BuilderProject; sections: any[] }>(path: string, method: string, token: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}/builder${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const value = await res.json().catch(() => ({}));
-  if (!res.ok) throw new WorkflowRequestError(res.status, value.error || `API error: ${res.status}`, value.currentRevision);
-  return { ...value, sections: value.sections.map(normalizeSection) };
+/** Section operations throw ApiError, so a stale revision (409 with
+ *  currentRevision) can be told apart and the project reloaded. */
+async function builderOp<T extends { project: BuilderProject; sections: any[] }>(path: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown): Promise<T> {
+  const data = await apiClient.request<T>(method, `/builder${path}`, body);
+  return { ...data, sections: data.sections.map(normalizeSection) };
 }
 
 export const builderApi = {
-  listProjects: (token: string, opts?: ReadOptions) =>
-    get<{ projects: BuilderProject[] }>('/builder/projects', token, opts),
-  getProject: async (id: string, token: string, opts?: ReadOptions) => {
-    const data = await get<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, token, opts);
+  listProjects: (opts?: ReadOptions) => get<{ projects: BuilderProject[] }>('/builder/projects', opts),
+  getProject: async (id: string, opts?: ReadOptions) => {
+    const data = await get<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, opts);
     return { project: data.project, sections: data.sections.map(normalizeSection) };
   },
-  createProject: (body: Partial<BuilderProject> & { keyScale?: string; timeSignature?: string; vocalLanguage?: string; sectionLength?: number; variantCount?: number; genParams?: unknown }, token: string) =>
-    post<{ project: BuilderProject; sections: BuilderSection[] }>('/builder/projects', body, token),
-  updateProject: async (id: string, body: Record<string, unknown>, token: string) => {
-    const data = await patch<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, body, token);
+  createProject: (body: Partial<BuilderProject> & { keyScale?: string; timeSignature?: string; vocalLanguage?: string; sectionLength?: number; variantCount?: number; genParams?: unknown }) =>
+    post<{ project: BuilderProject; sections: BuilderSection[] }>('/builder/projects', body),
+  updateProject: async (id: string, body: Record<string, unknown>) => {
+    const data = await patch<{ project: BuilderProject; sections: any[] }>(`/builder/projects/${id}`, body);
     return { project: data.project, sections: data.sections.map(normalizeSection) };
   },
-  deleteProject: (id: string, token: string) => del<{ ok: boolean }>(`/builder/projects/${id}`, token),
+  deleteProject: (id: string) => del<{ ok: boolean }>(`/builder/projects/${id}`),
 
   /** Start the next section; follow `jobId` with followJob. */
-  generateSection: (projectId: string, body: GenerateSectionInput, token: string) =>
-    builderOp<BuilderView & { jobId: string; sectionId: string }>(`/projects/${projectId}/sections/generate`, 'POST', token, body),
-  chooseCandidate: (sectionId: string, songId: string, expectedRevision: number, token: string) =>
-    builderOp<BuilderView>(`/sections/${sectionId}/choose`, 'POST', token, { songId, expectedRevision }),
-  stopSection: (sectionId: string, expectedRevision: number, token: string) =>
-    builderOp<BuilderView>(`/sections/${sectionId}/stop`, 'POST', token, { expectedRevision }),
-  editSection: (sectionId: string, edit: { label?: string; lyrics?: string }, expectedRevision: number, token: string) =>
-    builderOp<BuilderView>(`/sections/${sectionId}`, 'PATCH', token, { ...edit, expectedRevision }),
-  deleteSection: (sectionId: string, expectedRevision: number, token: string) =>
-    builderOp<BuilderView>(`/sections/${sectionId}?expectedRevision=${expectedRevision}`, 'DELETE', token),
+  generateSection: (projectId: string, body: GenerateSectionInput) =>
+    builderOp<BuilderView & { jobId: string; sectionId: string }>(`/projects/${projectId}/sections/generate`, 'POST', body),
+  chooseCandidate: (sectionId: string, songId: string, expectedRevision: number) =>
+    builderOp<BuilderView>(`/sections/${sectionId}/choose`, 'POST', { songId, expectedRevision }),
+  stopSection: (sectionId: string, expectedRevision: number) =>
+    builderOp<BuilderView>(`/sections/${sectionId}/stop`, 'POST', { expectedRevision }),
+  editSection: (sectionId: string, edit: { label?: string; lyrics?: string }, expectedRevision: number) =>
+    builderOp<BuilderView>(`/sections/${sectionId}`, 'PATCH', { ...edit, expectedRevision }),
+  deleteSection: (sectionId: string, expectedRevision: number) =>
+    builderOp<BuilderView>(`/sections/${sectionId}?expectedRevision=${expectedRevision}`, 'DELETE'),
 };
 
 // ── Models ──────────────────────────────────────────────────
 export const modelApi = {
-  list: (opts?: ReadOptions) => get<AceModels>('/models', undefined, opts),
-  health: (opts?: ReadOptions) => get<{ aceServer: string }>('/models/health', undefined, opts),
+  list: (opts?: ReadOptions) => get<AceModels>('/models', opts),
+  health: (opts?: ReadOptions) => get<{ aceServer: string }>('/models/health', opts),
 };
 
 // ── Health ──────────────────────────────────────────────────
 export const healthApi = {
-  check: (opts?: ReadOptions) => get<HealthResponse>('/health', undefined, opts),
+  check: (opts?: ReadOptions) => get<HealthResponse>('/health', opts),
 };
 
 // ── Shutdown ────────────────────────────────────────────────
@@ -376,28 +345,15 @@ export const shutdownApi = {
 };
 // ── Mastering ───────────────────────────────────────────────
 export const masteringApi = {
-  /** Upload a reference track */
-  uploadReference: async (file: File, token: string): Promise<UploadReferenceResponse> => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch(`${BASE}/mastering/upload-reference`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(errBody.error || `Upload failed (${res.status})`);
-    }
-    return res.json();
-  },
+  /** Upload a reference track (XHR under the hood, for progress). */
+  uploadReference: (file: File) => apiClient.upload<UploadReferenceResponse>('/mastering/upload-reference', [{ field: 'file', file }]),
   /** List uploaded reference tracks */
-  listReferences: (opts?: ReadOptions) => get<ListReferencesResponse>('/mastering/references', undefined, opts),
+  listReferences: (opts?: ReadOptions) => get<ListReferencesResponse>('/mastering/references', opts),
   /** Delete a reference track */
-  deleteReference: (name: string, token: string) => del<DeleteReferenceResponse>(`/mastering/references/${name}`, token),
+  deleteReference: (name: string) => del<DeleteReferenceResponse>(`/mastering/references/${name}`),
   /** Run mastering on an existing song */
-  run: (songId: string, referenceName: string, token: string) =>
-    post<RunMasteringResponse>('/mastering/run', { songId, referenceName }, token),
+  run: (songId: string, referenceName: string) =>
+    post<RunMasteringResponse>('/mastering/run', { songId, referenceName }),
 };
 
 // ── Adapters ────────────────────────────────────────────────
@@ -406,7 +362,7 @@ export const adapterApi = {
   browse: (dirPath: string, filter?: string, opts?: ReadOptions) =>
     get<BrowseResponse>(
       `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`,
-      undefined, opts,
+      opts,
     ),
   /** Scan folder for .safetensors files. A POST, but a pure read. */
   scan: (folder: string, opts?: ReadOptions) =>
@@ -417,7 +373,7 @@ export const adapterApi = {
    *  name suffix; `trigger` is the embedded trigger word when present. */
   lmList: (folder?: string, opts?: ReadOptions) =>
     get<LmAdaptersResponse>(
-      `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`, undefined, opts),
+      `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`, opts),
 };
 
 // ── VST3 Post-Processing ────────────────────────────────────
@@ -429,16 +385,11 @@ export type VstChainEntry = ChainEntry;
 
 export const vstApi = {
   /** Scan for installed VST3 plugins */
-  scan: (opts?: ReadOptions) => get<ScanPluginsResponse>('/vst/scan', undefined, opts),
+  scan: (opts?: ReadOptions) => get<ScanPluginsResponse>('/vst/scan', opts),
   /** Get current chain config */
-  getChain: (opts?: ReadOptions) => get<GetChainResponse>('/vst/chain', undefined, opts),
+  getChain: (opts?: ReadOptions) => get<GetChainResponse>('/vst/chain', opts),
   /** Update chain config */
-  updateChain: (plugins: VstChainEntry[]) =>
-    fetch(`${BASE}/vst/chain`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plugins }),
-    }).then(r => r.json()) as Promise<UpdateChainResponse>,
+  updateChain: (plugins: VstChainEntry[]) => apiClient.put<UpdateChainResponse>('/vst/chain', { plugins }),
   /** Launch plugin GUI */
   openGui: (pluginPath: string, uid?: string) =>
     post<GuiResponse>('/vst/gui', { pluginPath, uid }),
@@ -455,7 +406,7 @@ export const vstApi = {
     post<MonitorSwitchResponse>('/vst/monitor/switch', { trackPath }),
   /** Get monitor status */
   monitorStatus: (opts?: ReadOptions) =>
-    get<MonitorStatusResponse>('/vst/monitor/status', undefined, opts),
+    get<MonitorStatusResponse>('/vst/monitor/status', opts),
   /** Seek monitor to a position */
   monitorSeek: (position: number) =>
     post<MonitorSeekResponse>('/vst/monitor/seek', { position }),
@@ -464,14 +415,14 @@ export const vstApi = {
 // ── Settings / .env ─────────────────────────────────────────
 export const settingsApi = {
   /** Read current .env values for exposed keys */
-  getEnv: (opts?: ReadOptions) => get<EnvResponse>('/settings/env', undefined, opts),
+  getEnv: (opts?: ReadOptions) => get<EnvResponse>('/settings/env', opts),
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
     post<EnvUpdateResponse>('/settings/env', { values }),
   /** Detect available GPUs via nvidia-smi. `uuid` is what the picker stores in
    *  CUDA_VISIBLE_DEVICES — the index is display-only, because nvidia-smi and
    *  CUDA number GPUs differently (issue #153). */
-  getGpus: (opts?: ReadOptions) => get<GpusResponse>('/settings/gpus', undefined, opts),
+  getGpus: (opts?: ReadOptions) => get<GpusResponse>('/settings/gpus', opts),
 };
 
 // ── Parameter Profiles ──────────────────────────────────────
@@ -483,7 +434,7 @@ export type ParamProfile = ProfileFile;
 export const profileApi = {
   /** List one engine's saved profiles (full data inline) */
   list: (backend: string, opts?: ReadOptions) =>
-    get<ListProfilesResponse>(`/profiles?backend=${encodeURIComponent(backend)}`, undefined, opts),
+    get<ListProfilesResponse>(`/profiles?backend=${encodeURIComponent(backend)}`, opts),
   /** Save or overwrite a named profile */
   save: (backend: string, name: string, data: Record<string, unknown>) =>
     post<SaveProfileResponse>('/profiles', { name, data, backend }),
@@ -498,7 +449,7 @@ export const profileApi = {
 // ── Model Manager ───────────────────────────────────────────
 export const modelManagerApi = {
   /** Get full model registry with installed status */
-  registry: (opts?: ReadOptions) => get<ModelRegistry>('/model-manager/registry', undefined, opts),
+  registry: (opts?: ReadOptions) => get<ModelRegistry>('/model-manager/registry', opts),
   /** Start downloading a model file. Optional hfToken is forwarded to
    *  huggingface.co as a Bearer token (gated repos only). */
   download: (fileId: string, hfToken?: string) =>
@@ -539,24 +490,22 @@ export async function runSongPostProcessing(
   songId: string,
   params: Record<string, any>
 ): Promise<{ jobId: string; status: string; stage: string; stages: string[] }> {
-  const res = await fetch(`/api/songs/${songId}/postprocess`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    // The already-processed refusal carries the truth about this song, and the
-    // caller uses it to fix its own stale copy. Losing that detail to a bare
-    // Error string is what left the UI insisting a mastered track was
-    // unmastered.
-    throw Object.assign(new Error(data.error || `HTTP ${res.status}`), {
-      status: res.status,
-      alreadyProcessed: !!data.alreadyProcessed,
-      masteredAudioUrl: data.masteredAudioUrl as string | undefined,
-    });
+  try {
+    return await apiClient.post(`/songs/${songId}/postprocess`, params);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const data = (err.body ?? {}) as { alreadyProcessed?: boolean; masteredAudioUrl?: string };
+      // The already-processed refusal carries the truth about this song, and the
+      // caller uses it to fix its own stale copy. Losing that detail to a bare
+      // Error string is what left the UI insisting a mastered track was
+      // unmastered — so it rides along on the ApiError itself.
+      throw Object.assign(err, {
+        alreadyProcessed: !!data.alreadyProcessed,
+        masteredAudioUrl: data.masteredAudioUrl as string | undefined,
+      });
+    }
+    throw err;
   }
-  return res.json();
 }
 
 /** Poll a post-processing re-run. Omit jobId to find whatever is in flight for
@@ -567,14 +516,12 @@ export async function getSongPostProcessingStatus(
   opts?: ReadOptions,
 ): Promise<PostProcessJobStatus | null> {
   const qs = jobId ? `?jobId=${encodeURIComponent(jobId)}` : '';
-  const res = await fetch(`/api/songs/${songId}/postprocess${qs}`, { signal: opts?.signal });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    // ApiError (an Error subclass, same message) so retry policy can see the status.
-    throw new ApiError(res.status, data.error || `HTTP ${res.status}`, data);
+  try {
+    return await apiClient.get<PostProcessJobStatus>(`/songs/${songId}/postprocess${qs}`, { signal: opts?.signal });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null; // nothing in flight
+    throw err;
   }
-  return res.json();
 }
 
 /**
@@ -583,29 +530,13 @@ export async function getSongPostProcessingStatus(
  * The escape hatch for the no-double-cook rule: refusing a second pass is
  * right, but a track has to be able to get out of a bad first one.
  */
-export async function revertSongPostProcessing(
-  songId: string
-): Promise<{ removed: boolean; songId: string }> {
-  const res = await fetch(`/api/songs/${songId}/postprocess`, { method: 'DELETE' });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `HTTP ${res.status}`);
-  }
-  return res.json();
+export function revertSongPostProcessing(songId: string): Promise<{ removed: boolean; songId: string }> {
+  return apiClient.delete(`/songs/${songId}/postprocess`);
 }
 
-export async function retranscribeLyrics(
+export function retranscribeLyrics(
   songId: string,
   options?: { model?: string; language?: string; beamSize?: number }
 ): Promise<{ success: boolean; lineCount: number; wordCount: number }> {
-  const res = await fetch(`/api/songs/${songId}/retranscribe`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options || {}),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `HTTP ${res.status}`);
-  }
-  return res.json();
+  return apiClient.post(`/songs/${songId}/retranscribe`, options || {});
 }

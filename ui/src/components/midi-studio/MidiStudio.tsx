@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { midiJobsOptions, midiStatusOptions, removeMidiJob } from '../../queries/studios/midi';
+import { queryManager } from '../../queries/invalidation';
 import { useStudioSongs } from '../../queries/studios/shared';
 import type { Song } from '../../types';
 import {
@@ -26,6 +27,7 @@ import {
   type MuscriptorModel,
 } from '../../services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
+import { useUpload } from '../../queries/writes';
 
 const MODEL_INFO: Array<{ id: MuscriptorModel; params: string }> = [
   { id: 'small', params: '103M' },
@@ -42,8 +44,8 @@ export const MidiStudio: React.FC = () => {
   const jobsQuery = useQuery(midiJobsOptions());
   const status = statusQuery.data;
   const jobs = jobsQuery.data ?? [];
-  const refreshStatus = () => client.invalidateQueries({ queryKey: midiStatusOptions().queryKey });
-  const refreshJobs = () => client.invalidateQueries({ queryKey: midiJobsOptions().queryKey });
+  const refreshStatus = () => queryManager.keys(client, midiStatusOptions().queryKey);
+  const refreshJobs = () => queryManager.keys(client, midiJobsOptions().queryKey);
   const deletion = useMutation({ mutationFn: (id: string) => removeMidiJob(client, id), retry: false });
 
 
@@ -87,27 +89,23 @@ export const MidiStudio: React.FC = () => {
   }, []);
 
   // ── Upload a track from the user's PC (same endpoint Repaint uses) ──
-  const [isUploading, setIsUploading] = useState(false);
+  const { mutate: uploadAudio, isPending: isUploading } = useUpload<{ audio_url?: string }>();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const handleFileUpload = useCallback(async (file: File) => {
+  const handleFileUpload = useCallback((file: File) => {
     setSubmitError('');
-    setIsUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-      const { audio_url } = await res.json();
-      setSourceAudioUrl(audio_url);
-      setSourceName(file.name);
-      setSourceSongId(undefined);
-      setShowLibrary(false);
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsUploading(false);
-    }
-  }, []);
+    uploadAudio({
+      path: '/upload/audio',
+      files: [{ field: 'audio', file }],
+      onSuccess: data => {
+        if (!data.audio_url) return;
+        setSourceAudioUrl(data.audio_url);
+        setSourceName(file.name);
+        setSourceSongId(undefined);
+        setShowLibrary(false);
+      },
+      onError: err => setSubmitError(err instanceof Error ? err.message : String(err)),
+    });
+  }, [uploadAudio]);
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];

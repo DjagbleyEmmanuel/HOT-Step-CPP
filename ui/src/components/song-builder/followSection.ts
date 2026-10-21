@@ -20,7 +20,7 @@ export interface FollowSectionHandlers<V> {
   follow?: typeof followJob;
 }
 
-export function followSection<V>(token: string, projectId: string, jobId: string, h: FollowSectionHandlers<V>, signal: AbortSignal): Promise<void> {
+export function followSection<V>(projectId: string, jobId: string, h: FollowSectionHandlers<V>, signal: AbortSignal): Promise<void> {
   let total = 1, finished = 0, landed = 0;
   let snapshots = 0;
   const live = () => !signal.aborted && h.isCurrent(projectId);
@@ -29,7 +29,7 @@ export function followSection<V>(token: string, projectId: string, jobId: string
   };
   // followJob starts at event 0 and resumes after the last one it delivered,
   // so each variant event is counted once across reconnects.
-  return (h.follow ?? followJob)(token, jobId, {
+  return (h.follow ?? followJob)(jobId, {
     onSnapshot: (job, gap) => {
       total = Number((job.input as { variants?: number }).variants) || 1;
       if ((snapshots++ > 0 || gap) && live()) void reload();
