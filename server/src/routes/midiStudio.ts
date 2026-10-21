@@ -42,7 +42,28 @@ const router = Router();
 const midiBaseDir = path.join(config.data.dir, 'midi');
 fs.mkdirSync(midiBaseDir, { recursive: true });
 
-const TRANSCRIBE_TIMEOUT_MS = 60 * 60 * 1000;
+/** Kill ace-midi if it prints nothing for this long (#227: a fixed total
+ *  timeout killed long songs that were still making chunk progress). */
+const TRANSCRIBE_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+/** Hard cap on one transcription, however steady its progress. */
+const TRANSCRIBE_MAX_MS = 6 * 60 * 60 * 1000;
+
+/** Fires onTimeout('idle') when touch() is not called for idleMs, or
+ *  onTimeout('cap') after capMs total. touch() on each line of output. */
+export function startStallTimer(onTimeout: (why: 'idle' | 'cap') => void, idleMs: number, capMs: number) {
+  let idle = setTimeout(() => onTimeout('idle'), idleMs);
+  const cap = setTimeout(() => onTimeout('cap'), capMs);
+  return {
+    touch() {
+      clearTimeout(idle);
+      idle = setTimeout(() => onTimeout('idle'), idleMs);
+    },
+    clear() {
+      clearTimeout(idle);
+      clearTimeout(cap);
+    },
+  };
+}
 
 interface MidiJob {
   id: string;
@@ -150,21 +171,22 @@ async function runTranscription(job: MidiJob): Promise<void> {
       }
     });
 
+    const killer = startStallTimer((why) => {
+      console.error(`[MidiStudio] Job ${job.id}: ${why === 'idle' ? 'no progress' : 'timed out'} — killing ace-midi`);
+      child.kill();
+    }, TRANSCRIBE_IDLE_TIMEOUT_MS, TRANSCRIBE_MAX_MS);
+
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on('line', (line) => {
+      killer.touch();
       try { pushEvent(job, JSON.parse(line)); } catch { /* non-JSON noise */ }
     });
-
-    const killer = setTimeout(() => {
-      console.error(`[MidiStudio] Job ${job.id}: timed out — killing ace-midi`);
-      child.kill();
-    }, TRANSCRIBE_TIMEOUT_MS);
 
     const code: number | null = await new Promise((resolve, reject) => {
       child.on('error', (err) => reject(new Error(`Failed to launch ace-midi: ${err.message}`)));
       child.on('close', (c, signal) => resolve(signal ? null : c));
     }).finally(() => {
-      clearTimeout(killer);
+      killer.clear();
       job.child = undefined;
     }) as number | null;
 
