@@ -169,7 +169,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
-import { parseYue2JointStopMode, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
+import { legacyYue2DoraError, parseYue2JointStopMode, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
@@ -3353,6 +3353,8 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
     const ds = yue2Preflight(req, res);
     if (!ds) return;
     const b = (req.body || {}) as Record<string, unknown>;
+    const doraError = legacyYue2DoraError(b);
+    if (doraError) { res.status(400).json({ error: doraError }); return; }
     const num = (k: string, d: number, lo: number, hi: number): number => {
       if (b[k] === undefined || b[k] === null) return d;
       const v = Number(b[k]);
@@ -3709,9 +3711,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     // LoKr sites (kron factors) instead of LoRA pairs. Only forwarded when
     // asked for, so a request without it trains exactly as before.
     const adapterType = b.adapterType === undefined || b.adapterType === 'lora' ? 'lora'
-      : b.adapterType === 'lokr' ? 'lokr' : null;
+      : b.adapterType === 'lokr' || b.adapterType === 'dora' ? b.adapterType : null;
     if (adapterType === null) {
-      res.status(400).json({ error: 'adapterType must be lora or lokr.' });
+      res.status(400).json({ error: 'adapterType must be lora, lokr or dora.' });
       return;
     }
     const lokrDim = b.lokrDim === undefined ? undefined : integer('lokrDim', 0);
@@ -3883,6 +3885,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || preview.parallel) ? preview : { ...preview, enabled: false },
       alignment,
       rank, alpha: alphaRaw,
+      ...(adapterType === 'dora' ? { adapterType } : {}),
       ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),
       ...(optimizer !== 'adamw' ? { optimizer } : {}),
       ...(cautious ? { cautious } : {}),
@@ -4878,6 +4881,8 @@ router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
     const ds = yue2Preflight(req, res);
     if (!ds) return;
     const b = (req.body || {}) as Record<string, unknown>;
+    const doraError = legacyYue2DoraError(b);
+    if (doraError) { res.status(400).json({ error: doraError }); return; }
     const num = (k: string, d: number, lo: number, hi: number): number => {
       if (b[k] === undefined || b[k] === null) return d;
       const v = Number(b[k]);

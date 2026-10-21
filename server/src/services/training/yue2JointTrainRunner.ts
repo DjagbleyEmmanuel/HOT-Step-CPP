@@ -103,10 +103,11 @@ export interface ResolvedYue2JointTrainOptions {
    *  LoKr dim, i.e. scale 1). */
   rank?: number;
   alpha?: number;
-  /** 'lora' (default) or 'lokr': kron-factor sites, dim/factor as in the DiT
+  /** 'lora' (default), 'dora' (LoRA pairs plus a trained magnitude per output
+   *  row; rank/alpha as LoRA) or 'lokr': kron-factor sites, dim/factor as in the DiT
    *  trainer. Engine defaults dim 32 / factor 8 (the DiT's 512/6 is larger
    *  than a rank-64 LoRA at YuE2's dims). */
-  adapterType?: 'lora' | 'lokr';
+  adapterType?: 'lora' | 'lokr' | 'dora';
   lokrDim?: number;
   lokrFactor?: number;
   /** 'loss' trains until the windowed composite loss <= targetLoss; 'kl' until
@@ -305,6 +306,13 @@ export function applyBaseMatchedRecipe(body: Record<string, unknown>): Record<st
   return { ...out, ...BASE_MATCHED_FORCED };
 }
 
+/** The retained NAR-only and AR-only endpoints train plain LoRA. DoRA exists
+ *  only in the joint trainer, so a request for it there is refused, not dropped. */
+export function legacyYue2DoraError(body: Record<string, unknown>): string | null {
+  return body.adapterType === 'dora' || body.dora === true
+    ? 'DoRA is only available in joint YuE2 training; this legacy endpoint trains LoRA.' : null;
+}
+
 /** Fixed joint-training recipe: bf16 base, rank-64 LoRA, one song per update. */
 export function applyFixedRecipe(body: Record<string, unknown>): Record<string, unknown> {
   // bf16 is the default and the ear-tested base; a chosen GGUF or ConvRot base is kept.
@@ -350,6 +358,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.method !== 'fixed-recipe') args.push('--nar-drift');
   if (o.rank !== undefined) args.push('--rank', String(o.rank));
   if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
+  if (o.adapterType === 'dora') args.push('--adapter-type', 'dora');
   if (o.adapterType === 'lokr') {
     args.push('--adapter-type', 'lokr');
     if (o.lokrDim !== undefined) args.push('--lokr-dim', String(o.lokrDim));
@@ -478,7 +487,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.cautious && (o.optimizer ?? 'adamw') === 'adamw') return 'cautious needs optimizer adamw-lm, prodigy or muon';
   if (o.rank !== undefined && (!Number.isInteger(o.rank) || o.rank < 1 || o.rank > 65536)) return 'rank must be an integer between 1 and 65536';
   if (o.alpha !== undefined && (!Number.isFinite(o.alpha) || o.alpha <= 0)) return 'alpha must be a positive finite number';
-  if (o.adapterType !== undefined && o.adapterType !== 'lora' && o.adapterType !== 'lokr') return 'adapterType must be lora or lokr';
+  if (o.adapterType !== undefined && o.adapterType !== 'lora' && o.adapterType !== 'lokr' && o.adapterType !== 'dora') return 'adapterType must be lora, lokr or dora';
   if (o.lokrDim !== undefined && (!Number.isInteger(o.lokrDim) || o.lokrDim < 1 || o.lokrDim > 65536)) return 'lokrDim must be an integer between 1 and 65536';
   if (o.lokrFactor !== undefined && (!Number.isInteger(o.lokrFactor) || o.lokrFactor < 1 || o.lokrFactor > 65536)) return 'lokrFactor must be an integer between 1 and 65536';
   if (o.prodigyD0 !== undefined && (!Number.isFinite(o.prodigyD0) || o.prodigyD0 <= 0)) return 'prodigyD0 must be a positive finite number';

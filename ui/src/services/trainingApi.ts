@@ -698,9 +698,10 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  unused and alpha is the LoKr alpha (engine default = lokrDim, scale 1). */
   rank?: number;
   alpha?: number;
-  /** 'lora' (default) or 'lokr' (kron-factor sites). Engine defaults for LoKr
-   *  are dim 32 / factor 8; the DiT's 512/6 is a trap at YuE2's dims. */
-  adapterType?: 'lora' | 'lokr';
+  /** 'lora' (default), 'lokr' (kron-factor sites) or 'dora' (LoRA pairs plus a
+   *  learned magnitude per output row). Engine defaults for LoKr are dim 32 /
+   *  factor 8; the DiT's 512/6 is a trap at YuE2's dims. */
+  adapterType?: 'lora' | 'lokr' | 'dora';
   lokrDim?: number;
   lokrFactor?: number;
   /** 'loss' trains until the windowed composite loss reaches targetLoss;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyFixedRecipe, buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
+import { applyFixedRecipe, buildYue2JointTrainArgs, legacyYue2DoraError, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
 
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 16, alpha: 256, adapterType: 'lokr',
@@ -183,4 +183,16 @@ test('wsd overshoot margin rides only with the wsd schedule', () => {
   const wsd = buildYue2JointTrainArgs({ ...base, lrSchedule: 'wsd', lrDecaySteps: 40, klOvershootMargin: 0.15 });
   assert.deepEqual(wsd.slice(wsd.indexOf('--lr-decay-steps'), wsd.indexOf('--lr-decay-steps') + 4), ['--lr-decay-steps', '40', '--kl-overshoot-margin', '0.15']);
   assert.equal(buildYue2JointTrainArgs({ ...base, lrSchedule: 'constant', klOvershootMargin: 0.15 }).includes('--kl-overshoot-margin'), false);
+});
+
+test('DoRA reaches the joint trainer as --adapter-type dora; legacy endpoints refuse it', () => {
+  const base = { checkpoint: 'base.gguf', dataset: 'dataset.json', outDir: 'run',
+    steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', companion: 'nar-v9.safetensors' };
+  const args = buildYue2JointTrainArgs({ ...base, adapterType: 'dora' });
+  assert.equal(args[args.indexOf('--adapter-type') + 1], 'dora');
+  assert.equal(args.includes('--lokr-dim'), false);
+  assert.equal(buildYue2JointTrainArgs({ ...base, adapterType: 'lora' }).includes('--adapter-type'), false);
+  assert.match(legacyYue2DoraError({ adapterType: 'dora' }) ?? '', /only available in joint/);
+  assert.match(legacyYue2DoraError({ dora: true }) ?? '', /only available in joint/);
+  assert.equal(legacyYue2DoraError({ adapterType: 'lora', dora: false }), null);
 });

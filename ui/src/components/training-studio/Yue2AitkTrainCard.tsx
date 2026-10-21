@@ -1271,7 +1271,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <ParamLabel
             label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.adapterTypeInfo', 'The adapter parameterization trained. LoRA is the standard low-rank pair. LoKr trains a Kronecker-factored delta per site instead, at a similar file size for more capacity; it is the default and what every preset was tested with. Switching resets rank/alpha (or dim/factor/alpha) and the KL stop to that type\'s tested defaults.')}
+            info={t('trainingStudio.yue2.method.adapterTypeInfo', 'The adapter parameterization trained. LoRA is the standard low-rank pair. LoKr trains a Kronecker-factored delta per site instead, at a similar file size for more capacity; it is the default and what every preset was tested with. DoRA is a LoRA pair plus a learned magnitude per output row, so it uses the LoRA rank and alpha; it is untested on this model and needs a little more VRAM and time per update. Switching resets rank/alpha (or dim/factor/alpha) and the KL stop to that type\'s tested defaults.')}
           />
           <StyledSelect
             accent="amber"
@@ -1279,7 +1279,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive}
             className="w-full"
             onChange={value => {
-              const adapterType = value === 'lokr' ? 'lokr' : 'lora';
+              const adapterType = value === 'lokr' || value === 'dora' ? value : 'lora';
               // LoKr's scale is alpha/dim, so alpha follows the dim by default
               // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
               setForm(previous => adapterType === 'lokr'
@@ -1289,6 +1289,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             options={[
               { value: 'lora' as const, label: t('trainingStudio.yue2.method.adapterLora', 'LoRA') },
               { value: 'lokr' as const, label: t('trainingStudio.yue2.method.adapterLokr', 'LoKr') },
+              { value: 'dora' as const, label: t('trainingStudio.yue2.method.adapterDora', 'DoRA') },
             ]}
           />
         </label>

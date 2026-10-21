@@ -107,7 +107,7 @@ Defaults the card ships:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Adapter type | LoKr, dim 128, factor 4, alpha 256 | About 213 MB for the AR and NAR pair (dim 64 is about 106 MB); the card shows the expected size for whatever dim, factor or rank you enter. |
+| Adapter type | LoKr, dim 128, factor 4, alpha 256 | About 213 MB for the AR and NAR pair (dim 64 is about 106 MB); the card shows the expected size for whatever dim, factor or rank you enter. DoRA is also offered: a LoRA pair with a learned magnitude per output row, using the LoRA rank and alpha. It is untested on YuE2 and takes a little more VRAM and time per update. Joint training only; a run resumes with the type it started with. |
 | Learning rate | 1e-4 | Linear warmup over 3% of the updates, then cosine decay to 0.1x at the end. |
 | Weight decay | 0.1 | The report's value. |
 | Adam beta2 | 0.95 | The report's value; the old recipe used 0.999. |
