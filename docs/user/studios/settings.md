@@ -60,6 +60,7 @@ This tab is a structured editor for `.env`. Fields marked "Restart" in the UI ne
 | Training workers / Training worker token | Other PCs this one can train YuE2 batches on, as `Name=http://address:3001`, comma-separated, and the token sent to them. Applies live. See [training on another PC](../training/yue2.md#training-on-another-pc). |
 | Worker token (this PC as a worker) | Set only on a PC that trains for another. API calls from other machines must then carry this token; the PC itself and a browser on it are not affected. Applies live. |
 | Dataset labeling throughput (Essentia / Genius / caption concurrency and intervals) | Rate limits for the background dataset-labeling queue used by Training Studio. Applies live, no restart. |
+| Download folder | Absolute folder that downloaded tracks are saved into, with a toast showing where each one went. Empty (the default) keeps normal browser downloads, which also stay the route for the library's zip export. The folder is checked when you save, and an existing file is never overwritten (the new one becomes `name (2).ext`). Applies live. |
 | Lyrics export directory | Where Lyric Studio exports lyric files. Applies live. |
 | MuScriptor models directory | Where MIDI Studio's transcription models live. Restart required. |
 

@@ -379,6 +379,18 @@ export const config = {
 /** Absolute path to the project .env file */
 export const ENV_FILE_PATH = ENV_PATH;
 
+/** Write one .env value so dotenv reads back exactly `v` (a bare `#` would start a comment). */
+export function formatEnvValue(v: string): string {
+  if (!/[#'"`]|^\s|\s$/.test(v)) return v;
+  if (v.includes('`')) throw new Error('Value cannot contain a backtick');
+  return `\`${v}\``; // backticks are the one dotenv quote with no escape processing
+}
+
+/** Inverse of formatEnvValue for the raw text after `KEY=`. */
+export function parseEnvValue(raw: string): string {
+  return dotenvParse(`K=${raw}`).K ?? '';
+}
+
 /** Keys exposed to the Settings UI (whitelist — nothing else leaks) */
 export const EXPOSED_ENV_KEYS = [
   // Engine

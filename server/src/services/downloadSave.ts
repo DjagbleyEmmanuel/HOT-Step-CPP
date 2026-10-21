@@ -6,6 +6,7 @@
 // created with an exclusive open so an existing entry (including a symlink or
 // junction planted in the folder) is never followed or overwritten.
 
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -27,8 +28,9 @@ export function validateDownloadDir(dir: string): string {
   try {
     fs.mkdirSync(dir, { recursive: true });
     const real = fs.realpathSync(dir);
-    const probe = path.join(real, `.hotstep-write-test-${process.pid}`);
-    fs.writeFileSync(probe, '');
+    // Exclusive open of a unique name: never follows or truncates anything already there.
+    const probe = path.join(real, `.hotstep-write-test-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+    fs.closeSync(fs.openSync(probe, 'wx'));
     fs.unlinkSync(probe);
     return real;
   } catch (err: any) {

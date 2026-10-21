@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { parse as dotenvParse } from 'dotenv';
+import { formatEnvValue, parseEnvValue } from '../config.js';
 import { safeFilename, saveIntoDir, validateDownloadDir } from './downloadSave.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dlsave-'));
@@ -68,4 +70,20 @@ test('validateDownloadDir rejects relative paths and creates missing ones', () =
   const dir = path.join(tmp(), 'a', 'b');
   validateDownloadDir(dir);
   assert.ok(fs.statSync(dir).isDirectory());
+});
+
+test('validateDownloadDir probe does not truncate a planted symlink', () => {
+  const root = tmp(), out = path.join(root, 'out'), target = path.join(root, 'target.txt');
+  fs.mkdirSync(out); fs.writeFileSync(target, 'data');
+  try { fs.symlinkSync(target, path.join(out, `.hotstep-write-test-${process.pid}`), 'file'); } catch { return; }
+  validateDownloadDir(out);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'data');
+});
+
+test('env values round-trip through the .env writer and dotenv', () => {
+  for (const v of ['D:/Music #1', 'D:\\new\\tab #1', '/mnt/a "b" c', "it's #x", ' lead', 'plain/path']) {
+    assert.equal(dotenvParse(`K=${formatEnvValue(v)}`).K, v);
+    assert.equal(parseEnvValue(formatEnvValue(v)), v);
+  }
+  assert.throws(() => formatEnvValue('a#`b'), /backtick/);
 });

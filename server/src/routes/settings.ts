@@ -10,6 +10,8 @@ import fs from 'fs';
 import {
   ENV_FILE_PATH,
   EXPOSED_ENV_KEYS,
+  formatEnvValue,
+  parseEnvValue,
   RESTART_REQUIRED_KEYS,
   reloadEnvConfig,
   config,
@@ -111,7 +113,7 @@ router.get('/env', (_req, res) => {
     // Override with explicit .env values
     for (const line of lines) {
       if (line.key && exposedSet.has(line.key)) {
-        values[line.key] = line.value ?? '';
+        values[line.key] = parseEnvValue(line.value ?? '');
       }
     }
 
@@ -172,7 +174,7 @@ router.post('/env', (req, res) => {
     const newLines = lines.map((line) => {
       if (line.key && line.key in safeUpdates) {
         updatedKeys.add(line.key);
-        return { ...line, raw: `${line.key}=${safeUpdates[line.key]}` };
+        return { ...line, raw: `${line.key}=${formatEnvValue(safeUpdates[line.key])}` };
       }
       return line;
     });
@@ -180,7 +182,7 @@ router.post('/env', (req, res) => {
     // Append any keys that weren't already in the file
     for (const [key, value] of Object.entries(safeUpdates)) {
       if (!updatedKeys.has(key)) {
-        newLines.push({ key, value, raw: `${key}=${value}` });
+        newLines.push({ key, value, raw: `${key}=${formatEnvValue(value)}` });
         updatedKeys.add(key);
       }
     }
