@@ -23,10 +23,12 @@ import type { Song } from '../../types';
 import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
-  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL,
+  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL,
   type MuscriptorModel,
 } from '../../services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
+import { MidiExportPanel } from './MidiExportPanel';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useUpload } from '../../queries/writes';
 
 const MODEL_INFO: Array<{ id: MuscriptorModel; params: string }> = [
@@ -152,6 +154,7 @@ export const MidiStudio: React.FC = () => {
 
   const engineMissing = !!status && !status.engineAvailable;
   const modelState = status?.models?.[model];
+  const beatState = status?.models?.[BEAT_MODEL];
   const canTranscribe = !!status?.engineAvailable && !!modelState?.downloaded && !!sourceAudioUrl && !isUploading;
 
   const fmtGB = (b: number) => `${(b / 1e9).toFixed(2)} GB`;
@@ -388,6 +391,32 @@ export const MidiStudio: React.FC = () => {
               })}
             </div>
             <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-2">{t('midiStudio.firstRunNote')}</p>
+
+            {/* Beat This!: optional, gives the MIDI tempo, time signature and bar lines */}
+            <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
+              <ParamLabel label={t('midiStudio.tempoModel')} info={t('midiStudio.tempoModelInfo')} />
+              {beatState?.downloaded ? (
+                <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 size={11} /> {t('midiStudio.tempoModelReady')}
+                </span>
+              ) : beatState?.downloading ? (
+                <span className="flex items-center gap-1 text-[11px] text-purple-500">
+                  <Loader2 size={11} className="animate-spin" />
+                  {t('midiStudio.downloading')} {beatState.totalBytes ? Math.round(100 * beatState.receivedBytes / beatState.totalBytes) : 0}%
+                </span>
+              ) : (
+                <button
+                  onClick={() => startModelDownload(BEAT_MODEL).then(refreshStatus).catch(err =>
+                    setSubmitError(err instanceof Error ? err.message : String(err)))}
+                  className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline"
+                >
+                  <Download size={11} /> {t('midiStudio.tempoModelDownload')}
+                </button>
+              )}
+              {beatState?.error && !beatState.downloading && (
+                <span className="text-[11px] text-red-500 dark:text-red-400">{beatState.error.slice(0, 120)}</span>
+              )}
+            </div>
           </div>
 
           {/* Primary action morphs with the selected model's state:
@@ -530,7 +559,10 @@ export const MidiStudio: React.FC = () => {
                     <MidiPlayer key={`${job.id}-live`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live />
                   )}
                   {expandedJob === job.id && hasMidi && (
-                    <MidiPlayer key={`${job.id}-done`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={false} />
+                    <>
+                      <MidiPlayer key={`${job.id}-done`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={false} />
+                      {job.status === 'done' && <MidiExportPanel jobId={job.id} initial={job.exportOptions} />}
+                    </>
                   )}
                 </div>
               );

@@ -25,10 +25,17 @@ export const MUSCRIPTOR_DIR = path.join(config.data.dir, 'muscriptor');
 export const MUSCRIPTOR_MODELS = ['small', 'medium', 'large'] as const;
 export type MuscriptorModel = typeof MUSCRIPTOR_MODELS[number];
 
-export const HF_MODEL_REPOS: Record<MuscriptorModel, string> = {
+/** Beat This! (CPJKU, MIT, not gated): beats and downbeats that give the
+ *  MIDI its tempo, time signature and bar lines (ace-midi --beat-model). */
+export const BEAT_MODEL = 'beat-this';
+export type DownloadableModel = MuscriptorModel | typeof BEAT_MODEL;
+
+export const HF_MODEL_REPOS: Record<DownloadableModel, string> = {
   small: 'MuScriptor/muscriptor-small',
   medium: 'MuScriptor/muscriptor-medium',
   large: 'MuScriptor/muscriptor-large',
+  // final0 as safetensors; tensors verified bit-identical to the official checkpoint
+  [BEAT_MODEL]: 'safe-models/beat-this-final0',
 };
 
 // ── Hugging Face access token ────────────────────────────────────────────
@@ -81,11 +88,11 @@ export function aceMidiExe(): string | null {
 // change needs a restart.
 export const MODELS_DIR = process.env.MUSCRIPTOR_MODELS_DIR || path.join(config.data.dir, 'models', 'muscriptor');
 
-export function modelDir(m: MuscriptorModel): string {
+export function modelDir(m: DownloadableModel): string {
   return path.join(MODELS_DIR, m);
 }
 
-export function isModelDownloaded(m: MuscriptorModel): boolean {
+export function isModelDownloaded(m: DownloadableModel): boolean {
   return fs.existsSync(path.join(modelDir(m), 'model.safetensors'))
       && fs.existsSync(path.join(modelDir(m), 'config.json'));
 }
@@ -98,11 +105,11 @@ export interface ModelDownloadState {
   gated?: boolean;
 }
 
-const downloads = new Map<MuscriptorModel, ModelDownloadState>();
+const downloads = new Map<DownloadableModel, ModelDownloadState>();
 
 export function getModelStates(): Record<string, ModelDownloadState & { downloaded: boolean; sizeBytes: number }> {
   const out: Record<string, any> = {};
-  for (const m of MUSCRIPTOR_MODELS) {
+  for (const m of [...MUSCRIPTOR_MODELS, BEAT_MODEL] as DownloadableModel[]) {
     const dl = downloads.get(m);
     let sizeBytes = 0;
     const downloaded = isModelDownloaded(m);
@@ -147,7 +154,7 @@ async function fetchToFile(url: string, token: string | null, dest: string,
  * Begin downloading a model's config.json + model.safetensors from its gated
  * HF repo. Fire-and-poll: progress via getModelStates(). Single-flight.
  */
-export function startModelDownload(m: MuscriptorModel): { started: boolean; error?: string } {
+export function startModelDownload(m: DownloadableModel): { started: boolean; error?: string } {
   if (downloads.get(m)?.downloading) return { started: false, error: 'Download already in progress' };
   if (isModelDownloaded(m)) return { started: false, error: 'Already downloaded' };
 
@@ -178,6 +185,80 @@ export function startModelDownload(m: MuscriptorModel): { started: boolean; erro
 registerBusyCheck('muscriptor-downloads', () => [...downloads.entries()]
   .filter(([, s]) => s.downloading)
   .map(([m]) => `downloading MuScriptor ${m}`));
+
+// ── Beat grid (ace-midi --beats-out) ─────────────────────────────────────
+
+/** The grid a tempo-aware MIDI was written on, in seconds of the audio. */
+export interface MidiGrid {
+  bpm: number;
+  /** 0 when the meter was not clear enough to write a time signature */
+  beatsPerBar: number;
+  /** false: the MIDI carries a tempo map that follows the performance */
+  steady: boolean;
+  onsetDelay: number;
+  /** grid steps per beat the notes sit on (0: none found) */
+  subdivision: number;
+  /** add to a MIDI time (seconds from tick 0) to get the audio time */
+  audioShift: number;
+  beats: number[];
+  bars: number[];
+}
+
+export function readGrid(beatsJsonText: string): MidiGrid | null {
+  try {
+    const g = JSON.parse(beatsJsonText)?.grid;
+    if (!g || typeof g.bpm !== 'number') return null;
+    return {
+      bpm: g.bpm, beatsPerBar: g.beats_per_bar || 0, steady: !!g.steady, onsetDelay: g.onset_delay || 0,
+      subdivision: g.subdivision || 0, audioShift: g.audio_shift_s || 0, beats: g.beats || [], bars: g.bars || [],
+    };
+  } catch { return null; }
+}
+
+/** A parsed bar-aligned MIDI moved back onto the audio's clock, with its grid,
+ *  so the piano roll lines up with the source. */
+export function alignToAudio<T extends { durationSec: number; notes: { start: number; duration: number }[] }>(
+  parsed: T, grid: MidiGrid,
+): T & { grid: MidiGrid } {
+  const notes = parsed.notes.map(n => ({ ...n, start: n.start + grid.audioShift }));
+  const durationSec = notes.reduce((m, n) => Math.max(m, n.start + n.duration), 0);
+  return { ...parsed, notes, durationSec, grid };
+}
+
+/** ace-midi export flags from the UI's options; unknown or empty fields are skipped. */
+export interface MidiExportOptions {
+  bpm?: number;
+  beatsPerBar?: number;
+  firstDownbeat?: number;
+  tempoMode?: 'auto' | 'map' | 'fixed';
+  beatScale?: number;
+  quantize?: boolean;
+  grid?: number;
+  strength?: number;
+  fillGaps?: number;
+  trimLeadingBars?: boolean;
+}
+
+export function exportArgs(o: MidiExportOptions): string[] {
+  const a: string[] = [];
+  const num = (flag: string, v: unknown, ok: (x: number) => boolean) => {
+    if (typeof v === 'number' && Number.isFinite(v) && ok(v)) a.push(flag, String(v));
+  };
+  num('--bpm', o.bpm, x => x >= 20 && x <= 400);
+  num('--beats-per-bar', o.beatsPerBar, x => Number.isInteger(x) && x >= 1 && x <= 16);
+  num('--first-downbeat', o.firstDownbeat, x => x >= 0);
+  if (o.tempoMode === 'map') a.push('--tempo-map');
+  if (o.tempoMode === 'fixed') a.push('--fixed-tempo');
+  num('--beat-scale', o.beatScale, x => [0.25, 0.5, 2, 4].includes(x));
+  if (o.quantize) {
+    a.push('--quantize');
+    num('--grid', o.grid, x => Number.isInteger(x) && x >= 1 && x <= 24);
+    num('--quantize-strength', o.strength, x => x > 0 && x <= 1);
+  }
+  num('--fill-gaps', o.fillGaps, x => x > 0 && x <= 4);
+  if (o.trimLeadingBars) a.push('--trim-leading-bars');
+  return a;
+}
 
 // ── Partial MIDI from the streamed events ────────────────────────────────
 

@@ -308,7 +308,7 @@ Live streaming performance with crossfaded slots on ACE-Step, YuE2 and Stable Au
 
 ## MIDI Studio
 
-Audio-to-MIDI transcription on its own native engine. Weights are CC BY-NC 4.0, and MIDI made here inherits that. Details: [MIDI Studio](docs/user/studios/midi-studio.md)
+Audio-to-MIDI transcription on its own native engine, with the song's tempo, time signature and bar lines when the optional Beat This! model is downloaded, plus re-export with tempo corrections and quantize. Weights are CC BY-NC 4.0, and MIDI made here inherits that. Details: [MIDI Studio](docs/user/studios/midi-studio.md)
 
 | Feature | What it does |
 |---|---|

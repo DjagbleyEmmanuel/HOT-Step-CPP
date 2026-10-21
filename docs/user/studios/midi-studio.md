@@ -22,6 +22,11 @@ Before the first transcription:
   read token in MIDI Studio. Weights then download in-app per model size.
   This is separate from [Model Manager](model-manager.md), which does not
   list these weights.
+- **Tempo & bars (optional).** A second, ungated 80 MB model, Beat This!
+  (by CPJKU), finds the beats and downbeats. Click its Download link under the
+  model sizes. With it, the MIDI gets the song's tempo, a time signature and
+  bar lines; without it, the MIDI is written at a fixed 120 BPM and does not
+  line up with the bars in a DAW.
 - **Engine binary.** `ace-midi` ships next to the main engine. If MIDI Studio
   shows "Transcription engine not found," reinstall the app.
 
@@ -40,6 +45,10 @@ Before the first transcription:
    generation or post-processing pass is running or queued, the job waits as
    queued until the GPU is free, then starts.
 6. Once done, expand the job to preview it, or download the `.mid`.
+7. With the tempo model, the expanded job also shows a Tempo & bars panel.
+   Correct the tempo, meter or beat there, or quantize for notation, and
+   click "Rewrite MIDI". The download then gets the new file; nothing is
+   transcribed again.
 
 If the source audio has a `.lrc` file beside it with the same base name,
 the downloaded MIDI includes its timestamped lines as lyric events. Section
@@ -61,7 +70,9 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Play / pause (in preview) | Plays the original audio and the MIDI transcription together, in sync. |
 | Original ↔ MIDI slider | Crossfades between the two audio sources so you can hear either or a blend. |
 | Instrument legend, mute (M) / solo (S) | One entry per instrument family found in the track. Mute or solo affects only the MIDI side of playback, not the original audio. |
-| Piano roll | Click anywhere on the roll to seek. Notes are colored by instrument family; an unfinished region is shaded while a live job is still transcribing. |
+| Tempo & bars (model row) | Downloads Beat This!, the beat tracker that gives new transcriptions a tempo, time signature and bar lines. |
+| Tempo & bars (job panel) | Shows the detected tempo and meter, and whether the MIDI follows the performance with a tempo map. BPM and beats per bar override them (blank keeps the detected value). Tempo picks automatic, follow the performance, or one tempo. Beat halves or doubles a tempo detected at the wrong level. Quantize snaps notes to a grid (detected, 8ths, 16ths, triplets) at a chosen strength. Fill short rests holds notes over gaps of half a beat or less. Trim leading bars drops empty bars before the first note. "Rewrite MIDI" applies them; "As detected" goes back. |
+| Piano roll | Click anywhere on the roll to seek. Notes are colored by instrument family; with tempo and bars, the background shows the MIDI's beats and numbered bar lines instead of 10-second marks; an unfinished region is shaded while a live job is still transcribing. |
 
 ## Tips and limits
 
@@ -70,6 +81,8 @@ or transcribing and stops polling when they finish. A slow refresh does not
 start overlapping cycles. Deleting a job waits for server confirmation; an
 older pending refresh cannot put a successfully deleted row back. Returning
 to MIDI Studio shows existing jobs without submitting another transcription.
+
+How the tempo is written: the beats are fitted with one tempo when they are steady (within 5% of a beat), and with a tempo map that changes only at bar lines when they drift, so bar lines stay on the beat. The time signature is written only when 90% of bars agree on it, always as n/4; otherwise set Beats per bar yourself. The music is delayed by whole bars so bar 1 of the MIDI is a real bar line; the preview moves it back so it stays in sync with the audio. Transcriptions made before the tempo model was downloaded keep their 120 BPM file; transcribe them again to get bars.
 
 Transcription is one-way: audio in, a `.mid` file out. There is no path from
 a transcribed (or any other) MIDI file back into music generation.

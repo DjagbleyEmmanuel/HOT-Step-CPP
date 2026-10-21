@@ -221,14 +221,29 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
     ctx.clearRect(0, 0, w, h);
 
     const rowH = h / (PITCH_MAX - PITCH_MIN + 1);
-    // 10 s gridlines
-    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
     ctx.fillStyle = dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
     ctx.font = '9px sans-serif';
-    for (let s = 0; s * PPS < w; s += 10) {
-      const x = s * PPS;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      ctx.fillText(`${s}s`, x + 3, 10);
+    const grid = notesQuery.data?.grid;
+    if (grid) {
+      // the MIDI's own beats and bar lines, numbered as a DAW shows them
+      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+      for (const b of grid.beats) {
+        ctx.beginPath(); ctx.moveTo(b * PPS, 0); ctx.lineTo(b * PPS, h); ctx.stroke();
+      }
+      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)';
+      const firstBar = grid.bars.findIndex(b => b >= grid.audioShift - 1e-3);
+      grid.bars.forEach((b, i) => {
+        ctx.beginPath(); ctx.moveTo(b * PPS, 0); ctx.lineTo(b * PPS, h); ctx.stroke();
+        if (firstBar >= 0 && i >= firstBar) ctx.fillText(String(i - firstBar + 1), b * PPS + 3, 10);
+      });
+    } else {
+      // 10 s gridlines
+      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+      for (let s = 0; s * PPS < w; s += 10) {
+        const x = s * PPS;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.fillText(`${s}s`, x + 3, 10);
+      }
     }
 
     for (const n of notesRef.current) {
@@ -249,7 +264,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
     ctx.strokeStyle = 'rgba(236,72,153,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(t * PPS, 0); ctx.lineTo(t * PPS, h); ctx.stroke();
-  }, [frontier, duration, curTime]);
+  }, [frontier, duration, curTime, notesQuery.data]);
 
   // resize canvas to content and redraw on data changes
   useEffect(() => {

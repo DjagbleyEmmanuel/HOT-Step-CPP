@@ -1,8 +1,8 @@
 import { apiClient, type ReadOptions } from './httpClient';
 // midiStudioApi.ts — API client for MIDI Studio (audio → MIDI transcription)
 //
-// Communicates with Node server /api/midi-studio endpoints, which run
-// MuScriptor (Kyutai & Mirelo) in a server-managed Python venv.
+// Communicates with Node server /api/midi-studio endpoints, which run the
+// native ace-midi engine (MuScriptor by Kyutai & Mirelo, Beat This! by CPJKU).
 
 const API_BASE = '/api/midi-studio';
 /** Path prefix for apiClient calls (the client already adds `/api`). */
@@ -22,11 +22,14 @@ export interface ModelState {
   gated?: boolean;
 }
 
+/** Beat This! weights: tempo, time signature and bar lines for the MIDI */
+export const BEAT_MODEL = 'beat-this';
+
 export interface MidiStudioStatus {
   /** ace-midi engine binary present next to ace-server */
   engineAvailable: boolean;
   hfTokenSet: boolean;
-  models: Record<MuscriptorModel, ModelState>;
+  models: Record<MuscriptorModel | typeof BEAT_MODEL, ModelState>;
 }
 
 export interface MidiJobProgress {
@@ -58,6 +61,8 @@ export interface MidiJobSummary {
   /** chunk progress — present on in-flight jobs */
   chunksDone?: number;
   chunksTotal?: number;
+  /** options the MIDI was last re-exported with */
+  exportOptions?: MidiExportOptions;
 }
 
 /**
@@ -88,11 +93,41 @@ export interface MidiChannelInfo {
   noteCount: number;
 }
 
+/** The grid a tempo-aware MIDI was written on; times are seconds of the audio. */
+export interface MidiGrid {
+  bpm: number;
+  /** 0 when the meter was unclear and no time signature was written */
+  beatsPerBar: number;
+  /** false: the MIDI follows the performance with a tempo map */
+  steady: boolean;
+  onsetDelay: number;
+  subdivision: number;
+  audioShift: number;
+  beats: number[];
+  bars: number[];
+}
+
+/** Re-export corrections (ace-midi's MuScriptor export options). */
+export interface MidiExportOptions {
+  bpm?: number;
+  beatsPerBar?: number;
+  firstDownbeat?: number;
+  tempoMode?: 'auto' | 'map' | 'fixed';
+  beatScale?: number;
+  quantize?: boolean;
+  grid?: number;
+  strength?: number;
+  fillGaps?: number;
+  trimLeadingBars?: boolean;
+}
+
 export interface ParsedMidi {
   durationSec: number;
   noteCount: number;
   channels: MidiChannelInfo[];
   notes: MidiNote[];
+  /** present when the MIDI has tempo and bars (beat model downloaded) */
+  grid?: MidiGrid;
 }
 
 export interface TranscribeParams {
@@ -115,7 +150,7 @@ export async function saveHfToken(token: string): Promise<void> {
 }
 
 /** Begin downloading a model's gated weights. Poll getMidiStatus() for progress. */
-export async function startModelDownload(model: MuscriptorModel): Promise<void> {
+export async function startModelDownload(model: MuscriptorModel | typeof BEAT_MODEL): Promise<void> {
   await apiClient.post(`${P}/models/${model}/download`);
 }
 
@@ -148,6 +183,11 @@ export async function listMidiJobs(opts?: ReadOptions): Promise<MidiJobSummary[]
 /** Cancel and/or delete a job. */
 export async function deleteMidiJob(jobId: string): Promise<void> {
   await apiClient.delete(`${P}/${jobId}`);
+}
+
+/** Rewrite a job's MIDI on a corrected and/or quantized grid. */
+export async function exportMidi(jobId: string, options: MidiExportOptions): Promise<{ grid: MidiGrid | null; noteCount: number }> {
+  return apiClient.post(`${P}/${jobId}/export`, options);
 }
 
 /** Direct URL for downloading the .mid file of a completed job. */
