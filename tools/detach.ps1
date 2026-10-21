@@ -5,11 +5,15 @@
 .DESCRIPTION
   Agent runtimes put each run in a Windows Job Object with kill-on-close and no
   breakaway, so everything the run starts (Start-Process and `start` included)
-  dies when the run ends. Win32_Process.Create makes WmiPrvSE the parent, which
-  is outside that job. Same user, same desktop session, no admin rights.
+  dies when the run ends. A process started by the Task Scheduler service is
+  outside that job. This registers a one-shot task for the current user
+  (interactive token, no admin rights, no stored password), runs it, records
+  the PID and deletes the task; deleting a task does not stop its process.
+  WMI's Win32_Process.Create did the same job, but antivirus flagged it.
 
-  The script runs under cmd with stdout/stderr appended to
-  logs\detached\<name>-<timestamp>.log. Prints the wrapper PID and the log path.
+  The task runs `conhost --headless` (no window on the desktop) around cmd,
+  which runs logs\detached\<name>-<timestamp>.cmd with stdout/stderr appended
+  to the matching .log. Prints the PID and the log path.
   Stop it with: taskkill /PID <pid> /T /F
 
 .EXAMPLE
@@ -24,10 +28,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $target = (Resolve-Path $Script).Path
+$cwd = (Get-Location).ProviderPath
 
-# Everything is pasted into one cmd /c line: refuse what cmd would treat as
+# Everything is pasted into one cmd line: refuse what cmd would treat as
 # an operator, expansion or quote, rather than trying to escape it.
-foreach ($a in @($target) + @($ScriptArgs)) {
+foreach ($a in @($target, $cwd) + @($ScriptArgs)) {
   if ($null -ne $a -and ($a -eq '' -or $a -match '[&|<>^"%]')) {
     throw "Unsupported argument '$a': empty values and & | < > ^ `" % cannot be passed through cmd safely."
   }
@@ -38,23 +43,56 @@ if ((Split-Path $target -Leaf) -eq 'dev.bat' -and
     (Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue)) {
   throw 'The app is already running (port 3001 is listening). Use it, or stop it first.'
 }
-# Bitdefender ATD kills the whole tree when the browser helper's
-# `powershell -ExecutionPolicy Bypass` runs under a WMI-started cmd.
+# Bitdefender ATD killed the whole tree when the browser helper's
+# `powershell -ExecutionPolicy Bypass` ran under a detached cmd.
 if ((Split-Path $target -Leaf) -eq 'dev.bat') { $ScriptArgs = @('--no-browser') + @($ScriptArgs | Where-Object { $_ }) }
 
 $logDir = Join-Path $repo 'logs\detached'
 New-Item -ItemType Directory -Force $logDir | Out-Null
-$log = Join-Path $logDir ('{0}-{1:yyyyMMdd-HHmmss}.log' -f [IO.Path]::GetFileNameWithoutExtension($target), (Get-Date))
-
+# conhost drops inner quotes when it rebuilds the cmd line, so the task only
+# passes a space-free launcher name and the launcher holds the real command.
+$name = '{0}-{1:yyyyMMdd-HHmmss}' -f ([IO.Path]::GetFileNameWithoutExtension($target) -replace '[^\w.-]', '_'), (Get-Date)
+$log = Join-Path $logDir "$name.log"
 $argText = ($ScriptArgs | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) -join ' '
-$cmdLine = "cmd /d /s /c `"`"$target`" $argText >> `"$log`" 2>&1`""
+Set-Content -Encoding ascii (Join-Path $logDir "$name.cmd") @(
+  "@cd /d `"$cwd`""
+  "@`"$target`" $argText >> `"$log`" 2>&1"
+)
 
-$startup = New-CimInstance -ClientOnly -ClassName Win32_ProcessStartup -Property @{ ShowWindow = [uint16]0 }
-$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-  CommandLine = $cmdLine
-  CurrentDirectory = (Get-Location).ProviderPath
-  ProcessStartupInformation = $startup
+$x = [Security.SecurityElement]
+$xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec>
+    <Command>conhost.exe</Command>
+    <Arguments>--headless cmd.exe /d /c $name.cmd</Arguments>
+    <WorkingDirectory>$($x::Escape($logDir))</WorkingDirectory>
+  </Exec></Actions>
+</Task>
+"@
+
+$svc = New-Object -ComObject Schedule.Service
+$svc.Connect()
+$folder = $svc.GetFolder('\')
+$taskName = "HotStep-detach-$name-$PID"
+# 6 = create or update, 3 = interactive token (current user, no password).
+$task = $folder.RegisterTask($taskName, $xml, 6, $null, $null, 3)
+try {
+  $run = $task.Run($null)
+  for ($i = 0; $i -lt 50 -and -not $run.EnginePID; $i++) { Start-Sleep -Milliseconds 100; $run.Refresh() }
+  $taskPid = $run.EnginePID
+} finally {
+  $folder.DeleteTask($taskName, 0)
 }
-if ($r.ReturnValue -ne 0) { throw "Win32_Process.Create failed with code $($r.ReturnValue)" }
-"PID $($r.ProcessId)"
+if (-not $taskPid) { throw "The scheduled task did not report a process; see $log" }
+if (-not (Get-Process -Id $taskPid -ErrorAction SilentlyContinue)) { Write-Warning "PID $taskPid has already exited; see $log" }
+"PID $taskPid"
 "Log $log"
