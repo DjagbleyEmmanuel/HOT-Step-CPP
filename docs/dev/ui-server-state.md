@@ -71,11 +71,10 @@ credential: `session` is an opaque counter. `normalizeFilters` drops
 Build an invalidation prefix with `resourceKey(resource, scope?, id?)`.
 Matching is per slot, so `resourceKey('training-data/datasets', { worker: 'A' })`
 hits every dataset list on worker A and nothing on B or this PC. Pass the
-prefix to `queryManager` (`queries/invalidation.ts`): `queryManager.keys(client,
+prefix to `queryManager` (`queries/invalidation.ts`): `queryManager.invalidate(client,
 ...keys)`, `queryManager.filter(client, filter)` for a predicate, or a named
-group such as `queryManager.songs.views(client)`. `invalidation.ts` is meant
-to be the only file that calls `QueryClient.invalidateQueries`; one component
-still calls it directly (tanstack-query.md F4#17).
+group such as `queryManager.songs.views(client)`. `invalidation.ts` is the only
+file that calls `QueryClient.invalidateQueries`.
 
 ### Capture the target in the key
 
@@ -305,19 +304,13 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/assistant/AssistantPanel.tsx` | studios | assistantApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/ArtistSettingsPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/CoverArtistGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/CoverRecentSongs.tsx` | cover-lyrics | api | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/CoverStudio.tsx` | cover-lyrics | api, coverWorkflowApi, lireekApi, studioDraftMirror, supersepApi, workflowApi, yue2CoverApi | 5 | - | 2 | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/RecentCovers.tsx` | cover-lyrics | api | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/ScorePlanReview.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/SectionMatchReview.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/SourcePanel.tsx` | cover-lyrics | api, supersepApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/Yue2Build.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/Yue2CoverPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/Yue2CoverScore.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/create/AdaptersAccordion.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/AiGenerateModal.tsx` | shell-queue | inspireApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/CreatePanel.tsx` | shell-queue | api, studioDraftMirror, trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/create/MasteringSection.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/Mm3ComposeButton.tsx` | shell-queue | lireekApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/create/trainingCreateDraft.ts` | shell-queue | trainingOperations | - | - | - | Explicit one-shot form handoff; command-time revision transport |
 | `components/details/MetadataEditorModal.tsx` | shell-queue | api | 1 | - | - | Area service/store adapter; Query reads, explicit commands/client state |
@@ -326,7 +319,6 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/global-bar/CoverArtDropdown.tsx` | global-models | - | 3 | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/GenerationDropdown.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/GlobalParamBar.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/global-bar/MasteringDropdown.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/Mm3LmAdapterDropdown.tsx` | global-models | - | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/ModelsDropdown.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/MonitorBar.tsx` | global-models | - | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |

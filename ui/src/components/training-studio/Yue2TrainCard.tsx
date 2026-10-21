@@ -47,6 +47,7 @@ import {
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs } from '../../utils/trainingEta';
+import { formatDateTime } from '../../utils/dateUtils';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
@@ -91,11 +92,6 @@ const NumField: React.FC<{
 function gb(bytes: number): string {
   return bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB`
                              : `${Math.round(bytes / 1048576)} MB`;
-}
-
-function when(ms?: number): string {
-  if (!ms) return '';
-  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 // ── Preprocess: audio -> cached VAE latents ─────────────────────────────────
@@ -561,7 +557,7 @@ export const Yue2RunsList: React.FC<{ datasetId: string; reloadKey: unknown }> =
                       </span>
                     )}
                     <span>{gb(run.sizeBytes)}</span>
-                    <span>{when(run.updatedAt)}</span>
+                    <span>{formatDateTime(run.updatedAt)}</span>
                   </div>
                   {run.failure && (
                     <div className="text-[10px] text-rose-500 mt-1 break-words">{run.failure}</div>

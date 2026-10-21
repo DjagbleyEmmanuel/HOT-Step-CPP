@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { aceModelsOptions } from '../../queries/global-models/options';
+import { QueryError } from '../shared/QueryError';
 // ModelsDropdown.tsx — Model selection UI for the global param bar
 //
 // Uses custom ModelSelect dropdown to show GGUF/SafeTensors format badges.
@@ -37,7 +38,7 @@ function loadFormatFilter(): Record<ModelFormat, boolean> {
 export const ModelsDropdown: React.FC = () => {
   const gp = useGlobalParams();
   const { t } = useTranslation();
-  const { data: models } = useQuery(aceModelsOptions());
+  const { data: models, isError, error, refetch } = useQuery(aceModelsOptions());
   const [showModelManager, setShowModelManager] = useState(false);
 
 
@@ -88,6 +89,7 @@ export const ModelsDropdown: React.FC = () => {
 
   return (
     <div className="space-y-3">
+      {isError && <QueryError error={error} onRetry={() => void refetch()} compact />}
       {/* Format-type filter — toggles which model formats appear in the dropdowns */}
       {chipFormats.length > 1 && (
         <div className="flex items-center gap-1.5 flex-wrap">

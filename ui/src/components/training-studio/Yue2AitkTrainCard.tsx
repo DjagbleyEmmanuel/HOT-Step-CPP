@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { yue2SamplerSnapshot } from '../../stores/globalParamsStore';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,7 +7,7 @@ import { YUE2_JOINT_BASE_MATCHED_DEFAULTS, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_
 import { pollWhile } from '../../queries/contract';
 import { trainingQueries } from '../../queries/training-data/queries';
 import { useJobSelection, useReload, useScopedId } from '../../queries/training-runs/hooks';
-import { runCommand, runQueries } from '../../queries/training-runs/queries';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 
 import { preferencesApi } from '../../services/preferencesApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
@@ -484,22 +484,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const autoCaption = form.autoCaption === false || !captionProvider ? null
     : { provider: captionProvider, ...(captionProvider === 'gemini' && savedCaption?.model ? { model: savedCaption.model } : {}) };
   const [captioning, setCaptioning] = useState<TrainingJobSummary | null>(null);
-  const captionMissing = async () => {
-    if (!autoCaption) return;
-    const started = await runCommand(client, trainingWorker, () => captionMissingYue2(datasetId, autoCaption, { worker: trainingWorker }));
-    if (!started.jobId) return;
-    let j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
-    setCaptioning(j);
-    while (j.status === 'queued' || j.status === 'running') {
-      await new Promise(r => setTimeout(r, 1500));
-      j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
+  // No onError: the caller's catch (run, or the run-all orchestrator) sets the
+  // error line, as before; the service is silent so that line is sole notifier.
+  const captionStartMut = useMutation({
+    mutationFn: async (cap: { provider: 'gemini' | 'moss'; model?: string }) => {
+      const started = await captionMissingYue2(datasetId, cap, { worker: trainingWorker });
+      if (!started.jobId) return;
+      let j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
       setCaptioning(j);
-    }
-    setCaptioning(null);
-    if (j.status !== 'done') throw new Error(`Captioning failed: ${j.error || j.status}`);
-    const left = (await captionMissingYue2(datasetId, { checkOnly: true }, { worker: trainingWorker })).missing ?? 0;
-    if (left) throw new Error(`${left} track(s) still have no YuE2 caption after captioning; see the Label log on the Dataset page. Not training on the ACE captions.`);
-  };
+      while (j.status === 'queued' || j.status === 'running') {
+        await new Promise(r => setTimeout(r, 1500));
+        j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
+        setCaptioning(j);
+      }
+      setCaptioning(null);
+      if (j.status !== 'done') throw new Error(`Captioning failed: ${j.error || j.status}`);
+      const left = (await captionMissingYue2(datasetId, { checkOnly: true }, { worker: trainingWorker })).missing ?? 0;
+      if (left) throw new Error(`${left} track(s) still have no YuE2 caption after captioning; see the Label log on the Dataset page. Not training on the ACE captions.`);
+    },
+  });
+  const captionMissing = () => { if (!autoCaption) return; return captionStartMut.mutateAsync(autoCaption); };
   const [commandError, setError] = useState('');
   const [starting, setStarting] = useState(false);
   // Saved presets keep their names and settings; only the leftover tuned-era
@@ -567,6 +571,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // A batch draft turns this card into the recipe editor for N datasets: the
   // form is the same, Start sends it to the server-side batch instead of one
   // run, and the per-dataset paths are resolved per item by the runner.
+  // The batch write targets runOn, so its invalidation plans for runOn too —
+  // planning the local trainingWorker left the worker's queues stale. No
+  // onError: runBatch's catch sets the error line (sole notifier).
+  const dispatchMut = useMutation({
+    mutationFn: async ({ worker, ...input }: { worker: string } & Parameters<typeof dispatchYue2Batch>[1]) => {
+      await dispatchYue2Batch(worker, input);
+      return worker;
+    },
+    onSuccess: worker => { void trainingWritePlan(client, worker); },
+  });
   const runBatch = async () => {
     if (!batchDraft?.length || presetLoadGate.current.pending) return;
     setBatchStarting(true); setError('');
@@ -580,7 +594,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview, sampler: yue2SamplerSnapshot(),
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       if (runOn) {
-        await runCommand(client, trainingWorker, () => dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe }));
+        await dispatchMut.mutateAsync({ worker: runOn, datasetIds: batchDraft, lyricTiming: batchTiming, clearCache: batchClearCache, recipe });
         setBatchDraft(null);
         await setTrainingWorker(runOn);
         return;
@@ -930,6 +944,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (!resumeChoice && !form.resume?.trim()) await captionMissing();
     return request;
   };
+  // No onError: a failed start rejects into run's catch, which sets the
+  // error line (sole notifier), as before.
+  const prepareStartMut = useMutation({
+    mutationFn: (snapshot: Parameters<typeof preparationApi.startYue2Preparation>[0]) => preparationApi.startYue2Preparation(snapshot),
+  });
   const run = async (): Promise<string | null> => {
     if (presetLoadGate.current.pending) return null;
     const worker = currentWorkerRef();
@@ -938,7 +957,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const request = await captureJointRequest();
       const pipeline = await submitJointStart(datasetId, request, {
         getContext: preparationApi.getYue2PreparationContext,
-        start: snapshot => runCommand(client, trainingWorker, () => preparationApi.startYue2Preparation(snapshot)),
+        start: snapshot => prepareStartMut.mutateAsync(snapshot),
       }, undefined, worker);
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
@@ -955,43 +974,46 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     startRef.current = captureJointRequest;
     if (exposeStart) exposeStart(() => startRef.current ? startRef.current() : Promise.reject(new Error('Joint form is unavailable')));
   });
-  const prepareDataset = async () => {
-    if (presetLoadGate.current.pending) return;
-    setStarting(true); setError('');
-    try {
-      const result = await runCommand(client, trainingWorker, () => startYue2AitkPrepare(datasetId, { ...prepare,
+  const prepareMut = useMutation({
+    mutationFn: async () => {
+      const result = await startYue2AitkPrepare(datasetId, { ...prepare,
         lyricTiming: form.method === 'fixed-recipe' ? false : lyricTiming,
-        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const, base: form.base } : {}) }, { worker: trainingWorker }));
-      setPrepareManifest(result.manifest);
-      setAppliedPrepareJobId('');
-      setPrepareJob(await client.query(trainingQueries.job(trainingWorker, result.jobId)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally { setStarting(false); }
+        ...(form.method === 'fixed-recipe' ? { captionGrammar: 'fixed-recipe' as const, base: form.base } : {}) }, { worker: trainingWorker });
+      return { result, job: await client.query(trainingQueries.job(trainingWorker, result.jobId)) };
+    },
+    onSuccess: r => { setPrepareManifest(r.result.manifest); setAppliedPrepareJobId(''); setPrepareJob(r.job); void trainingWritePlan(client, trainingWorker); },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  const prepareDataset = () => {
+    if (presetLoadGate.current.pending) return;
+    setError('');
+    void prepareMut.mutateAsync().catch(() => null);
   };
-  const stop = async () => {
+  const pipelineCancelMut = useMutation({
+    mutationFn: (pipelineId: string) => preparationApi.commandYue2Preparation(pipelineId, 'cancel'),
+    onSuccess: () => { void trainingWritePlan(client, trainingWorker); },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  // Shared by Stop (train job) and the prepare Stop: silent is threaded through
+  // the target because this card's stop error line is the sole notifier.
+  const cancelMut = useMutation({
+    mutationFn: async (v: { jobId: string; worker: string | null }) => {
+      await cancelJob(v.jobId, { worker: v.worker, silent: true });
+      return client.query(trainingQueries.job(v.worker, v.jobId));
+    },
+    onSuccess: (_measured, v) => { void trainingWritePlan(client, v.worker); },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  const stop = () => {
     if (!job && !jointPipelineId) return;
     setError('');
-    try {
-      if (jointPipelineId) {
-        await runCommand(client, trainingWorker, () => preparationApi.commandYue2Preparation(jointPipelineId, 'cancel'));
-      } else if (job) {
-        await runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker }));
-        setJob(await client.query(trainingQueries.job(trainingWorker, job.id)));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    if (jointPipelineId) void pipelineCancelMut.mutateAsync(jointPipelineId).catch(() => null);
+    else if (job) void cancelMut.mutateAsync({ jobId: job.id, worker: trainingWorker }).then(measured => setJob(measured)).catch(() => null);
   };
-  const stopPrepare = async () => {
+  const stopPrepare = () => {
     if (!prepareJob) return;
     setError('');
-    try {
-      await runCommand(client, trainingWorker, () => cancelJob(prepareJob.id, { worker: trainingWorker }));
-      setPrepareJob(await client.query(trainingQueries.job(trainingWorker, prepareJob.id)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    void cancelMut.mutateAsync({ jobId: prepareJob.id, worker: trainingWorker }).then(measured => setPrepareJob(measured)).catch(() => null);
   };
   const error = commandError || prepareQuery.error?.message || runsQuery.error?.message || previewsQuery.error?.message || pipelineQuery.error?.message || pipelineJobQuery.error?.message || '';
   const selectResume = (value: string) => {
@@ -1028,7 +1050,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   );
   // The lyric timing toggle lives in its own card on the stages page; it is
   // locked while this card is resuming, preparing or training.
-  const busy = active || preparing || starting || yue2RunAllActive;
+  const busy = active || preparing || starting || prepareMut.isPending || yue2RunAllActive;
   const timingLocked = !!resumeChoice || active || preparing || starting;
   useEffect(() => { onTimingLockedChange?.(timingLocked); }, [timingLocked, onTimingLockedChange]);
   const progress = job && job.total > 0 ? ` · ${job.done}/${job.total}` : '';
@@ -1161,12 +1183,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset', 'text', form, undefined,
             t('trainingStudio.yue2.method.resumeDatasetInfo', 'The prepared dataset manifest that matches the run being resumed by record below. Filled in automatically when a resume record is set; only needed if you are pointing at a different prepared copy.'))}
         </div>
-        <button type="button" onClick={() => void prepareDataset()} disabled={presetLoading || preparing || active || starting || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
+        <button type="button" onClick={prepareDataset} disabled={presetLoading || preparing || active || starting || prepareMut.isPending || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
           className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
           {preparing ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.prepare', 'Prepare native dataset')}
         </button>
         {prepareJob && <span className="ml-3 text-[11px] text-zinc-600 dark:text-zinc-400">{prepareJob.status} · {prepareJob.phase || 'waiting'}</span>}
-        {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
+        {preparing && <button type="button" disabled={cancelMut.isPending} onClick={stopPrepare} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
       <div className="mt-4">
@@ -1734,7 +1756,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {jointPipelineId && !job ? t('trainingStudio.yue2.method.admitting', 'Starting joint training…') : active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
         </button>
-        {active && <button type="button" onClick={() => void stop()} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
+        {active && <button type="button" disabled={cancelMut.isPending || pipelineCancelMut.isPending} onClick={stop} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}
           {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}

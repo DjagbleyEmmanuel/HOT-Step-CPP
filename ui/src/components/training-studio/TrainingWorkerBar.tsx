@@ -51,8 +51,8 @@ export const TrainingWorkerBar: React.FC = () => {
   const queuedHere = dispatches.find(d => d.worker === worker)?.items.filter(i => i.status === 'queued').length ?? 0;
   useEffect(() => {
     if (!queuedHere) return;
-    void queryManager.keys(queryClient, resourceKey(TD.datasets, { worker }));
-    void queryManager.keys(queryClient, resourceKey(TD.yue2Batches, { worker }));
+    void queryManager.invalidate(queryClient, resourceKey(TD.datasets, { worker }));
+    void queryManager.invalidate(queryClient, resourceKey(TD.yue2Batches, { worker }));
     void loadDatasets(); void loadBatches();
   }, [queuedHere, worker, loadDatasets, loadBatches]);
 

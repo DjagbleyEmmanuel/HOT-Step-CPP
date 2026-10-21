@@ -87,10 +87,8 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 |---|---|
 | `App.tsx` | query (library, reconnect bridge); `/api/health` liveness probes with a timeout stay transport; extract-kick, shutdown and restart are mutations; `/api/logs` presence is a stream |
 | `audio/peaksClient.ts` | query (shared `peaks`), read by the playback engine outside React |
-| `components/create/AdaptersAccordion.tsx` | query (scan) |
 | `components/create/AiGenerateModal.tsx` | query (studios providers); inspire and random subject are commands |
 | `components/create/CreatePanel.tsx` | query (training-data datasets); YuE2 plan is a command |
-| `components/create/MasteringSection.tsx` | query (global-models references); upload and delete are mutations |
 | `components/create/Mm3ComposeButton.tsx` | mutation (compose) |
 | `components/create/trainingCreateDraft.ts` | transport: one-shot handoff read applied to the form once |
 | `components/details/MetadataEditorModal.tsx` | mutation: the save runs through `writeAndInvalidate` with the `song:written` event, the cover upload through `useUpload` |

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { localOptions } from '../../queries/global-models/options';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
-import { useReferences } from '../../queries/global-models/hooks';
+import { useReferenceTracks } from '../../queries/global-models/hooks';
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
 //
 // Four collapsible accordion sections:
@@ -10,7 +10,7 @@ import { useReferences } from '../../queries/global-models/hooks';
 //   2. VST Chain       — Plugin chain management (existing VstChainDropdown content)
 //   3. Mastering       — Reference-based mastering (existing MasteringDropdown content)
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Sparkles, AudioWaveform, Zap, Image, Mic2, BarChart3,
@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ToggleSwitch } from './BarSection';
@@ -132,36 +131,20 @@ const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
   const gp = useGlobalParams();
   const { t } = useTranslation();
   const { token } = useAuth();
-  const { references: references, refresh: refreshReferences } = useReferences();
-  const [uploading, setUploading] = useState(false);
+  const { references, upload: uploadMut, remove: deleteMut } = useReferenceTracks();
+  const uploading = uploadMut.isPending;
 
-
-  const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !token) return;
-    try {
-      setUploading(true);
-      const result = await masteringApi.uploadReference(file);
-      gp.setMasteringReference(result.name);
-      await refreshReferences();
-    } catch (err) {
-      console.error('[Mastering] Upload failed:', err);
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  }, [token, gp, refreshReferences]);
+    uploadMut.mutate(file, { onSuccess: result => gp.setMasteringReference(result.name) });
+    e.target.value = '';
+  }, [token, uploadMut, gp]);
 
-  const handleDelete = useCallback(async (name: string) => {
+  const handleDelete = useCallback((name: string) => {
     if (!token) return;
-    try {
-      await masteringApi.deleteReference(name);
-      if (gp.masteringReference === name) gp.setMasteringReference('');
-      await refreshReferences();
-    } catch (err) {
-      console.error('[Mastering] Delete failed:', err);
-    }
-  }, [token, gp, refreshReferences]);
+    deleteMut.mutate(name, { onSuccess: () => { if (gp.masteringReference === name) gp.setMasteringReference(''); } });
+  }, [token, deleteMut, gp]);
 
   if (!gp.masteringEnabled) {
     return (

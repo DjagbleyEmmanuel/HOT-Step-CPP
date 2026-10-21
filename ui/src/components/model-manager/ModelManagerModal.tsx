@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invalidateModels } from '../../queries/global-models/options';
 // ModelManagerModal.tsx — Full-screen model manager modal
 //
@@ -89,14 +89,12 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
     }
   }, []);
 
-  const handleDelete = useCallback(async (filename: string) => {
-    try {
-      await modelManagerApi.deleteFile(filename);
-      await invalidateModels(client);
-    } catch (err: any) {
-      console.error('[ModelManager] Delete failed:', err);
-    }
-  }, [client]);
+  // Deleting a model file is one command: one mutation. deleteFile is
+  // non-silent, so the global toast is the notifier (no inline error line here).
+  const deleteMut = useMutation({
+    mutationFn: (filename: string) => modelManagerApi.deleteFile(filename),
+    onSuccess: () => { void invalidateModels(client); },
+  });
 
   // ── Computed ────────────────────────────────────────────────
 
@@ -237,7 +235,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
                   onDownload={handleDownload}
                   onCancel={handleCancel}
                   onResume={handleResume}
-                  onDelete={handleDelete}
+                  onDelete={deleteMut.mutate}
                   activeFamily={activeFamily}
                 />
               </div>

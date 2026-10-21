@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { modelsOptions } from '../../queries/studios/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { modelsOptions, songsOptions } from '../../queries/studios/shared';
 // StemBuilder.tsx — Main Stem Builder orchestrator
 //
 // Lego mode UI: generates new instrument tracks layered over backing audio.
@@ -34,6 +34,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
+import { queryManager } from '../../queries/invalidation';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -99,11 +100,16 @@ export const StemBuilder: React.FC = () => {
 
   // ── Sidebar ──
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const queueCount = useAudioGenQueueSelector(s =>
     s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
   );
   const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
+  const client = useQueryClient();
+  // Queue completions are written by the shell, not by this page; refresh the
+  // shared song feed when one lands so a finished layer appears in Recent.
+  useEffect(() => {
+    if (completionCounter) void queryManager.invalidate(client, songsOptions().queryKey);
+  }, [client, completionCounter]);
 
   // ── Toast ──
   const [toast, setToast] = useState('');
@@ -128,7 +134,7 @@ export const StemBuilder: React.FC = () => {
         if (!mounted) return;
         const captured = job.input as { source?: SourceRef; trackName?: string; caption?: string };
         const audioUrl = result.audio?.audioUrls?.[0];
-        setRefreshTrigger(p => p + 1);
+        void queryManager.invalidate(client, songsOptions().queryKey);
         if (audioUrl && captured.source?.expectedUrl === sourceUrlRef.current) {
           setLayers(prev => [...prev, { trackName: captured.trackName || 'stem', caption: captured.caption || '',
             audioUrl, songId: result.audio?.songIds?.[0], timestamp: Date.now() }]);
@@ -142,7 +148,7 @@ export const StemBuilder: React.FC = () => {
         if (mounted) { setIsGenerating(false); setActiveJobId(null); }
       });
     return () => { mounted = false; observation.abort(); };
-  }, [token]);
+  }, [token, client]);
 
   // ── Persist model ──
   useEffect(() => {
@@ -246,7 +252,7 @@ export const StemBuilder: React.FC = () => {
       const result = await followStudioRender(job.id, stage => setGenStage(stage));
       const audio = result.audio || {};
       setGenStage('Complete!');
-      setRefreshTrigger(p => p + 1);
+      void queryManager.invalidate(client, songsOptions().queryKey);
       const audioUrl = audio.audioUrls?.[0] || '';
       if (audioUrl && sourceUrlRef.current === sourceAudioUrl) {
         setLayers(prev => [...prev, {
@@ -562,7 +568,6 @@ export const StemBuilder: React.FC = () => {
             defaultOpen={true}
           >
             <RecentBuilds
-              refreshTrigger={refreshTrigger + completionCounter}
               onPlay={handlePlayRecent}
               onUseAsSource={handleUseRecentAsSource}
             />

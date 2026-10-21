@@ -1,10 +1,8 @@
 // SourcePanel.tsx — Left panel: source audio upload + metadata + analysis
 
-import { serverKey } from '../../queries/keys';
 import { useQuery } from '@tanstack/react-query';
-import { snapshotOptions } from '../../queries/cover-lyrics/reads';
-import { queryClient } from '../../queries/client';
-import { queryManager } from '../../queries/invalidation';
+import { referencesOptions } from '../../queries/global-models/options';
+import { useReferenceTracks } from '../../queries/global-models/hooks';
 import React, { useCallback, useState } from 'react';
 import { Upload, Music, Loader2, X, Layers, Volume2, FolderOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -12,7 +10,6 @@ import type { AudioMetadata, AudioAnalysis } from './coverStudioUtils';
 import { ALL_KEYS } from './coverStudioUtils';
 import { SEPARATION_LEVELS } from '../../services/supersepApi';
 import { LatentImport, type LatentMetadata } from '../shared/LatentImport';
-import { masteringApi } from '../../services/api';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { ProviderSelector } from '../lyric-studio/ProviderSelector';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -85,29 +82,18 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   const { t } = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
   const [isTimbreDragging, setIsTimbreDragging] = useState(false);
-  const [isTimbreUploading, setIsTimbreUploading] = useState(false);
   const [showTimbreBrowser, setShowTimbreBrowser] = useState(false);
-  interface ReferenceTrack { name: string; size: number; url: string; }
-  const referenceOptions = { ...snapshotOptions<{ references: ReferenceTrack[] }>('cover', '/mastering/references'), queryKey: serverKey('global-models/references') };
-  const referenceQuery = useQuery({ ...referenceOptions, enabled: showTimbreBrowser });
+  const referenceQuery = useQuery({ ...referencesOptions(), enabled: showTimbreBrowser });
   const timbreRefs = referenceQuery.data?.references ?? [];
+  const { upload: timbreUploadMut } = useReferenceTracks();
+  const isTimbreUploading = timbreUploadMut.isPending;
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const timbreFileRef = React.useRef<HTMLInputElement>(null);
 
-  const handleTimbreUpload = useCallback(async (file: File) => {
+  const handleTimbreUpload = useCallback((file: File) => {
     if (!token) return;
-    try {
-      setIsTimbreUploading(true);
-      const result = await masteringApi.uploadReference(file);
-      onTimbreOverridePathChange(result.name);
-      // Refresh list if browser is open
-      await queryManager.keys(queryClient, referenceOptions.queryKey);
-    } catch (err) {
-      console.error('[Timbre] Upload failed:', err);
-    } finally {
-      setIsTimbreUploading(false);
-    }
-  }, [token, onTimbreOverridePathChange, showTimbreBrowser]);
+    timbreUploadMut.mutate(file, { onSuccess: result => onTimbreOverridePathChange(result.name) });
+  }, [token, timbreUploadMut, onTimbreOverridePathChange]);
 
   const handleTimbreDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

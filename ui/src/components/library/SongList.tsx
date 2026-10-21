@@ -25,6 +25,7 @@ import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { openImportTracks } from './ImportTracksModal';
 import { CoverImage } from '../shared/CoverImage';
 import { displayTitle, displaySubtext } from '../../utils/songDisplay';
+import { formatRelativeDay } from '../../utils/dateUtils';
 import { applySelectClick } from '../../utils/rangeSelect';
 import { buildSongBadges, coverTag } from './songBadges';
 
@@ -1177,22 +1178,6 @@ const SongCard: React.FC<SongCardProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const formatDate = (d: string | Date | undefined) => {
-    if (!d) return '';
-    // SQLite datetime('now') stores UTC without 'Z' suffix — force UTC interpretation
-    const date = typeof d === 'string'
-      ? new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z')
-      : d;
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffH = Math.floor(diffMs / 3600000);
-    if (diffH < 1) return 'Just now';
-    if (diffH < 24) return `${diffH}h ago`;
-    const diffD = Math.floor(diffH / 24);
-    if (diffD < 7) return `${diffD}d ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  };
-
   const handleClick = (e: React.MouseEvent) => {
     if (selectionMode) onToggleSelect(e);
     else onSelect?.();
@@ -1331,7 +1316,7 @@ const SongCard: React.FC<SongCardProps> = ({
           <div className="flex items-center gap-2 min-w-0">
             <QualityBadge song={song} />
             <span className="text-[10px] text-zinc-500 dark:text-white/40 truncate">
-              {formatDate(song.created_at || song.createdAt)}
+              {formatRelativeDay(song.created_at || song.createdAt)}
             </span>
           </div>
 
@@ -1639,22 +1624,6 @@ const SongTable: React.FC<SongTableProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const formatDate = (d: string | Date | undefined) => {
-    if (!d) return '';
-    // SQLite datetime('now') stores UTC without 'Z' suffix — force UTC interpretation
-    const date = typeof d === 'string'
-      ? new Date(d.includes('T') || d.includes('Z') ? d : d.replace(' ', 'T') + 'Z')
-      : d;
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffH = Math.floor(diffMs / 3600000);
-    if (diffH < 1) return 'Just now';
-    if (diffH < 24) return `${diffH}h ago`;
-    const diffD = Math.floor(diffH / 24);
-    if (diffD < 7) return `${diffD}d ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  };
-
   // Sum of fixed column widths (spacer is flexible, contributes nothing).
   // Used as the table's min width so it scrolls once the fixed columns no
   // longer fit; otherwise the table fills 100% and the spacer takes the slack.
@@ -1781,7 +1750,7 @@ const SongTable: React.FC<SongTableProps> = ({
               model: <span className="text-violet-400/60 truncate block" title={model}>{modelShort || '—'}</span>,
               quality: <QualityBadge song={song} />,
               time: <span className="text-zinc-500 font-mono">{formatDuration(song.duration)}</span>,
-              date: <span className="text-zinc-600">{formatDate(song.created_at || song.createdAt)}</span>,
+              date: <span className="text-zinc-600">{formatRelativeDay(song.created_at || song.createdAt)}</span>,
               // ── Generation data (hidden by default) ──
               seed: <span className="text-zinc-500 font-mono truncate block">{gp?.seed ?? '—'}</span>,
               lmSeed: <span className="text-zinc-500 font-mono truncate block">{gp?.lmSeed ?? '—'}</span>,

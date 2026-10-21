@@ -12,9 +12,14 @@ async function request<T>(url: string, method = 'GET', body?: unknown, options: 
   const target = { session: getSessionEpoch(), api: apiClient.baseUrl };
   const path = url.replace(/^\/api/, '');
   if (method === 'GET') return readSnapshot<T>('drafts', path, options);
-  const result = method === 'DELETE' ? await apiClient.delete<T>(path, options)
-    : method === 'PUT' ? await apiClient.put<T>(path, body, options)
-    : await apiClient.post<T>(path, body, options);
+  // POST/PUT writes are silent: every caller renders its own inline error —
+  // the draft mirror's onError line and the playlist store's saveError status.
+  // `remove` has no production caller yet, so it keeps the global toast until
+  // a caller without inline UI is added.
+  const write = method === 'DELETE' ? options : { ...options, silent: true };
+  const result = method === 'DELETE' ? await apiClient.delete<T>(path, write)
+    : method === 'PUT' ? await apiClient.put<T>(path, body, write)
+    : await apiClient.post<T>(path, body, write);
   await changed('drafts', target);
   return result;
 }

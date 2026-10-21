@@ -15,15 +15,9 @@ import { BatchImportWizard } from './BatchImportWizard';
 import { DatasetAssetChips } from './DatasetAssetChips';
 import { NewDatasetWizard } from './NewDatasetWizard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { formatDayYear } from '../../utils/dateUtils';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
-
-function formatWhen(iso: string): string {
-  if (!iso) return '';
-  const d = new Date(iso.includes('T') || iso.includes('Z') ? iso : iso.replace(' ', 'T') + 'Z');
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
 
 const STATUS_STYLE: Record<string, string> = {
   draft:    'text-zinc-500 bg-zinc-500/10 border-zinc-500/20',
@@ -210,7 +204,7 @@ export const DatasetList: React.FC = () => {
                 {ds.status}
               </span>
               <span className="text-[11px] text-zinc-500">
-                {ds.builtAt ? t('trainingStudio.list.built', { when: formatWhen(ds.builtAt) }) : t('trainingStudio.list.notBuilt')}
+                {ds.builtAt ? t('trainingStudio.list.built', { when: formatDayYear(ds.builtAt, ds.builtAt) }) : t('trainingStudio.list.notBuilt')}
               </span>
             </div>
 

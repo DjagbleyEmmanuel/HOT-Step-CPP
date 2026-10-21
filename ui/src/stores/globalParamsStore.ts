@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import type { GenerationParams, LmRepMode, StableStepBackend, StableStepBlendMode } from '../types';
 import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
 import { useBackendStore } from './backendStore';
+import { apiClient } from '../services/httpClient';
 
 // -- Types --
 
@@ -302,11 +303,11 @@ function hydrateBackendScoped(backendId: string = activeBackendId()): Record<str
  */
 function mirrorActiveModels(patch: Record<string, string>): void {
   try {
-    void fetch('/api/training/active-models', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(patch),
-    }).catch(() => { /* offline / server down — retried on the next change and at boot */ });
+    // silent: this is a best-effort mirror with no UI of its own — failures are
+    // retried on the next change and at boot, so the global toast would only
+    // be noise.
+    void apiClient.put('/training/active-models', patch, { silent: true })
+      .catch(() => { /* offline / server down — retried on the next change and at boot */ });
   } catch { /* never let a model change throw */ }
 }
 

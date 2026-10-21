@@ -22,6 +22,7 @@ import { trainingQueries } from '../../queries/training-data/queries';
 import { queryManager } from '../../queries/invalidation';
 import { PIPELINE_STAGES, type PipelineItem, type PipelineStage, type PipelineSummary } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { formatDayTime } from '../../utils/dateUtils';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { PipelineStageProgress } from './PipelineStageProgress';
 
@@ -47,11 +48,6 @@ const CHIP_STYLE: Record<string, string> = {
 
 function folderBasename(dir: string): string {
   return dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? dir;
-}
-
-function formatWhen(ts: number): string {
-  if (!ts) return '';
-  return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 const PipelineItemRow: React.FC<{ item: PipelineItem; stages: PipelineStage[] }> = ({ item, stages }) => {
@@ -141,7 +137,7 @@ const RecentPipelineRow: React.FC<{ pipeline: PipelineSummary; resumeBlocked: bo
           </span>
         </button>
         <span className="text-[11px] text-zinc-500 flex items-center gap-1 flex-shrink-0">
-          <Clock size={11} /> {formatWhen(pipeline.createdAt)}
+          <Clock size={11} /> {formatDayTime(pipeline.createdAt)}
         </span>
         {resumable && (
           <button
@@ -195,7 +191,7 @@ const PipelineCard: React.FC<{ pipeline: PipelineSummary; active: boolean }> = (
           )}
         </div>
         <span className="text-[11px] text-zinc-500 flex items-center gap-1 flex-shrink-0">
-          <Clock size={11} /> {formatWhen(pipeline.createdAt)}
+          <Clock size={11} /> {formatDayTime(pipeline.createdAt)}
         </span>
         {active && (pausePending || pipeline.status === 'paused' ? (
           <button
@@ -264,7 +260,7 @@ export const MonitorPanel: React.FC = () => {
   const wasRunningRef = useRef(false);
   useEffect(() => {
     if (!activePipeline) {
-      if (wasRunningRef.current) { wasRunningRef.current = false; void queryManager.keys(client, trainingQueries.datasets(worker).queryKey).then(() => loadDatasets()); }
+      if (wasRunningRef.current) { wasRunningRef.current = false; void queryManager.invalidate(client, trainingQueries.datasets(worker).queryKey).then(() => loadDatasets()); }
       return;
     }
     wasRunningRef.current = true;

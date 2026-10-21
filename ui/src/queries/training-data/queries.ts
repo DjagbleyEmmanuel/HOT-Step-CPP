@@ -15,6 +15,7 @@ import { scopeOf, serverKey, sharedKeys, type Resource } from '../keys';
 import * as api from '../../services/trainingApi';
 import * as preparation from '../../services/trainingPreparationApi';
 import { adapterApi } from '../../services/api';
+import { browseOptions } from '../shell-queue/settings';
 import type { LmSize } from '../../services/trainingApi';
 
 export const TD = {
@@ -126,12 +127,8 @@ export const trainingQueries = {
     queryFn: ({ signal }) => preparation.getYue2PreparationJob<api.TrainingJobSummary>(id, { signal }),
     staleTime: 0,
   }),
-  /** The folder picker's listing, on this PC (shared key). */
-  browse: (dir: string, filter?: string) => queryOptions({
-    queryKey: sharedKeys.browse(dir, filter),
-    queryFn: ({ signal }) => adapterApi.browse(dir, filter, { signal }),
-    staleTime: 0,
-  }),
+  /** One owner: the settings folder-browser factory. */
+  browse: (dir: string, filter?: string) => browseOptions(dir, filter),
   /** What a folder holds before a dataset is created from it. */
   scanPreview: (worker: Worker, path: string, recursive = true) => queryOptions({
     queryKey: serverKey(TD.scanPreview, { worker, filters: { path, recursive } }),

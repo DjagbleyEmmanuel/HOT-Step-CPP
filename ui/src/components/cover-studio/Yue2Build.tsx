@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { queryClient } from '../../queries/client';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import { withKeyId } from '../../queries/keys';
 import { pollWhile } from '../../queries/contract';
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Loader2, Lock, MoreHorizontal, Pause, Play, RotateCcw, Scissors, Trash2, X } from 'lucide-react';
@@ -185,75 +186,126 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   const snapshot = useQuery({ ...options, enabled: !!token && !!sessionId, refetchInterval: pollWhile<Yue2BuildSession>(s => !s || s.pending.length > 0 || s.preview?.status === 'rendering') });
   const session = sessionId ? snapshot.data ?? null : null;
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const call = async (fn: () => Promise<Yue2BuildSession>) => {
-    setBusy(true);
-    try { const next = await fn(); const key = snapshotOptions<Yue2BuildSession>('cover', `/yue2-cover/build/${next.id}`).queryKey; queryClient.setQueryData([key[0], key[1], options.queryKey[2], key[3], key[4]], next); setError(''); return next; }
-    catch (err: any) { setError(err.message); void snapshot.refetch(); return null; }
-    finally { setBusy(false); }
-  };
   const live = session && session.id === sessionId ? session : null;
+
+  /** Every command ends with the session's new snapshot: seed it under the new session's pathname id (not the bare id),
+   *  keeping this query's scope, and clear the error line. */
+  const commit = (next: Yue2BuildSession) => {
+    const key = withKeyId(options.queryKey, `/yue2-cover/build/${next.id}`);
+    queryClient.setQueryData<Yue2BuildSession>(key, previous =>
+      previous && previous.revision > next.revision ? previous : next);
+    setError('');
+  };
+  /** The error line is the sole notifier (the commands are silent): show it, and re-read what the server still holds. */
+  const fail = (err: unknown) => { setError(err instanceof Error ? err.message : String(err)); void snapshot.refetch(); };
+
+  // One mutation per command; they share commit/fail because every one returns the session's new snapshot.
+  const generateMut = useMutation({
+    mutationFn: async (v: { params: Record<string, unknown>; to: number; count: number; caption: string; lyrics: Record<string, string> }) => {
+      let started = live;
+      if (!started) { started = await yue2CoverApi.buildStart(v.params, draft.text ?? undefined); setSessionId(started.id); }
+      if (Object.keys(v.lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, v.lyrics);
+      return yue2CoverApi.buildGenerate(started.id, started.revision, v.to, v.count, v.caption || undefined);
+    },
+    onSuccess: commit, onError: fail,
+  });
+  const occurrenceLyricsMut = useMutation({
+    mutationFn: (v: { edits: Record<string, string | null> }) => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, v.edits),
+    onSuccess: commit, onError: fail,
+  });
+  const settingsMut = useMutation({
+    mutationFn: (v: { settings: Record<string, unknown> }) => yue2CoverApi.buildSettings(live!.id, live!.revision, v.settings),
+    onSuccess: commit, onError: fail,
+  });
+  const planMut = useMutation({
+    mutationFn: async (v: { params: Record<string, unknown>; upcoming: string[]; finished: boolean }) => {
+      let started = live;
+      if (!started) { started = await yue2CoverApi.buildStart(v.params, draft.text ?? undefined); setSessionId(started.id); }
+      return yue2CoverApi.buildPlan(started.id, started.revision, v.upcoming, v.finished);
+    },
+    onSuccess: commit, onError: fail,
+  });
+  const keepMut = useMutation({
+    mutationFn: async (v: { take: string; crop?: TakeCrop; count?: number }) => {
+      const kept = live!.takes.find(t => t.id === v.take);
+      let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, v.take);
+      if (v.crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, v.take, Math.round(v.crop.out * FPS), v.crop.mode ?? undefined);
+      if (v.crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, v.take, v.crop.in);
+      // Not for a cut in the section the take ran on into: that section may not be planned yet.
+      if (v.count && kept && v.crop?.out != null && v.crop.mode === 'regenerate' && cropPoint(kept, Math.round(v.crop.out * FPS)).occurrence <= kept.to) next = await yue2CoverApi.buildGenerate(next.id, next.revision, kept.to, v.count, kept.caption || undefined);
+      return next;
+    },
+    onSuccess: commit, onError: fail,
+  });
+  const previewMut = useMutation({ mutationFn: () => yue2CoverApi.buildPreview(live!.id), onSuccess: commit, onError: fail });
+  const trimMut = useMutation({
+    mutationFn: (v: { take: string; seconds: number | null }) => yue2CoverApi.buildTrim(live!.id, live!.revision, v.take, v.seconds),
+    onSuccess: commit, onError: fail,
+  });
+  const undoMut = useMutation({
+    mutationFn: (v: { section?: number }) => yue2CoverApi.buildUndo(live!.id, live!.revision, v.section),
+    onSuccess: commit, onError: fail,
+  });
+  const removeMut = useMutation({
+    mutationFn: (take: string) => yue2CoverApi.buildDelete(live!.id, live!.revision, take),
+    onSuccess: commit, onError: fail,
+  });
+  const cancelMut = useMutation({ mutationFn: () => yue2CoverApi.buildCancel(live!.id), onSuccess: commit, onError: fail });
+  const cropMut = useMutation({
+    mutationFn: (v: { take: string; frame: number | null; mode?: 'regenerate' | 'advance' }) => yue2CoverApi.buildCrop(live!.id, live!.revision, v.take, v.frame, v.mode),
+    onSuccess: commit, onError: fail,
+  });
+  const applyLyricsMut = useMutation({
+    mutationFn: async (text: string): Promise<{ session?: Yue2BuildSession }> => {
+      if (live) return { session: await yue2CoverApi.buildLyrics(live.id, live.revision, text) };
+      await yue2CoverApi.buildLyricsCheck(text); draft.set(text); return {};
+    },
+    onSuccess: r => { if (r.session) commit(r.session); else setError(''); },
+    onError: fail,
+  });
+
+  const deleteBuildMut = useMutation({
+    mutationFn: () => yue2CoverApi.buildDeleteAll(live!.id),
+    onSuccess: () => { setSessionId(''); setError(''); },
+    onError: fail,
+  });
+
+  const busy = [generateMut, occurrenceLyricsMut, settingsMut, planMut, keepMut, previewMut, trimMut, undoMut, removeMut, cancelMut, cropMut, applyLyricsMut, deleteBuildMut]
+    .some(m => m.isPending);
   return {
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. A non-empty
      *  `caption` is these takes' own; `lyrics` (occurrence id to lines) is applied first. */
-    generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}) => call(async () => {
-      let started = live;
-      if (!started) { started = await yue2CoverApi.buildStart(params, draft.text ?? undefined); setSessionId(started.id); }
-      if (Object.keys(lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, lyrics);
-      return yue2CoverApi.buildGenerate(started.id, started.revision, to, count, caption || undefined);
-    }),
+    generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}) =>
+      generateMut.mutateAsync({ params, to, count, caption, lyrics }).catch(() => null),
     /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
-    occurrenceLyrics: (edits: Record<string, string | null>) => call(() => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, edits)),
+    occurrenceLyrics: (edits: Record<string, string | null>) => { void occurrenceLyricsMut.mutateAsync({ edits }).catch(() => null); },
     /** Applies new cover settings to the session (before its first keep). */
-    settings: (settings: Record<string, unknown>) => call(() => yue2CoverApi.buildSettings(live!.id, live!.revision, settings)),
+    settings: (settings: Record<string, unknown>) => settingsMut.mutateAsync({ settings }).catch(() => null),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
-    plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => call(async () => {
-      let started = live;
-      if (!started) { started = await yue2CoverApi.buildStart(params, draft.text ?? undefined); setSessionId(started.id); }
-      return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished);
-    }),
+    plan: (params: Record<string, unknown>, upcoming: string[], finished: boolean) => { void planMut.mutateAsync({ params, upcoming, finished }).catch(() => null); },
     /** Keeps a take, then applies the crop set on it: the out point cuts the kept take, the in point starts the saved song later.
      *  With `count`, a 'regenerate' cut then queues that many takes composing from the cut to the take's end, with its caption. */
-    keep: (take: string, crop?: TakeCrop, count?: number) => call(async () => {
-      const kept = live!.takes.find(t => t.id === take);
-      let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take);
-      if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined);
-      if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in);
-      // Not for a cut in the section the take ran on into: that section may not be planned yet.
-      if (count && kept && crop?.out != null && crop.mode === 'regenerate' && cropPoint(kept, Math.round(crop.out * FPS)).occurrence <= kept.to) next = await yue2CoverApi.buildGenerate(next.id, next.revision, kept.to, count, kept.caption || undefined);
-      return next;
-    }),
+    keep: (take: string, crop?: TakeCrop, count?: number) => { void keepMut.mutateAsync({ take, ...(crop ? { crop } : {}), ...(count ? { count } : {}) }).catch(() => null); },
     /** Renders everything kept so far once, for Play build. */
-    preview: () => call(() => yue2CoverApi.buildPreview(live!.id)),
+    preview: () => { void previewMut.mutateAsync().catch(() => null); },
     /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
-    trim: (take: string, seconds: number | null) => call(() => yue2CoverApi.buildTrim(live!.id, live!.revision, take, seconds)),
-    undo: (section?: number) => call(() => yue2CoverApi.buildUndo(live!.id, live!.revision, section)),
-    remove: (take: string) => call(() => yue2CoverApi.buildDelete(live!.id, live!.revision, take)),
-    cancel: () => call(() => yue2CoverApi.buildCancel(live!.id)),
+    trim: (take: string, seconds: number | null) => { void trimMut.mutateAsync({ take, seconds }).catch(() => null); },
+    undo: (section?: number) => { void undoMut.mutateAsync({ ...(section === undefined ? {} : { section }) }).catch(() => null); },
+    remove: (take: string) => { void removeMut.mutateAsync(take).catch(() => null); },
+    cancel: () => { void cancelMut.mutateAsync().catch(() => null); },
     /** Cuts the last kept take at codec frame `frame`, or restores it (null). The take rows' crop goes through keep. */
-    crop: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') =>
-      call(() => yue2CoverApi.buildCrop(live!.id, live!.revision, take, frame, mode)),
+    crop: (take: string, frame: number | null, mode?: 'regenerate' | 'advance') => { void cropMut.mutateAsync({ take, frame, ...(mode ? { mode } : {}) }).catch(() => null); },
     /** Applies the build's lyrics: to the session, or to the draft the first session starts from.
      *  True once the server (or, before a session, its validation) accepted them. */
     applyLyrics: async (text: string) => {
       const target = lyricsTarget(sessionId, live);
       if (target === 'loading') { setError('This build is still loading; try again once it has.'); return false; }
-      if (live) return !!(await call(() => yue2CoverApi.buildLyrics(live.id, live.revision, text)));
-      setBusy(true);
-      try { await yue2CoverApi.buildLyricsCheck(text); draft.set(text); setError(''); return true; }
-      catch (err: any) { setError(err.message); return false; }
-      finally { setBusy(false); }
+      return !!(await applyLyricsMut.mutateAsync(text).catch(() => null));
     },
     startOver: () => { setSessionId(''); setError(''); },
     /** Deletes the build on the server (refused while takes render), then returns to the empty state. */
-    deleteBuild: async () => {
-      setBusy(true);
-      try { await yue2CoverApi.buildDeleteAll(live!.id); setSessionId(''); setError(''); }
-      catch (err: any) { setError(err.message); }
-      finally { setBusy(false); }
-    },
+    deleteBuild: async () => { await deleteBuildMut.mutateAsync().catch(() => null); },
   };
 }
 

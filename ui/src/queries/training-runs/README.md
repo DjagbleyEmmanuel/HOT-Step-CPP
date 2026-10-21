@@ -25,11 +25,14 @@ replayed events. Reconnect invalidates authoritative snapshots. Teardown drops
 late frames. Metrics, preview rows received over SSE, form values, selections,
 score-note drafts, playback and wall-clock timers remain client state.
 
-Commands run from user actions or the existing explicit workflow executor.
-`runCommand` executes a command once and invalidates the captured scope after
-success. It never retries a submission. Training-store actions retain their
-published scoped signatures and their own cache invalidation. Recipe resolution,
-preset resolution and preparation context capture remain command-time operations.
+Commands run from user actions or the existing explicit workflow executor as
+component `useMutation` hooks whose success callback calls `trainingWritePlan`.
+A command executes once and invalidates the captured scope after success; it
+never retries a submission. `trainingWritePlan` accepts explicit keys for
+resources whose canonical key carries no worker scope (the unscoped workers
+list, per-dataset rows). Training-store actions retain their published scoped
+signatures and their own cache invalidation. Recipe resolution, preset
+resolution and preparation context capture remain command-time operations.
 Caption-before-training remains an explicit sequential workflow; its job reads
 use the canonical training-data job cache rather than a separate transport.
 

@@ -8,6 +8,7 @@ import { localOptions } from '../../queries/global-models/options';
 import { scopeOf, serverKey } from '../../queries/keys';
 import { manualRenderRequest, renderSa3PreviewCommand, sa3PreviewOptions } from '../../queries/sa3-previews/queries';
 import { generationStatusOptions } from '../../queries/shell-queue/queue';
+import { queryManager } from '../../queries/invalidation';
 import { generateApi } from '../../services/api';
 import type { Sa3PreviewRecord } from '../../services/sa3PreviewApi';
 import { getSa3TrainingStatus, type Sa3Recipe, type Sa3TrainingStatus, type StartSa3TrainingRequest, type TrainingJobSummary } from '../../services/trainingApi';
@@ -111,7 +112,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
       preview: { everySteps: preview.enabled ? everySteps : 0, prompts, seconds: preview.seconds, seeds },
     };
     await start(body);
-    await client.invalidateQueries({ queryKey: sa3StatusOptions(worker, datasetId).queryKey });
+    await queryManager.invalidate(client, sa3StatusOptions(worker, datasetId).queryKey);
   } });
   const cancelMutation = useMutation({ mutationFn: cancel });
   const [form, setForm] = usePersistedState<PreviewForm>('hs-sa3-preview', PREVIEW_DEFAULTS);

@@ -23,11 +23,11 @@ and request URL. Reads consume Query's AbortSignal and throw on HTTP failures.
 | `Mm3LmAdapterDropdown.tsx` | `global-models/mm3-adapters` |
 | `PostProcessingDropdown.tsx` | Shared plugins plus `global-models/pp-vae`, `stablestep`, `sa3-adapters` |
 | `training-studio/Sa3TrainCard.tsx` | The same `global-models/sa3-adapters` list for its audition picker, read only while training targets this PC |
-| `GenerationDropdown.tsx`, `MasteringDropdown.tsx`, `PostProcessingDropdown.tsx` | One `global-models/references` snapshot; upload/delete invalidates all consumers |
-| `CoverArtDropdown.tsx` | `global-models/cover-art`; download/cancel are explicit commands |
+| `GenerationDropdown.tsx`, `PostProcessingDropdown.tsx` | One `global-models/references` snapshot; upload/delete invalidates all consumers |
+| `CoverArtDropdown.tsx` | `shell-queue/cover-art-status` (owned by shell-queue's queue slice); download/cancel are explicit commands |
 | `AdaptersDropdown.tsx` | Folder-filtered `global-models/lm-adapters` and shared `adapter-scan`; scan is a read-only POST owned by Query, fresh per click and shared with shell-queue |
-| `ProfilesModal.tsx` | `global-models/profiles`, one list per backend (`backend` filter); save/rename/delete/import invalidates it |
-| `SeedManagerDrawer.tsx` | `global-models/seeds`; save/delete/favorite invalidates it; random GET remains an explicit selection command |
+| `ProfilesModal.tsx` | `shell-queue/profiles`, one list per backend (`backend` filter); save/rename/delete/import invalidates it |
+| `SeedManagerDrawer.tsx` | `shell-queue/seeds`; save/delete/favorite invalidates it; random GET remains an explicit selection command |
 | `MonitorBar.tsx`, `vstChainStore.ts`, `VstChainDropdown.tsx` | `global-models/monitor`, `vst-chain`, `vst-scan`; exact-key projections preserve existing store selectors |
 | `vstChainStore.ts` preset collection | Family-filtered `global-models/vst-presets` supplies authoritative reads through the existing injectable API; the collection retains unsaved edits, migration decisions and revision conflicts |
 | `globalParamsStore.ts` | Form state and local persistence; active-model PUT is a client-to-server mirror command, with no independent read |

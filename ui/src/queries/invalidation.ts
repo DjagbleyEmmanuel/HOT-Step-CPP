@@ -36,11 +36,20 @@ export const queryManager = {
   sidecars: {
     all: (c: QueryClient) => invalidateKeys(c, [resourceKey(SHARED.lrc), resourceKey(SHARED.lyricsJson)]),
   },
-  /** Exact keys or prefixes, with the captured scope — parameterized writes
-   *  and refresh buttons. */
-  keys: (c: QueryClient, ...keys: QueryKey[]) => invalidateKeys(c, keys),
+  /** Lyric Studio (lireek) snapshots — a purge of generations or profiles
+   *  rewrote every cached document in the area (`cover-lyrics/reads.ts`'s
+   *  `resource('lireek')`; P6 folds this into the entity composer). */
+  coverLyrics: {
+    lireek: (c: QueryClient) => invalidateKeys(c, [resourceKey('cover-lyrics/lireek')]),
+  },
+  /** Invalidate exact keys or prefixes. The one call site for "this write
+   *  dirtied these specific entries." */
+  invalidate: (c: QueryClient, ...keys: QueryKey[]) => invalidateKeys(c, keys),
   /** A full filter (predicate-narrowed sets, e.g. one worker's reads). */
   filter: (c: QueryClient, filter: InvalidateQueryFilters) => invalidateQuery(c, filter),
+  /** Everything, after a write that can replace rows in every area (a settings
+   *  backup import). Still routed through the one owner. */
+  all: (c: QueryClient) => invalidateQuery(c, {}),
 
   /** Event map: writes declare what happened; the manager resolves it to the
    *  groups above. Parameterized methods are called directly when the write
@@ -48,6 +57,8 @@ export const queryManager = {
   events: {
     'song:written': (c: QueryClient) => queryManager.songs.views(c),
     'sidecars:changed': (c: QueryClient) => queryManager.sidecars.all(c),
+    /** A nuke of Lyric Studio generations or profiles (SettingsPanel). */
+    'cover-lyrics:lireek-purged': (c: QueryClient) => queryManager.coverLyrics.lireek(c),
   },
 };
 

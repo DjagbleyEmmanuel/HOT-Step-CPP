@@ -30,6 +30,7 @@ import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
 import { MonitorBar } from './MonitorBar';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ProfilesModal } from './ProfilesModal';
+import { QueryError } from '../shared/QueryError';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
@@ -319,6 +320,11 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
   return (
     <div className="flex-shrink-0 relative z-40 bg-white/95 dark:bg-zinc-900/95 border-b border-zinc-200 dark:border-white/5"
          style={{ backdropFilter: 'blur(20px)' }}>
+      {modelsQuery.isError && (
+        <div className="px-3 pt-1.5">
+          <QueryError error={modelsQuery.error} onRetry={() => void modelsQuery.refetch()} compact />
+        </div>
+      )}
 
       {/* Mobile compact bar — hamburger + logo + Settings button (hidden >= 1024px) */}
       <div className="hidden max-[1023px]:flex portrait:flex items-center gap-3 px-3 py-2">

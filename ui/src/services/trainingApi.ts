@@ -29,7 +29,9 @@ import type {
   HeartmulaStatusResponse, HeartmulaTrainRequest,
 } from '../../../server/src/contracts/heartmulaTraining';
 
-export interface TrainingTarget { worker?: string | null }
+/** `silent` rides here too: a caller that renders the command's failure
+ *  itself (an inline error line) opts out of the global toast per call. */
+export interface TrainingTarget { worker?: string | null; silent?: boolean }
 export interface TrainingReadOptions extends TrainingTarget, ReadOptions {}
 
 const WORKER_KEY = 'hotstep.trainingWorker';
@@ -2417,7 +2419,10 @@ export const PIPELINE_STAGES: readonly PipelineStage[] =
 // shape so call sites don't change; bodies are the JSON strings jsonBody()
 // makes, parsed back to objects for the adapter to re-serialize identically.
 
-type TrainingInit = RequestInit & { timeout?: number };
+/** Transport flags ride alongside the legacy RequestInit shape: `timeout` and
+ *  `silent` (skip the global failure toast — for calls whose caller renders
+ *  the error itself). */
+type TrainingInit = RequestInit & { timeout?: number; silent?: boolean };
 
 function initToArgs(init?: TrainingInit): { method: string; body?: unknown } {
   const method = (init?.method ?? 'GET').toUpperCase();
@@ -2429,7 +2434,7 @@ function initToArgs(init?: TrainingInit): { method: string; body?: unknown } {
 async function request<T>(path: string, init?: TrainingInit, target?: TrainingReadOptions): Promise<T> {
   const { method, body } = initToArgs(init);
   return apiClient.request<T>(method, path, body, {
-    signal: target?.signal, timeout: init?.timeout, baseURL: trainingBase(target?.worker),
+    signal: target?.signal, timeout: init?.timeout, baseURL: trainingBase(target?.worker), silent: init?.silent ?? target?.silent,
   });
 }
 
@@ -2439,7 +2444,7 @@ async function request<T>(path: string, init?: TrainingInit, target?: TrainingRe
 async function localRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
   const { method, body } = initToArgs(init);
   return apiClient.request<T>(method, path, body, {
-    signal: opts?.signal, timeout: init?.timeout, baseURL: LOCAL_BASE,
+    signal: opts?.signal, timeout: init?.timeout, baseURL: LOCAL_BASE, silent: init?.silent,
   });
 }
 
@@ -2657,7 +2662,8 @@ export async function startYue2Train(
 export async function startYue2JointTrain(
   id: string, opts: Yue2JointTrainRequest, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; trainingMethod: 'aitk'; recipeVersion: string; outDir: string; steps: number; saveEvery: number }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
+  // silent: RefinePanel's Start error line is the sole notifier.
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts), silent: true }, reqOpts);
 }
 
 /** Re-caption (from the audio) only the tracks with no .yue2.txt. jobId is
@@ -2665,7 +2671,9 @@ export async function startYue2JointTrain(
 export async function captionMissingYue2(
   id: string, opts: { provider?: 'gemini' | 'moss'; model?: string; checkOnly?: boolean }, reqOpts?: TrainingTarget,
 ): Promise<{ jobId?: string | null; skipped?: string; missing?: number }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
+  // silent: Yue2AitkTrainCard's captionMissing error line is the sole notifier
+  // (both the start leg and the final checkOnly leg).
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts), silent: true }, reqOpts);
 }
 
 /** Native AITK joint runs and their split AR/NAR checkpoint files. Always
@@ -2746,7 +2754,8 @@ export async function updateYue2JointIntervals(
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — a finished run and its checkpoints. */
 export async function deleteYue2AitkRun(id: string, jobId: string): Promise<{ output: string }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+  // silent: RefinePanel's remove error line is the sole notifier.
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE', silent: true });
 }
 
 /** Refinement rung scores (Refine tab): the listener's judgement per rung
@@ -2762,7 +2771,8 @@ export async function listYue2RungScores(id: string, run?: string, reqOpts?: Rea
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, undefined, reqOpts);
 }
 export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string; blind?: boolean; blindLabel?: string }): Promise<{ score: Yue2RungScore }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
+  // silent: Yue2LadderReview's rung-score error line is the sole notifier.
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body), silent: true });
 }
 /** Optimise phase: the dataset's _hotstep-optimisation.json and prepare readiness. */
 export interface Yue2BaseLossItem { file: string; frames: number; arTokens: number; arCe: number; narMse: number; narMseByT: number[] }
@@ -2773,7 +2783,8 @@ export async function getYue2Optimise(id: string, reqOpts?: TrainingReadOptions)
   return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise`, undefined, reqOpts);
 }
 export async function startYue2BaseLoss(id: string, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise/base-loss`, { method: 'POST', ...jsonBody({}) }, reqOpts);
+  // silent: Yue2OptimisePanel's measure error line is the sole notifier.
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise/base-loss`, { method: 'POST', ...jsonBody({}), silent: true }, reqOpts);
 }
 /** A run's album verdict: how well the album trained overall, 1-5 (Dataset-Calibrated Training). */
 export type Yue2TrainedDirection = 'under' | 'right' | 'over';
@@ -2783,7 +2794,8 @@ export async function getYue2AlbumScore(id: string, run: string, reqOpts?: ReadO
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`, undefined, reqOpts);
 }
 export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
+  // silent: Yue2LadderReview's album-score error line is the sole notifier.
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body), silent: true });
 }
 export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/yue2-rung-scores/export?format=${format}`;
 
@@ -2791,14 +2803,16 @@ export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE
 export async function renderYue2JointPreviews(
   id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; arScale?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number; sampler?: Record<string, number | string> },
 ): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
+  // silent: Yue2LadderReview's render error line is the sole notifier.
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body), silent: true });
 }
 
 /** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */
 export async function startYue2AitkPrepare(
   id: string, opts: Yue2AitkPrepareRequest, reqOpts?: TrainingTarget,
 ): Promise<{ jobId: string; kind: TrainingJobKind; status: TrainingJobStatus; output: string; manifest: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
+  // silent: Yue2AitkTrainCard's prepare error line is the sole notifier.
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts), silent: true }, reqOpts);
 }
 
 /** A base the joint trainer can load: the ConvRot checkpoint or a yue2-lm GGUF.
@@ -2989,9 +3003,11 @@ export async function getLyricStudioPreview(id: string, reqOpts?: TrainingReadOp
 export async function exportToLyricStudio(
   id: string, input: LyricStudioExportInput, reqOpts?: TrainingTarget,
 ): Promise<LyricStudioExportResult> {
+  // SendToLyricStudio renders failures itself (the modal's error line), so the
+  // transport stays quiet — one notifier per failure.
   return request<LyricStudioExportResult>(
     `/datasets/${encodeURIComponent(id)}/lyric-studio`,
-    { method: 'POST', ...jsonBody(input) }, reqOpts,
+    { method: 'POST', ...jsonBody(input), silent: true }, reqOpts,
   );
 }
 
@@ -3237,7 +3253,8 @@ export async function listYue2Batches(reqOpts?: TrainingReadOptions): Promise<Yu
   return data.batches;
 }
 export async function setYue2ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }) });
+  // silent: RefinePanel's reviewed-toggle error line is the sole notifier.
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }), silent: true });
 }
 /** NAR further training from each ladder's best-scored rung, then link + cleanup. */
 export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>, knee = true): Promise<Yue2BatchSummary> {
@@ -3271,7 +3288,7 @@ export interface WorkerDispatch { worker: string; batchId: string | null; items:
 async function workersRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
   const { method, body } = initToArgs(init);
   return apiClient.request<T>(method, path, body, {
-    signal: opts?.signal, timeout: init?.timeout, baseURL: '/api/workers',
+    signal: opts?.signal, timeout: init?.timeout, baseURL: '/api/workers', silent: init?.silent,
   });
 }
 export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<TrainingWorkerStatus[]> {
@@ -3279,7 +3296,8 @@ export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<Traini
 }
 /** Caption here, push, and queue each dataset on the worker's YuE2 batch. */
 export async function dispatchYue2Batch(worker: string, input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<WorkerDispatch> {
-  return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input) })).dispatch;
+  // silent: Yue2AitkTrainCard's batch-dispatch error line is the sole notifier.
+  return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input), silent: true })).dispatch;
 }
 export async function getWorkerDispatch(worker: string, reqOpts?: ReadOptions): Promise<WorkerDispatch | null> {
   return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, undefined, reqOpts)).dispatch;
@@ -3295,7 +3313,8 @@ export async function getWorkerMirror(worker: string, reqOpts?: ReadOptions): Pr
 }
 /** Run one mirror pass now; resolves when the pass ends. */
 export async function syncWorkerMirror(worker: string): Promise<MirrorStatus> {
-  return (await workersRequest<{ mirror: MirrorStatus }>(`/${encodeURIComponent(worker)}/mirror`, { method: 'POST' })).mirror;
+  // silent: ReviewPanel's sync error line is the sole notifier.
+  return (await workersRequest<{ mirror: MirrorStatus }>(`/${encodeURIComponent(worker)}/mirror`, { method: 'POST', silent: true })).mirror;
 }
 
 export async function cancelPipeline(id: string, reqOpts?: TrainingTarget): Promise<void> {
@@ -3315,10 +3334,12 @@ export async function getWorkerUpdate(worker: string, reqOpts?: ReadOptions): Pr
   return (await workersRequest<{ update: WorkerUpdateStatus | null }>(`/${encodeURIComponent(worker)}/update`, undefined, reqOpts)).update;
 }
 export async function startWorkerUpdate(worker: string): Promise<WorkerUpdateStatus> {
-  return (await workersRequest<{ update: WorkerUpdateStatus }>(`/${encodeURIComponent(worker)}/update`, { method: 'POST' })).update;
+  // silent: WorkersPanel's update error line is the sole notifier.
+  return (await workersRequest<{ update: WorkerUpdateStatus }>(`/${encodeURIComponent(worker)}/update`, { method: 'POST', silent: true })).update;
 }
 export async function cancelWorkerUpdate(worker: string): Promise<void> {
-  await workersRequest(`/${encodeURIComponent(worker)}/update`, { method: 'DELETE' });
+  // silent: WorkersPanel's update error line is the sole notifier.
+  await workersRequest(`/${encodeURIComponent(worker)}/update`, { method: 'DELETE', silent: true });
 }
 
 export async function putTrainingDefaults(patch: Partial<TrainingDefaults>, reqOpts?: TrainingTarget): Promise<TrainingDefaults> {

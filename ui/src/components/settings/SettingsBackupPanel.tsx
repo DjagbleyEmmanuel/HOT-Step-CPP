@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { BackupPreview, SettingsBackup } from '../../../../server/src/services/settingsBackup';
 import type { AppSettings } from './SettingsPanel';
 import { http } from '../../services/axiosClient';
+import { queryManager } from '../../queries/invalidation';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { ParamLabel } from '../shared/ParamLabel';
 
@@ -55,7 +56,7 @@ export function SettingsBackupPanel({ settings, onSettingsChange }: Props) {
       const { data } = await http.post<{ app: AppSettings }>('/settings/backup/import', { backup: selected.backup, confirmed: true });
       onSettingsChange(data.app);
       setPending(null); setSaved(true);
-      await queryClient.invalidateQueries();
+      await queryManager.all(queryClient);
     });
   };
   const labels: Record<keyof BackupPreview['current'], string> = {

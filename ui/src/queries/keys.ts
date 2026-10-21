@@ -157,6 +157,13 @@ export function scopeOf(key: QueryKey): KeyScope | undefined {
   return key[0] === 'hs' && key[2] && typeof key[2] === 'object' ? key[2] as KeyScope : undefined;
 }
 
+/** Re-point a key at another id while keeping its resource, scope and filters.
+ *  Used when a write returns a session/snapshot under a new id: the entry
+ *  belongs in the same scope, so callers never splice a tuple by position. */
+export function withKeyId(key: QueryKey, id: string | number | null): QueryKey {
+  return [key[0], key[1], key[2], id, key[4]];
+}
+
 // ── Shared resource keys ─────────────────────────────────────────────────
 
 export const sharedKeys = {

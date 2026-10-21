@@ -391,7 +391,7 @@ Every API mount is registered in `server/src/index.ts`. Route files are in
 | Player waveform peaks | `/api/audio` | `audio.ts` | `audio/peaks.ts` | `ui/src/audio/peaksClient.ts` | none |
 | Models dropdown | `/api/models` | `models.ts` | `aceClient.ts` (`GET /props`) | `global-bar/ModelsDropdown.tsx` | `model-registry.h`, `model-store.cpp` |
 | Model Manager (downloads) | `/api/model-manager` | `modelManager.ts` | `modelDownloadService.ts`, `server/src/data/model-registry.json` | `model-manager/` | none |
-| DiT adapters (LoRA, LoKr) | `/api/adapters` | `adapters.ts` | `adapters/stMetadata.ts`, `generation/adapterSections.ts` | `create/AdaptersAccordion.tsx`, `global-bar/AdaptersDropdown.tsx` | `adapter-merge.h`, `adapter-runtime.h` |
+| DiT adapters (LoRA, LoKr) | `/api/adapters` | `adapters.ts` | `adapters/stMetadata.ts`, `generation/adapterSections.ts` | `global-bar/AdaptersDropdown.tsx` | `adapter-merge.h`, `adapter-runtime.h` |
 | Stem Studio | `/api/stem-studio` | `stemStudio.ts` | `aceClient.ts`, `audioConvert.ts` | `stem-studio/` | `/synth` (extract), `/supersep/*` |
 | SuperSep proxy | `/api/supersep` | `supersep.ts` | `audioConvert.ts` | `stem-studio/`, Cover Studio's stem split (`cover-studio/SourcePanel.tsx`, `stores/coverStemsStore.ts`), `services/supersepApi.ts`, `shared/StemMixer.tsx` | `supersep.cpp` |
 | Stem Builder | `/api/workflows` (`layer-render` kind), plus `/api/upload` and `/api/songs` | `workflows.ts` | `workflows/repaintLayerWorkflow.ts` | `stem-builder/`, `services/repaintLayerWorkflowApi.ts` | the `lego` task on `/synth` |
@@ -405,7 +405,7 @@ Every API mount is registered in `server/src/index.ts`. Route files are in
 | Training Studio | `/api/training` | `training.ts` | `training/*` | `training-studio/` | `ace-train`, `ace-caption`, `/understand` |
 | Training workers (training on another PC) | `/api/workers` (controller), `/api/training/worker` (worker) | `workers.ts` | `training/trainingWorkers.ts`, `training/workerUpdate.ts`, `training/yue2Mirror.ts` | `training-studio/WorkersPanel.tsx`, `training-studio/TrainingWorkerBar.tsx` | none |
 | Cover art images | `/api/cover-art` | `coverArt.ts` | `coverArt/*` | `library/CoverArtPromptModal.tsx`, `global-bar/CoverArtDropdown.tsx` | `sd-cli` (stable-diffusion.cpp), not the music engine |
-| Mastering | `/api/mastering` | `mastering.ts` | `generation/postProcessing.ts` | `create/MasteringSection.tsx`, `global-bar/MasteringDropdown.tsx` | `mastering`, `mp3-codec` binaries |
+| Mastering | `/api/mastering` | `mastering.ts` | `generation/postProcessing.ts` | `global-bar/PostProcessingDropdown.tsx` | `mastering`, `mp3-codec` binaries |
 | VST3 chain | `/api/vst` | `vst.ts` | none, runs `vst-host` | `global-bar/VstChainDropdown.tsx`, `stores/vstChainStore.ts` | `tools/vst-host.cpp` |
 | Lua plugins | `/api/plugins` | `plugins.ts` | `aceClient.ts` (`GET /plugins`) | `global-bar/PluginControls.tsx`, `hooks/usePluginRegistry.ts` | `lua-plugin.h`, `lua-plugin-registry.h`, `hot-step-sampler.h` |
 | Assistant | `/api/assistant` | `assistant.ts` | `lireek/llm/registry.ts`, `server/src/data/assistant-knowledge.md` | `assistant/`, `services/assistantApi.ts` | none |
@@ -559,19 +559,13 @@ migration. The historical test fake is retained here only to reconcile its row.
 | `components/assistant/AssistantPanel.tsx` | studios | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/ArtistSettingsPanel.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/CoverArtistGrid.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/CoverRecentSongs.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/CoverStudio.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/RecentCovers.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/ScorePlanReview.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/SectionMatchReview.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/SourcePanel.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/Yue2Build.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/Yue2CoverPanel.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/Yue2CoverScore.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/create/AdaptersAccordion.tsx` | shell-queue | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/AiGenerateModal.tsx` | shell-queue | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/CreatePanel.tsx` | shell-queue | Query consumer; forms/commands/streams stay client-owned |
-| `components/create/MasteringSection.tsx` | shell-queue | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/Mm3ComposeButton.tsx` | shell-queue | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/create/trainingCreateDraft.ts` | shell-queue | Explicit one-shot form handoff; command-time revision transport |
 | `components/details/MetadataEditorModal.tsx` | shell-queue | Area service/store adapter; Query reads, explicit commands/client state |
@@ -580,7 +574,6 @@ migration. The historical test fake is retained here only to reconcile its row.
 | `components/global-bar/CoverArtDropdown.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/GenerationDropdown.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/GlobalParamBar.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
-| `components/global-bar/MasteringDropdown.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/Mm3LmAdapterDropdown.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/ModelsDropdown.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |
 | `components/global-bar/MonitorBar.tsx` | global-models | Query consumer; forms/commands/streams stay client-owned |

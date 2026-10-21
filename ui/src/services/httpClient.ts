@@ -14,9 +14,9 @@
 // SSE is not here: `streamEvents()` stays on fetch (axios does not stream
 // response bodies), and reconnecting streams are owned by sharedEventSource.ts.
 
-import { getAuthToken, handleFailure, http } from './axiosClient';
-import { ApiError } from './apiError';
-export { ApiError };
+import { getAuthToken, handleFailure, http, SLOW_ROUTE_TIMEOUT_MS } from './axiosClient';
+import { ApiError, HttpStatus } from './apiError';
+export { ApiError, HttpStatus };
 
 /** Trailing options every entrypoint accepts, so a query function can pass
  *  TanStack Query's AbortSignal without changing positional callers. The
@@ -145,6 +145,10 @@ export class ApiClient {
       const fail = (info: Parameters<typeof handleFailure>[0]) => {
         try { handleFailure(info); } catch (err) { reject(err); }
       };
+      // A stalled upload would otherwise hang forever — XHR has no default
+      // timeout, and the axios JSON path's does not reach this code path.
+      xhr.timeout = opts.timeout ?? SLOW_ROUTE_TIMEOUT_MS;
+      xhr.ontimeout = () => fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent });
       xhr.onload = () => {
         let parsed: unknown;
         try { parsed = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }

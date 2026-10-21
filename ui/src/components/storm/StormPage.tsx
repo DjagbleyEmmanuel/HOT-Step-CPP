@@ -17,6 +17,7 @@ import { useBackendStore } from '../../stores/backendStore';
 import type { BackendExtensionParam } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { StyledSelect } from '../shared/StyledSelect';
+import { QueryError } from '../shared/QueryError';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import type { GenerationParams } from '../../types';
@@ -623,6 +624,11 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   return (
     <BackendCapabilityGate feature="streaming">
     <div className="h-full flex flex-col bg-zinc-950 overflow-hidden">
+      {pluginsQuery.isError && (
+        <div className="px-3 lg:px-6 pt-2">
+          <QueryError error={pluginsQuery.error} onRetry={() => void pluginsQuery.refetch()} compact />
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 lg:px-6 py-3 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-3">

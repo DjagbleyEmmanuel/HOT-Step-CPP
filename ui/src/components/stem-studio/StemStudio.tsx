@@ -1,6 +1,7 @@
-import { extractResultOptions } from '../../queries/studios/resources';
+import { extractResultOptions, extractionsOptions } from '../../queries/studios/resources';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { modelsOptions } from '../../queries/studios/shared';
+import { queryManager } from '../../queries/invalidation';
 // StemStudio.tsx — Main Stem Studio orchestrator
 //
 // Composes: SourceSelector, TrackSelector, StemMixer, RecentExtractions
@@ -94,7 +95,6 @@ export const StemStudio: React.FC = () => {
   // Results
   const [mixerStems, setMixerStems] = useState<MixerStemInfo[] | null>(null);
   const [stemControls, setStemControls] = useState<StemControl[]>([]);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Sidebar — shared width with other studio pages
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
@@ -148,7 +148,7 @@ export const StemStudio: React.FC = () => {
       });
 
       loadResultIntoMixer(jobId, result);
-      setRefreshTrigger(prev => prev + 1);
+      void queryManager.invalidate(client, extractionsOptions().queryKey);
 
     } catch (err: any) {
       console.error('SuperSep failed:', err);
@@ -163,7 +163,7 @@ export const StemStudio: React.FC = () => {
     } finally {
       setIsExtracting(false);
     }
-  }, [sourceAudioUrl, sourceFileName, sepLevel]);
+  }, [sourceAudioUrl, sourceFileName, sepLevel, client]);
 
   const handleExtract = useCallback(async () => {
     if (!sourceAudioUrl) return;
@@ -203,7 +203,7 @@ export const StemStudio: React.FC = () => {
       });
 
       loadResultIntoMixer(jobId, result);
-      setRefreshTrigger(prev => prev + 1);
+      void queryManager.invalidate(client, extractionsOptions().queryKey);
 
     } catch (err: any) {
       console.error('Extraction failed:', err);
@@ -218,7 +218,7 @@ export const StemStudio: React.FC = () => {
     } finally {
       setIsExtracting(false);
     }
-  }, [sourceAudioUrl, sourceFileName, selectedTracks, style, lyrics, extractModel, mode, handleSupersep]);
+  }, [sourceAudioUrl, sourceFileName, selectedTracks, style, lyrics, extractModel, mode, handleSupersep, client]);
 
   const loadResultIntoMixer = useCallback((jobId: string, result: ExtractJobResult) => {
     const stems: MixerStemInfo[] = result.stems.map((s, idx) => ({
@@ -450,7 +450,6 @@ export const StemStudio: React.FC = () => {
             <RecentExtractions
               onSelectJob={handleSelectPastJob}
               activeJobId={activeJobId || undefined}
-              refreshTrigger={refreshTrigger}
             />
           </Section>
 

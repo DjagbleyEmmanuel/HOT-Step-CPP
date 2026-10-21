@@ -12,7 +12,7 @@ const options = <T>(family: PresetFamily) => ({
 async function write<T>(family: PresetFamily, command: () => Promise<T>) {
   await queryClient.cancelQueries({ queryKey: options(family).queryKey });
   try { return await command(); }
-  finally { await queryManager.keys(queryClient, options(family).queryKey); }
+  finally { await queryManager.invalidate(queryClient, options(family).queryKey); }
 }
 
 // The collection retains unsaved edits, import decisions and revision conflicts.

@@ -17,6 +17,7 @@ import { resourceKey } from '../../queries/keys';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
 import { useTranslation } from 'react-i18next';
+import { QueryError } from '../shared/QueryError';
 import { FORM_KEY, PREP_KEY } from './Yue2AitkTrainCard';
 
 const CARD = 'rounded-xl border border-red-500/20 bg-white dark:bg-suno-card p-4';
@@ -28,12 +29,13 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
   const worker = useTrainingStore(s => s.trainingWorker);
   const prepared = trainingQueries.preparedData(worker, datasetId, target === 'heartmula' ? target : undefined);
   // A failed read shows nothing to clear, as before.
-  const info = useQuery(prepared).data ?? null;
+  const infoQuery = useQuery(prepared);
+  const info = infoQuery.data ?? null;
   const [clearing, setClearing] = useState(false);
   const [includeCore, setIncludeCore] = useState(false);
   const [note, setNote] = useState('');
 
-  const load = () => queryManager.keys(queryClient, prepared.queryKey);
+  const load = () => queryManager.invalidate(queryClient, prepared.queryKey);
   useEffect(() => { setIncludeCore(false); }, [datasetId]);
 
   const allowCore = target === 'yue2' && includeCore;
@@ -47,7 +49,7 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
     setClearing(true); setNote('');
     try {
       await clearPreparedData(datasetId, info.slug, allowCore, { worker }, target === 'heartmula' ? target : undefined);
-      if (target === 'heartmula') void queryManager.keys(queryClient, resourceKey('training-data/heartmula-status', { worker }, datasetId));
+      if (target === 'heartmula') void queryManager.invalidate(queryClient, resourceKey('training-data/heartmula-status', { worker }, datasetId));
       if (allowCore) {
         // The prepared manifest the form points at is gone with the core.
         try {
@@ -70,6 +72,9 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
   const bytes = targets.reduce((sum, item) => sum + item.bytes, 0);
   return (
     <div className={CARD}>
+      {infoQuery.isError && (
+        <QueryError error={infoQuery.error} onRetry={() => void infoQuery.refetch()} className="mb-3" />
+      )}
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {target === 'yue2' ? <>Clears the vocal stems and this dataset&apos;s MM3 and ACE caches. The YuE2 latents, codes, lead sheets and prepared set are
         kept: they are small, slow to rebuild, and rebuilt anyway when the audio, captions or loudness change.

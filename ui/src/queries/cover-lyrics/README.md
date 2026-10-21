@@ -77,10 +77,9 @@ remain API consumers in the historical import count, but own no server reads.
 | Consumer | Disposition |
 |---|---|
 | `cover-studio/CoverStudio.tsx` | Observes bulk artists, all lyrics sets and all presets; observes readiness/transcription; source metadata keyed by captured input; cover/legacy jobs observed by Query; source/caption/lyric edits and serialized execution remain local |
-| `cover-studio/CoverRecentSongs.tsx`, `RecentCovers.tsx` | Shared filtered cover-song query; no module list cache or fetch-in-flight flag; successful delete updates/invalidation; postprocess listeners clean up on unmount |
 | `cover-studio/SourcePanel.tsx` | Canonical reference list query, enabled while browser opens; upload invalidates |
 | `cover-studio/Yue2Build.tsx` | Session query keyed by captured session id; polls while pending; successful commands update their returned session |
-| `cover-studio/ArtistSettingsPanel.tsx`, `CoverArtistGrid.tsx`, `Yue2CoverPanel.tsx`, `Yue2CoverScore.tsx`, `SectionMatchReview.tsx`, `ScorePlanReview.tsx`, `PrepareLyrics.tsx`, `PrepareStructure.tsx`, `SectionPlayback.tsx` | Types, forms, score/audio display only; the Prepare and section players' intervals time audio playback windows |
+| `cover-studio/ArtistSettingsPanel.tsx`, `CoverArtistGrid.tsx`, `Yue2CoverPanel.tsx`, `Yue2CoverScore.tsx`, `PrepareLyrics.tsx`, `PrepareStructure.tsx`, `SectionPlayback.tsx` | Types, forms, score/audio display only; the Prepare and section players' intervals time audio playback windows |
 | `lyric-studio/LyricStudioV2.tsx` | Observes artists, selected artist's albums, album detail, bulk queue lists and presets; URL restore guarded against navigation; image enrichment stays a command, attempted once per resource identity |
 | `lyric-studio/ProviderSelector.tsx` | Query providers, shared across both picker variants; imperative provider fallback uses the same Query snapshot |
 | `lyric-studio/PromptEditor.tsx` | Prompt query; editable buffer local; save/reset refresh and reset uses the fresh returned value |

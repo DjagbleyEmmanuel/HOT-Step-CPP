@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { backendModelsOptions } from '../../queries/global-models/options';
+import { QueryError } from '../shared/QueryError';
 // BackendModelsDropdown.tsx — model picker for backends whose model choice is
 // ENGINE STATE rather than a per-request parameter.
 //
@@ -55,7 +56,7 @@ function formatBytes(bytes?: number): string {
 export const BackendModelsDropdown: React.FC = () => {
   const { t } = useTranslation();
   const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const { data: catalogue } = useQuery(backendModelsOptions(activeBackendId));
+  const { data: catalogue, isError, error, refetch } = useQuery(backendModelsOptions(activeBackendId));
   const selectModels = useBackendStore(s => s.selectModels);
   // Same path the Generation dropdown's old Renderer hint used to read
   // dit_runtime off of: the active backend's capability manifest (see the
@@ -95,6 +96,10 @@ export const BackendModelsDropdown: React.FC = () => {
       : 'Could not switch model; the previous one is still loaded.');
   };
 
+  if (isError && !catalogue) {
+    return <QueryError error={error} onRetry={() => void refetch()} />;
+  }
+
   if (!catalogue) {
     return <p className="text-[11px] text-zinc-500">Loading models…</p>;
   }
@@ -121,6 +126,7 @@ export const BackendModelsDropdown: React.FC = () => {
 
   return (
     <div className="space-y-3">
+      {isError && <QueryError error={error} onRetry={() => void refetch()} compact />}
       {buckets.map(([bucket, options]) => {
         const current = String(catalogue.defaults?.[bucket] ?? '');
         const meta = catalogue.meta?.[bucket] ?? {};

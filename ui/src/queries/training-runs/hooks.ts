@@ -62,7 +62,7 @@ export function useReload(key: readonly unknown[], revision: unknown) {
     const before = previous.current;
     previous.current = { encoded, revision };
     if (revision === undefined || before.encoded !== encoded || Object.is(before.revision, revision)) return;
-    void queryManager.keys(client, key);
+    void queryManager.invalidate(client, key);
   // The resource key is structural, not the allocation made each render.
   }, [client, encoded, revision]);
 }

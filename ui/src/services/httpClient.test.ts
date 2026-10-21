@@ -7,6 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import i18n from '../i18n';
 
 type FakeResponse = { ok: boolean; status: number; statusText: string; headers: Headers; json: () => Promise<any> };
 function jsonResponse(status: number, body: unknown): FakeResponse {
@@ -98,7 +99,9 @@ test('a non-JSON error body still throws, falling back to a status-mapped messag
   await assert.rejects(() => client.get('/x'), (err: unknown) => {
     assert.ok(err instanceof ApiError);
     assert.equal(err.status, 500);
-    assert.equal(err.message, 'Server error (HTTP 500)');
+    // The message is the localized fallback for unmapped statuses — no raw
+    // status code reaches the user (api.error.* in the locale files).
+    assert.equal(err.message, i18n.t('api.error.serverError'));
     return true;
   });
 });
@@ -156,7 +159,9 @@ test('upload rejects instead of hanging when a non-2xx body is JSON null or not 
   await assert.rejects(result, (err: unknown) => {
     assert.ok(err instanceof ApiError);
     assert.equal(err.status, 500);
-    assert.equal(err.message, 'Server error (HTTP 500)');
+    // The message is the localized fallback for unmapped statuses — no raw
+    // status code reaches the user (api.error.* in the locale files).
+    assert.equal(err.message, i18n.t('api.error.serverError'));
     return true;
   });
 });

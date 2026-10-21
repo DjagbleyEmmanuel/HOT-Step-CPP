@@ -213,7 +213,7 @@ export function clearYue2CaptionSources(): void {
  */
 export async function fetchYue2CaptionSource(
   by: { dataset?: string; lyricsSet?: number; adapter?: string },
-): Promise<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[] }> {
+): Promise<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[]; error?: string }> {
   const params = new URLSearchParams();
   if (by.dataset) params.set('dataset', by.dataset);
   else if (by.lyricsSet) params.set('lyricsSet', String(by.lyricsSet));
@@ -236,8 +236,10 @@ export async function fetchYue2CaptionSource(
     if (datasetId) cacheYue2SourceTracks(datasetId, tracks);
     if (by.lyricsSet) writeYue2DatasetForLyricsSet(by.lyricsSet, datasetId);
     return { datasetId, datasetName, tracks };
-  } catch {
-    return { datasetId: '', datasetName: '', tracks: [] };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Failed to load YuE2 caption source', error);
+    return { datasetId: '', datasetName: '', tracks: [], error: message };
   }
 }
 
@@ -251,7 +253,7 @@ export async function fetchYue2CaptionSource(
  *  opened the picker. Both do (audioGenQueueStore, useAudioGeneration). */
 export async function ensureYue2CaptionSource(
   by: { dataset?: string; lyricsSet?: number; adapter?: string },
-): Promise<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[] }> {
+): Promise<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[]; error?: string }> {
   if (by.adapter && !by.dataset && !by.lyricsSet) return fetchYue2CaptionSource(by);
 
   const datasetId = by.dataset || (by.lyricsSet ? readYue2DatasetForLyricsSet(by.lyricsSet) : '');

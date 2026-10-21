@@ -1,12 +1,13 @@
-import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import { queryOptions, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import * as api from '../../services/trainingApi';
 import * as preparation from '../../services/trainingPreparationApi';
 import { getReviewLadder } from '../../services/trainingReviewApi';
 import { trainingOperation } from '../../services/trainingOperations';
 import type { TrainingRecipe } from '../../services/trainingRecipesApi';
 import type { TrainingRecipeFamily } from '../../../../server/src/contracts/trainingRecipes';
-import { settingsApi } from '../../services/api';
-import { scopeOf, serverKey, sharedKeys, resourceKey, SHARED } from '../keys';
+import { scopeOf, serverKey, resourceKey, SHARED } from '../keys';
+import { gpusOptions } from '../shell-queue/settings';
+import { trainingQueries } from '../training-data/queries';
 import { pollWhile } from '../contract';
 import { queryManager } from '../invalidation';
 
@@ -24,10 +25,8 @@ export const runQueries = {
       return trainingOperation<TrainingRecipe<T>>('recipes', `/${family}${target ? `?worker=${encodeURIComponent(target)}` : ''}`, { signal });
     },
   }),
-  gpus: () => queryOptions({
-    queryKey: sharedKeys.gpus(),
-    queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
-  }),
+  /** One owner: the settings GPUs factory. */
+  gpus: () => gpusOptions(),
   mm3Status: (worker: Worker, id: string) => queryOptions({
     queryKey: serverKey('training-runs/mm3-status', { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getMm3Status(id, { worker: scopeOf(queryKey)!.worker, signal }),
@@ -121,30 +120,29 @@ export const runQueries = {
     refetchInterval: pollWhile<Awaited<ReturnType<typeof preparation.listYue2Preparations>>>(data =>
       !data || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))),
   }),
-  preparation: (id: string) => queryOptions({
-    queryKey: sharedKeys.preparation(id),
-    queryFn: ({ signal }) => preparation.getYue2Preparation(id, { signal }),
+  /** One owner: training-data's factories; this view adds the polling cadence. */
+  preparation: (id: string) => ({
+    ...trainingQueries.preparation(id),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof preparation.getYue2Preparation>>>(data =>
       !data || !['done', 'failed', 'cancelled', 'interrupted'].includes(data.status)),
   }),
-  preparationJob: (id: string) => queryOptions({
-    queryKey: sharedKeys.preparationJob(id),
-    queryFn: ({ signal }) => preparation.getYue2PreparationJob<api.TrainingJobSummary>(id, { signal }),
-  }),
+  preparationJob: (id: string) => trainingQueries.preparationJob(id),
 };
 
-/** Commands execute once; only successful commands refresh their snapshots.
- * Capture the worker before starting a command, including across awaits. */
-export async function runCommand<T>(client: QueryClient, worker: Worker, command: () => Promise<T>): Promise<T> {
-  const result = await command();
-  await Promise.all([
-    queryManager.keys(client, ...[SHARED.preparation, SHARED.preparationJob].map(r => resourceKey(r))),
+/** What a training command dirtied (replaces runCommand's success-only plan):
+ * the preparation pair, this worker's training-runs reads (unscoped ones
+ * included), and its training-data reads. A write that dirties keys outside
+ * those filters (an unscoped training-data entry, another worker's scope)
+ * names them explicitly in its own plan. Capture the worker before starting
+ * the command, including across awaits. */
+export function trainingWritePlan(client: QueryClient, worker: Worker, ...explicit: QueryKey[]): Promise<unknown> {
+  return Promise.all([
+    queryManager.invalidate(client, ...[SHARED.preparation, SHARED.preparationJob].map(r => resourceKey(r)), ...explicit),
     queryManager.filter(client, { queryKey: ['hs'], predicate: q =>
       String(q.queryKey[1]).startsWith('training-runs/') &&
       (scopeOf(q.queryKey)?.worker === undefined || scopeOf(q.queryKey)?.worker === worker) }),
     queryManager.filter(client, { queryKey: ['hs'], predicate: q =>
       String(q.queryKey[1]).startsWith('training-data/') && scopeOf(q.queryKey)?.worker === worker }),
   ]);
-  return result;
 }
 

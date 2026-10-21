@@ -17,7 +17,7 @@ export const sa3PreviewOptions = (worker: string | null, datasetId: string, run:
 });
 
 export const invalidateSa3Previews = (client: QueryClient, worker: string | null, datasetId: string) =>
-  queryManager.keys(client, sa3PreviewKeys.dataset(worker, datasetId));
+  queryManager.invalidate(client, sa3PreviewKeys.dataset(worker, datasetId));
 
 /** A manual render or retry never carries browser form values: the server renders with the selected
  *  run's own saved settings, so a reload, a resumed run or previews switched off cannot override them. */

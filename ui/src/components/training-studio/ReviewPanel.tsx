@@ -1,12 +1,13 @@
 // ReviewPanel.tsx — "Awaiting review": every YuE2 refinement ladder with
 // rung previews, across datasets, with how many rungs still have no score.
 // A batch trains, refines and renders overnight; this is the morning list.
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ListChecks, RefreshCw } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { runCommand, runQueries } from '../../queries/training-runs/queries';
+import { resourceKey } from '../../queries/keys';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 import { formatBytes } from '../../services/stemStudioApi';
 import {
   syncWorkerMirror,
@@ -58,14 +59,13 @@ export const ReviewPanel: React.FC = () => {
   const load = () => reviewQuery.refetch();
   const mirrorQuery = useQuery({ ...runQueries.mirror(trainingWorker ?? ''), enabled: !!trainingWorker });
   const mirror = mirrorQuery.data ?? null;
-  const [syncing, setSyncing] = useState(false);
-  const syncNow = async () => {
-    if (!trainingWorker) return;
-    setSyncing(true);
-    try { await runCommand(client, trainingWorker, () => syncWorkerMirror(trainingWorker)); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-    finally { setSyncing(false); }
-  };
+  const syncMut = useMutation({
+    mutationFn: (worker: string) => syncWorkerMirror(worker),
+    onSuccess: () => { setError(''); void trainingWritePlan(client, trainingWorker); },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  const syncing = syncMut.isPending;
+  const syncNow = () => { if (!trainingWorker) return; syncMut.mutate(trainingWorker); };
   // "Reviewing complete" on the Refine tab counts as scored; a finished
   // (linked and cleaned up) ladder has nothing left to review.
   const pending = rows.filter(awaitingReview);
@@ -85,7 +85,6 @@ export const ReviewPanel: React.FC = () => {
   const [approved, setApproved] = useState<Array<{ pick: ReviewPick; name: string; score: number; decoderOnly: boolean; baseMatched: boolean }>>([]);
   const [preparing, setPreparing] = useState(false);
   const [skip, setSkip] = useState<Record<string, boolean>>({});
-  const [finishing, setFinishing] = useState(false);
   const [knee, setKnee] = useState(true);
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const prepareFinish = async () => {
@@ -103,14 +102,19 @@ export const ReviewPanel: React.FC = () => {
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setPreparing(false); }
   };
-  const finish = async () => {
-    setFinishing(true); setError('');
-    try {
-      const picks = approved.filter(item => !skip[item.pick.runId]).map(item => item.pick);
-      await runCommand(client, null, () => finishReviewBatch(picks, knee));
-      setFinishOpen(false); setApproved([]); setSkip({});
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-    finally { setFinishing(false); }
+  const finishMut = useMutation({
+    mutationFn: async (v: { picks: ReviewPick[]; knee: boolean }) => {
+      await finishReviewBatch(v.picks, v.knee);
+      return v.picks;
+    },
+    onSuccess: picks => { setFinishOpen(false); setApproved([]); setSkip({});
+      void trainingWritePlan(client, null, ...picks.map(p => resourceKey('training-data/dataset', undefined, p.datasetId))); },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  const finishing = finishMut.isPending;
+  const finish = () => {
+    setError('');
+    finishMut.mutate({ picks: approved.filter(item => !skip[item.pick.runId]).map(item => item.pick), knee });
   };
   // A base-matched run's ladder lives on the Train page; the earlier recipe's
   // KL ladders still open on the (hidden) Refine tab.
@@ -143,7 +147,7 @@ export const ReviewPanel: React.FC = () => {
             })}
         </span>
         {mirror?.lastError && <span className="text-amber-600 dark:text-amber-400 truncate" title={mirror.lastError}>{mirror.lastError}</span>}
-        <button type="button" onClick={() => void syncNow()} disabled={syncing || mirror?.running}
+        <button type="button" onClick={syncNow} disabled={syncing || mirror?.running}
           className="px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
           {syncing ? t('trainingStudio.review.mirrorSyncing', 'Syncing…') : t('trainingStudio.review.mirrorSync', 'Sync now')}
         </button>
@@ -175,7 +179,7 @@ export const ReviewPanel: React.FC = () => {
               label={t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
               info={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 250-step budget or the recon target.')}
             />
-            <button type="button" disabled={finishing || approved.every(item => skip[item.pick.runId])} onClick={() => void finish()}
+            <button type="button" disabled={finishing || approved.every(item => skip[item.pick.runId])} onClick={finish}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
               {finishing ? t('trainingStudio.review.finishStarting', 'Starting…') : t('trainingStudio.review.finishGo', 'Start')}
             </button>

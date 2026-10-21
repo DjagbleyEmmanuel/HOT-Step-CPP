@@ -24,12 +24,12 @@
 // The preflight line is advisory; the server checks current artifacts before
 // each accepted stage. The status panel polls the durable command on reconnect.
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ListChecks, Loader2, XCircle } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { pollWhile } from '../../queries/contract';
-import { runCommand, runQueries } from '../../queries/training-runs/queries';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 import type { Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 
 import { commandYue2Preparation } from '../../services/trainingPreparationApi';
@@ -155,11 +155,15 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
     refetchInterval: pollWhile<Yue2PreparationSummary[]>(data => yue2RunAllActive || !data
       || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))) });
   const preparation = preparationQuery.data?.[0] ?? null;
-  const controlPreparation = async (action: 'pause' | 'resume' | 'cancel' | 'retry') => {
+  const controlMut = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'pause' | 'resume' | 'cancel' | 'retry' }) => commandYue2Preparation(id, action),
+    onSuccess: () => void trainingWritePlan(client, null),
+    onError: error => setCaptureError(error instanceof Error ? error.message : String(error)),
+  });
+  const controlPreparation = (action: 'pause' | 'resume' | 'cancel' | 'retry') => {
     if (!preparation) return;
     setCaptureError(null);
-    try { await runCommand(client, null, () => commandYue2Preparation(preparation.id, action)); }
-    catch (error) { setCaptureError(error instanceof Error ? error.message : String(error)); }
+    controlMut.mutate({ id: preparation.id, action });
   };
   const startJointChain = async () => {
     setCaptureError(null);
@@ -285,10 +289,10 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
         </div>
         {preparation.error && <p className="mt-1 text-xs text-red-500">{preparation.error}</p>}
         <div className="mt-2 flex gap-2 text-xs">
-          {preparation.status === 'running' && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('pause')}>{t('trainingStudio.yue2.preparationPause', 'Pause')}</button>}
-          {(preparation.status === 'paused' || preparation.status === 'pausing') && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('resume')}>{t('trainingStudio.yue2.preparationResume', 'Resume')}</button>}
-          {['running', 'pausing', 'paused'].includes(preparation.status) && <button className="text-red-500 hover:underline" onClick={() => void controlPreparation('cancel')}>{t('trainingStudio.yue2.preparationCancel', 'Cancel')}</button>}
-          {['failed', 'interrupted'].includes(preparation.status) && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('retry')}>{t('trainingStudio.yue2.preparationRetry', 'Retry')}</button>}
+          {preparation.status === 'running' && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('pause')}>{t('trainingStudio.yue2.preparationPause', 'Pause')}</button>}
+          {(preparation.status === 'paused' || preparation.status === 'pausing') && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('resume')}>{t('trainingStudio.yue2.preparationResume', 'Resume')}</button>}
+          {['running', 'pausing', 'paused'].includes(preparation.status) && <button className="text-red-500 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('cancel')}>{t('trainingStudio.yue2.preparationCancel', 'Cancel')}</button>}
+          {['failed', 'interrupted'].includes(preparation.status) && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('retry')}>{t('trainingStudio.yue2.preparationRetry', 'Retry')}</button>}
         </div>
       </div>
     );

@@ -36,6 +36,7 @@ import { runQueries } from '../../queries/training-runs/queries';
 import type { Yue2OptimOptions } from '../../services/trainingApi';
 import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { followNoteInBox } from '../../utils/abcFollow';
+import { formatDateTime } from '../../utils/dateUtils';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 
 import {
@@ -112,11 +113,6 @@ const CheckField: React.FC<{
 function gb(bytes: number): string {
   return bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB`
                              : `${Math.round(bytes / 1048576)} MB`;
-}
-
-function when(ms?: number): string {
-  if (!ms) return '';
-  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /** A snapshot's step, read off its filename. The milestone events the AR relay
@@ -1117,7 +1113,7 @@ export const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; rel
                       </span>
                     )}
                     <span>{gb(run.sizeBytes)}</span>
-                    <span>{when(run.updatedAt)}</span>
+                    <span>{formatDateTime(run.updatedAt)}</span>
                   </div>
                   {run.failure && (
                     <div className="text-[10px] text-rose-500 mt-1 break-words">{run.failure}</div>
