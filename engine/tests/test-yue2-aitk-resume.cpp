@@ -1,7 +1,7 @@
 // Self-check for the YuE2 LmOptim resume record: optimizer moments must come
 // back bit-exact, including the tiny second moments the old 8-bit storage
 // zeroed. Header-only, no CUDA, no model files:
-//   cl /std:c++17 /EHsc /I..\src /I..\src\train test-yue2-aitk-resume.cpp
+//   cl /std:c++17 /EHsc /I..\src /I..\src\train /I..\ggml\include test-yue2-aitk-resume.cpp
 //   c++ -std=c++17 -I../src -I../src/train -I../ggml/include test-yue2-aitk-resume.cpp
 #include "yue2-aitk-resume.h"
 
