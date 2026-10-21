@@ -51,10 +51,14 @@ $logDir = Join-Path $repo 'logs\detached'
 New-Item -ItemType Directory -Force $logDir | Out-Null
 # conhost drops inner quotes when it rebuilds the cmd line, so the task only
 # passes a space-free launcher name and the launcher holds the real command.
-$name = '{0}-{1:yyyyMMdd-HHmmss}' -f ([IO.Path]::GetFileNameWithoutExtension($target) -replace '[^\w.-]', '_'), (Get-Date)
+# The PID suffix keeps concurrent launches of the same script apart.
+$name = '{0}-{1:yyyyMMdd-HHmmss}-{2}' -f ([IO.Path]::GetFileNameWithoutExtension($target) -replace '[^\w.-]', '_'), (Get-Date), $PID
 $log = Join-Path $logDir "$name.log"
 $argText = ($ScriptArgs | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) -join ' '
-Set-Content -Encoding ascii (Join-Path $logDir "$name.cmd") @(
+# UTF-8 plus chcp 65001 on the (ASCII) first line keeps non-ASCII paths and
+# arguments intact; cmd decodes each later line with the new code page.
+Set-Content -Encoding utf8NoBOM (Join-Path $logDir "$name.cmd") @(
+  '@chcp 65001 >nul'
   "@cd /d `"$cwd`""
   "@`"$target`" $argText >> `"$log`" 2>&1"
 )
@@ -82,7 +86,7 @@ $xml = @"
 $svc = New-Object -ComObject Schedule.Service
 $svc.Connect()
 $folder = $svc.GetFolder('\')
-$taskName = "HotStep-detach-$name-$PID"
+$taskName = "HotStep-detach-$name"
 # 6 = create or update, 3 = interactive token (current user, no password).
 $task = $folder.RegisterTask($taskName, $xml, 6, $null, $null, 3)
 try {
