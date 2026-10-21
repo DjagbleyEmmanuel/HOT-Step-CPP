@@ -48,11 +48,11 @@ have to make.
    overrides the detected key. The key override changes generation conditioning;
    it does not apply a DSP pitch shift to the recording. Use **Pitch Shift**
    in the cover settings to change the audio pitch.
-   Turn off **Use detected BPM/key** before loading another recording to keep
-   your current BPM and key, including manual overrides. Detected, cached and
-   dataset BPM/key results are ignored while it is off. Source analysis may
-   still run. With no current values, the manual fields start at 120 BPM and
-   C major. The switch is remembered in this browser; turning it back on uses
+   Turn off **Use detected BPM/key** to ignore detected, cached and dataset
+   BPM/key results. Loading another recording then resets the BPM and key to
+   120 BPM and C major and clears any manual overrides, so the previous song's
+   values never carry over; type new values after the load. Source analysis may
+   still run. The switch is remembered in this browser; turning it back on uses
    automatic values on the next load.
 4. Optionally turn on Advanced Mode to split the source into stems, then mute or
    lower individual stems in the mixer that opens. Splitting alone changes
