@@ -851,6 +851,7 @@ test('locateData: dev pointer, release pointer, HOT_STEP_DATA_ROOT and .env over
   const viaProcess = locateData({ env: { HOT_STEP_PROFILE_DIR: f.prof, TRAINING_DIR: path.join(f.base, 'tr') } as NodeJS.ProcessEnv, checkoutRoot: checkout });
   assert.equal(viaProcess.children!.training, path.join(f.base, 'tr'));
 
+  initLayout(dataLayout(path.join(f.base, 'rel')));
   writePointer(f.ptrFile, { version: 1, root: path.join(f.base, 'rel'), pending: null });
   assert.equal(locateData({ env: f.env }).root, path.join(f.base, 'rel'));
   const o = locateData({ env: { ...f.env, HOT_STEP_DATA_ROOT: path.join(f.base, 'ov') } });
@@ -873,6 +874,48 @@ test('locateData: reports a pending move and a bad pointer without acting on the
   const bad = locateData({ env, checkoutRoot: checkout });
   assert.match(bad.pointerError!, /not valid JSON/); assert.equal(bad.root, null);
 });
+
+for (const mode of ['release', 'dev'] as const) {
+  for (const state of ['missing', 'inaccessible', 'valid', 'override'] as const) {
+    test(`locateData and boot agree: ${mode} ${state} saved root`, async t => {
+      const f = fixture();
+      const saved = path.join(f.base, 'saved');
+      const override = path.join(f.base, 'override');
+      const env: NodeJS.ProcessEnv = { HOT_STEP_PROFILE_DIR: f.prof };
+      if (mode === 'release') env.HOT_STEP_ROOT = f.app;
+      if (state === 'override') {
+        env.HOT_STEP_DATA_ROOT = override;
+        initLayout(dataLayout(override));
+      }
+      if (state === 'valid' || state === 'inaccessible') initLayout(dataLayout(saved));
+      const file = mode === 'release' ? f.ptrFile : devPointerFile(f.prof, f.app);
+      writePointer(file, { version: 1, root: saved, pending: null });
+      const pointerBefore = fs.readFileSync(file, 'utf-8');
+      if (state === 'inaccessible') {
+        const access = fs.accessSync;
+        t.mock.method(fs, 'accessSync', (p: fs.PathLike, flags?: number) => {
+          if (p === saved) throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+          return access(p, flags);
+        });
+      }
+      const before = snapshot(f.base);
+      const report = locateData({ env, checkoutRoot: f.app });
+      const expectedRoot = mode === 'release' && state === 'override' ? override
+        : state === 'valid' ? saved : mode === 'release' ? f.sibling : null;
+      assert.equal(report.root, expectedRoot);
+      assert.deepEqual(snapshot(f.base), before, 'locator never writes, even when fallback does not exist');
+      const boot = await resolveRuntime({ env, checkoutRoot: f.app, log: quiet });
+      assert.ok(boot.ok);
+      assert.equal(report.root, boot.runtime.dataRoot);
+      const library = boot.runtime.libraryDir ?? path.join(f.app, 'server', 'data');
+      assert.equal(report.children!.library, library);
+      assert.equal(report.children!.db, path.join(library, 'hotstep.db'));
+      assert.equal(report.children!.envFile, boot.runtime.envPath ?? path.join(f.app, '.env'));
+      assert.equal(fs.readFileSync(file, 'utf-8'), pointerBefore);
+      assert.equal(locateData({ env, checkoutRoot: f.app }).root, boot.runtime.dataRoot);
+    });
+  }
+}
 
 test('locateData: an empty process variable beats the .env file, like dotenv', () => {
   const f = fixture();

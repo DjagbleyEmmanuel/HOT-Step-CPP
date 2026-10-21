@@ -151,6 +151,10 @@ paths. It leaves the pointer unchanged, so reconnecting the drive and restarting
 saved root again. The fallback may show an empty library; data in the saved root has not
 been moved or deleted. An unrelated or shared fallback folder still blocks startup.
 `HOT_STEP_DATA_ROOT` keeps precedence and an invalid override still blocks startup.
+The read-only `locateData()` inspector and `server/scripts/data-paths.ts` use the same
+fallback selection and report `source: "fallback"`, without creating folders or changing
+the pointer. Pending transfers remain reported as pending; finish recovery before opening
+their database.
 An unreadable pointer or a move that stops part way still prints the reason and serves
 one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
 

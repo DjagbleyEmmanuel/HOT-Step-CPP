@@ -22,7 +22,7 @@ import {
   type Pointer,
 } from './paths.js';
 import { planOperation, runPending, sharedRoot } from './transfer.js';
-import { CHECKOUT_ROOT, pointerLocation } from './locate.js';
+import { CHECKOUT_ROOT, accessibleRoot, pointerLocation, selectPointerRoot } from './locate.js';
 
 export interface Runtime {
   mode: 'dev' | 'release';
@@ -117,14 +117,6 @@ export interface ResolveOptions {
   checkoutRoot?: string;
 }
 
-function accessibleRoot(root: string): boolean {
-  try {
-    if (!fs.statSync(root).isDirectory()) return false;
-    fs.accessSync(root, fs.constants.R_OK | fs.constants.W_OK);
-    return true;
-  } catch { return false; }
-}
-
 /** Run ptr.pending (if any) under the transfer lock. Returns an error or null. */
 async function runPendingAtBoot(ptrFile: string, ptr: Pointer, appRoot: string, prof: string, opts: ResolveOptions, log: (m: string) => void): Promise<string | null> {
   const op = ptr.pending;
@@ -156,7 +148,8 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
     const err = await runPendingAtBoot(ptrFile, ptr, checkout, prof, opts, log);
     if (err) return fail(err);
     if (!ptr.root) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) }; // abandoned before any root
-    if (!accessibleRoot(ptr.root)) {
+    const selected = selectPointerRoot({ mode: 'dev', appRoot: checkout }, ptr.root);
+    if (selected.staleRoot) {
       log(`[Data] WARNING: Saved data folder ${ptr.root} is missing or cannot be accessed. Using this checkout's default folders in ${checkout}. Saved location unchanged; reconnect the drive and restart to use it again.`);
       return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
     }
@@ -224,9 +217,10 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
 
     let root = ptr.root;
     if (!root) return fail(`${ptrFile} names no data folder.`);
-    const staleRoot = accessibleRoot(root) ? null : root;
+    const selected = selectPointerRoot({ mode: 'release', appRoot }, root);
+    const staleRoot = selected.staleRoot;
     if (staleRoot) {
-      root = path.join(path.dirname(appRoot), DEFAULT_DATA_FOLDER);
+      root = selected.root!;
       if (fs.existsSync(root) && !isEmptyDir(root) && !isDataLayout(root)) {
         return fail(`${root} exists but is not a HOT-Step data folder. Rename it, or set HOT_STEP_DATA_ROOT, then restart.`);
       }

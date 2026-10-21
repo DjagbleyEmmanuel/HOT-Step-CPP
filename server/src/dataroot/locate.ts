@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { parse as dotenvParse } from 'dotenv';
 import {
-  POINTER_FILE, dataLayout, devPointerFile, profileDir, readPointer,
+  DEFAULT_DATA_FOLDER, POINTER_FILE, dataLayout, devPointerFile, profileDir, readPointer,
   type PendingOperation, type Pointer,
 } from './paths.js';
 
@@ -35,6 +35,23 @@ export function pointerLocation(env: NodeJS.ProcessEnv = process.env, checkoutRo
   return { mode: 'release', appRoot: path.resolve(env.HOT_STEP_ROOT), profileDir: prof, pointerPath: path.join(prof, POINTER_FILE) };
 }
 
+export function accessibleRoot(root: string): boolean {
+  try {
+    if (!fs.statSync(root).isDirectory()) return false;
+    fs.accessSync(root, fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch { return false; }
+}
+
+/** Shared boot/inspection selection after pending work. Never creates the fallback. */
+export function selectPointerRoot(loc: Pick<PointerLocation, 'mode' | 'appRoot'>, savedRoot: string): { root: string | null; staleRoot: string | null } {
+  if (accessibleRoot(savedRoot)) return { root: path.resolve(savedRoot), staleRoot: null };
+  return {
+    root: loc.mode === 'release' ? path.join(path.dirname(loc.appRoot), DEFAULT_DATA_FOLDER) : null,
+    staleRoot: savedRoot,
+  };
+}
+
 export interface DataChildren {
   library: string;
   db: string;
@@ -54,7 +71,7 @@ export interface DataReport extends PointerLocation {
   /** The data folder, or null: dev checkout with no folder (legacy checkout paths) or a release before first start. */
   root: string | null;
   /** What chose the root. */
-  source: 'HOT_STEP_DATA_ROOT' | 'pointer' | 'checkout' | 'none';
+  source: 'HOT_STEP_DATA_ROOT' | 'pointer' | 'fallback' | 'checkout' | 'none';
   /** A scheduled or half-finished move/import/migration. While set, do not open the DB. */
   pendingMove: Pick<PendingOperation, 'kind' | 'source' | 'destination' | 'error'> | null;
   /** The pointer exists but cannot be read. */
@@ -115,7 +132,12 @@ export function locateData(opts: { env?: NodeJS.ProcessEnv; checkoutRoot?: strin
   let root: string | null = null;
   let source: DataReport['source'] = 'none';
   if (loc.mode === 'release' && env.HOT_STEP_DATA_ROOT) { root = path.resolve(env.HOT_STEP_DATA_ROOT); source = 'HOT_STEP_DATA_ROOT'; }
-  else if (ptr?.root) { root = path.resolve(ptr.root); source = 'pointer'; }
+  else if (ptr?.root) {
+    // A transfer must finish before its effective root can be known.
+    const selected = ptr.pending ? { root: path.resolve(ptr.root), staleRoot: null } : selectPointerRoot(loc, ptr.root);
+    root = selected.root;
+    source = selected.staleRoot ? 'fallback' : 'pointer';
+  }
   else if (loc.mode === 'dev') source = 'checkout';
 
   const pendingMove = ptr?.pending
