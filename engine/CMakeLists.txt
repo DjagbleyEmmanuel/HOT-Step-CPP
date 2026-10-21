@@ -766,6 +766,8 @@ link_ggml_backends(mdx23c-test)
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
 add_executable(ace-midi tools/ace-midi.cpp)
 link_ggml_backends(ace-midi)
+# --abc-out renders through SheetSage2's notation headers, whose event code uses yyjson
+target_link_libraries(ace-midi PRIVATE yyjson)
 
 # ace-train: training toolchain (phase 2: dataset tensor preprocessing —
 # docs/plans/2026-07-27-preprocess-implementation.md). Standalone tool: every

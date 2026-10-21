@@ -190,6 +190,16 @@ export async function exportMidi(jobId: string, options: MidiExportOptions): Pro
   return apiClient.post(`${P}/${jobId}/export`, options);
 }
 
+export interface MidiAbcResult {
+  abc: string;
+  summary: { vocal_notes: number; ins_notes: number; ins: string; key: string; chords: number };
+}
+
+/** The transcription as a YuE2 ABC lead sheet on the job's current grid. */
+export async function getMidiAbc(jobId: string, options: { ins?: number; melodyOnly?: boolean }): Promise<MidiAbcResult> {
+  return apiClient.post(`${P}/${jobId}/abc`, options);
+}
+
 /** Direct URL for downloading the .mid file of a completed job. */
 export function getMidiFileUrl(jobId: string): string {
   return `${API_BASE}/${jobId}/file`;

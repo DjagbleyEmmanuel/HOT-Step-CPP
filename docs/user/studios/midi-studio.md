@@ -72,6 +72,7 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Instrument legend, mute (M) / solo (S) | One entry per instrument family found in the track. Mute or solo affects only the MIDI side of playback, not the original audio. |
 | Tempo & bars (model row) | Downloads Beat This!, the beat tracker that gives new transcriptions a tempo, time signature and bar lines. |
 | Tempo & bars (job panel) | Shows the detected tempo and meter, and whether the MIDI follows the performance with a tempo map. BPM and beats per bar override them (blank keeps the detected value). Tempo picks automatic, follow the performance, or one tempo. Beat halves or doubles a tempo detected at the wrong level. Quantize snaps notes to a grid (detected, 8ths, 16ths, triplets) at a chosen strength. Fill short rests holds notes over gaps of half a beat or less. Trim leading bars drops empty bars before the first note. "Rewrite MIDI" applies them; "As detected" goes back. |
+| YuE2 lead sheet | Writes the transcription as the two-voice ABC score that YuE2 covers use, on the job's current bars: the sung notes as the Vocal line, the top notes of one instrument as the Ins line (Ins line picks which; Automatic takes the busiest one that is not voice, bass or drums), an estimated key, and, with Chords on, a chord symbol every half bar estimated from the accompaniment. "Copy ABC" puts it on the clipboard for Cover Studio's ABC box; "Save .abc" downloads it. |
 | Piano roll | Click anywhere on the roll to seek. Notes are colored by instrument family; with tempo and bars, the background shows the MIDI's beats and numbered bar lines instead of 10-second marks; an unfinished region is shaded while a live job is still transcribing. |
 
 ## Tips and limits
@@ -83,6 +84,8 @@ older pending refresh cannot put a successfully deleted row back. Returning
 to MIDI Studio shows existing jobs without submitting another transcription.
 
 How the tempo is written: the beats are fitted with one tempo when they are steady (within 5% of a beat), and with a tempo map that changes only at bar lines when they drift, so bar lines stay on the beat. The time signature is written only when 90% of bars agree on it, always as n/4; otherwise set Beats per bar yourself. The music is delayed by whole bars so bar 1 of the MIDI is a real bar line; the preview moves it back so it stays in sync with the audio. Transcriptions made before the tempo model was downloaded keep their 120 BPM file; transcribe them again to get bars.
+
+The lead sheet is only as good as the transcription's vocal line. On a dense mix the transcriber often hears little singing, and the panel says so when the Vocal line comes out sparse. Its chords are a simple estimate from the instruments' notes, not a trained chord model.
 
 Transcription is one-way: audio in, a `.mid` file out. There is no path from
 a transcribed (or any other) MIDI file back into music generation.

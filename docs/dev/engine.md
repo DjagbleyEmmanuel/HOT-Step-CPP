@@ -104,6 +104,7 @@ fixed 120 BPM file, byte for byte (`--validate-midi`).
 | `--quantize [--grid N] [--quantize-strength x]` | Snap notes to 1/N beat (default: the measured subdivision) |
 | `--fill-gaps <beats>`, `--trim-leading-bars` | Hold notes over short rests; drop empty leading bars |
 | `--export <events.jsonl> --beats-in <beats.json>` | Re-export a transcription with new options; no MuScriptor model loaded |
+| `--abc-out <file> [--abc-ins <program>] [--abc-melody-only]` | Also write a YuE2 two-voice ABC lead sheet (`tools/midi-abc.h`) through SheetSage2's notation stage: voice notes → Vocal, one instrument's top line → Ins, a Krumhansl key estimate and half-bar template chords, notes pre-snapped to the 4-per-beat subbeat grid. Prints a `{"type":"abc",...}` summary line |
 | `--track <audio>` | Beats and grid only (needs `--beat-model` and `--beats-out`) |
 | `--self-test-grid` | Grid maths on synthetic beats with known answers |
 

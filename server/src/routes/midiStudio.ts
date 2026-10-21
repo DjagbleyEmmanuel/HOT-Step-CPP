@@ -18,6 +18,7 @@
 //   GET    /api/midi-studio/:jobId/stream         — SSE: live note events
 //   GET    /api/midi-studio/:jobId/notes          — parsed notes (piano roll)
 //   POST   /api/midi-studio/:jobId/export         — re-export on a corrected / quantized grid
+//   POST   /api/midi-studio/:jobId/abc            — YuE2 ABC lead sheet from the transcription
 //   GET    /api/midi-studio/:jobId/file           — download the .mid
 //   DELETE /api/midi-studio/:jobId                — cancel/delete a job
 
@@ -576,6 +577,59 @@ router.post('/:jobId/export', async (req: Request, res: Response) => {
   } catch (err: any) {
     for (const p of [tmpMid, tmpBeats]) { try { fs.rmSync(p, { force: true }); } catch { /* ignore */ } }
     console.error(`[MidiStudio] Job ${jobId}: export FAILED — ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /:jobId/abc — the transcription as a YuE2 two-voice ABC lead sheet
+ *  (voice -> Vocal, one instrument -> Ins, estimated key and chords) on the
+ *  job's current grid. Body: { ins?: GM program, melodyOnly?: boolean }. */
+router.post('/:jobId/abc', async (req: Request, res: Response) => {
+  const jobId = req.params.jobId as string;
+  if (!fs.existsSync(eventsPath(jobId)) || !fs.existsSync(beatsPath(jobId))) {
+    res.status(409).json({ error: 'This transcription has no beat grid. Download the tempo model and transcribe again.' });
+    return;
+  }
+  const exe = aceMidiExe();
+  if (!exe) {
+    res.status(503).json({ error: 'ace-midi engine binary not found' });
+    return;
+  }
+  const dir = jobDir(jobId);
+  let opts: MidiExportOptions = {};
+  try { opts = JSON.parse(fs.readFileSync(path.join(dir, '_meta.json'), 'utf-8')).export || {}; } catch { /* detected grid */ }
+  const ins = Number(req.body?.ins);
+  const abcPath = path.join(dir, 'score.abc');
+  const tmpMid = path.join(dir, 'abc.export.tmp');
+  try {
+    let stdout = '';
+    const stderr: string[] = [];
+    const code: number | null = await new Promise((resolve, reject) => {
+      const child = spawn(exe, [
+        '--export', eventsPath(jobId), '--beats-in', beatsPath(jobId), '--out', tmpMid, '--abc-out', abcPath,
+        ...exportArgs(opts),
+        ...(Number.isInteger(ins) && ins >= 0 && ins < 128 ? ['--abc-ins', String(ins)] : []),
+        ...(req.body?.melodyOnly ? ['--abc-melody-only'] : []),
+      ], { windowsHide: true });
+      child.stdout?.on('data', (b: Buffer) => { stdout += b.toString('utf-8'); });
+      child.stderr?.on('data', (b: Buffer) => stderr.push(b.toString('utf-8')));
+      child.on('error', reject);
+      child.on('close', c => resolve(c));
+    });
+    fs.rmSync(tmpMid, { force: true });
+    const line = stdout.split(/\r?\n/).find(l => l.startsWith('{"type":"abc"'));
+    const summary = line ? JSON.parse(line) : null;
+    if (code !== 0 || !summary) {
+      throw new Error(`ace-midi failed (${code}): ${stderr.join('').trim().split(/\r?\n/).slice(-3).join(' | ')}`);
+    }
+    if (!summary.ok) {
+      res.status(422).json({ error: summary.error || 'The notes could not be written as ABC', summary });
+      return;
+    }
+    res.json({ abc: fs.readFileSync(abcPath, 'utf-8'), summary });
+  } catch (err: any) {
+    fs.rmSync(tmpMid, { force: true });
+    console.error(`[MidiStudio] Job ${jobId}: ABC FAILED — ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });

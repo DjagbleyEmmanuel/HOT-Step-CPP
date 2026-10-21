@@ -28,6 +28,7 @@
 #include "backend.h"
 #include "beat-this.h"
 #include "ggml.h"
+#include "midi-abc.h"
 #include "midi-grid.h"
 #include "safetensors.h"
 
@@ -1656,16 +1657,42 @@ static bool run_beats(const std::string & model_dir, const std::vector<float> & 
     return true;
 }
 
-// Notes -> MIDI on the detected grid, plus beats.json. A failed detection
-// writes the placeholder grid (120 BPM, no meter), as upstream's best-effort.
+struct AbcOpts {
+    std::string out;               // YuE2 ABC lead sheet path; empty = none
+    int         ins_program = -1;  // the Ins voice's instrument; -1 = busiest melodic one
+    bool        melody_only = false;
+};
+
+// The transcription as a YuE2 lead sheet on the same grid as the MIDI (midi-abc.h)
+static void write_abc(const std::vector<MidiNote> & notes, const GridOut & go, double duration, const AbcOpts & ao) {
+    std::vector<AbcNote> an;
+    for (auto & n : notes) an.push_back({ n.onset, n.offset, n.pitch, n.program, n.is_drum });
+    AbcResult r = midi_to_yue2_abc(an, go.grid, duration, ao.ins_program, ao.melody_only);
+    if (r.ok) write_file(ao.out, r.abc.data(), r.abc.size());
+    fprintf(stderr, "[ace-midi] abc: %s (vocal %d notes, ins %s %d notes, key %s, %d chords%s%s)\n",
+            r.ok ? "ok" : r.error.c_str(), r.vocal_notes, r.ins_program < 0 ? "none" : instrument_name(r.ins_program).c_str(), r.ins_notes,
+            r.key.c_str(), r.chords, r.repaired.empty() ? "" : ", repaired: ", r.repaired.c_str());
+    std::string err;
+    for (char c : r.error) err += (c == '"' || c == '\\') ? std::string("\\") + c : (c == '\n' ? std::string(" ") : std::string(1, c));
+    printf("{\"type\":\"abc\",\"ok\":%s,\"vocal_notes\":%d,\"ins_notes\":%d,\"ins\":\"%s\",\"key\":\"%s\",\"chords\":%d,\"error\":\"%s\"}\n",
+           r.ok ? "true" : "false", r.vocal_notes, r.ins_notes, r.ins_program < 0 ? "none" : instrument_name(r.ins_program).c_str(), r.key.c_str(),
+           r.chords, err.c_str());
+    fflush(stdout);
+}
+
+// Notes -> MIDI on the detected grid, plus beats.json (and the ABC lead
+// sheet). A failed detection writes the placeholder grid (120 BPM, no
+// meter), as upstream's best-effort.
 static std::vector<uint8_t> grid_midi(const std::vector<MidiNote> & notes, const BeatTrack & tr, double duration,
-                                      const GridExport & opts, const std::string & beats_out) {
+                                      const GridExport & opts, const std::string & beats_out,
+                                      const AbcOpts & ao = {}) {
     BeatGrid g;
     bool     ok = grid_detect(tr.beats, tr.downbeats, &g);
     if (!ok) fprintf(stderr, "[ace-midi] only %zu beats detected, need %d; writing 120 BPM\n", tr.beats.size(), GRID_MIN_BEATS);
     GridOut go;
     std::vector<uint8_t> mid = write_midi_grid(notes, ok ? &g : nullptr, opts, &go);
     if (!beats_out.empty()) write_beats_json(beats_out, tr, duration, go);
+    if (!ao.out.empty()) write_abc(notes, go, duration, ao);
     return mid;
 }
 
@@ -1673,7 +1700,7 @@ static std::vector<uint8_t> grid_midi(const std::vector<MidiNote> & notes, const
 // With a beat model the MIDI gets tempo, meter and bar lines.
 static int run_transcribe(MidiModel * m, const std::string & audio_path, const std::string & out_path, bool jsonl,
                           bool is_raw, const std::string & beat_model, const GridExport & opts,
-                          const std::string & beats_out) {
+                          const std::string & beats_out, const AbcOpts & ao) {
     std::vector<float> wav;
     BeatTrack          tr;
     if (is_raw) {
@@ -1688,7 +1715,7 @@ static int run_transcribe(MidiModel * m, const std::string & audio_path, const s
     TranscribeResult     res = transcribe_wav(m, wav.data(), (int) wav.size(), jsonl);
     std::vector<uint8_t> mid = beat_model.empty()
         ? write_midi(res.notes)
-        : grid_midi(res.notes, tr, (double) wav.size() / MIDI_SAMPLE_RATE, opts, beats_out);
+        : grid_midi(res.notes, tr, (double) wav.size() / MIDI_SAMPLE_RATE, opts, beats_out, ao);
     if (!write_file(out_path, mid.data(), mid.size())) return 1;
     if (jsonl) {
         printf("{\"type\":\"done\",\"notes\":%zu,\"midi_bytes\":%zu}\n", res.notes.size(), mid.size());
@@ -1728,7 +1755,7 @@ static std::string read_text(const std::string & path) {
 // Re-export: the streamed note events (--jsonl output) + beats.json -> MIDI
 // with new export options. No transcription model needed.
 static int run_export(const std::string & events_path, const std::string & beats_in, const std::string & out_path,
-                      const GridExport & opts, const std::string & beats_out) {
+                      const GridExport & opts, const std::string & beats_out, const AbcOpts & ao) {
     std::string ev = read_text(events_path), bj = read_text(beats_in);
     if (ev.empty() || bj.empty()) {
         fprintf(stderr, "[ace-midi] cannot read %s or %s\n", events_path.c_str(), beats_in.c_str());
@@ -1789,7 +1816,7 @@ static int run_export(const std::string & events_path, const std::string & beats
     const size_t dp       = bj.find("\"duration\":");
     const double duration = dp == std::string::npos ? 0.0 : atof(bj.c_str() + dp + 11);
 
-    std::vector<uint8_t> mid = grid_midi(notes, tr, duration, opts, beats_out);
+    std::vector<uint8_t> mid = grid_midi(notes, tr, duration, opts, beats_out, ao);
     if (!write_file(out_path, mid.data(), mid.size())) return 1;
     fprintf(stderr, "[ace-midi] exported %s (%zu notes, %zu bytes)\n", out_path.c_str(), notes.size(), mid.size());
     return 0;
@@ -1826,6 +1853,7 @@ int main(int argc, char ** argv) {
     std::string device = "auto";
     std::string beat_model, beats_out, export_events, beats_in, track_path;
     GridExport  opts;
+    AbcOpts     abc;
     bool   jsonl  = false;
     bool   is_raw = false;
     double tol    = 1e-3;
@@ -1836,6 +1864,9 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--export") && i + 1 < argc) export_events = argv[++i];
         else if (!strcmp(argv[i], "--beats-in") && i + 1 < argc) beats_in = argv[++i];
         else if (!strcmp(argv[i], "--track") && i + 1 < argc) track_path = argv[++i];
+        else if (!strcmp(argv[i], "--abc-out") && i + 1 < argc) abc.out = argv[++i];
+        else if (!strcmp(argv[i], "--abc-ins") && i + 1 < argc) abc.ins_program = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--abc-melody-only")) abc.melody_only = true;
         else if (!strcmp(argv[i], "--bpm") && i + 1 < argc) opts.bpm = atof(argv[++i]);
         else if (!strcmp(argv[i], "--beats-per-bar") && i + 1 < argc) opts.beats_per_bar = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--first-downbeat") && i + 1 < argc) { opts.has_downbeat = true; opts.first_downbeat = atof(argv[++i]); }
@@ -1884,7 +1915,7 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "[ace-midi] --export needs --beats-in <beats.json>\n");
             return 2;
         }
-        return run_export(export_events, beats_in, out_path, opts, beats_out);
+        return run_export(export_events, beats_in, out_path, opts, beats_out, abc);
     }
     if (model_dir.empty()) {
         fprintf(stderr,
@@ -1909,6 +1940,9 @@ int main(int argc, char ** argv) {
                 "    --quantize [--grid <steps per beat>] [--quantize-strength <0..1>]\n"
                 "    --fill-gaps <beats>       hold notes over short rests\n"
                 "    --trim-leading-bars       drop empty bars before the first note\n"
+                "    --abc-out <score.abc> [--abc-ins <program>] [--abc-melody-only]\n"
+                "                              YuE2 lead sheet: voice -> Vocal, one instrument -> Ins,\n"
+                "                              estimated key and chords, on the same grid\n"
                 "  ace-midi --track <audio> --beat-model <dir> --beats-out <beats.json>\n"
                 "                              beats and grid only, no transcription model\n"
                 "  ace-midi --export <events.jsonl> --beats-in <beats.json> [options] --out x.mid\n"
@@ -1944,7 +1978,7 @@ int main(int argc, char ** argv) {
     else if (!validate_decode_dir.empty()) rc = run_validate_decode(&m, validate_decode_dir);
     else if (!validate_midi_dir.empty())   rc = run_validate_midi(&m, validate_midi_dir);
     else if (!dump_dir.empty())            rc = run_dump_logits(&m, dump_dir, out_path);
-    else if (!audio_path.empty())          rc = run_transcribe(&m, audio_path, out_path, jsonl, is_raw, beat_model, opts, beats_out);
+    else if (!audio_path.empty())          rc = run_transcribe(&m, audio_path, out_path, jsonl, is_raw, beat_model, opts, beats_out, abc);
     else fprintf(stderr, "[ace-midi] no mode given\n");
 
     free_model(&m);
