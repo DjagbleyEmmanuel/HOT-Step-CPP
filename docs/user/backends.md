@@ -161,6 +161,10 @@ What sets it apart:
 - The prompt is freeform: a plain style description plus lyrics. BPM and key are folded
   into the style sentence rather than sent as fields. The language comes from the
   lyrics.
+- Include BPM/key in caption (on by default) controls that tail. Turn it off for an
+  adapter trained without BPM and key: Song Info BPM and key are left out, and a
+  "<bpm> BPM, key of <key>." tail already on the caption (from a dataset caption) is
+  removed. Training captions are unchanged.
 - The song decides its own length, up to six minutes, and there is no duration control.
 - Chain of Thought (Generation cluster) sets how much the planner writes before audio:
   Full (the default), Melody only, or Off. Off skips the lead sheet but runs guidance,
