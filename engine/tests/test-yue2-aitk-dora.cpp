@@ -12,6 +12,11 @@
 //   3. Row norms over a three-part base (q|k|v) plus a frozen companion
 //      delta: exact (identity pass) and expanded (rank-r) agree with a double
 //      host reference, and an all-zero row lands on the floor, not 0/0.
+//   4. yue2-adapter.h's loader, on CPU over a 2x2 identity base: a v1 DoRA
+//      file merges W' = m (W0 + s BA) / ||.||_row at the alpha/rank the merge
+//      uses (AR and NAR halves); an unknown DoRA version, and a numeric
+//      dora_scaling that disagrees with the resolved alpha over the tensor
+//      rank, are refused with the base untouched; plain LoRA still merges.
 // The ConvRot8 base is not built here (no small fixture for its weights); the
 // trainer's YUE2_AITK_DORA_CHECK=1 compares both norm paths on it. CPU and
 // Vulkan run case 3 only (see main).
@@ -23,6 +28,7 @@
 
 #include "backend.h"
 #include "train/yue2-aitk-graph.h"
+#include "yue2/yue2-adapter.h"
 
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
@@ -370,6 +376,82 @@ static void case_norms() {
     ggml_free(ctx);
 }
 
+// Case 4. One 2x2 identity base `blk.0.attn_q.weight` and a rank-1 module
+// with A = [1, 1], B = [1, 1]^T, m = [1, 1], so W0 + s BA = [[1+s, s], [s, 1+s]].
+// `nar` runs the same module on the decoder half (blk.0.nar_attn_q), so the
+// NAR tags are checked against keys their family accepts.
+static void case_loader(ggml_backend_t cpu, bool nar) {
+    const char * fam = nar ? "nar" : "ar";
+    ggml_init_params ip{ 64 * ggml_tensor_overhead() + 4096, nullptr, true };
+    ggml_context * ctx = ggml_init(ip);
+    ggml_tensor * t = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 2, 2);
+    ggml_set_name(t, nar ? "blk.0.nar_attn_q.weight" : "blk.0.attn_q.weight");
+    GGUFModel gf{};
+    gf.gguf = gguf_init_empty();
+    gf.meta = ctx;
+    gguf_add_tensor(gf.gguf, t);
+    gguf_set_val_u32(gf.gguf, "yue2.block_count", 1);
+    float base[4] = { 1, 0, 0, 1 };
+    gf.mapping = reinterpret_cast<uint8_t *>(base);
+    float data[6] = { 1, 1, 1, 1, 1, 1 };
+    const std::string mod = nar ? "yue2.blk.0.nar_attn_q" : "yue2.blk.0.attn_q";
+    const std::string v1 = std::string("yue2-") + fam + "-dora-v1", v99 = std::string("yue2-") + fam + "-dora-v99",
+                      lora_v1 = std::string("yue2-") + fam + "-lora-v1";
+    auto make_st = [&](bool magnitude) {
+        STFile st{};
+        st.mapping   = reinterpret_cast<uint8_t *>(data);
+        st.file_size = sizeof(data);
+        st.entries.push_back({ mod + ".lora_A.weight", "F32", { 1, 2 }, 2, 0, 8 });
+        st.entries.push_back({ mod + ".lora_B.weight", "F32", { 2, 1 }, 2, 8, 16 });
+        if (magnitude) st.entries.push_back({ mod + ".lora_magnitude_vector.weight", "F32", { 2 }, 1, 16, 24 });
+        return st;
+    };
+    const STFile dora = make_st(true), lora = make_st(false);
+    // Returns the merge's result; `out` gets the patched (or untouched) base.
+    auto run = [&](const STFile & st, const char * fmt, int rank, float alpha, const char * scaling, float out[4]) {
+        WeightCtx wc{};
+        wctx_init(&wc, 2);
+        ggml_tensor * wt = ggml_dup_tensor(wc.ctx, t);
+        ggml_set_name(wt, ggml_get_name(t));
+        wc.pending.push_back({ wt, base, sizeof(base), 0 });
+        Yue2AdapterMeta md;
+        md.format = fmt; md.rank = rank; md.alpha = alpha;
+        if (&st == &dora) { md.use_dora = "true"; md.dora_scaling = scaling; }
+        std::string error;
+        const int n = yue2_adapter_merge_st(&wc, gf, st, "", Yue2LmAdapterScales{}, cpu, &error, nullptr, &md);
+        memcpy(out, wc.pending[0].src, 4 * sizeof(float));
+        wctx_free(&wc);
+        return n;
+    };
+    // W' rows: [1+s, s] / sqrt((1+s)^2 + s^2), m = 1. The merge rounds its
+    // delta through BF16, hence the tolerance.
+    auto expect = [&](const char * tag, const float got[4], double sc) {
+        const double n = std::sqrt((1 + sc) * (1 + sc) + sc * sc);
+        const double w[4] = { (1 + sc) / n, sc / n, sc / n, (1 + sc) / n };
+        for (int i = 0; i < 4; i++) CHECK(std::fabs(got[i] - w[i]) < 4e-3, "loader %s %s: [%d] %g, want %g", fam, tag, i, got[i], w[i]);
+    };
+    auto untouched = [&](const char * tag, int n, const float got[4]) {
+        CHECK(n < 0, "loader %s %s: merged (%d), want a refusal", fam, tag, n);
+        CHECK(!memcmp(got, base, sizeof(base)), "loader %s %s: base changed on a refusal", fam, tag);
+    };
+    float out[4];
+    CHECK(run(dora, v1.c_str(), 1, 1, "1.000000", out) == 1, "loader %s v1: no merge", fam);
+    expect("v1 scale 1", out, 1.0);
+    CHECK(run(dora, v1.c_str(), 1, 2, "alpha/rank", out) == 1, "loader %s alpha/rank: no merge", fam);
+    expect("alpha/rank scale 2", out, 2.0);
+    // Metadata rank 2 / alpha 2 reads as 1, but the tensor rank is 1: the
+    // merge would apply 2. Refused.
+    untouched("metadata-rank scaling", run(dora, v1.c_str(), 2, 2, "1.000000", out), out);
+    untouched("v99", run(dora, v99.c_str(), 1, 1, "1.000000", out), out);
+    untouched("magnitude in lora-v1", run(dora, lora_v1.c_str(), 1, 1, "", out), out);
+    // Plain LoRA keeps its merge: W0 + s BA at s = 1.
+    CHECK(run(lora, lora_v1.c_str(), 1, 1, "", out) == 1, "loader %s lora: no merge", fam);
+    const float want[4] = { 2, 1, 1, 2 };
+    for (int i = 0; i < 4; i++) CHECK(std::fabs(out[i] - want[i]) < 1e-2, "loader %s lora: [%d] %g, want %g", fam, i, out[i], want[i]);
+    gguf_free(gf.gguf);
+    ggml_free(ctx);
+}
+
 int main() {
     BackendPair bp = backend_init("yue2-aitk-dora");
     g_backend = bp.backend;
@@ -394,6 +476,8 @@ int main() {
         }
         case_norms();
     }
+    case_loader(bp.cpu_backend, false);
+    case_loader(bp.cpu_backend, true);
     backend_release(bp.backend, bp.cpu_backend);
     if (g_fail) {
         fprintf(stderr, "yue2-aitk-dora-test: %d check(s) FAILED\n", g_fail);

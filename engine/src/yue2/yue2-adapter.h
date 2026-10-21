@@ -749,7 +749,16 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
     // DoRA is only ever the versioned yue2-{ar,nar}-dora-v1 format, and its
     // metadata must not contradict it: magnitudes in any other file, or a
     // DoRA file that says otherwise, are refused before anything is patched.
-    const bool dora_fmt = yue2a_starts(md.format, "yue2-nar-dora") || yue2a_starts(md.format, "yue2-ar-dora");
+    // Only the two v1 tags: a later DoRA revision may change what the
+    // magnitudes or the scaling mean, so it is refused, never merged as v1.
+    const bool dora_fmt = md.format == "yue2-nar-dora-v1" || md.format == "yue2-ar-dora-v1";
+    if (!dora_fmt && (yue2a_starts(md.format, "yue2-nar-dora") || yue2a_starts(md.format, "yue2-ar-dora"))) {
+        if (err_out) {
+            *err_out = "adapter __metadata__ says format=\"" + md.format +
+                       "\"; this loader merges DoRA as yue2-ar-dora-v1 / yue2-nar-dora-v1 only";
+        }
+        return -1;
+    }
     if (dora_fmt ? (!md.use_dora.empty() && md.use_dora != "true") : md.use_dora == "true") {
         if (err_out) {
             *err_out = "adapter __metadata__ says format=\"" + md.format + "\" but use_dora=\"" + md.use_dora +
@@ -757,17 +766,17 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
         }
         return -1;
     }
+    // dora_scaling is "alpha/rank" or the trainer's number for it. A number
+    // is checked per module in the preflight, against the alpha and tensor
+    // rank the merge will actually use; anything else is refused here.
+    double dora_scaling = NAN;  // NaN: declared symbolically, or absent
     if (dora_fmt && !md.dora_scaling.empty() && md.dora_scaling != "alpha/rank") {
-        // The trainer writes the value (std::to_string, six decimals), so a
-        // number must be alpha/rank from the same metadata; anything else
-        // (rsLoRA's alpha/sqrt(rank), say) is a semantics this merge lacks.
-        char *       end = nullptr;
-        const double v   = strtod(md.dora_scaling.c_str(), &end);
-        const double s   = md.alpha > 0.0f && md.rank > 0 ? (double) md.alpha / (double) md.rank : NAN;
-        if (end == md.dora_scaling.c_str() || *end || !(std::fabs(v - s) <= 1e-6 + 1e-5 * std::fabs(s))) {
+        char * end   = nullptr;
+        dora_scaling = strtod(md.dora_scaling.c_str(), &end);
+        if (end == md.dora_scaling.c_str() || *end || !std::isfinite(dora_scaling) || !(dora_scaling > 0.0)) {
             if (err_out) {
                 *err_out = "DoRA adapter declares dora_scaling=\"" + md.dora_scaling +
-                           "\"; this loader merges alpha/rank scaling only (alpha and rank from the same metadata)";
+                           "\"; this loader merges alpha/rank scaling only";
             }
             return -1;
         }
@@ -1182,6 +1191,21 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                         *err_out = name + ": DoRA magnitude must be F32 [" + std::to_string((long long) ne[1]) +
                                    "] (one per output row), inside the file and finite (" + f.mag->name + ", " +
                                    f.mag->dtype + ")";
+                    }
+                    return -1;
+                }
+                // The scaling the merge loop below applies: this module's
+                // resolved alpha over its tensor rank. A declared number that
+                // disagrees means the norm the trainer took is not this one.
+                const double s_eff = f.alpha > 0.0f ? (double) f.alpha / (double) f.a->shape[0] : 1.0;
+                if (std::isfinite(dora_scaling) && !(std::fabs(dora_scaling - s_eff) <= 1e-6 + 1e-5 * s_eff)) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                             "%s: DoRA adapter declares dora_scaling=%s, but this module merges at alpha/rank = "
+                             "%g/%lld = %g",
+                             name.c_str(), md.dora_scaling.c_str(), (double) f.alpha, (long long) f.a->shape[0], s_eff);
+                    if (err_out) {
+                        *err_out = buf;
                     }
                     return -1;
                 }
