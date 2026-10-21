@@ -38,7 +38,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
 | `ace-caption` | `tools/ace-caption.cpp` | MOSS-Music captioning: audio in, prose caption, MM3-format caption or lyrics out |
-| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle |
+| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
@@ -83,6 +83,29 @@ The Node server starts `ace-server` with `--models`, `--host` and `--port`, and 
 `--adapters`, `--keep-loaded` and `--noise-profile` when they are configured
 (`server/src/services/aceEngineProcess.ts`). The app's default port is
 8085; the binary's own default is 8080.
+
+### ace-midi tempo, meter and bars
+
+`ace-midi --beat-model <dir>` runs Beat This! (`tools/beat-this.h`, a GGML port of
+CPJKU's beat and downbeat tracker, MIT weights `final0` as `model.safetensors`) on the
+source audio at its own rate. `tools/midi-grid.h` then fits upstream MuScriptor v0.4's
+grid to the beats: least-squares tempo, meter from downbeat spacing (written as n/4 when
+90% of bars agree), an onset-delay correction, and a tempo map when the beats do not fit
+one tempo within 5% of a beat. The MIDI gets a time signature, `set_tempo` in every track,
+and a whole-bar delay so tick 0 is a bar line. Without `--beat-model` the output is the old
+fixed 120 BPM file, byte for byte (`--validate-midi`).
+
+| Flag | Effect |
+|---|---|
+| `--beats-out <file>` | Tracked beats plus the written grid in audio seconds (`beats`, `bars`, `audio_shift_s`: add it to a MIDI time to get the audio time) |
+| `--bpm`, `--beats-per-bar`, `--first-downbeat` | Override the detected grid |
+| `--tempo-map` / `--fixed-tempo` | Force a tempo map or one tempo (default: map only when unsteady) |
+| `--beat-scale <2\|0.5\|…>` | Beats per detected beat, a power of two |
+| `--quantize [--grid N] [--quantize-strength x]` | Snap notes to 1/N beat (default: the measured subdivision) |
+| `--fill-gaps <beats>`, `--trim-leading-bars` | Hold notes over short rests; drop empty leading bars |
+| `--export <events.jsonl> --beats-in <beats.json>` | Re-export a transcription with new options; no MuScriptor model loaded |
+| `--track <audio>` | Beats and grid only (needs `--beat-model` and `--beats-out`) |
+| `--self-test-grid` | Grid maths on synthetic beats with known answers |
 
 ## How ace-server is organised
 
