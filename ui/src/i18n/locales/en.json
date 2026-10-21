@@ -2007,6 +2007,8 @@
     "settings.ai.unslothUsernameDesc": "Username for Unsloth authentication.",
     "settings.ai.unslothPassword": "Unsloth password",
     "settings.ai.unslothPasswordDesc": "Password for Unsloth authentication.",
+    "settings.ai.unslothKeyless": "Keyless local Studio",
+    "settings.ai.unslothKeylessDesc": "Turn on if your local Unsloth Studio runs with its \"keyless API access\" setting enabled — it then needs no username or password. Leave off otherwise; the provider stays hidden until this is on or both credentials are set.",
     "settings.ai.llamacppUrl": "llama.cpp URL",
     "settings.ai.llamacppUrlDesc": "Base URL for the llama.cpp server (llama-server).",
     "settings.ai.openaiCompatUrl": "Compatible endpoint URL",

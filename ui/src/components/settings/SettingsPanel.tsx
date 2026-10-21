@@ -606,6 +606,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           value={envValues.UNSLOTH_USERNAME || ''} onChange={handleEnvChange} />
         <EnvPasswordRow envKey="UNSLOTH_PASSWORD" label={t('settings.ai.unslothPassword')} description={t('settings.ai.unslothPasswordDesc')}
           value={envValues.UNSLOTH_PASSWORD || ''} onChange={handleEnvChange} />
+        <div className="setting-row">
+          <div className="setting-info">
+            <ParamLabel
+              label={t('settings.ai.unslothKeyless')}
+              className="setting-label"
+              info={t('settings.ai.unslothKeylessDesc')}
+            />
+          </div>
+          <Toggle
+            id="env-UNSLOTH_KEYLESS"
+            checked={(envValues.UNSLOTH_KEYLESS || '0') === '1'}
+            onChange={(v) => handleEnvChange('UNSLOTH_KEYLESS', v ? '1' : '0')}
+          />
+        </div>
         <EnvTextRow envKey="LLAMACPP_BASE_URL" label={t('settings.ai.llamacppUrl')} description={t('settings.ai.llamacppUrlDesc')}
           value={envValues.LLAMACPP_BASE_URL || ''} onChange={handleEnvChange} placeholder="http://127.0.0.1:8080/v1" />
         <EnvTextRow envKey="OPENAI_COMPAT_BASE_URL" label={t('settings.ai.openaiCompatUrl')} description={t('settings.ai.openaiCompatUrlDesc')}

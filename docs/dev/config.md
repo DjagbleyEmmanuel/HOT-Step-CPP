@@ -274,6 +274,7 @@ them are hot-reloaded when saved from Settings.
 | `UNSLOTH_BASE_URL` | `http://127.0.0.1:8888` | AI Services | Unsloth server |
 | `UNSLOTH_USERNAME` | empty | AI Services | Unsloth login |
 | `UNSLOTH_PASSWORD` | empty | AI Services | Unsloth password |
+| `UNSLOTH_KEYLESS` | empty | AI Services | Set to `1` when a local Studio runs with its "keyless API access" setting on — no username/password needed. The provider stays hidden until this or both credentials are set |
 | `UNSLOTH_MODEL` | empty | AI Services | Unsloth model |
 | `LLAMACPP_BASE_URL` | `http://127.0.0.1:8080/v1` | AI Services | llama.cpp server |
 | `LLAMACPP_MODEL` | empty | AI Services | llama.cpp model |
