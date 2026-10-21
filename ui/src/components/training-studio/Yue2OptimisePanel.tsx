@@ -33,7 +33,7 @@ export const Yue2OptimisePanel: React.FC<{ datasetId: string }> = ({ datasetId }
     setError('');
     try {
       const { jobId } = await runCommand(client, worker, () => startYue2BaseLoss(datasetId, { worker }));
-      setJob(await client.fetchQuery(trainingQueries.job(worker, jobId)));
+      setJob(await client.query(trainingQueries.job(worker, jobId)));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
 

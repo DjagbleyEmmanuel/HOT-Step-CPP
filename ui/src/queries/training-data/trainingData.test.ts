@@ -67,8 +67,8 @@ test('local and worker reads route by the worker in their key', async () => {
     [`${LOCAL}/datasets`]: { body: { datasets: [ds('here')] } },
     [`${A}/datasets`]: { body: { datasets: [ds('there')] } },
   });
-  const local = await queryClient.fetchQuery(trainingQueries.datasets(null));
-  const remote = await queryClient.fetchQuery(trainingQueries.datasets('A'));
+  const local = await queryClient.query(trainingQueries.datasets(null));
+  const remote = await queryClient.query(trainingQueries.datasets('A'));
   assert.deepEqual(srv.calls, [`${LOCAL}/datasets`, `${A}/datasets`]);
   assert.equal(local[0].id, 'here');
   assert.equal(remote[0].id, 'there');
@@ -79,7 +79,7 @@ test('local and worker reads route by the worker in their key', async () => {
 test('a read captures its worker: switching the global after scheduling does not move it', async () => {
   const srv = fakeServer({ [`${A}/datasets`]: { body: { datasets: [] } } });
   srv.hold(`${A}/datasets`);
-  const read = queryClient.fetchQuery(trainingQueries.datasets('A'));
+  const read = queryClient.query(trainingQueries.datasets('A'));
   await tick();
   setTrainingWorker('B');
   srv.release(`${A}/datasets`);
@@ -191,8 +191,8 @@ test('a terminal stream event invalidates the worker scope once, replay included
     trainingWorker: 'A', selectedDatasetId: 'd',
     activeJob: { id: 'job-term', kind: 'label', status: 'running' } as never,
   });
-  await queryClient.fetchQuery(trainingQueries.lsGenerations('A', 'd'));
-  await queryClient.fetchQuery(trainingQueries.lsGenerations('B', 'd'));
+  await queryClient.query(trainingQueries.lsGenerations('A', 'd'));
+  await queryClient.query(trainingQueries.lsGenerations('B', 'd'));
   const apply = useTrainingStore.getState().applyStreamEvent;
   apply({ type: 'status', status: 'done' });
   apply({ type: 'status', status: 'done' }); // replayed on reconnect
@@ -351,15 +351,15 @@ test('preparation reads use the local shared keys: concurrent polls join, each p
   const options = trainingQueries.preparation('p');
   assert.deepEqual(options.queryKey, sharedKeys.preparation('p'));
   assert.equal('worker' in scopeOf(options.queryKey)!, false);
-  await Promise.all([queryClient.fetchQuery(options), queryClient.fetchQuery(trainingQueries.preparation('p'))]);
+  await Promise.all([queryClient.query(options), queryClient.query(trainingQueries.preparation('p'))]);
   assert.equal(calls, 1);
-  await queryClient.fetchQuery(options);
+  await queryClient.query(options);
   assert.equal(calls, 2);
 });
 
 test('a scan preview goes to the worker captured when it was asked for', async () => {
   const server = fakeServer({ [`${A}/scan-preview?path=x&recursive=1`]: { body: { audioFiles: 3 } } });
-  const read = queryClient.fetchQuery(trainingQueries.scanPreview('A', 'x'));
+  const read = queryClient.query(trainingQueries.scanPreview('A', 'x'));
   setTrainingWorker('B');
   assert.equal((await read).audioFiles, 3);
   assert.deepEqual(server.calls, [`${A}/scan-preview?path=x&recursive=1`]);

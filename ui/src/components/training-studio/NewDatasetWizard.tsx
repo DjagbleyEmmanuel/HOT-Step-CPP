@@ -78,7 +78,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
     setScanning(true);
     setScanError(null);
     try {
-      const result = await queryClient.fetchQuery(options);
+      const result = await queryClient.query(options);
       if (seq !== scanSeq.current) return;
       setPreview(result);
     } catch (err) {

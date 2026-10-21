@@ -236,7 +236,7 @@ export const StemStudio: React.FC = () => {
     try {
       setActiveJobId(jobId);
       selectedResult.current = jobId;
-      const result = await client.fetchQuery(extractResultOptions(jobId));
+      const result = await client.query(extractResultOptions(jobId));
       if (selectedResult.current === jobId) loadResultIntoMixer(jobId, result);
     } catch (err) {
       console.error('Failed to load past job:', err);

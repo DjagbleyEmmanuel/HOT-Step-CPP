@@ -125,7 +125,7 @@ export const AdaptersDropdown: React.FC = () => {
       setScanFolder(dir);
       const key = adapterScanOptions(dir).queryKey;
       await client.invalidateQueries({ queryKey: key });
-      const result = await client.fetchQuery(adapterScanOptions(dir));
+      const result = await client.query(adapterScanOptions(dir));
       if (result.files.length === 0) {
         setScanError('No .safetensors files found in this folder');
       }

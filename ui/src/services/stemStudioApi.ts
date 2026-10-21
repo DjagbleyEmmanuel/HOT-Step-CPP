@@ -193,7 +193,7 @@ export async function waitForExtraction(
     signal => getExtractProgress(jobId, { signal }),
     p => !['done', 'failed', 'cancelled'].includes(p.status), onProgress, { pollMs });
   if (p.status !== 'done') throw new Error(p.error || `Extraction ${p.status}`);
-  const result = await queryClient.fetchQuery({
+  const result = await queryClient.query({
     queryKey: serverKey('studios/extract-result', { id: jobId }),
     queryFn: ({ signal }) => getExtractResult(jobId, { signal }),
   });

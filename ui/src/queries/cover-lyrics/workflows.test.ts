@@ -51,10 +51,10 @@ test('Cover and canonical workflow consumers deduplicate raw job and document re
     assert.deepEqual(job.queryKey, sharedKeys.workflowJob('job', 0));
     assert.deepEqual(doc.queryKey, sharedKeys.workflowDocument('doc'));
     const [cover, canonical, coverDoc, canonicalDoc] = await Promise.all([
-      queryClient.fetchQuery(job),
-      queryClient.fetchQuery({ ...job, queryKey: sharedKeys.workflowJob('job', 0) }),
-      queryClient.fetchQuery(doc),
-      queryClient.fetchQuery({ ...doc, queryKey: sharedKeys.workflowDocument('doc') }),
+      queryClient.query(job),
+      queryClient.query({ ...job, queryKey: sharedKeys.workflowJob('job', 0) }),
+      queryClient.query(doc),
+      queryClient.query({ ...doc, queryKey: sharedKeys.workflowDocument('doc') }),
     ]);
     assert.equal(calls, 2);
     assert.deepEqual(cover, replay);

@@ -208,7 +208,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         audioDuration: audio.duration,
       });
       if (songId) {
-        try { const { song } = await client.fetchQuery({ queryKey: sharedKeys.song(songId), queryFn: ({ signal }) => songApi.get(songId, { signal }) }); onSongCreated?.(song); } catch { /* library refresh still runs */ }
+        try { const { song } = await client.query({ queryKey: sharedKeys.song(songId), queryFn: ({ signal }) => songApi.get(songId, { signal }) }); onSongCreated?.(song); } catch { /* library refresh still runs */ }
       }
     } catch (err: any) {
       failManualQueueItem(queueId, err.message || 'Generation failed');
@@ -381,7 +381,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
               onClick={() => {
                 if (!promptEditorOpen && !promptLoaded) {
                   // Load prompt on first open
-                  client.fetchQuery(inspirePromptOptions()).then(data => {
+                  client.query(inspirePromptOptions()).then(data => {
                     setPromptDefault(data.default_content);
                     setPromptContent(data.custom || data.default_content);
                     setPromptIsCustom(!!data.custom);

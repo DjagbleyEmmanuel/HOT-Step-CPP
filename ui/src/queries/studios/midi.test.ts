@@ -24,8 +24,8 @@ test('slow simultaneous MIDI reads share a single cycle and consume cancellation
   globalThis.fetch = async (_url, opts) => { calls++; signal = opts?.signal ?? undefined; return held.promise; };
   try {
     const options = midiJobsOptions();
-    const first = client.fetchQuery(options).catch(error => error);
-    const second = client.fetchQuery(options).catch(error => error);
+    const first = client.query(options).catch(error => error);
+    const second = client.query(options).catch(error => error);
     await tick();
     assert.equal(calls, 1);
     await client.cancelQueries({ queryKey: options.queryKey });
@@ -52,7 +52,7 @@ test('delete during a slow progress read cannot resurrect the row, even if fetch
     const options = midiJobsOptions();
     client.setQueryData(options.queryKey, [job]);
     client.setQueryData(midiNotesOptions(job.id).queryKey, { notes: [] });
-    const pending = client.fetchQuery({ ...options, staleTime: 0 }).catch(error => error);
+    const pending = client.query({ ...options, staleTime: 0 }).catch(error => error);
     await tick();
     await removeMidiJob(client, job.id);
     assert.equal(progressSignal?.aborted, true);
@@ -60,7 +60,7 @@ test('delete during a slow progress read cannot resurrect the row, even if fetch
     await pending; await tick();
     assert.deepEqual(client.getQueryData(options.queryKey), []);
     assert.equal(client.getQueryData(midiNotesOptions(job.id).queryKey), undefined);
-    assert.deepEqual(await client.fetchQuery(options), []);
+    assert.deepEqual(await client.query(options), []);
   } finally { globalThis.fetch = original; client.clear(); }
 });
 
@@ -80,7 +80,7 @@ test('a poll started during DELETE is cancelled again after success', async () =
     client.setQueryData(options.queryKey, [job]);
     const removing = removeMidiJob(client, job.id);
     await tick();
-    const reading = client.fetchQuery({ ...options, staleTime: 0 }).catch(error => error);
+    const reading = client.query({ ...options, staleTime: 0 }).catch(error => error);
     await tick();
     deletion.resolve(json({}));
     await removing;
@@ -131,7 +131,7 @@ test('returning to MIDI reuses its fresh snapshot and mutation invalidation refr
   globalThis.fetch = async () => { calls++; return json([]); };
   try {
     const options = midiJobsOptions();
-    await client.fetchQuery(options);
+    await client.query(options);
     const first = new QueryObserver(client, options);
     first.subscribe(() => {})();
     const second = new QueryObserver(client, options);
@@ -149,7 +149,7 @@ test('MIDI read errors carry HTTP status instead of a failed empty snapshot', as
   const client = createQueryClient();
   globalThis.fetch = async () => json({ error: 'Missing job' }, 404);
   try {
-    await assert.rejects(client.fetchQuery(midiJobsOptions()), (error: unknown) => error instanceof ApiError && error.status === 404);
+    await assert.rejects(client.query(midiJobsOptions()), (error: unknown) => error instanceof ApiError && error.status === 404);
     assert.equal(client.getQueryData(midiJobsOptions().queryKey), undefined);
   } finally { globalThis.fetch = original; client.clear(); }
 });

@@ -11,7 +11,7 @@ export async function sendAuditionToCustomGen(preview: AuditionPreview, side: Au
   cell: AuditionRenderCell, token: string): Promise<string> {
   // The dataset's current revision, always from this PC: audition previews
   // and the draft they feed are local, whatever "Train on" says.
-  const dataset = await queryClient.fetchQuery({ ...trainingQueries.dataset(null, preview.datasetId), staleTime: 0 });
+  const dataset = await queryClient.query({ ...trainingQueries.dataset(null, preview.datasetId), staleTime: 0 });
   if (typeof dataset.updatedAt !== 'string') throw new Error('Could not load the training dataset revision');
   const result = await trainingOperation<{ draftId: string }>('review', '/draft', {
     token,

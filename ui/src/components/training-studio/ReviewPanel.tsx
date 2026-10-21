@@ -73,7 +73,7 @@ export const ReviewPanel: React.FC = () => {
     if (finishOpen) { setFinishOpen(false); setApproved([]); return; }
     setPreparing(true); setError('');
     try {
-      const ladders = await Promise.all(finishable.map(r => client.fetchQuery({ ...runQueries.ladder(r.datasetId, r.refineRun), staleTime: 0 })));
+      const ladders = await Promise.all(finishable.map(r => client.query({ ...runQueries.ladder(r.datasetId, r.refineRun), staleTime: 0 })));
       setApproved(ladders.map((ladder, index) => {
         if (!ladder.best || ladder.best.overall === null) throw new Error('A ladder has no fully scored rung. Reload Review before finishing.');
         return { pick: pickFromLadder(ladder, ladder.best.step), name: finishable[index].datasetName,

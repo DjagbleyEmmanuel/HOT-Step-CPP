@@ -137,7 +137,7 @@ export const RefinePanel: React.FC = () => {
         // server renders `takes` previews there before resuming.
         preview: { enabled: autoPreview, everySteps: 0, arScale: (opts.preview as Yue2JointTrainRequest['preview'])?.arScale ?? YUE2_JOINT_LADDER_PREVIEW.arScale, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, sampler: yue2SamplerSnapshot(), ...draftOpts } } as unknown as Yue2JointTrainRequest;
       const result = await runCommand(client, trainingWorker, () => startYue2JointTrain(datasetId, request, { worker: trainingWorker }));
-      setJob(await client.fetchQuery(trainingQueries.job(trainingWorker, result.jobId)));
+      setJob(await client.query(trainingQueries.job(trainingWorker, result.jobId)));
       setLadderRun(result.jobId);
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }
@@ -168,7 +168,7 @@ export const RefinePanel: React.FC = () => {
     if (!datasetId || !ladderRun) return true;
     setError(''); setCleanupNote('');
     try {
-      const ladder = await client.fetchQuery({ ...runQueries.ladder(datasetId, ladderRun), staleTime: 0 });
+      const ladder = await client.query({ ...runQueries.ladder(datasetId, ladderRun), staleTime: 0 });
       const pick = pickFromLadder(ladder, step);
       if (pick.checkpointDir !== _dir) throw new Error('The selected checkpoint changed. Reload the ladder.');
       const decision = await runCommand(client, null, () => decideReviewUse(pick, narFurther, { budget: narBudget, lrScale: narLrScale,
@@ -188,7 +188,7 @@ export const RefinePanel: React.FC = () => {
       // Node admitted the captured decoder continuation after rechecking the rung.
       if (!decision.jobId) throw new Error('The review server did not start decoder training.');
       setNarJob({ jobId: decision.jobId, step });
-      setJob(await client.fetchQuery(trainingQueries.job(null, decision.jobId)));
+      setJob(await client.query(trainingQueries.job(null, decision.jobId)));
       setCleanupNote(t('trainingStudio.refine.narStarted', 'Decoder training on from step {{step}}; the adapter is linked when it stops.', { step }));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     return true;
@@ -201,7 +201,7 @@ export const RefinePanel: React.FC = () => {
     const pending = narJob; setNarJob(null);
     void (async () => {
       try {
-        const r = await client.fetchQuery({ ...runQueries.jointRuns(datasetId), staleTime: 0 });
+        const r = await client.query({ ...runQueries.jointRuns(datasetId), staleTime: 0 });
         const run = r.runs.find(x => x.jobId === pending.jobId);
         const last = run?.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];
         if (!run || !last) { setError(t('trainingStudio.refine.narNoCheckpoint', 'The decoder run left no complete checkpoint.')); return; }
@@ -333,7 +333,7 @@ export const RefinePanel: React.FC = () => {
             {busy || active ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             {active ? t('trainingStudio.refine.running', 'Refining…') : t('trainingStudio.refine.start', 'Start refinement')}
           </button>
-          {active && <button type="button" onClick={() => { if (job) void runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker })).then(() => client.fetchQuery(trainingQueries.job(trainingWorker, job.id))).then(setJob); }} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.refine.stop', 'Stop')}</button>}
+          {active && <button type="button" onClick={() => { if (job) void runCommand(client, trainingWorker, () => cancelJob(job.id, { worker: trainingWorker })).then(() => client.query(trainingQueries.job(trainingWorker, job.id))).then(setJob); }} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.refine.stop', 'Stop')}</button>}
           {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{job.total ? ` · step ${job.done} / ${job.total}` : ''}</span>}
         </div>
         {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}

@@ -46,7 +46,7 @@ export const FolderPicker: React.FC<FolderPickerProps> = ({ open, onClose, onSel
     setLoading(true);
     setError(null);
     try {
-      const result = await queryClient.fetchQuery(options);
+      const result = await queryClient.query(options);
       if (lastKey.current !== options.queryKey) return;
       setCurrentDir(result.current);
       setPathInput(result.current);

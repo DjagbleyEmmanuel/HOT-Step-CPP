@@ -196,7 +196,7 @@ async function request<T>(path: string, token: string, init?: RequestInit): Prom
   const opts = { token, signal: init.signal ?? undefined };
   const body = init.body ? JSON.parse(String(init.body)) : undefined;
   if (path === '/source-metadata' || path === '/sections/review') {
-    return queryClient.fetchQuery({
+    return queryClient.query({
       queryKey: serverKey('cover-lyrics/cover', { auth: true, id: path, filters: body }),
       queryFn: ({ signal }) => apiClient.post<T>(url, body, { token, signal: opts.signal ? AbortSignal.any([signal, opts.signal]) : signal }),
     });

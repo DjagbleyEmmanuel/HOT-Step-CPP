@@ -24,7 +24,7 @@ test('Repaint and player variants share the LRC request and sidecar invalidation
   try {
     const studio = lyricsOptions('/audio/track_mastered.wav');
     const player = lrcOptions('/audio/track.wav');
-    const results = await Promise.all([client.fetchQuery(studio), client.fetchQuery(player)]);
+    const results = await Promise.all([client.query(studio), client.query(player)]);
     assert.deepEqual(results, ['[00:01] Words', '[00:01] Words']);
     assert.equal(calls, 1);
     const { invalidateSidecars } = await import('../keys');
@@ -52,7 +52,7 @@ test('studio plugin selection shares the canonical request and preserves the ful
   });
   const unsubscribe = observer.subscribe(() => {});
   try {
-    const result = await client.fetchQuery({
+    const result = await client.query({
       queryKey: sharedKeys.plugins(),
       queryFn: ({ signal }) => apiClient.get<PluginRegistry>('/plugins', { signal }),
     });
@@ -74,11 +74,11 @@ test('late project A response cannot replace project B, and project reads consum
     return json({ project: { id: 'B' }, sections: [] });
   };
   try {
-    const first = client.fetchQuery(projectOptions('test-token', 'A')).catch(error => error);
+    const first = client.query(projectOptions('test-token', 'A')).catch(error => error);
     await tick();
     await client.cancelQueries({ queryKey: projectOptions('test-token', 'A').queryKey });
     assert.equal(signal?.aborted, true);
-    await client.fetchQuery(projectOptions('test-token', 'B'));
+    await client.query(projectOptions('test-token', 'B'));
     resolveA(json({ project: { id: 'A' }, sections: [] }));
     await first;
     assert.equal(client.getQueryData(projectOptions('test-token', 'B').queryKey)?.project.id, 'B');
@@ -97,10 +97,10 @@ test('prompt mutation invalidation refreshes the cached server value', async () 
   };
   try {
     const options = inspirePromptOptions();
-    assert.equal((await client.fetchQuery(options)).custom, 'Before');
+    assert.equal((await client.query(options)).custom, 'Before');
     await saveInstagenPrompt('After');
     await client.invalidateQueries({ queryKey: options.queryKey });
-    assert.equal((await client.fetchQuery(options)).custom, 'After');
+    assert.equal((await client.query(options)).custom, 'After');
     assert.equal(writes, 1);
   } finally { globalThis.fetch = original; client.clear(); }
 });
@@ -110,10 +110,10 @@ test('lyrics follow the selected source and distinguish missing sidecars from er
   const client = createQueryClient();
   globalThis.fetch = async url => String(url).includes('missing') ? json({}, 404) : new Response('[00:01] Words');
   try {
-    assert.equal(await client.fetchQuery(lyricsOptions('/audio/missing.wav')), null);
-    assert.equal(await client.fetchQuery(lyricsOptions('/audio/present.wav')), '[00:01] Words');
+    assert.equal(await client.query(lyricsOptions('/audio/missing.wav')), null);
+    assert.equal(await client.query(lyricsOptions('/audio/present.wav')), '[00:01] Words');
     globalThis.fetch = async () => json({}, 403);
-    await assert.rejects(client.fetchQuery(lyricsOptions('/audio/forbidden.wav')), /403/);
+    await assert.rejects(client.query(lyricsOptions('/audio/forbidden.wav')), /403/);
   } finally { globalThis.fetch = original; client.clear(); }
 });
 

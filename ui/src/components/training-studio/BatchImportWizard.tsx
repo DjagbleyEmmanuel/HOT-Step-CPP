@@ -131,7 +131,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
     if (gen !== genRef.current) return;
     setRows(prev => prev.map(r => (r.path === path ? { ...r, scanning: true, scanError: null } : r)));
     try {
-      const preview = await queryClient.fetchQuery(tq.scanPreview(useTrainingStore.getState().trainingWorker, path, true));
+      const preview = await queryClient.query(tq.scanPreview(useTrainingStore.getState().trainingWorker, path, true));
       if (gen !== genRef.current) return;
       setRows(prev => prev.map(r => (r.path === path
         ? { ...r, scanning: false, audioFiles: preview.audioFiles, checked: r.checked && preview.audioFiles > 0 }
@@ -163,7 +163,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
     setLoadingRoot(true);
     setRows([]);
     try {
-      const result = await queryClient.fetchQuery(tq.browse(dir, 'trainingAudio'));
+      const result = await queryClient.query(tq.browse(dir, 'trainingAudio'));
       if (gen !== genRef.current) return;
       const subdirs = result.entries.filter(e => e.type === 'dir' && e.name !== '..');
       const initial: FolderRow[] = subdirs.map(e => ({

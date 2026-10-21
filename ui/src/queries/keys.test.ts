@@ -74,7 +74,7 @@ test('a new auth session cancels and drops old auth queries, keeps public ones',
   const before = getSessionEpoch();
   const oldKey = sharedKeys.songs();
   let aborted = false;
-  const pending = client.fetchQuery({
+  const pending = client.query({
     queryKey: oldKey,
     queryFn: ({ signal }) => new Promise((_, reject) => {
       signal.addEventListener('abort', () => { aborted = true; reject(new DOMException('Aborted', 'AbortError')); });
@@ -109,8 +109,8 @@ test('simultaneous reads of one key share one request; another worker gets its o
         listDatasets({ worker: scopeOf(queryKey)!.worker, signal }),
     });
     await Promise.all([
-      client.fetchQuery(options('A')), client.fetchQuery(options('A')), client.fetchQuery(options('A')),
-      client.fetchQuery(options(null)),
+      client.query(options('A')), client.query(options('A')), client.query(options('A')),
+      client.query(options(null)),
     ]);
     assert.deepEqual(urls.sort(), ['/api/training/datasets', '/api/workers/A/api/training/datasets']);
   } finally { globalThis.fetch = real; client.clear(); }
@@ -124,7 +124,7 @@ test('the request goes where its key says, whatever the current selection', asyn
   try {
     setTrainingWorker('B');
     const queryKey = serverKey('training-data/datasets', { worker: 'A' });
-    await client.fetchQuery({ queryKey, queryFn: ({ signal }) => listDatasets({ worker: scopeOf(queryKey)!.worker, signal }) });
+    await client.query({ queryKey, queryFn: ({ signal }) => listDatasets({ worker: scopeOf(queryKey)!.worker, signal }) });
     assert.deepEqual(urls, ['/api/workers/A/api/training/datasets']);
   } finally { globalThis.fetch = real; setTrainingWorker(null); client.clear(); }
 });
@@ -139,7 +139,7 @@ test('cancelling a query aborts the fetch it started', async () => {
   })) as typeof fetch;
   try {
     const queryKey = serverKey('training-data/datasets', { worker: null });
-    const run = client.fetchQuery({ queryKey, queryFn: ({ signal }) => listDatasets({ worker: null, signal }) }).catch(e => e);
+    const run = client.query({ queryKey, queryFn: ({ signal }) => listDatasets({ worker: null, signal }) }).catch(e => e);
     await new Promise(r => setTimeout(r, 0));
     await client.cancelQueries({ queryKey });
     await run;

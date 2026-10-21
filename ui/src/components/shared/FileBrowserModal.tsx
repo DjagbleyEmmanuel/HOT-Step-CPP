@@ -67,7 +67,7 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const result = await queryClient.fetchQuery(browseOptions(dir, filter));
+      const result = await queryClient.query(browseOptions(dir, filter));
       if (request !== latest.current) return;
       setCurrentDir(result.current);
       setPathInput(result.current);

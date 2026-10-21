@@ -35,7 +35,7 @@ test('run GPU and preparation reads join other areas and refresh after commands 
     [runQueries.preparationJob('chain'), trainingQueries.preparationJob('chain')],
   ] as const;
   for (const [one, two] of pairs) {
-    await Promise.all([cache.fetchQuery(one), cache.fetchQuery(two)]);
+    await Promise.all([cache.query(one), cache.query(two)]);
   }
   assert.equal(calls, 3);
   await runCommand(cache, 'remote-worker', async () => {});
@@ -53,10 +53,10 @@ test('two status consumers share one read, including a fresh remount', async () 
   let count = 0;
   globalThis.fetch = async () => { count++; await tick(); return json({ ready: true }); };
   const options = runQueries.mm3Status(null, 'set');
-  const [one, two] = await Promise.all([cache.fetchQuery(options), cache.fetchQuery(options)]);
+  const [one, two] = await Promise.all([cache.query(options), cache.query(options)]);
   assert.equal(one, two);
   assert.equal(count, 1);
-  await cache.fetchQuery(runQueries.mm3Status(null, 'set'));
+  await cache.query(runQueries.mm3Status(null, 'set'));
   assert.equal(count, 1);
 });
 
@@ -70,9 +70,9 @@ test('a delayed worker A read stays in A cache after worker B is selected', asyn
     if (url.includes('/A/')) await held;
     return json({ file: url });
   };
-  const a = cache.fetchQuery(runQueries.optimise('A', 'set'));
+  const a = cache.query(runQueries.optimise('A', 'set'));
   setTrainingWorker('B');
-  const b = await cache.fetchQuery(runQueries.optimise('B', 'set'));
+  const b = await cache.query(runQueries.optimise('B', 'set'));
   release(); await a;
   assert.match(b.file, /\/B\//);
   assert.equal(cache.getQueryData(runQueries.optimise('B', 'set').queryKey), b);
@@ -103,11 +103,11 @@ test('local run/review indexes stay local while a remote worker is selected', as
   const urls: string[] = [];
   globalThis.fetch = async input => { urls.push(String(input)); return json({ runs: [], rows: [], scores: [], score: null, batches: [] }); };
   await Promise.all([
-    cache.fetchQuery(runQueries.mm3Runs('set')), cache.fetchQuery(runQueries.narRuns('set')),
-    cache.fetchQuery(runQueries.arRuns('set')), cache.fetchQuery(runQueries.jointRuns('set')),
-    cache.fetchQuery(runQueries.previews('set', 'run')), cache.fetchQuery(runQueries.review()),
-    cache.fetchQuery(runQueries.ladder('set', 'run')), cache.fetchQuery(runQueries.scores('set', 'run')),
-    cache.fetchQuery(runQueries.album('set', 'run')), cache.fetchQuery(runQueries.localBatches()),
+    cache.query(runQueries.mm3Runs('set')), cache.query(runQueries.narRuns('set')),
+    cache.query(runQueries.arRuns('set')), cache.query(runQueries.jointRuns('set')),
+    cache.query(runQueries.previews('set', 'run')), cache.query(runQueries.review()),
+    cache.query(runQueries.ladder('set', 'run')), cache.query(runQueries.scores('set', 'run')),
+    cache.query(runQueries.album('set', 'run')), cache.query(runQueries.localBatches()),
   ]);
   assert.ok(urls.every(url => url.startsWith('/api/training/')));
   assert.ok(urls.includes('/api/training/ops/review/ladder/set/run'));
@@ -156,7 +156,7 @@ test('review ladder cancellation reaches the local operation transport', async (
     return json({});
   };
   const options = runQueries.ladder('set', 'run');
-  const pending = cache.fetchQuery(options).catch(() => undefined);
+  const pending = cache.query(options).catch(() => undefined);
   await tick(); await cache.cancelQueries({ queryKey: options.queryKey }); await pending;
   assert.equal(aborted, true);
 });
