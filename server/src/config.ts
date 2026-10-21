@@ -155,6 +155,12 @@ export function withFfmpegOnPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 
+/** UNSLOTH_KEYLESS is on only for an explicit '1'; unset, empty and anything else are off
+ *  (Settings writes '1'/'0'), so startup and hot reload agree. */
+export function parseUnslothKeyless(v: string | undefined): boolean {
+  return v === '1';
+}
+
 export const config = {
   // ace-server configuration
   aceServer: {
@@ -295,7 +301,7 @@ export const config = {
     // enabled (off by default in Studio): /v1 then needs no username/password.
     // Must be set explicitly — the loopback default URL alone must never make
     // the provider look installed on a fresh checkout.
-    unslothKeyless: (process.env.UNSLOTH_KEYLESS ?? '0') !== '0',
+    unslothKeyless: parseUnslothKeyless(process.env.UNSLOTH_KEYLESS),
     defaultProvider: process.env.DEFAULT_LLM_PROVIDER || 'gemini',
     geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -424,10 +430,10 @@ export const RESTART_REQUIRED_KEYS = new Set([
  * Re-read the .env file and hot-patch the live config object.
  * Returns a list of keys that actually changed.
  */
-export function reloadEnvConfig(): string[] {
-  const envContent = fs.existsSync(ENV_FILE_PATH)
+export function reloadEnvConfig(envText?: string): string[] {
+  const envContent = envText ?? (fs.existsSync(ENV_FILE_PATH)
     ? fs.readFileSync(ENV_FILE_PATH, 'utf-8')
-    : '';
+    : '');
   const parsed = dotenvParse(envContent);
   const changed: string[] = [];
 
@@ -490,7 +496,7 @@ export function reloadEnvConfig(): string[] {
     () => config.lireek.unslothUsername);
   apply('UNSLOTH_PASSWORD', v => { config.lireek.unslothPassword = v; },
     () => config.lireek.unslothPassword);
-  apply('UNSLOTH_KEYLESS', v => { config.lireek.unslothKeyless = (v || '0') !== '0'; },
+  apply('UNSLOTH_KEYLESS', v => { config.lireek.unslothKeyless = parseUnslothKeyless(v); },
     () => (config.lireek.unslothKeyless ? '1' : '0'));
   apply('DEFAULT_LLM_PROVIDER', v => { config.lireek.defaultProvider = v || 'gemini'; },
     () => config.lireek.defaultProvider);
