@@ -114,9 +114,11 @@ progress appears in the console. The saved location is reused by a fresh unzip.
 
 If the restart request fails, the pending change stays saved. The panel offers
 **Restart to apply** and **Cancel scheduled change**. Cancellation is only possible
-before the transfer starts. An interrupted transfer resumes on restart; a missing
-drive or failed transfer shows an explanatory page instead of opening an empty
-library. Reconnect the drive or correct the reported problem and restart.
+before the transfer starts. An interrupted transfer resumes on restart; a failed
+transfer shows an explanatory page. If only the saved folder is missing or inaccessible,
+startup warns in the launch console and uses `HOT-Step-Data` beside the app, or the
+original checkout folders in dev. This may show an empty library. The saved location
+is kept; reconnect the drive and restart to use it again.
 
 | Control | What it does |
 |---|---|

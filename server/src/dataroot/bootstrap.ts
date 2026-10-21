@@ -4,7 +4,8 @@
 // module that opens SQLite, log files or the engine. In a release it picks the
 // root (HOT_STEP_DATA_ROOT, profile pointer, this app's old layout, then
 // <parent of app>/HOT-Step-Data), runs a pending move/import/migration, and on
-// any failure serves one plain page and never lets the app start.
+// transfer or pointer failure serves one plain page and never lets the app start.
+// An unavailable saved root falls back without changing the pointer.
 // A dev checkout (no HOT_STEP_ROOT) keeps its checkout paths until Settings
 // writes its own dev pointer; from then on it works like a release, except
 // that nothing is migrated automatically and restart keeps the dev marker.
@@ -116,6 +117,14 @@ export interface ResolveOptions {
   checkoutRoot?: string;
 }
 
+function accessibleRoot(root: string): boolean {
+  try {
+    if (!fs.statSync(root).isDirectory()) return false;
+    fs.accessSync(root, fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch { return false; }
+}
+
 /** Run ptr.pending (if any) under the transfer lock. Returns an error or null. */
 async function runPendingAtBoot(ptrFile: string, ptr: Pointer, appRoot: string, prof: string, opts: ResolveOptions, log: (m: string) => void): Promise<string | null> {
   const op = ptr.pending;
@@ -147,9 +156,9 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
     const err = await runPendingAtBoot(ptrFile, ptr, checkout, prof, opts, log);
     if (err) return fail(err);
     if (!ptr.root) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) }; // abandoned before any root
-    try { fs.accessSync(ptr.root, fs.constants.R_OK | fs.constants.W_OK); } catch {
-      return fail(`The data folder ${ptr.root} is missing or cannot be written. Reconnect the drive, or correct "root" in ${ptrFile} `
-        + `(or delete that file to go back to this checkout's own folders), then restart.`);
+    if (!accessibleRoot(ptr.root)) {
+      log(`[Data] WARNING: Saved data folder ${ptr.root} is missing or cannot be accessed. Using this checkout's default folders in ${checkout}. Saved location unchanged; reconnect the drive and restart to use it again.`);
+      return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
     }
     const sharedWith = sharedRoot(prof, ptrFile, ptr.root);
     if (sharedWith) return fail(`The data folder ${ptr.root} is the same folder as ${sharedWith}, which another HOT-Step install uses. Point this one elsewhere in ${ptrFile}, then restart.`);
@@ -213,14 +222,20 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
     const err = await runPendingAtBoot(ptrFile, ptr, appRoot, prof, opts, log);
     if (err) return fail(err);
 
-    const root = ptr.root;
+    let root = ptr.root;
     if (!root) return fail(`${ptrFile} names no data folder.`);
-    try { fs.accessSync(root, fs.constants.R_OK | fs.constants.W_OK); } catch {
-      return fail(`The data folder ${root} is missing or cannot be written. Reconnect the drive, or correct "root" in ${ptrFile}, then restart.`);
+    const staleRoot = accessibleRoot(root) ? null : root;
+    if (staleRoot) {
+      root = path.join(path.dirname(appRoot), DEFAULT_DATA_FOLDER);
+      if (fs.existsSync(root) && !isEmptyDir(root) && !isDataLayout(root)) {
+        return fail(`${root} exists but is not a HOT-Step data folder. Rename it, or set HOT_STEP_DATA_ROOT, then restart.`);
+      }
+      if (fs.existsSync(root) && !accessibleRoot(root)) return fail(`The default data folder ${root} cannot be accessed.`);
     }
     const sharedWith = sharedRoot(prof, ptrFile, root);
     if (sharedWith) return fail(`The data folder ${root} is the same folder as ${sharedWith}, which another HOT-Step install uses. Point this one elsewhere in ${ptrFile}, then restart.`);
     initLayout(dataLayout(root));
+    if (staleRoot) log(`[Data] WARNING: Saved data folder ${staleRoot} is missing or cannot be accessed. Using default data folder ${root}. Saved location unchanged; reconnect the drive and restart to use it again.`);
     return { ok: true, runtime: release(appRoot, root, prof, null) };
   } catch (e: any) {
     return fail(String(e?.message ?? e));

@@ -145,9 +145,14 @@ reports work: generation, post-processing, stem, MIDI, cover-art and Inspire job
 (`registerJobsBusyCheck` on each job map for queued work, `trackBusy` on each runner until
 it settles), live streams with pending recording writes and exports, in-flight audio-queue items and
 workflow jobs, model, MuScriptor and cover-art downloads, training and the GPU lane. A new
-long-running job type registers its own check. If the folder is
-missing, the pointer is unreadable or a move stops part way, the server prints the reason
-and serves one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
+long-running job type registers its own check. If a saved root is missing or inaccessible,
+startup uses the default `HOT-Step-Data` beside the app and logs one warning naming both
+paths. It leaves the pointer unchanged, so reconnecting the drive and restarting uses the
+saved root again. The fallback may show an empty library; data in the saved root has not
+been moved or deleted. An unrelated or shared fallback folder still blocks startup.
+`HOT_STEP_DATA_ROOT` keeps precedence and an invalid override still blocks startup.
+An unreadable pointer or a move that stops part way still prints the reason and serves
+one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
 
 ### Dev checkouts
 
@@ -162,6 +167,9 @@ pointer. Settings refuses a target that any other pointer in the profile already
 a release's first run refuses a `HOT-Step-Data` sibling that a checkout already uses.
 These compare real locations, and start-up checks them again before a transfer and
 before opening the folder.
+
+An unavailable saved dev root falls back to this checkout's original folders, with one
+warning and no pointer change. Reconnect the drive and restart to resume the saved root.
 
 **Move current data** from a checkout with no data folder moves those checkout paths with
 the same rename-or-copy rules as a release migration. Only folders inside the checkout

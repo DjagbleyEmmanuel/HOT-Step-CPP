@@ -153,21 +153,112 @@ test('legacy .env DATA_DIR=./server/data: user data leaves server/data, settings
   assert.equal(manifest.src, path.join(l.library, 'references', 'r.flac'));
 });
 
-test('missing data folder or malformed pointer: refuses, keeps the pointer, creates nothing', async () => {
+test('missing data folder: falls back with one warning, preserves pointer and uses it again when restored', async () => {
   const f = fixture();
   const gone = path.join(f.base, 'unplugged-drive', 'HOT-Step-Data');
   writePointer(f.ptrFile, { version: 1, root: gone, pending: null });
   const before = fs.readFileSync(f.ptrFile, 'utf-8');
-  const r = await resolveRuntime({ env: f.env, log: quiet, skipEngineProbe: true });
-  assert.equal(r.ok, false);
-  assert.match((r as any).error, /missing/);
+  const logs: string[] = [];
+  const r = await resolveRuntime({ env: f.env, log: m => logs.push(m), skipEngineProbe: true });
+  assert.ok(r.ok);
+  assert.equal(r.runtime.dataRoot, f.sibling);
+  assert.equal(r.runtime.libraryDir, dataLayout(f.sibling).library);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /warning/i);
+  assert.ok(logs[0].includes(gone) && logs[0].includes(f.sibling));
   assert.equal(fs.readFileSync(f.ptrFile, 'utf-8'), before);
   assert.ok(!fs.existsSync(gone));
 
+  initLayout(dataLayout(gone));
+  logs.length = 0;
+  const restored = await resolveRuntime({ env: f.env, log: m => logs.push(m) });
+  assert.ok(restored.ok);
+  assert.equal(restored.runtime.dataRoot, gone);
+  assert.deepEqual(logs, []);
+  assert.equal(fs.readFileSync(f.ptrFile, 'utf-8'), before);
+});
+
+test('malformed pointer: refuses and keeps the pointer', async () => {
+  const f = fixture();
+  fs.mkdirSync(f.prof, { recursive: true });
   fs.writeFileSync(f.ptrFile, '{ not json');
   const bad = await resolveRuntime({ env: f.env, log: quiet, skipEngineProbe: true });
   assert.equal(bad.ok, false);
   assert.equal(fs.readFileSync(f.ptrFile, 'utf-8'), '{ not json');
+});
+
+test('HOT_STEP_DATA_ROOT wins over a stale pointer and never falls back itself', async () => {
+  const f = fixture();
+  const gone = path.join(f.base, 'gone');
+  writePointer(f.ptrFile, { version: 1, root: gone, pending: null });
+  const before = fs.readFileSync(f.ptrFile, 'utf-8');
+  const override = path.join(f.base, 'override');
+  fs.mkdirSync(override);
+  const logs: string[] = [];
+  const env = { ...f.env, HOT_STEP_DATA_ROOT: override };
+  const r = await resolveRuntime({ env, log: m => logs.push(m) });
+  assert.ok(r.ok);
+  assert.equal(r.runtime.dataRoot, override);
+  assert.equal(r.runtime.override, override);
+  assert.ok(logs.every(m => !/warning/i.test(m)));
+  assert.equal(fs.readFileSync(f.ptrFile, 'utf-8'), before);
+  assert.ok(!fs.existsSync(f.sibling));
+  const bad = await resolveRuntime({ env: { ...env, HOT_STEP_DATA_ROOT: gone }, log: quiet });
+  assert.equal(bad.ok, false);
+  assert.ok(!fs.existsSync(gone));
+});
+
+test('unreachable saved root falls back without rewriting the pointer', async t => {
+  const f = fixture();
+  const root = path.join(f.base, 'unreachable');
+  initLayout(dataLayout(root));
+  writePointer(f.ptrFile, { version: 1, root, pending: null });
+  const before = fs.readFileSync(f.ptrFile, 'utf-8');
+  const access = fs.accessSync;
+  t.mock.method(fs, 'accessSync', (p: fs.PathLike, mode?: number) => {
+    if (p === root) throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+    return access(p, mode);
+  });
+  const logs: string[] = [];
+  const r = await resolveRuntime({ env: f.env, log: m => logs.push(m) });
+  assert.ok(r.ok);
+  assert.equal(r.runtime.dataRoot, f.sibling);
+  assert.equal(logs.length, 1);
+  assert.ok(logs[0].includes(root) && logs[0].includes(f.sibling));
+  assert.equal(fs.readFileSync(f.ptrFile, 'utf-8'), before);
+});
+
+test('stale pointer refuses a fallback owned by another install or containing unrelated files', async () => {
+  const f = fixture();
+  writePointer(f.ptrFile, { version: 1, root: path.join(f.base, 'gone'), pending: null });
+  write(path.join(f.sibling, 'unrelated.txt'));
+  const unrelated = await resolveRuntime({ env: f.env, log: quiet });
+  assert.equal(unrelated.ok, false);
+  assert.ok(!fs.existsSync(dataLayout(f.sibling).marker));
+  const other = fixture();
+  writePointer(other.ptrFile, { version: 1, root: path.join(other.base, 'gone'), pending: null });
+  writePointer(devPointerFile(other.prof, other.app), { version: 1, root: other.sibling, pending: null, checkout: other.app });
+  const shared = await resolveRuntime({ env: other.env, log: quiet });
+  assert.equal(shared.ok, false);
+  assert.ok(!fs.existsSync(other.sibling));
+});
+
+test('dev stale pointer falls back to checkout paths with one warning and preserves pointer', async () => {
+  const f = fixture();
+  const ptrFile = devPointerFile(f.prof, f.app);
+  const gone = path.join(f.base, 'gone');
+  writePointer(ptrFile, { version: 1, root: gone, pending: null, checkout: f.app });
+  const before = fs.readFileSync(ptrFile, 'utf-8');
+  const logs: string[] = [];
+  const r = await resolveRuntime({ env: { HOT_STEP_PROFILE_DIR: f.prof }, checkoutRoot: f.app, log: m => logs.push(m) });
+  assert.ok(r.ok);
+  assert.equal(r.runtime.dataRoot, null);
+  assert.equal(r.runtime.envPath, null);
+  assert.equal(logs.length, 1);
+  assert.ok(logs[0].includes(gone) && logs[0].includes(f.app));
+  assert.match(logs[0], /warning/i);
+  assert.equal(fs.readFileSync(ptrFile, 'utf-8'), before);
+  assert.ok(!fs.existsSync(gone));
 });
 
 test('legacy data next to a populated sibling refuses instead of choosing', async () => {
