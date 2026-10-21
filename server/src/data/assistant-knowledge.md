@@ -545,7 +545,9 @@ The profile pointer is `data-location.json` in:
 | Linux | `$XDG_CONFIG_HOME/hot-step`, or `~/.config/hot-step` |
 | macOS | `~/Library/Application Support/HOT-Step` |
 
-Restart state and the transfer journal stay in this profile even while data moves. If the drive is missing, the pointer is malformed, or a transfer fails, HOT-Step shows an explanation page and keeps the saved state. Reconnect the drive or fix the reported problem and restart. An interrupted transfer resumes. Follow the error page's instructions to abandon an unfinished same-volume move. Keep the pointer and data intact until recovery is complete.
+Restart state and the transfer journal stay in this profile even while data moves. If the saved data folder is missing or inaccessible, HOT-Step starts with the default `HOT-Step-Data` beside the app. The launch console warns with the saved and fallback paths. This may show an empty library. The saved location stays unchanged, and no data is moved or deleted; reconnect the drive and restart to use it again. A development checkout falls back to its original checkout folders. An explicit `HOT_STEP_DATA_ROOT` override still takes precedence; an invalid override stops startup.
+
+A malformed pointer, failed transfer, or unsuitable fallback folder still shows an explanation page and keeps the saved state. Fix the reported problem and restart. An interrupted transfer resumes. Follow the error page's instructions to abandon an unfinished same-volume move. Keep the pointer and data intact until recovery is complete.
 
 Browser preferences stay in browser localStorage for that address. They do not move with the data folder. Back up the profile pointer separately if you need to restore the saved location on another machine.
 
