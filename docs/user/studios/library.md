@@ -158,6 +158,11 @@ note onset; the panel also shows their mean absolute offset and the first
 section more than one bar off. It lists unmatched sung tags and why any section
 is unscored, including low word confidence. The live result uses the mix alone
 and says that vocal-stem agreement has not been checked.
+Sections without a vocal note or matching lyrics show **Instrumental / N/A**
+and are excluded from the vocal-section scoring count. Section names do not
+decide eligibility: an intro, interlude, solo or outro with lyrics and vocal
+notes is measured. Low-confidence vocal sections remain unscored; instrumental
+skipping does not lower the word-confidence cutoff.
 The measurement is saved with the song; opening details alone does not run the
 aligner. If the rendered score has free tempo, the calculation uses the
 reviewed source score's tempo and labels that fallback.

@@ -167,6 +167,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Editable cover-art prompt | Generate or regenerate cover art from a pre-filled, editable prompt. |
 | A/B compare | Pin two tracks, play them against each other, and open a parameter diff. |
 | Song details | Backend chip, per-backend "How it was made" breakdown, prompt and lyrics. |
+| Cover lyric drift | Measures sung section timing against vocal notes; sections without lyrics or vocal notes show Instrumental / N/A and leave the scoring count. |
 | Streaming rows | A MiniMax-Music3 render in progress shows in the list and plays before its file exists. |
 | Tagged downloads | Metadata and cover art embedded in downloaded files, in the format chosen in Settings. |
 | Global player | Transport, repeat modes, spectrum analyzer, disco mode and volume, visible in every view. |
