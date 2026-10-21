@@ -703,6 +703,8 @@ export interface Yue2PreparedJob {
   job: GenerationJob;
   req: Yue2SynthRequest;
   abcSupplied: boolean;
+  /** The app planned the score itself and handed the engine a finished one. */
+  abcPlanned?: boolean;
   caption: string;
   halves: Yue2StyleHalves;
   autoReplan?: Yue2AutoReplan;
@@ -940,6 +942,7 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     if (p.replanFlags) autoReplan.clean = picked.clean;
     const notes: string[] = [];
     m.req.abc = m.req.lyrics ? p.sheets[picked.index] : yue2InstrumentalAbc(p.sheets[picked.index], notes);
+    m.abcPlanned = true;
     for (const n of notes) m.log('INFO', `[YuE2] ${n}`);
     m.req.seed = seed;
     if (p.once) {
@@ -1601,6 +1604,7 @@ async function finishYue2Job(
           stage_end_reasons: td.stage_end_reasons ?? finalDetail.stage_end_reasons,
           duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
           abc_supplied: p.abcSupplied,
+          ...(p.abcPlanned ? { abc_planned: true } : {}),
           ...(parts.length > 1 ? { song: td.song, variation: td.variation, noise_seed: td.noise_seed } : {}),
           ...(scoreHealth ? { score_health: scoreHealth } : {}),
           ...(autoReplan ? { auto_replan: autoReplan } : {}),
