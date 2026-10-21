@@ -83,9 +83,11 @@ original audio track is unaffected and keeps playing under the crossfade.
 Transcription shares the GPU queue with generation and post-processing, one
 job at a time, so it never runs beside a render and slows both down.
 
-A transcription job that runs past an hour is stopped automatically. The hour
-counts from when transcription starts, not from when the job was queued. A job
-that fails or is stopped after it has transcribed some notes keeps them: the
+A transcription job is stopped automatically after 20 minutes of silence from
+the engine. Each line of output resets that timer, so a long track can keep
+running while it makes progress. A six-hour hard cap applies from when
+transcription starts, excluding time spent queued. A job that fails or is
+stopped after it has transcribed some notes keeps them: the
 server saves those notes as a partial `.mid` and the job stays marked failed,
 with the error, after a restart too. Notes still sounding at the moment it
 stopped are left out.
