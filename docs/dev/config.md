@@ -73,6 +73,7 @@ In the tables below, the Settings column says where a key appears:
 | `ACESTEPCPP_NOISE_PROFILE` | First `.wav` in `<root>/noise_samples/`, or empty | env only | Passed as `--noise-profile` when the file exists |
 | `DATA_DIR` | `./data` | Environment, Restart | Data folder: `hotstep.db`, `audio/`, `references/`, `vst/`, `lyrics/`, `training/`. See [How DATA_DIR resolves](#how-data_dir-resolves) |
 | `LYRICS_EXPORT_DIR` | `<data dir>/lyrics` | Environment | Where Lyric Studio exports lyrics. Hot-reloaded |
+| `DOWNLOAD_DIR` | empty | Environment | Absolute folder that `POST /api/download/:id/save` writes into. Empty keeps browser downloads. Checked (creatable, writable) when saved. Hot-reloaded |
 | `MUSCRIPTOR_MODELS_DIR` | `<data dir>/models/muscriptor` | Environment, Restart | Where MIDI Studio keeps its MuScriptor weights. Read in `services/muscriptor.ts` when the module loads |
 | `TRAINING_DIR` | `<data dir>/training` | env only | Training Studio working folder |
 | `WHISPER_EXE` | `<root>/tools/whisper/whisper-cli[.exe]` | env only | Whisper binary for lyric transcription. On macOS and Linux, the app also checks for `whisper-cli` on PATH and does not auto-download it. Install with [`brew install whisper.cpp`](https://formulae.brew.sh/formula/whisper.cpp) or set this to an existing executable path. |

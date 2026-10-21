@@ -513,6 +513,18 @@ const AppContent: React.FC = () => {
     setToast({ message, type, isVisible: true });
   };
 
+  // downloadTrack.ts saves into the DOWNLOAD_DIR folder when one is set; say where it went.
+  useEffect(() => {
+    const onSaved = (e: Event) => {
+      const { path, error } = (e as CustomEvent<{ path?: string; error?: string }>).detail;
+      setToast(error
+        ? { message: t('download.saveFailed', 'Download failed: {{error}}', { error }), type: 'error', isVisible: true }
+        : { message: t('download.savedTo', 'Saved to {{path}}', { path }), type: 'success', isVisible: true });
+    };
+    window.addEventListener('hotstep:download-saved', onSaved);
+    return () => window.removeEventListener('hotstep:download-saved', onSaved);
+  }, [t]);
+
   // Disco mode toggle — prompt to enable stem extraction if needed
   const handleToggleDisco = useCallback(() => {
     if (discoMode) {

@@ -270,6 +270,8 @@ export const config = {
   // Data paths
   data: {
     dir: resolveDataDir(process.env.DATA_DIR),
+    /** Where /api/download/:id/save writes; '' = browser download only. */
+    downloadDir: resolveDataPath(process.env.DOWNLOAD_DIR || ''),
     get dbPath() {
       return path.join(this.dir, 'hotstep.db');
     },
@@ -403,7 +405,7 @@ export const EXPOSED_ENV_KEYS = [
   'LABEL_GENIUS_CONCURRENCY', 'LABEL_GENIUS_MIN_INTERVAL_MS',
   'LABEL_CAPTION_CONCURRENCY', 'LABEL_CAPTION_MIN_INTERVAL_MS',
   // Paths
-  'LYRICS_EXPORT_DIR', 'MUSCRIPTOR_MODELS_DIR',
+  'LYRICS_EXPORT_DIR', 'MUSCRIPTOR_MODELS_DIR', 'DOWNLOAD_DIR',
   // Training workers
   'TRAINING_WORKERS', 'TRAINING_WORKER_TOKEN', 'WORKER_TOKEN',
 ] as const;
@@ -529,6 +531,8 @@ export function reloadEnvConfig(envText?: string): string[] {
   apply('TRAINING_WORKERS', v => { config.workers.list = v; }, () => config.workers.list);
   apply('TRAINING_WORKER_TOKEN', v => { config.workers.token = v; }, () => config.workers.token);
   apply('WORKER_TOKEN', v => { config.workers.acceptToken = v; }, () => config.workers.acceptToken);
+  apply('DOWNLOAD_DIR', v => { config.data.downloadDir = resolveDataPath(v); },
+    () => config.data.downloadDir);
   apply('LYRICS_EXPORT_DIR', v => {
     config.lireek.exportDir = resolveDataPath(v) || path.join(config.data.dir, 'lyrics');
   }, () => config.lireek.exportDir);

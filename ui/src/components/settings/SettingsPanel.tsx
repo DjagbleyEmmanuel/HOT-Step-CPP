@@ -465,6 +465,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <EnvSubsection title={t('settings.env.paths')} isOpen={openSections.paths} onToggle={() => toggleSection('paths')}>
               <EnvPathRow envKey="LYRICS_EXPORT_DIR" label={t('settings.env.lyricsExportDir')} description={t('settings.env.lyricsExportDirDesc')}
                 value={envValues.LYRICS_EXPORT_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
+              <EnvPathRow envKey="DOWNLOAD_DIR" label={t('settings.env.downloadDir')} description={t('settings.env.downloadDirDesc')}
+                value={envValues.DOWNLOAD_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
               <EnvPathRow envKey="MUSCRIPTOR_MODELS_DIR" label={t('settings.env.muscriptorModelsDir')} description={t('settings.env.muscriptorModelsDirDesc')}
                 value={envValues.MUSCRIPTOR_MODELS_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
             </EnvSubsection>

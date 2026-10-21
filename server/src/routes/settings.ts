@@ -15,6 +15,7 @@ import {
   config,
 } from '../config.js';
 import { listGpus } from '../services/gpuDevices.js';
+import { validateDownloadDir } from '../services/downloadSave.js';
 import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../contracts/settings.js';
 import { getDataLocation, getBusyBlockers, previewOperation, scheduleOperation, cancelPending, registerBusyCheck } from '../dataroot/pointer.js';
 import { listJobs } from '../services/training/labelingQueue.js';
@@ -149,6 +150,14 @@ router.post('/env', (req, res) => {
     if (Object.keys(safeUpdates).length === 0) {
       res.json({ updated: [], restartRequired: false } satisfies EnvUpdateResponse);
       return;
+    }
+
+    // A bad download folder is refused here, not discovered at the first download.
+    if (safeUpdates.DOWNLOAD_DIR?.trim()) {
+      try { validateDownloadDir(safeUpdates.DOWNLOAD_DIR.trim()); } catch (err: any) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
     }
 
     // Read current .env
