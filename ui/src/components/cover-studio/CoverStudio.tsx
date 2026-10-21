@@ -596,12 +596,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setInstrumental(gpData.instrumental === true || lyr === '' || lyr === '[instrumental]');
 
     // Reset transforms/overrides from any previous source
-    if (useDetectedDetails) {
-      setAnalysis(null);
-      setBpmCorrection(1); setKeyOverride(null); setBpmOverride(null);
-    } else {
-      setAnalysis(prev => prev ?? { bpm: 120, key: 'C major' });
-    }
+    // Detection off: the new source starts at the 120 / C major default, never the old song's values.
+    setAnalysis(useDetectedDetails ? null : { bpm: 120, key: 'C major' });
+    setBpmCorrection(1); setKeyOverride(null); setBpmOverride(null);
     setTempoScale(1.0); setPitchShift(0);
 
     // BPM/key — (A) use the track's stored metadata, else (B) analyze the source.
@@ -683,14 +680,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setLyrics(''); setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
-    if (useDetectedDetails) {
-      setAnalysis(null);
-      setBpmCorrection(1);
-      setBpmOverride(null);
-      setKeyOverride(null);
-    } else {
-      setAnalysis(prev => prev ?? { bpm: 120, key: 'C major' });
-    }
+    setAnalysis(useDetectedDetails ? null : { bpm: 120, key: 'C major' });
+    setBpmCorrection(1);
+    setBpmOverride(null);
+    setKeyOverride(null);
 
     // Check track cache
     const cached = getTrackCache()[file.name];
@@ -1753,7 +1746,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               setUseDetectedDetails(enabled);
             }}
             label={t('cover.useDetectedDetails', 'Use detected BPM/key')}
-            info={t('cover.useDetectedDetailsInfo', 'On: loading audio uses detected, cached or dataset BPM and key. Off: ignore those results and keep your current BPM and key overrides when loading audio. Source analysis may still run. This does not edit the ABC score. Default manual values are 120 BPM and C major.')} />
+            info={t('cover.useDetectedDetailsInfo', 'On: loading audio uses detected, cached or dataset BPM and key. Off: ignore those results; loading new audio resets BPM and key to the defaults. Source analysis may still run. This does not edit the ABC score. Default manual values are 120 BPM and C major.')} />
           <ParamLabel label={t('cover.sourceKeyBehavior', 'Source key behavior')}
             info={yue2Mode
               ? t('cover.sourceKeyBehaviorYue2', 'The source Key field is metadata. It does not transpose the ABC notes or pitch-shift the recording. YuE2 composes from the reviewed ABC score; use Pitch Shift in the cover settings to transpose that score for generation.')
