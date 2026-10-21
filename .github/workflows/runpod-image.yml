@@ -1,9 +1,8 @@
 name: RunPod image
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -22,12 +21,21 @@ jobs:
       - name: Select release image tags
         id: version
         shell: bash
+        env:
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v[0-9][0-9A-Za-z._-]*$ || ${#GITHUB_REF_NAME} -gt 128 ]]; then
             echo "::error::Run this workflow on a v* release tag, not a branch."
             exit 1
           fi
+          # Under the release event GITHUB_REF is refs/tags/<release tag>, same as a tag push.
+          # Prereleases and hyphenated tags (-CI-Test) get their own tag but never move :latest.
+          images="ghcr.io/scragnog/hot-step-cpp:$GITHUB_REF_NAME"
+          if [[ "$RELEASE_PRERELEASE" != true && "$GITHUB_REF_NAME" != *-* ]]; then
+            images+=$'\n'"ghcr.io/scragnog/hot-step-cpp:latest"
+          fi
           echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          { echo "images<<EOF"; echo "$images"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,9 +71,7 @@ jobs:
           target: runpod
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/scragnog/hot-step-cpp:${{ steps.version.outputs.tag }}
-            ghcr.io/scragnog/hot-step-cpp:latest
+          tags: ${{ steps.version.outputs.images }}
           labels: |
             org.opencontainers.image.source=https://github.com/scragnog/HOT-Step-CPP
             org.opencontainers.image.version=${{ steps.version.outputs.tag }}

@@ -96,7 +96,8 @@ older shells — this repo's convention). `gh` is already authenticated as
 
 Use this to verify CI compiles across all platforms without cutting a real
 release. Hyphenated tags build everything but are excluded from changelog
-anchoring.
+anchoring. Never *publish* a `-CI-Test` draft: publishing a release also publishes
+the RunPod container image (`runpod-image.yml`); delete the draft instead.
 
 ```powershell
 git tag -a vX.Y.Z-CI-Test -m "compile test"

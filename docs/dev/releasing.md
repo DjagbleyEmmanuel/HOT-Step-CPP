@@ -11,8 +11,10 @@ A separate `Cache Warm` workflow keeps the engine build cache on `master` so
 release builds take ~10–15 min instead of ~1.5h for the CUDA jobs.
 
 Starting with the next release containing `.github/workflows/runpod-image.yml`,
-the separate `RunPod image` workflow runs on the same `v*` tag pushes and publishes
-`ghcr.io/scragnog/hot-step-cpp:<release-tag>` and `:latest`. It uses `GITHUB_TOKEN`
+the separate `RunPod image` workflow runs when you **publish** the GitHub Release
+(not on tag push, so the draft stays private) and publishes
+`ghcr.io/scragnog/hot-step-cpp:<release-tag>`, plus `:latest` unless the release is
+a prerelease or the tag is hyphenated (`-CI-Test`). It uses `GITHUB_TOKEN`
 with `packages: write`, builds the `runpod` Docker target for Linux x86_64 and
 has its own cache and concurrency group. It runs independently of the portable
 release jobs, so inspect its result separately; neither workflow gates the other.
@@ -20,9 +22,10 @@ Ordinary `master` pushes do not build images. See the [RunPod guide](runpod.md)
 for pulling the image or building your own.
 
 Manual `RunPod image` dispatch must select an existing `v*` release tag; branch
-dispatches fail before checkout or publishing. Every successful run updates
-`latest`, including throwaway `-CI-Test` tags and reruns of older tags. Publishing
-a GitHub Release draft does not trigger another image build. On the first GHCR
+dispatches fail before checkout or publishing, and the same `:latest` rule applies
+(a manual run of a plain `vX.Y.Z` tag does update `latest`, including reruns of older
+tags). Publishing a throwaway `-CI-Test` release builds and pushes its own image tag,
+so delete drafts instead of publishing them. On the first GHCR
 publication, check the package visibility and make it public for anonymous pulls,
 or configure registry credentials in RunPod for a private package.
 
