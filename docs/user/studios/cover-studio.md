@@ -148,7 +148,10 @@ Cover Studio draft to resume the workflow.
    with a confirmation, and Generate stays disabled until both are current for the
    source. Editing the score or changing the source audio, stem mix or source mode
    withdraws them. The raw ABC editor is still there as an advanced editor in step
-   1; a change made in it counts as a structure edit.
+   1; a change made in it counts as a structure edit. **MIDI**, beside the ABC/Chart
+   switch, downloads the score as a MIDI file: the vocal and instrumental lines as
+   separate tracks and the chord symbols as a comping track, at the score's tempo
+   and meter, for a DAW or notation app.
    A score whose bars are mostly 2/4 shows a **Convert 2/4 to 4/4** button in step 1. It pairs
    every two 2/4 bars into one 4/4 bar, in every voice, and shows the result as a
    chart before anything changes. Each note keeps its pitch and timing: where a

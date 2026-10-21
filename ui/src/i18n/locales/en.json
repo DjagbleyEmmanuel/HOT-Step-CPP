@@ -646,6 +646,10 @@
     "cover.prepare.undo": "Undo",
     "cover.prepare.redo": "Redo",
     "cover.prepare.score.applyAbc": "Apply ABC text",
+
+    "cover.prepare.score.downloadMidi": "MIDI",
+
+    "cover.prepare.score.downloadMidiInfo": "Download the score as a MIDI file: the vocal and instrumental lines as separate tracks, the chord symbols as a comping track, at the score's tempo and meter.",
     "cover.prepare.score.approved": "Score approved",
     "cover.prepare.structure.locked": "Structure confirmed and locked.",
     "cover.prepare.structure.edit": "Edit structure",

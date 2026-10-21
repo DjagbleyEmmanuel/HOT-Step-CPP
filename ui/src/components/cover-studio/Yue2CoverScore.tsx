@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { followNoteInBox } from '../../utils/abcFollow';
 import { abcSectionMarks, sectionAtChar, sectionColours, withBarNumbers } from '../../utils/abcSections';
 import { withChoirVocal } from '../../utils/abcChoirVocal';
+import { downloadAbcMidi } from '../../utils/abcMidi';
 import { barAtChar, barRanges } from '../../utils/abcSectionMove';
 import { AbcChart } from './AbcChart';
 import { MusicXmlImport } from './MusicXmlImport';
@@ -198,10 +199,15 @@ export const Yue2CoverScore: React.FC<Props> = p => {
   // Side by side, the ABC and the score share the panel's height, less its
   // heading, the import row and the approve button.
   const boxHeight = p.wide ? Math.max(128, p.height - 158) : undefined;
-  const viewToggle = <div className="inline-flex rounded-md border border-zinc-300 dark:border-white/10 text-[11px]">
-    {(['abc', 'chart'] as const).map(mode => <button key={mode} type="button" onClick={() => setView(mode)}
-      className={`px-2 py-0.5 ${view === mode ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-500'}`}>
-      {mode === 'abc' ? 'ABC' : 'Chart'}</button>)}
+  const viewToggle = <div className="inline-flex items-center gap-2">
+    <div className="inline-flex rounded-md border border-zinc-300 dark:border-white/10 text-[11px]">
+      {(['abc', 'chart'] as const).map(mode => <button key={mode} type="button" onClick={() => setView(mode)}
+        className={`px-2 py-0.5 ${view === mode ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300' : 'text-zinc-500'}`}>
+        {mode === 'abc' ? 'ABC' : 'Chart'}</button>)}
+    </div>
+    <button type="button" onClick={() => downloadAbcMidi(p.abc, `score-${p.sourceKey || 'cover'}`)}
+      title={t('cover.prepare.score.downloadMidiInfo')}
+      className="text-[11px] text-cyan-700 dark:text-cyan-300 hover:underline">{t('cover.prepare.score.downloadMidi')}</button>
   </div>;
   const editor = view === 'chart' && p.abc.trim()
     ? <AbcChart abc={p.abc} disabled={busy || p.readOnly} height={boxHeight ?? 320} playingBar={playingBar}
