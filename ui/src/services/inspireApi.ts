@@ -1,13 +1,10 @@
 import { serverKey } from '../queries/keys';
 import { waitForSnapshot } from '../queries/studios/wait';
 import { apiClient, type ReadOptions } from './httpClient';
-import { getAuthToken } from './axiosClient';
+import { getAuthToken, SLOW_ROUTE_TIMEOUT_MS } from './axiosClient';
 // inspireApi.ts — Frontend API client for the inspire endpoint
 //
 // Provides submit + poll interface for the Insta-Gen inspire flow.
-
-/** External LLM calls can run well past the 60s default; give them a wide margin. */
-const LLM_TIMEOUT_MS = 300_000;
 
 export interface InspireParams {
   caption: string;
@@ -116,7 +113,7 @@ export interface InspireProvider {
 export async function runLlmInspire(
   params: LlmInspireParams,
 ): Promise<LlmInspireResult> {
-  return apiClient.post<LlmInspireResult>('/inspire/llm', params, { timeout: LLM_TIMEOUT_MS });
+  return apiClient.post<LlmInspireResult>('/inspire/llm', params, { timeout: SLOW_ROUTE_TIMEOUT_MS });
 }
 
 /** Fetch available LLM providers for the Insta-Gen provider dropdown */
@@ -128,7 +125,7 @@ export async function fetchInspireProviders(opts?: ReadOptions): Promise<Inspire
 export async function generateRandomSubject(
   params: { provider: string; model?: string; genres?: string[] },
 ): Promise<string> {
-  const data = await apiClient.post<{ subject?: string }>('/inspire/llm/subject', params, { timeout: LLM_TIMEOUT_MS });
+  const data = await apiClient.post<{ subject?: string }>('/inspire/llm/subject', params, { timeout: SLOW_ROUTE_TIMEOUT_MS });
   return data.subject || '';
 }
 

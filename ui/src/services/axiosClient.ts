@@ -22,10 +22,14 @@ import axios, { AxiosError, CanceledError, type AxiosResponse, type InternalAxio
 import { toast } from 'react-toastify';
 import { ApiError } from './apiError';
 
-/** Default per-request timeout. Known-slow routes (adapter scans, folder
- *  browse, transcribe, LLM calls) pass a longer `timeout` per request — a
- *  blanket short timeout would break them. */
+/** Default per-request timeout. Known-slow routes pass SLOW_ROUTE_TIMEOUT_MS
+ *  instead — a blanket short timeout would break them. */
 export const DEFAULT_TIMEOUT_MS = 60_000;
+
+/** For routes that block server-side for minutes (adapter scans, folder
+ *  browse, Whisper retranscribe, mastering runs, external LLM calls): without
+ *  the override they die at the default and toast "Server unreachable". */
+export const SLOW_ROUTE_TIMEOUT_MS = 300_000;
 
 // ---------------------------------------------------------------------------
 // Auth session accessor — the only place the transport reads the bearer from.

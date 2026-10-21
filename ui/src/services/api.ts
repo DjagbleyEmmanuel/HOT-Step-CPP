@@ -25,6 +25,7 @@ import type {
   ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
 } from '../../../server/src/contracts/profiles';
 import { apiClient, ApiError, type ClientOptions, type ReadOptions } from './httpClient';
+import { SLOW_ROUTE_TIMEOUT_MS } from './axiosClient';
 
 const BASE = '/api';
 
@@ -351,22 +352,24 @@ export const masteringApi = {
   listReferences: (opts?: ReadOptions) => get<ListReferencesResponse>('/mastering/references', opts),
   /** Delete a reference track */
   deleteReference: (name: string) => del<DeleteReferenceResponse>(`/mastering/references/${name}`),
-  /** Run mastering on an existing song */
+  /** Run mastering on an existing song — blocks server-side for minutes. */
   run: (songId: string, referenceName: string) =>
-    post<RunMasteringResponse>('/mastering/run', { songId, referenceName }),
+    post<RunMasteringResponse>('/mastering/run', { songId, referenceName }, { timeout: SLOW_ROUTE_TIMEOUT_MS }),
 };
 
 // ── Adapters ────────────────────────────────────────────────
 export const adapterApi = {
-  /** Browse directory — returns entries (dirs + filtered files) */
+  /** Browse directory — returns entries (dirs + filtered files). Slow on
+   *  network filesystems, so it gets the slow-route timeout. */
   browse: (dirPath: string, filter?: string, opts?: ReadOptions) =>
-    get<BrowseResponse>(
+    apiClient.get<BrowseResponse>(
       `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`,
-      opts,
+      { ...opts, timeout: SLOW_ROUTE_TIMEOUT_MS },
     ),
-  /** Scan folder for .safetensors files. A POST, but a pure read. */
+  /** Scan folder for .safetensors files. A POST, but a pure read; a recursive
+   *  scan of a large library can take minutes. */
   scan: (folder: string, opts?: ReadOptions) =>
-    apiClient.post<ScanResponse>('/adapters/scan', { folder }, { signal: opts?.signal }),
+    apiClient.post<ScanResponse>('/adapters/scan', { folder }, { signal: opts?.signal, timeout: SLOW_ROUTE_TIMEOUT_MS }),
   /** Planner-LM adapters (local HOT-Step feature). Scans `folder` when given,
    *  else every per-size root (lm-06b/lm-17b/lm-4b) plus the legacy flat lm/.
    *  `lmSize` comes from the parent folder (new layout) or the legacy -<size>
@@ -534,9 +537,11 @@ export function revertSongPostProcessing(songId: string): Promise<{ removed: boo
   return apiClient.delete(`/songs/${songId}/postprocess`);
 }
 
+/** Re-runs Whisper transcription — the server runs it inline, so a full track
+ *  can take minutes. */
 export function retranscribeLyrics(
   songId: string,
   options?: { model?: string; language?: string; beamSize?: number }
 ): Promise<{ success: boolean; lineCount: number; wordCount: number }> {
-  return apiClient.post(`/songs/${songId}/retranscribe`, options || {});
+  return apiClient.post(`/songs/${songId}/retranscribe`, options || {}, { timeout: SLOW_ROUTE_TIMEOUT_MS });
 }
