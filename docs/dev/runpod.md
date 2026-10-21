@@ -14,16 +14,17 @@ are downloaded after deployment. This guide covers GPU Pods, not Serverless work
 ## Pull the published image
 
 From the next release containing this workflow, the separate `RunPod image`
-workflow publishes `ghcr.io/scragnog/hot-step-cpp:vX.Y.Z` and `:latest` on `v*`
-tag pushes. Wait for that workflow to succeed before pulling. Replace `vX.Y.Z`
-with the release tag you want:
+workflow publishes `ghcr.io/scragnog/hot-step-cpp:vX.Y.Z` when a GitHub release
+is published (a tag push alone does not). `:latest` moves only for a
+non-prerelease tag without a hyphen. Wait for that workflow to succeed before
+pulling. Replace `vX.Y.Z` with the release tag you want:
 
 ```sh
 docker pull ghcr.io/scragnog/hot-step-cpp:vX.Y.Z
 ```
 
-Use that image in the RunPod template below, or `:latest` for the most recently
-completed image build. Prefer a version tag for repeatable deployments. The
+Use that image in the RunPod template below, or `:latest` for the most recent
+stable release image. Prefer a version tag for repeatable deployments. The
 published image uses the portable CUDA architectures and build arguments below.
 Models are downloaded after deployment, and data persists under `/workspace`.
 
