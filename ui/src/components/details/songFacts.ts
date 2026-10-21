@@ -270,18 +270,18 @@ function yue2Facts(gp: any): FactGroup[] {
     // "plan: skipped" alongside "Score: Supplied (ABC)" is the same fact twice,
     // and the second phrasing reads like a failure. Drop it.
     if (stage === 'plan' && reason === 'skipped' && y.abc_supplied) continue;
+    // An app-planned score (auto re-plan, instrumental move) also reaches the
+    // engine finished, so the engine says "skipped" though a plan did run.
+    if (stage === 'plan' && reason === 'skipped' && y.abc_planned) {
+      add(outcome, 'Plan stage', 'Planned by the app');
+      continue;
+    }
     // The orchestrator can plan first, then render with that ABC. The render's
     // skipped result describes only its own job; abc_supplied records whether
     // the score came from the caller before that separate planning pass.
     if (stage === 'plan' && reason === 'skipped' && y.abc_supplied === false
       && req.abc && cot !== 'off') {
       add(outcome, 'Plan stage', 'Planned by LM');
-      continue;
-    }
-    // An app-planned score (auto re-plan, instrumental move) also reaches the
-    // engine finished, so the engine says "skipped" though a plan did run.
-    if (stage === 'plan' && reason === 'skipped' && y.abc_planned) {
-      add(outcome, 'Plan stage', 'Planned by the app');
       continue;
     }
     const mapped = STAGE_REASON[String(reason)];
