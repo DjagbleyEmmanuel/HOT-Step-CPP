@@ -1014,4 +1014,11 @@ if(BUILD_TESTING)
     link_ggml_backends(yue2-aitk-dora-test)
     target_link_libraries(yue2-aitk-dora-test PRIVATE yyjson)
     add_test(NAME yue2-aitk-dora COMMAND yue2-aitk-dora-test)
+
+    # A semantic redraw keeps the supplied score (#234). No GPU, no models.
+    add_executable(yue2-recompose-test tools/yue2-recompose-test.cpp)
+    target_include_directories(yue2-recompose-test PRIVATE src)
+    target_link_libraries(yue2-recompose-test PRIVATE yyjson luajit)
+    link_ggml_backends(yue2-recompose-test)
+    add_test(NAME yue2-recompose COMMAND yue2-recompose-test)
 endif()

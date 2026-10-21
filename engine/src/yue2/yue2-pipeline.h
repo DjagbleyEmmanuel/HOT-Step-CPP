@@ -665,6 +665,29 @@ static bool yue2_stream_clean(const std::string & reason) {
     return reason == "eos" || reason == "eos_threshold";
 }
 
+// Why a lyric_schedule run can't go ahead on these songs, or nullptr.
+static const char * yue2_lyric_schedule_refusal(bool use_cfg, bool have_abc, const std::vector<Yue2SongState> & songs) {
+    if (use_cfg) return "needs cfg_scale 1 (no rule for the guidance set)";
+    if (!have_abc || !songs[0].abc_given) return "needs a supplied score (abc)";
+    for (size_t b = 1; b < songs.size(); b++) {
+        if (songs[b].prefix_ids != songs[0].prefix_ids) return "needs every song of the batch to share one prompt";
+    }
+    return nullptr;
+}
+
+// What a recomposition draw inherits from the song it redraws. The supplied
+// score has to come along, or a lyric_schedule redraw is refused (#234).
+static void yue2_recompose_copy(Yue2SongState & ds, const Yue2SongState & sg) {
+    ds.src_song   = sg.src_song;
+    ds.style      = sg.style;
+    ds.lyrics     = sg.lyrics;
+    ds.abc_text   = sg.abc_text;
+    ds.abc_given  = sg.abc_given;
+    ds.abc_ids    = sg.abc_ids;
+    ds.score_abc  = sg.score_abc;
+    ds.noise_seed = sg.noise_seed;
+}
+
 static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, const Yue2Request & req,
                                      bool have_abc, std::vector<Yue2SongState> & songs,
                                      std::atomic<bool> * cancel, const Yue2ProgressFn & progress,
@@ -713,13 +736,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const Yue2LyricSchedule & lsched = req.lyric_schedule;
     Yue2ScheduleRows          lsched_rows;
     if (lsched.on) {
-        const char * why = use_cfg ? "needs cfg_scale 1 (no rule for the guidance set)"
-                           : !have_abc || !songs[0].abc_given ? "needs a supplied score (abc)"
-                           : nullptr;
-        for (int b = 1; !why && b < B; b++) {
-            if (songs[(size_t) b].prefix_ids != songs[0].prefix_ids) why = "needs every song of the batch to share one prompt";
-        }
-        if (why) {
+        if (const char * why = yue2_lyric_schedule_refusal(use_cfg, have_abc, songs)) {
             if (err) *err = std::string("lyric_schedule ") + why;
             return false;
         }
@@ -1789,12 +1806,7 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
             const Yue2SongState & sg = songs[(size_t) runaway[r]];
             for (int d = 0; d < want[r]; d++) {
                 Yue2SongState ds;
-                ds.src_song   = sg.src_song;
-                ds.style      = sg.style;
-                ds.lyrics     = sg.lyrics;
-                ds.abc_ids    = sg.abc_ids;
-                ds.score_abc  = sg.score_abc;
-                ds.noise_seed = sg.noise_seed;
+                yue2_recompose_copy(ds, sg);
                 // Try n of a song draws with its seed + n x 1000003, the step
                 // the server reads its recompose count back from.
                 ds.seed = sg.seed + 1000003ull * (uint64_t) (tries[(size_t) runaway[r]] + d + 1);
