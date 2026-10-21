@@ -1003,6 +1003,15 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
+        key: 'yue2CaptionBpmKey',
+        type: 'toggle',
+        label: 'Include BPM/key in caption',
+        hint: 'On (the default) the style sentence ends with the trained "<bpm> BPM, key of <key>." '
+            + 'tail, taken from Song Info or the dataset caption. Turn it off for an adapter trained '
+            + 'without BPM and key: the tail is left out and any tail on the caption is removed.',
+        default: true,
+      },
+      {
         key: 'yue2PreviewScore',
         type: 'toggle',
         label: 'Preview the score first',

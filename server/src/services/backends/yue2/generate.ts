@@ -152,6 +152,11 @@ function yue2StyleForAdapter(
   caption: string, params: any, picked: Yue2PersistedSelection['adapters'],
 ): { style: string; notes: string[]; halves: Yue2StyleHalves; trainedCot: string } {
   const notes: string[] = [];
+  // "Include BPM/key in caption" off (#286): adapters trained without the
+  // tail never saw it. Peel the caption's own tail and compose no Song Info
+  // values; absent or true is today's behaviour.
+  const noTail = params.yue2CaptionBpmKey === false;
+  if (noTail) caption = splitYue2Tail(caption).caption;
   const halfOf = (slot: { path: string; scales: Yue2AdapterScales }) => ({
     path: slot.path,
     trigger: yue2AdapterTrigger(slot.path).trigger,
@@ -217,8 +222,8 @@ function yue2StyleForAdapter(
   //
   // Only when actually set: tail() drops blanks, so a render that leaves BPM
   // at 0 and Key on Auto composes the identical string it did before.
-  const userBpm = Number(params.bpm) > 0 ? String(Math.round(Number(params.bpm))) : '';
-  const userKey = String(params.keyScale || '').trim();
+  const userBpm = !noTail && Number(params.bpm) > 0 ? String(Math.round(Number(params.bpm))) : '';
+  const userKey = noTail ? '' : String(params.keyScale || '').trim();
 
   // A caption from the dataset ("automatic" caption source) usually ENDS with
   // a tail of its own, because the labeller wrote it in the trained format.

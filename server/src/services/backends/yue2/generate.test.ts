@@ -295,3 +295,31 @@ test('an unlisted select value or an oversized text param falls back to the plug
   assert.ok(notes.includes('Invalid yue2LieCurve — using the plugin default'));
   assert.ok(notes.includes('Invalid yue2LieSections — using the plugin default'));
 });
+
+// #286: the BPM/key tail is optional per render; absent means on.
+test('yue2CaptionBpmKey: on and absent keep the tail, off leaves it out', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const nodePath = await import('node:path');
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'yue2-tail-'));
+  try {
+    const header = Buffer.from(JSON.stringify({ __metadata__: { trigger: 'tt', style_template: 'upstream' } }));
+    const len = Buffer.alloc(8);
+    len.writeBigUInt64LE(BigInt(header.length));
+    const file = nodePath.join(dir, 'native-nar.safetensors');
+    fs.writeFileSync(file, Buffer.concat([len, header]));
+    const adapted: Yue2PersistedSelection = {
+      ...pick, adapters: { ar: { path: '', scales }, nar: { path: file, scales } },
+    };
+    const base = { caption: 'sludgy riffs doom, 72 BPM, key of D minor.', lyrics, bpm: 90, keyScale: 'A minor' };
+    const style = (extra: Record<string, unknown>) => mapYue2Params({ ...base, ...extra }, adapted).req.style;
+    const on = 'tt, in the style of tt. sludgy riffs doom 90 BPM, key of A minor.';
+    assert.equal(style({}), on, 'older request without the field');
+    assert.equal(style({ yue2CaptionBpmKey: true }), on);
+    assert.equal(style({ yue2CaptionBpmKey: false }), 'tt, in the style of tt. sludgy riffs doom');
+    // No adapter: the caption goes verbatim, so off still peels its own tail.
+    assert.equal(mapYue2Params({ ...base, yue2CaptionBpmKey: false }, pick).req.style, 'sludgy riffs doom');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
