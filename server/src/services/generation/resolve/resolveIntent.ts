@@ -102,7 +102,10 @@ export function resolveCreateIntent(intent: CreateIntent, engine: string, data: 
     warnings.push(`Caption source is for '${src.engine}' but the request is for '${engine}'; the caption box is used`);
   }
 
-  const compose = intent.compose ?? {};
+  // YuE2 composes its adapter's trigger in the style template; the LoRA field is
+  // an ACE one (the UI hides and blanks it there), so a stale draft or API value
+  // must not prefix the caption a second time (#238).
+  const compose = engine === YUE2_ENGINE_ID ? { ...intent.compose, loraTrigger: '' } : intent.compose ?? {};
   let caption = base;
   let lyrics = lyricsIn;
   let wildcards: ResolveProvenance['wildcards'];

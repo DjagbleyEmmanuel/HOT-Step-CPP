@@ -168,3 +168,9 @@ test('switching backend while a draft loads: the backend at apply time decides',
   assert.equal(writes.size, 0);
   assert.equal(error, 'This draft was saved for MiniMax-Music3. Switch the backend to MiniMax-Music3 to load it.');
 });
+
+test('YuE2 sends no LoRA-trigger prefix, whatever a saved draft holds (#238)', () => {
+  const c = createContentFromDraft({ 'hs-caption': 'pop', 'hs-lora-trigger': 'rock' });
+  assert.equal(createContentParams(c, { mm3Mode: false, yue2Active: true }).caption, 'pop');
+  assert.equal(createContentParams(c, { mm3Mode: false }).caption, 'rock, pop');
+});

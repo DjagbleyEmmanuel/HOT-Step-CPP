@@ -520,3 +520,10 @@ test('preview route: an explicit inactive engine resolves from its own sources a
     assert.equal(def.request.expectedBackend, 'ace');
   });
 });
+
+test('create: YuE2 gets no LoRA-trigger prefix; the style template adds the trigger once (#238)', () => {
+  const r = resolveCreateIntent({ kind: 'create', params: { ...createParams, caption: 'rock, pop' }, compose: { loraTrigger: 'rock' } }, 'yue2');
+  assert.equal(r.request.caption, 'rock, pop');
+  const other = resolveCreateIntent({ kind: 'create', params: { ...createParams, caption: 'pop' }, compose: { loraTrigger: 'rock' } }, 'ace');
+  assert.equal(other.request.caption, 'rock, pop');
+});

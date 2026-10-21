@@ -146,18 +146,8 @@ export function applyYue2StyleTemplate(parts: Yue2StyleParts): string {
 
   let cap = squash(str(parts.caption));
   const opener = squash(head(trigger, upstream));
-  // The create path prefixes a bare "<trigger>, " (#238), so the caption can
-  // arrive with that, the full opener, or several of either. Peel until none
-  // is left. A bare prefix that is the whole remaining caption stays: that is
-  // a genre which happens to be the trigger word, not a duplicate.
-  const esc = trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const bare = upstream && trigger ? new RegExp(`^${esc}\\s*,\\s*(?=\\S)`, 'i') : null;
-  for (let n = 0; upstream || n < 1; n++) {
-    if (opener && cap.toLowerCase().startsWith(opener.toLowerCase())) {
-      cap = squash(cap.slice(opener.length));
-    } else if (bare && bare.test(cap)) {
-      cap = squash(cap.replace(bare, ''));
-    } else break;
+  if (opener && cap.toLowerCase().startsWith(opener.toLowerCase())) {
+    cap = squash(cap.slice(opener.length));
   }
   if (upstream) {
     const end = tail(parts);

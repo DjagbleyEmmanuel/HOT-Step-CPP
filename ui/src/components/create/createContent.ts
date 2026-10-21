@@ -27,7 +27,7 @@ export function composeCaption(base: string, loraTrigger: string, beatIntro: boo
  *  are the wildcard-expanded texts when auto-expand ran. */
 export function createContentParams(c: CreateContent, opts: { mm3Mode: boolean; yue2Active?: boolean; resolvedCaption?: string; resolvedLyrics?: string }): Partial<GenerationParams> {
   const params: Partial<GenerationParams> = {
-    caption: composeCaption(opts.resolvedCaption ?? c.caption, c.loraTrigger, c.beatIntro, c.introBars),
+    caption: composeCaption(opts.resolvedCaption ?? c.caption, opts.yue2Active ? '' : c.loraTrigger, c.beatIntro, c.introBars),
     lyrics: c.instrumental ? '[Instrumental]' : (opts.resolvedLyrics ?? c.lyrics),
     ...(c.negativePrompt.trim() ? { negative_prompt: c.negativePrompt.trim() } : {}),
     instrumental: c.instrumental,
