@@ -105,6 +105,15 @@ generation. Resume into another new directory with `--resume` pointing
 to that record; `--steps` is the total desired step count. Use the same dataset,
 model, seed and CUDA ordinal.
 
+`optimizer.resume` stores the LmOptim state (`adamw-lm`, `prodigy`, `muon`) as
+F32, so a resumed run matches an uninterrupted one bit for bit. Records are
+about twice their old size: about 1.4 GB for `adamw-lm` at rank 64 and about
+2.4 GB for Prodigy. Records written before this
+format (version 2) kept the moments 8-bit, which zeroed small second moments.
+They still load, but the trainer prints a note that the run will drift from an
+uninterrupted one. The CUDA `adamw` optimizer keeps 8-bit state in memory and
+saves it as held.
+
 The CLI emits JSON progress and records losses in `train.jsonl`. Ctrl+C requests
 a stop at the next completed step and saves that state. The app's Windows Stop
 action currently terminates the process, so only already published checkpoints

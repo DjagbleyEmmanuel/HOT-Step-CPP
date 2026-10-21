@@ -561,7 +561,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-nar-train` | Train a YuE2 NAR LoRA. `--manifest` may repeat (all caches train as one set); `--companion` merges `nar_lora_joint_v9` under the NAR first, as the server does at render time, and the export records it in `companion` metadata. `--audio-loss <w>` adds an audio-domain term on low-noise steps, the clean-latent estimate decoded through the frozen VAE and scored against the source recording ([training internals](training-internals.md#yue2-nar-audio-domain-loss)) |
 | `yue2-ar-train` | Train a YuE2 AR (composer) LoRA |
 | `yue2-prepare-aitk`, `yue2-import-aitk-cache` | Build or import caches for joint training |
-| `yue2-joint-train` | YuE2 AR and NAR joint training. `--eval-base-loss` trains nothing: it prints the base planner CE and decoder flow MSE per song (the Optimise phase) |
+| `yue2-joint-train` | YuE2 AR and NAR joint training. `--eval-base-loss` trains nothing: it prints the base planner CE and decoder flow MSE per song (the Optimise phase). `--resume` restores optimizer state exactly; older 8-bit records load with a note ([training internals](training-internals.md)) |
 | `yue2-optim-check` | Optimizer self-check |
 | `spike` | Phase-0 evidence runs |
 
