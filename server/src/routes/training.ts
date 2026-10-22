@@ -69,6 +69,8 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   POST   /datasets/:id/train-lm                       — start an LM LoRA training job
 //   GET    /datasets/:id/train-lm                       — LM adapter / codes status
 //   POST   /datasets/:id/train-dit                      — start a DiT LoRA training job
+//   POST   /datasets/:id/sa3-train                      — prepare and train SA3 Medium DoRA-rows
+//   GET    /datasets/:id/sa3-train                      — readiness, recipe and resumable SA3 runs
 //   GET    /datasets/:id/train-dit                      — DiT adapter / variant status
 //   GET    /previews/:previewId/:slot                   — stream a codes preview (Range aware)
 //   POST   /datasets/:id/audition                       — start an A/B codes-audition job
@@ -162,6 +164,7 @@ import { essentiaAvailable, essentiaTempoProfile } from '../services/training/es
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
 import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
+import { listSa3Runs, resolveSa3Run, sa3Readiness } from '../services/training/trainSa3Runner.js';
 import {
   buildYue2AitkPrepareArgs, validateYue2AitkPrepareOptions,
   parseYue2AitkModels,
@@ -1310,7 +1313,7 @@ function pickTargets(
 // it in place. Neither opens a sidecar — the aligner's lyrics come out of the
 // manifest, not the .txt the labeller writes — so a cloud captioner beside them
 // cannot lose an edit. `yue2-ar-train` joins for `yue2-nar-train`'s reason.
-const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train', 'yue2-tokenize', 'yue2-align', 'yue2-ar-train', 'audition', 'lm-calibrate', 'dit-calibrate']);
+const TRAINER_KINDS = new Set<string>(['train-lm', 'train-dit', 'sa3-train', 'mm3-train-lm', 'yue2-nar-train', 'yue2-tokenize', 'yue2-align', 'yue2-ar-train', 'audition', 'lm-calibrate', 'dit-calibrate']);
 function labelBlockedBy(datasetId: string, needsEngine: boolean): ReturnType<typeof queue.activeJobForDataset> {
   const active = queue.activeJobForDataset(datasetId);
   if (!active) return undefined;
@@ -5845,6 +5848,32 @@ router.get('/datasets/:id/train-lm', async (req: Request, res: Response) => {
 // ── DiT LoRA training (§2.7, phase 4) ────────────────────────────────────
 
 const TRAIN_DIT_STAGES: readonly TrainDitStage[] = ['train', 'export'];
+
+router.get('/datasets/:id/sa3-train', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    const active = queue.activeJobForDataset(ds.id);
+    res.json({ ...sa3Readiness(), runs: listSa3Runs(ds.id, ds.slug),
+      activeJob: active ? queue.toSummary(active) : null });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/datasets/:id/sa3-train', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) {
+    res.status(409).json({ error: 'A job or pipeline is queued or running for this dataset.' }); return;
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    res.status(400).json({ error: 'SA3 options must be an object' }); return;
+  }
+  try {
+    const opts = resolveSa3Run(ds.id, ds.slug, req.body);
+    const job = queue.startSa3TrainJob(ds.id, opts);
+    res.status(202).json({ jobId: job.id, job: queue.toSummary(job) });
+  } catch (err: any) { res.status(400).json({ error: err.message }); }
+});
 
 router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
   try {
