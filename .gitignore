@@ -88,6 +88,7 @@ tools/codegraph/node_modules/
 !tools/sa3-training-reference.py
 !tools/sa3-training-block-fixture.py
 !tools/sa3-training-step-fixture.py
+!tools/sa3-training-check.mjs
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
 !tools/yue2-vae-train/
