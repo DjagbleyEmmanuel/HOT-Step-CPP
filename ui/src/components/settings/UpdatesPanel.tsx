@@ -11,7 +11,6 @@ const short = (sha: string | null) => (sha ? sha.slice(0, 8) : null);
 function noticeKey(s: UpdatesStatus): string | null {
   if (s.installed.git?.dirty) return 'dirty';
   if (s.installed.kind === 'unknown' || (s.installed.kind === 'portable' && !s.installed.tag && !s.installed.sha)) return 'unknownIdentity';
-  if (s.status === 'could-not-check') return 'couldNotCheck';
   if (s.status === 'unknown') return 'cannotCompare';
   return null;
 }
@@ -19,7 +18,11 @@ function noticeKey(s: UpdatesStatus): string | null {
 export function UpdatesPanel() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const query = useQuery(updatesStatusOptions());
+  const query = useQuery({
+    ...updatesStatusOptions(),
+    // A check started elsewhere (startup, another tab) reports checking:true; follow it until it ends.
+    refetchInterval: q => (q.state.data?.checking ? 2000 : false),
+  });
   const check = useMutation({
     mutationFn: (channel?: UpdateChannel) => updatesApi.check(channel),
     onSuccess: result => queryClient.setQueryData(updatesStatusOptions().queryKey, result),
@@ -50,14 +53,15 @@ export function UpdatesPanel() {
         </button>
         {check.data?.throttled && <p>{t('settings.updates.throttled')}</p>}
         {s.retryAfter && <p>{t('settings.updates.retryAfter', { time: when(s.retryAfter) })}</p>}
-        {notice && <p role="status">{t(`settings.updates.${notice}`, { error: s.error ?? '' })}</p>}
+        {s.status === 'could-not-check' && <p role="alert" className="text-red-600 dark:text-red-400">{t('settings.updates.couldNotCheck', { error: s.error ?? '' })}</p>}
+        {notice && <p role="status">{t(`settings.updates.${notice}`)}</p>}
         {s.status === 'up-to-date' && <p role="status">{t('settings.updates.upToDate')}</p>}
         {s.status === 'ahead' && <p role="status">{t('settings.updates.ahead')}</p>}
         {s.status === 'update-available' && <div role="status" className="rounded border border-emerald-500/40 bg-emerald-500/10 p-3">
           <p>{t('settings.updates.available', { version: latest ?? '' })}</p>
-          {s.notesUrl && <a className="underline" href={s.notesUrl} target="_blank" rel="noreferrer">{t(s.channel === 'release' ? 'settings.updates.notes' : 'settings.updates.commit')}</a>}
           <p className="mt-1">{t('settings.updates.noInstall')}</p>
         </div>}
+        {s.notesUrl && <a className="block underline" href={s.notesUrl} target="_blank" rel="noreferrer">{t(s.channel === 'release' ? 'settings.updates.notes' : 'settings.updates.commit')}</a>}
       </>}
     </div>
   </section>;
