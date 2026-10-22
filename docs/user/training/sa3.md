@@ -91,7 +91,8 @@ caption, keep a fixed seed and duration, and click **Render audition**. Switch
 **Use adapter** off and render again for the strength-0 base comparison. Strength 1
 applies the full adapter. Each result has an audio player and is saved in the
 library. Auditions use SA3 text-to-audio at 8 steps with MD Pingpong Blend and no
-post-processing, independently of the active generation backend.
+post-processing. Each audition explicitly selects SA3 and checks that routing,
+independently of the active generation backend. The top-bar selection stays unchanged.
 
 Auditions and the picker use this PC's catalogue. When training on a worker,
 copy its published GGUF into this PC's `models/sa3-adapters/`, select **This PC**

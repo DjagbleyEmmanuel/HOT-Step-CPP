@@ -340,7 +340,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
 | Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
-| Stable Audio 3 training | Independent SA3 Medium DoRA-rows target with SuperSep level 5 vocal stripping, saved-run resume, adapter picker and fixed-seed auditions. [Details](docs/user/training/sa3.md) |
+| Stable Audio 3 training | Independent SA3 Medium DoRA-rows target with SuperSep level 5 vocal stripping, saved-run resume, adapter picker and fixed-seed SA3 auditions regardless of the selected backend. [Details](docs/user/training/sa3.md) |
 | YuE2 checkpoint previews | Adjustable music adapter scale, default 0.6, with sound adapter strength fixed at 1.0 for training and manual previews. [Details](docs/user/training/yue2.md#recommended-settings) |
 | YuE2 saved presets | Named training settings load with server-resolved legacy defaults while current dataset and output paths stay in place. [Details](docs/user/training/yue2.md#recommended-settings) |
 | Adapter methods | DoRA, rsLoRA, LoRA+, HiRA, LoHa, PiSSA and HRA, plus learned artist tokens and a trainable KV prefix on the LM trainers. |

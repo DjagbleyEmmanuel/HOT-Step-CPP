@@ -99,7 +99,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
   const auditionMutation = useMutation({ mutationFn: async () => {
     const params = useGlobalParamsStore.getState().getGlobalParams();
     const scale = useAdapter ? strength : 0;
-    const res = await generateApi.submit({ ...params, backend: 'sa3', caption: caption.trim(), lyrics: '',
+    const res = await generateApi.submit({ ...params, backend: 'sa3', backendOverride: 'sa3', expectedBackend: 'sa3', caption: caption.trim(), lyrics: '',
       instrumental: true, duration: auditionSeconds, seed: auditionSeed, randomSeed: false, batchSize: 1,
       postProcessingEnabled: false, samplerPluginsEnabled: false, sa3Steps: 8, sa3Sampler: 'md_pingpong_blend',
       sa3Adapters: scale === 0 ? [] : [{ name: selectedAdapter, scale }],
