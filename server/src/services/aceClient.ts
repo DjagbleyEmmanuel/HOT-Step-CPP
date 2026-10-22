@@ -116,6 +116,12 @@ export interface AceRequest {
   lm_dry_base?: number;
   /** 'dry' only: matched codes required before any penalty applies */
   lm_dry_min_len?: number;
+  /** Code phase: drop codes under this fraction of the top code's probability (0 = off). */
+  lm_min_p?: number;
+  /** Opt-in CFG refinements for the code phase (engine lm-cfg-extras.h). */
+  lm_cfg_min_p?: number;
+  lm_cfg_logprob?: boolean;
+  lm_cfg_rescale?: number;
   lm_top_k?: number;
   lm_negative_prompt?: string;
   negative_prompt?: string;

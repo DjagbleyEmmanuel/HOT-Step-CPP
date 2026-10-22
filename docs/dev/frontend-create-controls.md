@@ -247,6 +247,7 @@ it back off on this path."*).
 | `lmTemperature`, `lmCfgScale`, `lmTopK`, `lmTopP` | `0.8`, `2.2`, `0`, `0.92` | ace | `lmTopK: 0` is a meaningful value (disables top-k), not "unset" — the parity test covers this explicitly |
 | `lmRepPenalty`, `lmRepWindow`, `lmRepMode` | `1.1`, `64`, `'presence'` | ace | window/mode sent only when `lmRepPenalty > 1.0`; auto-bumped to `1.05` when an LM adapter is loaded and the caller didn't set one (`translateParams.ts:161-167`) |
 | `lmDryBase`, `lmDryMinLen` | `1.75`, `3` | ace | only with `lmRepMode === 'dry'` |
+| `lmMinP`, `lmCfgMinP`, `lmCfgLogprob`, `lmCfgRescale` | `0`, `0`, `false`, `0` | ace | code-phase min-p and CFG refinements (engine `lm-cfg-extras.h`); each sent only when non-default, and all four key the LM cache |
 | `lmNegativePrompt` | `'NO USER INPUT'` | ace | |
 
 ### Post-processing chain

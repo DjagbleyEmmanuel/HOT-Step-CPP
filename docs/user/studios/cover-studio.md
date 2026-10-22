@@ -486,6 +486,26 @@ the top reads covering artist, then song, as the saved track is named.
    the song is saved, the build clears so the next Build starts fresh. If the
    render fails, is cancelled or times out, the build stays so you can try again.
 
+**Follow source** (YuE2, audio sources only, off by default) lets the recording
+itself steer the composer, not just its transcribed score. The real-audio tokenizer
+reads the source and lists, for every 40 ms, the semantic codes that best describe
+it; the composer then leans toward those. **Source adherence** (0 to 1, default
+0.5) is the share of each moment taken from the source: on a 20-second test, 0.5
+kept 83% of the render on the source's top codes and 1.0 kept all of it. It needs
+the YuE2 semantic tokenizer (`yue2-tok-f16`) from the Model Manager. Reading a
+recording takes a few seconds the first time and is cached after that. Follow
+source switches itself off while the pitch is shifted or a BPM is set, because
+the guide carries the source's own key and timing and would pull the render back
+to them. Build by section does not use it yet.
+
+Under **Advanced**, with Follow source on: **Source candidates** (1 to 64,
+default 32) is how many of the tokenizer's best codes per moment count as the
+source; fewer follows it more literally. **Only source candidates** forbids every
+other code, so adherence only decides how the composer picks among them.
+**Adherence over the song** shapes adherence from start to end (Flat, Rising,
+Falling, Arc, Dip), and **Adherence wobble** swings it up and down with a period
+and depth, so the render drifts away from the source and back.
+
 **AR strength** (0 to 10, default 0.6) is Cover Studio's own setting, shown on
 both Prepare and Build. It replaces the adapter picker's AR scale for every
 Cover render, including 0. Values above 0.6 hurt adherence to the score: on

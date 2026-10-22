@@ -50,7 +50,7 @@ import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
   type Yue2ScoreSection } from '../../services/yue2CoverApi';
-import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr } from './Yue2CoverPanel';
+import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { CoverResizeHandle } from './CoverResizeHandle';
@@ -229,6 +229,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [coverBpm, setCoverBpm] = useState(() => restore('coverBpm', 120));
   const [coverKeyShift, setCoverKeyShift] = useState(() => restore('coverKeyShift', 0));
   const [coverCfgScale, setCoverCfgScale] = useState(() => restore('coverCfgScale', 1));
+  const [coverGuide, setCoverGuide] = useState<CoverGuideState>(() => ({ ...COVER_GUIDE_DEFAULT, ...restore('coverGuide', {}) }));
   // Cover's own AR strength; it replaces the adapter picker's AR scale in every Cover request.
   const [coverArStrength, setCoverArStrength] = useState(COVER_AR_DEFAULT);
   const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>(() => restore('coverLyricSchedule', 'off'));
@@ -433,6 +434,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('coverBpm', coverBpm); }, [coverBpm]);
   useEffect(() => { persist('coverKeyShift', coverKeyShift); }, [coverKeyShift]);
   useEffect(() => { persist('coverCfgScale', coverCfgScale); }, [coverCfgScale]);
+  useEffect(() => { persist('coverGuide', coverGuide); }, [coverGuide]);
   useEffect(() => { persist('coverLyricSchedule', coverLyricSchedule); }, [coverLyricSchedule]);
   useEffect(() => { persist('captionMode', captionMode); }, [captionMode]);
   useEffect(() => { persist('sheetAbc', sheetAbc); }, [sheetAbc]);
@@ -443,7 +445,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -506,6 +508,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-coverBpm')) setCoverBpm(f['cover-studio-coverBpm'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverKeyShift')) setCoverKeyShift(f['cover-studio-coverKeyShift'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverCfgScale')) setCoverCfgScale(f['cover-studio-coverCfgScale'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverGuide')) setCoverGuide({ ...COVER_GUIDE_DEFAULT, ...(f['cover-studio-coverGuide'] as object) });
     if (Object.hasOwn(f, 'cover-studio-coverLyricSchedule')) setCoverLyricSchedule(f['cover-studio-coverLyricSchedule'] as never);
     if (Object.hasOwn(f, 'cover-studio-captionMode')) setCaptionMode(f['cover-studio-captionMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-sheetAbc')) setSheetAbc(f['cover-studio-sheetAbc'] as never);
@@ -1373,7 +1376,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     instrumental: renderInstrumental, source: 'cover-studio',
     ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
     yue2Cover: sourceMode === 'audio'
-      ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices }
+      ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices,
+          ...(coverGuide.on && !coverGuideBlock(coverKeyShift, coverTempoMode)
+            ? { guide: (({ on: _on, ...rest }) => rest)(coverGuide) } : {}) }
       : { sourceKind: 'musicxml', ...coverChoices },
     yue2Abc: approvedSheet.abc, yue2Prepare: prep.doc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
     return { params, title };
@@ -1931,6 +1936,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           cfgScale={coverCfgScale} onCfgScale={setCoverCfgScale}
           arStrength={coverArStrength} onArStrength={v => setCoverArStrength(clampCoverAr(v))}
           lyricSchedule={coverLyricSchedule} onLyricSchedule={setCoverLyricSchedule}
+          guide={coverGuide} onGuide={setCoverGuide} hasSourceAudio={sourceMode === 'audio'}
           canGenerate={canGenerate} isGenerating={isGenerating} onGenerate={handleGenerate}
           footer={draftsFold}
         />

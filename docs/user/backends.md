@@ -277,8 +277,9 @@ Dials that change the song plan:
 
 - An ABC melody sketch (pasted lead sheet).
 - Style words in the prompt.
-- Seed, Composer Temperature, Top-K, Top-P and repetition penalty.
-- Composer CFG.
+- Seed, Composer Temperature, Top-K, Top-P, Min-P and repetition penalty.
+- Composer CFG, and its refinements in the Composer section: CFG Plausibility (guide only plausible frames), CFG in Log-Probabilities and CFG Rescale. All three only act when CFG is not 1, which means Chain of Thought off or a set CFG Scale.
+- In Cover Studio, Follow source: the source recording's own semantic codes steer the composer ([Cover Studio](studios/cover-studio.md)).
 
 Dials that change how closely the rendering follows the plan (experimental):
 

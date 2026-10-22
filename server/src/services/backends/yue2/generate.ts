@@ -82,6 +82,8 @@ import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { PollWatchdogOptions } from '../../generation/pollUntilDone.js';
 import type { GenerationAttempt } from '../types.js';
 import { buildSessionRender, TRIM_FADE_S, trimWavStart } from '../../yue2Takes.js';
+import { resolveSourceAudioPath } from '../../generation/sourceAudio.js';
+import { buildYue2Guide, yue2GuideSkipReason, yue2GuideWire } from './sourceGuide.js';
 
 /** Injected so this module never imports back into routes/generate.ts at
  *  runtime, matching MinimaxGenerationDeps' own shape exactly. */
@@ -290,6 +292,7 @@ export function yue2LmOverrides(params: Record<string, unknown>, notes: string[]
     ['yue2SemTemperature', 'semantic_temperature'], ['yue2SemTopP', 'semantic_top_p'], ['yue2SemTopK', 'semantic_top_k'],
     ['yue2SemRepPenalty', 'semantic_repetition_penalty'], ['yue2SemRepWindow', 'semantic_penalty_window'],
     ['yue2SemMinTokens', 'semantic_min_tokens'], ['yue2SemMaxTokens', 'semantic_max_tokens'],
+    ['yue2SemMinP', 'semantic_min_p'], ['yue2CfgMinP', 'cfg_min_p'], ['yue2CfgRescale', 'cfg_rescale'],
     ['yue2EndThreshold', 'end_threshold'], ['yue2EndBias', 'end_bias'],
     ['yue2EndBiasFrom', 'end_bias_from_sec'], ['yue2EndBiasRamp', 'end_bias_ramp_sec'],
   ];
@@ -624,6 +627,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     lyrics: lyrics || undefined,
     cot,
     ...(lmOverrides as Partial<Yue2SynthRequest>),
+    ...(params.yue2CfgLogprob === true ? { cfg_logprob: true } : {}),
     ...(lm_batch_size > 1 ? { lm_batch_size } : {}),
     ...(synth_batch_size > 1 ? { synth_batch_size } : {}),
     ...(noise_seed !== undefined ? { noise_seed } : {}),
@@ -769,6 +773,24 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
     }
     delete req.semantic_retries;
     log('INFO', `[YuE2] Rendering ${render.codec_ids!.length} kept codec frames from build session ${String(build.session)}`);
+  }
+
+  // Follow source: the cover's recording steers the composer too. Not for a
+  // build session (its codec stream is supplied, not composed).
+  const guide = captured?.cover.guide;
+  if (guide && build?.session === undefined) {
+    const skip = yue2GuideSkipReason(captured!.cover);
+    const srcUrl = typeof job.params?.sourceAudioUrl === 'string' ? job.params.sourceAudioUrl : '';
+    if (skip) log('WARNING', `[YuE2] ${skip}`);
+    else if (!srcUrl) log('WARNING', '[YuE2] Follow source is off for this render: the job carries no source recording.');
+    else {
+      const t0 = performance.now();
+      const guidePath = await buildYue2Guide(resolveSourceAudioPath(srcUrl), msg => log('INFO', msg));
+      Object.assign(req, yue2GuideWire(guide, guidePath));
+      timing.push({ name: 'Source guide', ms: performance.now() - t0 });
+      log('INFO', `[YuE2] Follow source: scale ${guide.scale}, k ${guide.k}${guide.restrict ? ', restricted' : ''}`
+        + `${guide.schedule !== 'flat' ? `, schedule ${guide.schedule}` : ''}${guide.lfo !== 'off' && guide.lfoDepth > 0 ? `, lfo ${guide.lfo}` : ''}`);
+    }
   }
 
   console.log(`[Generate] Job ${job.id} — backend=yue2, cot=${req.cot}, seed=${req.seed ?? -1}, `
@@ -973,7 +995,11 @@ export function yue2CoalesceKey(job: GenerationJob, req: Yue2SynthRequest): stri
     : ['style', 'lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'songs'];
   for (const k of own) delete shared[k];
   const ordered = Object.fromEntries(Object.keys(shared).sort().map(k => [k, shared[k]]));
-  return JSON.stringify([job.userId, job.envelope.models, ordered]);
+  // The guide is added after this key is taken (prepareYue2Job), so a cover
+  // that follows its source batches only with the same source and settings.
+  const guide = jobCover(job)?.cover.guide;
+  const follow = guide ? [guide, job.params?.sourceAudioUrl ?? ''] : null;
+  return JSON.stringify([job.userId, job.envelope.models, ordered, ...(follow ? [follow] : [])]);
 }
 
 /** The "songs" entries one prepared job contributes: its lm_batch_size takes

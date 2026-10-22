@@ -239,11 +239,19 @@ values: 120 BPM, 120 seconds, C major, 4/4.
 | CFG Scale | 0 to 10 | 2.2 | Guidance strength for the LM itself. |
 | Top-K | 0 to 200 | 0 | Limits sampling to the K most likely tokens. 0 turns it off. (YuE2's Composer Top-K is separate: 0 is unlimited there, and unlimited with a temperature above 1.0 is clamped to 1.0.) |
 | Top-P | 0 to 1 | 0.92 | Nucleus sampling threshold. |
+| Min-P | 0 to 0.5 | 0 | After Top-P, drops every audio code under this fraction of the most likely code's probability. Cuts the unlikely tail without narrowing close choices. 0 turns it off. |
+| CFG Plausibility | 0 to 0.5 | 0 | Applies CFG only to codes the conditioned pass gives at least this fraction of its top probability; the rest keep their unguided value. 0 turns it off. |
+| CFG Rescale | 0 to 1 | 0 | Pulls the guided distribution's spread back toward the conditioned pass's, so a high CFG Scale changes which codes win without sharpening or flattening everything. 0 turns it off. |
+| CFG in Log-Probabilities | toggle | off | Blends the two CFG passes after normalising each to log-probabilities instead of on raw logits. |
 | Repetition Penalty | 1.0 to 1.5 | 1.1 | Penalises recently used audio codes to break stuck loops. 1.0 turns it off. |
 | Rep. Mode | Presence, Frequency, DRY | Presence | Shown when the penalty is above 1.0. See below. |
 | Rep. Window (codes) | 8 to 256 | 64 | How far back the penalty looks. The LM emits 5 codes per second, so 64 codes is 12.8 seconds; the label shows the seconds. |
 | DRY Base, DRY Min Match | 1.05 to 4, 2 to 32 | 1.75, 3 | DRY mode only. How fast the penalty grows with match length, and the shortest verbatim repeat it acts on. |
 | Negative Prompt | text | `NO USER INPUT` | Negative conditioning text for the LM. |
+
+Min-P and the three CFG refinements are ignored, with a warning in the engine log,
+when a draft model is loaded for speculative decoding at batch size 1, the same as
+the repetition penalty.
 | LM Codes | Strength 0 to 1, or Step Count | Strength 1.0 | How many DiT steps the LM's audio codes condition. Strength is a fraction of the step budget. With Step Count on, you set an absolute number of steps (default 6) that stays fixed when you change Inference Steps. |
 | LM Seed | toggle and number | Use DiT Seed on | With Use DiT Seed on, the LM seed follows the Generation Seed: a fixed Generation Seed makes both deterministic, a random one makes both random. Turn it off to set an independent LM seed, which has its own Seed Manager. |
 
