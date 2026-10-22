@@ -2814,6 +2814,706 @@
       "tags": []
     },
     {
+      "id": "stablestep-gguf-dit-iq1_m-imat",
+      "filename": "sa3-dit-IQ1_M-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ1_M-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ1_M-imat",
+      "sizeBytes": 338482272,
+      "sha256": "e5a5d530c65a34e6a019f69767b476344b367e60b8c0db67bd2bc90245df6182",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-iq1_s-imat",
+      "filename": "sa3-dit-IQ1_S-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ1_S-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ1_S-imat",
+      "sizeBytes": 304668768,
+      "sha256": "5c4d8c59fd533ca8bc087d1c1fb2617e0489ed1c1a00dc8b5c6515345bc419f5",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-iq2_xs-imat",
+      "filename": "sa3-dit-IQ2_XS-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ2_XS-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ2_XS-imat",
+      "sizeBytes": 439922784,
+      "sha256": "3c898035a9d518ab69e2872e74542f2d18dafdf614ce1f502a768f60147cbef0",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-iq2_xxs-imat",
+      "filename": "sa3-dit-IQ2_XXS-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ2_XXS-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ2_XXS-imat",
+      "sizeBytes": 394838112,
+      "sha256": "0b8c3fd17b8d165e1dda1e1a57c4b9f9dfcbc329f63c82c8d075bf4567aaa0af",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-iq3_xxs-imat",
+      "filename": "sa3-dit-IQ3_XXS-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ3_XXS-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ3_XXS-imat",
+      "sizeBytes": 575176800,
+      "sha256": "c664d93e38add5055fa5dcc7d90bd5eed386c7726cb254f46d0ad9e1539673be",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-iq4_xs-imat",
+      "filename": "sa3-dit-IQ4_XS-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (IQ4_XS-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "IQ4_XS-imat",
+      "sizeBytes": 789328992,
+      "sha256": "47215b0f735d1b9c5b33517e2f5c93b7e89d15f5b71914eb32eb8cd0c0659214",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-mxfp4",
+      "filename": "sa3-dit-MXFP4.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (MXFP4)",
+      "scale": null,
+      "variant": null,
+      "quant": "MXFP4",
+      "sizeBytes": 789328832,
+      "sha256": "1d1512ecc77fe0aa70bc09880d0727f94cd2f6f4e0a067c724460106ad776849",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-nvfp4",
+      "filename": "sa3-dit-NVFP4.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (NVFP4)",
+      "scale": null,
+      "variant": null,
+      "quant": "NVFP4",
+      "sizeBytes": 834413504,
+      "sha256": "ca84de0c286882faf19ea6b7e56f864aca8352d03bb0b5ffccbbc07aed439c60",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q2_k-imat",
+      "filename": "sa3-dit-Q2_K-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q2_K-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q2_K-imat",
+      "sizeBytes": 496278624,
+      "sha256": "22466e48b99fe590fa6b1b871a75e934c76ad9f576f200daad23fc6cf56f88df",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q2_k",
+      "filename": "sa3-dit-Q2_K.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q2_K)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q2_K",
+      "sizeBytes": 496278464,
+      "sha256": "b0953143fbe0d29efa28822f08d55bdfc6b75cf41bc9acc4c6b0cccb3ddca07a",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_l-imat",
+      "filename": "sa3-dit-Q3_K_L-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_L-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_L-imat",
+      "sizeBytes": 642803808,
+      "sha256": "faaf472dcfb425285e8574a2b57e54e53d85104d05d23e4919b1e33313bdd43e",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_l",
+      "filename": "sa3-dit-Q3_K_L.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_L)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_L",
+      "sizeBytes": 642803648,
+      "sha256": "214f7abecbd6c9ed497354c30fb1cd593364ab8e9d32a350b0b1a9e2396a1827",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_m-imat",
+      "filename": "sa3-dit-Q3_K_M-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_M-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_M-imat",
+      "sizeBytes": 642803808,
+      "sha256": "279711b08f3b1e0c5a0cf1c56798f07adcad1c494a7bc6233af70e2c959242d5",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_m",
+      "filename": "sa3-dit-Q3_K_M.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_M)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_M",
+      "sizeBytes": 642803648,
+      "sha256": "99ff1e103b59520749b77c3c1d6368b6e9e15f0fb00bb07a187964d7e7d2b1b3",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_s-imat",
+      "filename": "sa3-dit-Q3_K_S-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_S-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_S-imat",
+      "sizeBytes": 642803808,
+      "sha256": "38347267b83260ba484541434d5954a0822a6097836dfa662dbf6757a0e3b37e",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q3_k_s",
+      "filename": "sa3-dit-Q3_K_S.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q3_K_S)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q3_K_S",
+      "sizeBytes": 642803648,
+      "sha256": "f22139f1fdb79bba4717584575fc8daf733ca2301f8ea5df692cf7ad7dc6b407",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q4_k_m-imat",
+      "filename": "sa3-dit-Q4_K_M-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q4_K_M-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q4_K_M-imat",
+      "sizeBytes": 834413664,
+      "sha256": "d6c0b237a06c038a0725d5a3abc981639cf2c18e5e77cd81108ab7707d66d053",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q4_k_m",
+      "filename": "sa3-dit-Q4_K_M.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q4_K_M)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q4_K_M",
+      "sizeBytes": 834413504,
+      "sha256": "ee318fc0401e98bb850f3961a51d176bad8473e051d39af3b2f57c4bc540ec46",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q4_k_s-imat",
+      "filename": "sa3-dit-Q4_K_S-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q4_K_S-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q4_K_S-imat",
+      "sizeBytes": 834413664,
+      "sha256": "5861ca70df44f73be79db1a31777c1c52d894ae6d1285a92c8ae98442d268c49",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q4_k_s",
+      "filename": "sa3-dit-Q4_K_S.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q4_K_S)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q4_K_S",
+      "sizeBytes": 834413504,
+      "sha256": "39b928cd5784b61f0c7e685337cbaae876d568456d27061c188cdc7088e6f139",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q5_k_m-imat",
+      "filename": "sa3-dit-Q5_K_M-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q5_K_M-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q5_K_M-imat",
+      "sizeBytes": 1014752352,
+      "sha256": "6d15114971b34f783fa6e8d34ca9a9817def4ba4b72c9fa0f7f47366a0fbc87a",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q5_k_m",
+      "filename": "sa3-dit-Q5_K_M.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q5_K_M)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q5_K_M",
+      "sizeBytes": 1014752192,
+      "sha256": "2d32d4386fba36edd82162e1665b373224e9407be0e578e61188b63c5b76d83d",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q5_k_s-imat",
+      "filename": "sa3-dit-Q5_K_S-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q5_K_S-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q5_K_S-imat",
+      "sizeBytes": 1014752352,
+      "sha256": "4514c21df2d358427771a0b2a4cb984bb1d39af14db01937fe2c7ccb3f1b3934",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q5_k_s",
+      "filename": "sa3-dit-Q5_K_S.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q5_K_S)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q5_K_S",
+      "sizeBytes": 1014752192,
+      "sha256": "616d4cd94951b393e4204e56fc2aa4a688b97fb45f940d795f67006acdfcbba7",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Finite forward verified; misses strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q6_k-imat",
+      "filename": "sa3-dit-Q6_K-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q6_K-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q6_K-imat",
+      "sizeBytes": 1206362208,
+      "sha256": "b4c1371755978956688b2c240aa92373714f39545af87178a3174d38b4f26ef7",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Passes strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q6_k",
+      "filename": "sa3-dit-Q6_K.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q6_K)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q6_K",
+      "sizeBytes": 1206362048,
+      "sha256": "d6effbd48813292bf78b6b7896cc738ff77323b88a8e8ebeb9f3c0ee78b2dba2",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Passes strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q8_0-imat",
+      "filename": "sa3-dit-Q8_0-imat.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q8_0-imat)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q8_0-imat",
+      "sizeBytes": 1555768416,
+      "sha256": "e5427ee2caa2f9bd0015c86f20cfd066ae8b896f5df3511f56d4e9f43b909a0c",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Activation-calibrated on 12 forwards with synthetic reference clips. Passes strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "stablestep-gguf-dit-q8_0",
+      "filename": "sa3-dit-Q8_0.gguf",
+      "role": "stablestep",
+      "family": "shared",
+      "displayName": "SA3 DiT (Q8_0)",
+      "scale": null,
+      "variant": null,
+      "quant": "Q8_0",
+      "sizeBytes": 1555768256,
+      "sha256": "c98cc976feba2d99bcb2e73f08f0e772b3d2e53cccb7ba67a796f1637ac2ee2a",
+      "repo": "scragnog/HOT-Step-CPP-StableStep",
+      "description": "Experimental quantized Stable Audio 3 Medium generation DiT. Retains original-precision memory tokens and conditioner tensors. Audible quality has not been verified. BF16 remains the default. Passes strict single-forward BF16 parity. Powered by Stability AI. See the accompanying licence and NOTICE.",
+      "tags": [
+        "experimental"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE-STABILITY-AI-COMMUNITY.md"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
       "id": "stablestep-gguf-same-enc",
       "filename": "sa3-same-enc-F16.gguf",
       "role": "stablestep",
