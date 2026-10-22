@@ -45,6 +45,31 @@ export const APP_VERSION: string = (() => {
   try { return fs.readFileSync(path.join(PROJECT_ROOT, 'VERSION'), 'utf-8').trim() || 'dev'; }
   catch { return 'dev'; }
 })();
+
+/** build-info.json, written beside VERSION by release/build-info.mjs. */
+export interface BuildInfo {
+  format: 1;
+  tag: string | null;
+  sha: string;
+  channel: 'release' | 'master';
+  os: 'windows' | 'linux' | 'macos';
+  arch: string;
+  /** Exact asset variant (cuda13.1, cuda12-volta, metal...), unlike engine/.variant. */
+  variant: string;
+  engineSha: string;
+  updaterProtocol: number;
+}
+/** The package's exact identity; null (unknown) for older releases and git checkouts. */
+export const BUILD_INFO: BuildInfo | null = (() => {
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'build-info.json'), 'utf-8'));
+    if (info?.format === 1 && typeof info.sha === 'string' && typeof info.variant === 'string') return info;
+    console.warn('[Config] Ignoring build-info.json with an unknown format');
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') console.warn('[Config] Could not read build-info.json:', e.message);
+  }
+  return null;
+})();
 const ENV_EXAMPLE_PATH = path.join(PROJECT_ROOT, '.env.example');
 if (!fs.existsSync(ENV_PATH) && fs.existsSync(ENV_EXAMPLE_PATH)) {
   try {

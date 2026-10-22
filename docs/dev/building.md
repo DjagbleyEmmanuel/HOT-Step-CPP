@@ -432,6 +432,7 @@ Layout of a Windows package, as assembled by `release.yml`:
 | `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, and `engine/plugins/` |
 | `plugins/` | The repo-root plugin overlay |
 | `VERSION` | The release version, shown by the app |
+| `build-info.json` | The package's exact identity: tag, source commit, channel, OS, arch and asset variant. See [Releasing](releasing.md#build-identity) |
 | `.env.example` | Copied from the repo root |
 | `HOT-Step.bat` | Launcher. Sets `HOT_STEP_ROOT` and runs `runtime\node.exe server\server.mjs` |
 | `open-browser-if-needed.mjs` | Browser helper the launcher starts on the bundled Node. It waits for `/api/health`, skips if a tab is already connected, and otherwise opens the URL through `explorer.exe` |
@@ -449,14 +450,16 @@ To build a package locally:
 
 | Platform | Command |
 |---|---|
-| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda\|vulkan\|cpu] [-BuildBackend all\|cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI]`, output in `release/out/` |
+| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda -CudaAsset cuda13.1\|cuda12.8\|cuda12-volta \| -Variant vulkan\|cpu] [-BuildBackend all\|cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI]`, output in `release/out/` |
 | macOS | `./package-release.sh [--skip-build] [--version=1.2.0]`, output `HOT-Step-CPP-v<version>-macOS-arm64.tar.gz` |
 
 `-BuildBackend` defaults to `all`, preserving the local build of CUDA, Vulkan and CPU
 backends. `-Variant` chooses the archive name and packaged GPU DLL. For a local CPU-only
 release test, use `-Variant cpu -BuildBackend cpu`; use matching `cuda` or `vulkan`
 values for those backends. A single build backend must match `-Variant`, including
-with `-SkipEngine`, and mismatches fail before staging is changed.
+with `-SkipEngine`, and mismatches fail before staging is changed. `-Variant cuda` also
+needs `-CudaAsset`, the CI asset the build stands in for, because `build-info.json` records
+an exact variant and the script will not guess one from the toolkit.
 
 | Build backend | GGML_CUDA | GGML_VULKAN | Packaged GPU DLL |
 |---|---|---|---|

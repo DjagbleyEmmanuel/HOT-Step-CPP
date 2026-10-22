@@ -312,6 +312,23 @@ itself, for that one matrix entry only.
 - Workflows: [`.github/workflows/release.yml`](../../.github/workflows/release.yml),
   [`.github/workflows/cache-warm.yml`](../../.github/workflows/cache-warm.yml)
 
+## Build identity
+
+Every package carries `build-info.json` beside `VERSION`. All five assemblers (the three CI platform jobs, `release/build-release.ps1` and `package-release.sh`) write it with `release/build-info.mjs`, then run `node release/check-layout.mjs --package <root> --os <os> --variant <variant>`, which fails the build when the file is missing or disagrees with the asset.
+
+| Field | Value |
+|---|---|
+| `format` | `1` |
+| `tag` | The release tag, only when it names the packaged commit; otherwise `null` |
+| `sha` | Full source commit (HEAD when packaged) |
+| `channel` | `release` with a tag, `master` without |
+| `os`, `arch` | `windows`/`linux` with `x64`, or `macos` with `arm64` |
+| `variant` | Exact asset variant: `cuda13.1`, `cuda12.8`, `cuda12-volta`, `vulkan`, `cpu`, `rocm` (Linux), `metal` (macOS) |
+| `engineSha` | Git tree id of `engine/` at that commit; it changes with any engine source or ggml pin change |
+| `updaterProtocol` | `0` until the updater can apply packages |
+
+The package check also matches the ggml backend library in `engine/` to the variant, and `engine/.variant` and `.cuda-version` when present. `engine/.variant` keeps its coarse meaning (`cuda` for every CUDA asset) for the code that reads it. The server reads the file in `config.ts` (`BUILD_INFO`) and reports `build.tag`, `build.sha`, `build.variant` and `build.channel` in `/api/health`. A package without the file (an older release) or a git checkout has unknown identity: `sha` falls back to the checkout's HEAD and the rest is `null`. Nothing guesses a variant.
+
 ## Data layout acceptance
 
 Archives contain app binaries and immutable `server/data/` resources. User data is initialized in sibling `HOT-Step-Data` or reused through the profile pointer. Package `release/.env.example`, `profile-path.mjs`, the platform launcher and `README.txt`, plus `open-browser-if-needed.mjs` on Windows (a Node helper; the launcher must never start PowerShell, which antivirus quarantines); do not create mutable app-root models or adapters. Windows uses `runtime/node.exe`, Linux and macOS use `runtime/bin/node`. Local packagers follow the same layout.
