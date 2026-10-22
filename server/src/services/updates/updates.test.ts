@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createChecker, BACKOFF_MIN_MS, STALE_MS } from './checker.js';
 import type { CheckerDeps, FetchLike, UpdateState } from './checker.js';
+import { trustedOrigin } from './origin.js';
 import { applyBlockers, detectInstall, gitRelation, parseBuildInfo } from './install.js';
 import type { InstallDeps } from './install.js';
 import type { InstalledIdentity } from '../../contracts/updates.js';
@@ -213,4 +214,34 @@ test('gitRelation maps merge-base exit codes; a missing object is unknown, not d
   assert.equal(gitRelation(git, SHA_B, () => { throw exit(1); }), 'diverged');
   assert.equal(gitRelation(git, SHA_B, () => { throw exit(128); }), 'unknown');
   assert.equal(gitRelation(null, SHA_B, () => ''), 'unknown');
+});
+
+test('a held Release fetch does not drop a Master check', async () => {
+  let release!: (r: ReturnType<typeof ok>) => void;
+  const calls: string[] = [];
+  const s = setup([]);
+  s.deps.fetch = (url) => {
+    calls.push(url);
+    return url.endsWith('/releases/latest') ? new Promise(r => { release = r; }) : Promise.resolve(ok(REF(SHA_B)));
+  };
+  const c = createChecker(s.deps);
+  const startup = c.check({ manual: false });
+  const master = await c.check({ manual: true, channel: 'master' });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /git\/ref\/heads\/master$/);
+  assert.equal(master.latest.master?.sha, SHA_B);
+  release(ok(REL('v1.0.0')));
+  await startup;
+});
+
+test('origin guard: own origin and the Vite dev proxy pass, other sites do not', () => {
+  assert.equal(trustedOrigin(undefined, '127.0.0.1:3001'), true);
+  assert.equal(trustedOrigin('http://localhost:3001', 'localhost:3001'), true);
+  assert.equal(trustedOrigin('http://localhost:3000', '127.0.0.1:3001'), true);
+  assert.equal(trustedOrigin('http://127.0.0.1:3000', '127.0.0.1:3001'), true);
+  assert.equal(trustedOrigin('https://evil.example', '127.0.0.1:3001'), false);
+  assert.equal(trustedOrigin('http://localhost:8080', '127.0.0.1:3001'), false);
+  assert.equal(trustedOrigin('http://evil.example:3000', '127.0.0.1:3001'), false);
+  assert.equal(trustedOrigin('http://localhost:3000', 'evil.example'), false);
+  assert.equal(trustedOrigin('null', '127.0.0.1:3001'), false);
 });

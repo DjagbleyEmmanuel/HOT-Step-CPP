@@ -88,7 +88,7 @@ function backoffMs(res: HttpResponse, now: number): number {
 
 export function createChecker(deps: CheckerDeps) {
   let state: UpdateState | null = null;
-  let inflight: Promise<void> | null = null;
+  const inflight: Partial<Record<UpdateChannel, Promise<void>>> = {};
   const get = (): UpdateState => (state ??= deps.load() ?? freshState());
   const save = () => { try { deps.save(get()); } catch (e) { console.warn('[Updates] could not save state:', (e as Error).message); } };
 
@@ -166,7 +166,7 @@ export function createChecker(deps: CheckerDeps) {
       stale: !!feed.error || feed.okAt === null || deps.now() - feed.okAt > STALE_MS,
       error: feed.error,
       retryAfter: feed.retryUntil && feed.retryUntil > deps.now() ? iso(feed.retryUntil) : null,
-      checking: inflight !== null,
+      checking: !!inflight[channel],
       apply: { offered: false, reason: 'notices-only', blockers: applyBlockers(installed, relation, deps.platform) },
     };
   }
@@ -179,13 +179,14 @@ export function createChecker(deps: CheckerDeps) {
     const now = deps.now();
     let skip: boolean;
     let throttled = false;
-    if (inflight) skip = true;
+    if (inflight[s.channel]) skip = true;
     else if (feed.retryUntil && feed.retryUntil > now) skip = true;
     else if (opts.manual) skip = throttled = feed.attemptAt !== null && now - feed.attemptAt < MANUAL_MIN_MS;
     else skip = (feed.okAt !== null && now - feed.okAt <= STALE_MS) || (feed.attemptAt !== null && now - feed.attemptAt < AUTO_RETRY_MS);
-    if (!skip) inflight = refresh(s.channel).finally(() => { inflight = null; });
-    // Concurrent callers share the running refresh instead of starting another.
-    if (inflight) await inflight;
+    const ch = s.channel;
+    if (!skip) inflight[ch] = refresh(ch).finally(() => { delete inflight[ch]; });
+    // Concurrent callers for a feed share its running refresh; the other feed is not blocked.
+    await inflight[ch];
     return { ...status(), throttled };
   }
 
