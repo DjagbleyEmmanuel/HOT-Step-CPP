@@ -235,6 +235,16 @@ also opens a small popup with the playback buttons (below); hovering the section
 you last clicked brings it back, and clicking another section moves it there.
 **Stop** is in the popup too. Lyrics are not needed in this step.
 
+When the transcription lumps several lyric sections together (one long "verse"
+holding Verse 1, Verse 2 and a Pre-Chorus), and the pasted lyrics are tagged
+correctly, click **Sections from lyrics** while editing the structure. It
+aligns the lyrics to the source recording's vocal and starts a section at the
+bar where each tagged block is sung, named after its tag. Sections with no
+Vocal notes, such as an intro, interlude or outro, stay where they are. A block
+it cannot place joins the section before it, and the message says how many. It
+is one edit, so **Undo** puts the old sections back. Check the boundaries by
+ear before confirming; the aligner can be a bar or two off.
+
 The edits sit in two collapsed panels side by side, **Edit the selection** and
 **Fix bar grouping**. Open one to use it; the open panel spans the width beneath
 them.

@@ -62,7 +62,7 @@ export interface Yue2SectionMatch {
 /** Match score to lyrics: the score's new sections (1-based bars) and the
  *  lyrics retagged to them. */
 export interface Yue2ScorePlan {
-  sections: Array<{ label: string; bar: number; block: number | null }>;
+  sections: Array<{ label: string; bar: number; block: number | null; tag: string | null }>;
   lyrics: string;
   unsure: Array<{ block: number; tag: string | null }>;
   unchanged: boolean;

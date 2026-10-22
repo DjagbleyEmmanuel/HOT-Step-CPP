@@ -1849,6 +1849,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             {prep.step === 'structure'
               ? <PrepareStructure prep={prep} sourceAudioUrl={sourceMode === 'audio' ? sourceAudioUrl : ''} scorePlaying={scorePlaying}
                 onPlayScore={playScore} scoreStarts={scoreStarts} onHighlight={setScoreHighlight}
+                planFromLyrics={token && lyrics.trim() && sourceMode === 'audio' && sourceAudioUrl
+                  ? () => yue2CoverApi.planScoreSections({ ...sectionSource(), abc: prep.doc.abc, lyrics }) : undefined}
                 onConfirmed={() => void handleApproveSheet()}>
                 {mainMeter(sheetAbc) === '2/4' && !remeterOpen &&
                   <button type="button" onClick={() => void previewRemeter(false)} disabled={sheetPreparing}
