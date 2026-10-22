@@ -255,6 +255,7 @@ static Yue2SamplingParams yue2_stage_params(const Yue2LmConfig::Stage & st, cons
     sp.penalty_window     = o.penalty_window >= 0 ? o.penalty_window : (int) st.penalty_window;
     sp.min_tokens          = o.min_tokens >= 0 ? o.min_tokens : (int) st.min_tokens;
     sp.max_tokens          = o.max_tokens > 0 ? o.max_tokens : (int) st.max_tokens;
+    sp.min_p               = o.min_p > 0.0f ? o.min_p : 0.0f;  // not a checkpoint field
     return sp;
 }
 
@@ -938,6 +939,21 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         return true;
     }
 
+    // Source guide (yue2-guide.h): read once, shared by every song in the batch.
+    Yue2Guide  guide;
+    const bool guide_on = !req.guide.path.empty();
+    if (guide_on) {
+        if (!yue2_guide_read(req.guide.path, &guide, err)) {
+            yue2_ar_kv_cache_free(&cache);
+            return false;
+        }
+        fprintf(stderr,
+                "[YuE2-Guide] %lld frames x top-%lld | k %d scale %.2f outside %.1f offset %.2fs%s%s%s\n",
+                (long long) guide.T, (long long) guide.K, req.guide.k, req.guide.scale, req.guide.outside,
+                req.guide.offset_sec, req.guide.allow_end ? " allow_end" : "",
+                req.guide.schedule.empty() ? "" : (" schedule " + req.guide.schedule).c_str(),
+                req.guide.lfo.empty() ? "" : (" lfo " + req.guide.lfo).c_str());
+    }
     std::vector<std::vector<int32_t>> history((size_t) B);
     std::vector<bool>    done((size_t) B, false), by_threshold((size_t) B, false), dropped((size_t) B, false),
                          capped((size_t) B, false), abandoned((size_t) B, false);
@@ -982,8 +998,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             }
             float * row = logits.data() + (size_t) sg.cond_set * (size_t) W;
             if (use_cfg) {
-                yue2_cfg_blend_into(row, logits.data() + (size_t) sg.neg_set * (size_t) W, (size_t) W, req.cfg_scale,
-                                    scratch.data());
+                const float * neg = logits.data() + (size_t) sg.neg_set * (size_t) W;
+                if (req.cfg_x.any()) {
+                    lm_cfg_blend_extras(row, neg, (size_t) W, req.cfg_scale, req.cfg_x, scratch.data());
+                } else {
+                    yue2_cfg_blend_into(row, neg, (size_t) W, req.cfg_scale, scratch.data());
+                }
                 row = scratch.data();
             }
             // Ending controls (yue2-request.h). The bias lands on the raw logit
@@ -1001,6 +1021,9 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 if (w > 0.0f && std::isfinite(row[end_rel])) {
                     row[end_rel] += w * req.end_bias;
                 }
+            }
+            if (guide_on) {
+                yue2_guide_apply(row, W, base, legal_lo, legal_hi, YUE2_MUSIC_END, guide, req.guide, step);
             }
             // YUE2_END_TRACE=<path>: per-step record of MUSIC_END's probability
             // and rank BEFORE the sampler chain (softmax over the legal ids +

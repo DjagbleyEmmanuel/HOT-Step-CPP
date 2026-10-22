@@ -48,6 +48,10 @@ straight to `/synth` or `ace-synth`.
     "lm_cfg_scale":         2.0,
     "lm_cfg_cutoff_ratio":  1.0,
     "lm_top_p":             0.9,
+    "lm_min_p":             0.0,
+    "lm_cfg_min_p":         0.0,
+    "lm_cfg_logprob":       false,
+    "lm_cfg_rescale":       0.0,
     "lm_top_k":             0,
     "lm_rep_penalty":       1.0,
     "lm_rep_window":        64,
@@ -196,6 +200,18 @@ or the CoT caption), so it only applies there when lyrics are given and
 **`lm_top_p`** (float, default 0.9). Nucleus cutoff. `1.0` disables it.
 
 **`lm_top_k`** (int, default 0). `0` disables top-k.
+
+**`lm_min_p`** (float, default 0 = off). Code phase only: after top-p, drop every code
+whose probability is under `lm_min_p` times the top code's.
+
+**`lm_cfg_min_p`**, **`lm_cfg_logprob`**, **`lm_cfg_rescale`** (defaults 0, false, 0).
+Opt-in CFG refinements for the code phase (`engine/src/lm-cfg-extras.h`).
+`lm_cfg_min_p` blends only codes the conditional pass gives at least that fraction of
+its top probability; the rest keep their conditional logit. `lm_cfg_logprob` blends
+log-softmax rows instead of raw logits. `lm_cfg_rescale` (0 to 1) pulls the blended
+row's spread back toward the conditional row's. All off keeps the plain blend. The
+speculative (draft model) path ignores `lm_min_p` and these three and logs a warning,
+as it does for the repetition penalty.
 
 **`lm_rep_penalty`** (float, default 1.0 = off). Repetition penalty over recently
 emitted audio codes, to break code loops.
@@ -434,7 +450,8 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `lm_batch_size` | 1 | Songs per request, 1 to 4 |
 | `songs` | none | A batch of different songs: an array of 1 to 4 objects, each with its own `style` (required), `lyrics`, `abc`, `seed` and `noise_seed`. Everything else comes from the request. Sets the batch size and cannot be combined with `lm_batch_size` above 1. Song i without a `seed` uses the request seed plus i. Tracks come back song-major in array order |
 | `synth_batch_size` | 1 | Noise variations per song, 1 to 9 |
-| `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens` or `max_tokens` |
+| `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens`, `max_tokens` or `min_p`. `min_p` (0 to 1, default 0 = off) is not a checkpoint field: after top-p it drops every token under that fraction of the top token's probability |
+| `cfg_min_p`, `cfg_logprob`, `cfg_rescale` | 0, false, 0 | Opt-in refinements of the semantic stage's logit CFG, as `lm_cfg_*` above. All off keeps the reference BF16 blend |
 | `cfg_scale` | resolved from the checkpoint | NAR CFG |
 | `ode_steps` | checkpoint | NAR ODE steps |
 | `ode_method` | `"midpoint"` | The only method implemented |
@@ -443,6 +460,14 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `nar_chunk_frames` | 0 | NAR chunk cap in frames (25 per second). 0 renders a normal song in one chunk |
 | `end_threshold` | 0.0 | 0 to 1. Stop the semantic stage when the sampler puts this much probability on the end token |
 | `end_bias`, `end_bias_from_sec`, `end_bias_ramp_sec` | 0.0 | Additive end-token bias (-50 to 50), when it starts, and its ramp |
+| `guide_path` | none | Source guide file from `ace-train yue2-guide` (absolute path). Turns on source guidance for the semantic stage: per 25 Hz frame, the real-audio tokenizer's top-K codes for a recording |
+| `guide_scale` | 0.5 | 0 to 1. Mixes the LM's distribution with the tokenizer's (renormalised over the candidates): `(1 - s) p_LM + s p_tok`. Roughly the share of frames that follow the source |
+| `guide_k` | 0 | Candidates used per frame, 0 = every one the file holds |
+| `guide_outside` | 0.0 | -1000 to 0. Additive penalty on codes outside the candidates; -100 or below makes the candidates the only legal codes |
+| `guide_offset_sec` | 0.0 | Shift the source against the output, -3600 to 3600 s |
+| `guide_allow_end` | false | Allow the end token while a guide frame is active |
+| `guide_schedule`, `guide_schedule_power` | `"flat"`, 1.0 | Scale envelope over the guide: `flat`, `up`, `down`, `sin` or `inv_sin`, raised to the power |
+| `guide_lfo`, `guide_lfo_period_sec`, `guide_lfo_depth`, `guide_lfo_phase` | `"off"`, 4.0, 0.0, 0.0 | Periodic scale modulation: `off`, `sine`, `triangle`, `saw` or `square`. Depth 1 swings the scale between 0 and its value |
 | `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Without continuation, single song and single variation only |
 | `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |

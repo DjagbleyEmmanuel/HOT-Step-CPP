@@ -34,6 +34,7 @@
 // yue2/yue2-tok-head.h in transitively; must follow yue2-preprocess-run.h,
 // whose decode helpers it reuses rather than re-implementing.
 #include "train/yue2-tokenize-run.h"
+#include "train/yue2-guide-run.h"
 // YuE2 native forced aligner (docs/plans/yue2/17-mms-fa-port.md §5): fills the
 // cursor_words slot the AR trainer's lyric-cursor loss reads, replacing
 // engine/tools/yue2-cursor-bridge.py and the torchaudio install behind it.
@@ -415,6 +416,10 @@ static void print_usage(void) {
             "                yue2-sheet. 0 = off (the old, unnormalized cache keys).\n"
             "                TF32 is forced off (the encoder is 50x outside its parity gate\n"
             "                on a TF32 cuBLAS handle) and there is no escape hatch.\n"
+            "  yue2-guide     Source guide for YuE2 Cover renders: run the real-audio tokenizer\n"
+            "                over one file and keep its top-K codes per 25 Hz frame.\n"
+            "                --audio <file> --out <file.y2gd> [--topk 64] [--lufs -14|0]\n"
+            "                [--tok <yue2-tok-*.gguf> | --models <dir>] [--ffmpeg <exe>]\n"
             "  yue2-tokenize  Fill the codec_ids slot yue2-preprocess reserves: run the YuE2\n"
             "                real-audio semantic tokenizer (MERT-v2-FullSong block 20 + the\n"
             "                8-layer head) over every source the manifest lists, write the\n"
@@ -4799,6 +4804,36 @@ static int cmd_yue2_tokenize(int argc, char ** argv) {
     return yue2_tokenize_run(a);
 }
 
+// ─── yue2-guide ─────────────────────────────────────────────────────────────
+//
+// One file in, one source-guide file out (train/yue2-guide-run.h). TF32 off
+// first, for the same reason as yue2-tokenize.
+static int cmd_yue2_guide(int argc, char ** argv) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    Yue2GuideArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--audio"))  a.audio      = next("--audio");
+        else if (!strcmp(argv[i], "--out"))    a.out        = next("--out");
+        else if (!strcmp(argv[i], "--tok"))    a.tok_path   = next("--tok");
+        else if (!strcmp(argv[i], "--models")) a.models_dir = next("--models");
+        else if (!strcmp(argv[i], "--ffmpeg")) a.ffmpeg     = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--topk"))   a.topk       = atoi(next("--topk"));
+        else if (!strcmp(argv[i], "--lufs"))   a.lufs       = atof(next("--lufs"));
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    ggml_time_init();
+    return yue2_guide_run(a);
+}
+
 // ─── yue2-align ─────────────────────────────────────────────────────────────
 //
 // Native forced alignment: fill the `cursor_words` slot the AR trainer's
@@ -6524,6 +6559,9 @@ static int ace_train_main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "yue2-tokenize")) {
         return cmd_yue2_tokenize(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "yue2-guide")) {
+        return cmd_yue2_guide(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-align")) {
         return cmd_yue2_align(argc - 1, argv + 1);

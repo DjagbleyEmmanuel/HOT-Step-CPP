@@ -20,6 +20,8 @@
 // caller (Node), per yue2-tokenizer.h's own file-header convention — this
 // file does not re-normalize anything.
 
+#include "lm-cfg-extras.h"  // LmCfgExtras (cfg_min_p / cfg_logprob / cfg_rescale)
+#include "yue2-guide.h"     // Yue2GuideParams (guide_*)
 #include "yue2-model.h"     // Yue2VaeVariant, Yue2LmConfig
 #include "yue2-tokenizer.h" // Yue2Cot, yue2_cot_from_name
 
@@ -59,6 +61,7 @@ struct Yue2StageOverride {
     int   penalty_window     = -1;
     int   min_tokens         = -1;
     int   max_tokens         = -1;
+    float min_p              = -1.0f;
 };
 
 // One song of a coalesced batch ("songs": [...]): its own prompt, score and
@@ -214,6 +217,13 @@ struct Yue2Request {
     float end_bias         = 0.0f;
     float end_bias_from_sec = 0.0f;
     float end_bias_ramp_sec = 0.0f;
+
+    // Opt-in CFG refinements (lm-cfg-extras.h). All off = the reference blend.
+    LmCfgExtras cfg_x;
+
+    // Source-audio guidance for the semantic stage (yue2-guide.h). Off unless
+    // guide_path is set; the file comes from `ace-train yue2-guide`.
+    Yue2GuideParams guide;
 
     Yue2VaeVariant vae_variant = YUE2_VAE_STANDARD;
 
@@ -458,7 +468,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         { "temperature", 0.0, 5.0, false },   { "top_p", 0.0, 1.0, false },
         { "top_k", 0.0, 200000.0, true },     { "repetition_penalty", 0.5, 3.0, false },
         { "penalty_window", 0.0, 16384.0, true }, { "min_tokens", 0.0, 16384.0, true },
-        { "max_tokens", 1.0, 16384.0, true },
+        { "max_tokens", 1.0, 16384.0, true }, { "min_p", 0.0, 1.0, false },
     };
     struct StageSlot {
         const char *        prefix;
@@ -487,6 +497,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             else if (!strcmp(f.suffix, "penalty_window")) o.penalty_window = (int) num;
             else if (!strcmp(f.suffix, "min_tokens")) o.min_tokens = (int) num;
             else if (!strcmp(f.suffix, "max_tokens")) o.max_tokens = (int) num;
+            else if (!strcmp(f.suffix, "min_p")) o.min_p = (float) num;
         }
     }
 
@@ -779,6 +790,86 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             }
             *f.dst = (float) num;
         }
+    }
+
+    // CFG extras and the source guide (see the struct). Range-checked like
+    // the ending controls.
+    struct XField {
+        const char * key;
+        float *      dst;
+        double       lo, hi;
+    };
+    const XField x_fields[] = {
+        { "cfg_min_p", &out->cfg_x.min_p, 0.0, 1.0 },
+        { "cfg_rescale", &out->cfg_x.rescale, 0.0, 1.0 },
+        { "guide_scale", &out->guide.scale, 0.0, 1.0 },
+        { "guide_outside", &out->guide.outside, -1000.0, 0.0 },
+        { "guide_offset_sec", &out->guide.offset_sec, -3600.0, 3600.0 },
+        { "guide_schedule_power", &out->guide.schedule_power, 0.1, 10.0 },
+        { "guide_lfo_period_sec", &out->guide.lfo_period_sec, 0.04, 600.0 },
+        { "guide_lfo_depth", &out->guide.lfo_depth, 0.0, 1.0 },
+        { "guide_lfo_phase", &out->guide.lfo_phase, 0.0, 1.0 },
+    };
+    for (const XField & f : x_fields) {
+        if (!yue2_req_num(root, f.key, &num, &present, err)) {
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (present) {
+            if (!(num >= f.lo && num <= f.hi)) {
+                if (err) {
+                    *err = std::string(f.key) + " must be within [" + std::to_string(f.lo) + ", " +
+                           std::to_string(f.hi) + "]";
+                }
+                yyjson_doc_free(doc);
+                return false;
+            }
+            *f.dst = (float) num;
+        }
+    }
+    if (!yue2_req_num(root, "guide_k", &num, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (present) {
+        if (!(num >= 0 && num <= 32768) || std::floor(num) != num) {
+            if (err) *err = "guide_k must be an integer in [0, 32768]";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->guide.k = (int) num;
+    }
+    for (const char * key : { "cfg_logprob", "guide_allow_end" }) {
+        yyjson_val * v = yyjson_obj_get(root, key);
+        if (!v || yyjson_is_null(v)) continue;
+        if (!yyjson_is_bool(v)) {
+            if (err) *err = std::string(key) + " must be a boolean";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        (!strcmp(key, "cfg_logprob") ? out->cfg_x.logprob : out->guide.allow_end) = yyjson_get_bool(v);
+    }
+    if (!yue2_req_str(root, "guide_path", &out->guide.path, &present, err) ||
+        !yue2_req_str(root, "guide_schedule", &out->guide.schedule, &present, err) ||
+        !yue2_req_str(root, "guide_lfo", &out->guide.lfo, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    {
+        const std::string & sc = out->guide.schedule;
+        const std::string & lf = out->guide.lfo;
+        if (!(sc.empty() || sc == "flat" || sc == "up" || sc == "down" || sc == "sin" || sc == "inv_sin")) {
+            if (err) *err = "guide_schedule must be one of flat, up, down, sin, inv_sin";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (sc == "flat") out->guide.schedule.clear();
+        if (!(lf.empty() || lf == "off" || lf == "sine" || lf == "triangle" || lf == "saw" || lf == "square")) {
+            if (err) *err = "guide_lfo must be one of off, sine, triangle, saw, square";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (lf == "off") out->guide.lfo.clear();
     }
 
     if (!yue2_req_str(root, "ode_method", &out->ode_method, &present, err)) {

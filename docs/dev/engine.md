@@ -357,6 +357,20 @@ identity as `yue2Cover`; the engine composes from the score rather than
 conditioning its audio renderer on the recording. Without `--melody-only`,
 `yue2-sheet` retains its full-score training default.
 
+Source guidance is the optional second path from the recording to the render.
+`ace-train yue2-guide` runs MERT and the tokenizer head over the source with
+TF32 off, which ace-server cannot promise, and keeps the head's top-K codes per
+frame instead of its argmax. The head's argmax matches the code YuE2 itself drew
+on only 27.6% of frames when re-reading one of its own renders; top-20 holds it
+on 78.4% and top-64 on 91.4%. So the semantic stage mixes the LM's distribution
+with the tokenizer's over those candidates (`guide_scale`) and can forbid
+everything else (`guide_outside`), at the same seam as `end_bias`, before the
+reference sampler chain. On a 20 s cot=off test the share of drawn codes inside
+the top-64 went from 1.4% unguided to 37%, 83%, 96% and 100% at scales 0.25,
+0.5, 0.75 and 1.0. The idea comes from comfyui_acetricks'
+TokenizerGuideLogitsProcessor; its log-space blend was replaced by the mixture
+because the log-space version barely moved at 0.5.
+
 The post-render cover drift check matches sung lyric blocks to like-labelled
 score sections in order, skipping instrumental tags and listing unmatched sung
 blocks. A section is unscored when its opening or full-block median MMS_FA word
@@ -581,6 +595,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-preprocess` | Audio folder to cached YuE2 VAE latents and a manifest. Skips `*.engine.wav` (old server conversion-cache leftovers, duplicates of real tracks), as the dataset scanner does |
 | `yue2-tokenize` | Fill a YuE2 manifest's codec ids. `--dump-mert` also writes `codes/<stem>.mert.f16`, the tokenizer head's exact instance-normed `[T25, 1024]` MERT input, for head-training experiments |
 | `yue2-align` | Fill word timings for the AR lyric-cursor loss |
+| `yue2-guide` | One audio file to a source guide (`--audio`, `--out`, `--topk 64`, `--lufs -14`): the real-audio tokenizer's top-K codes per 25 Hz frame, read by the YuE2 semantic stage through `guide_path` (`yue2/yue2-guide.h`) |
 | `yue2-sheet` | Fill the ABC lead sheet with SheetSage2; `--melody-only` serves cover inference, while training keeps full score by default |
 | `yue2-nar-train` | Train a YuE2 NAR LoRA. `--manifest` may repeat (all caches train as one set); `--companion` merges `nar_lora_joint_v9` under the NAR first, as the server does at render time, and the export records it in `companion` metadata. `--audio-loss <w>` adds an audio-domain term on low-noise steps, the clean-latent estimate decoded through the frozen VAE and scored against the source recording ([training internals](training-internals.md#yue2-nar-audio-domain-loss)) |
 | `yue2-ar-train` | Train a YuE2 AR (composer) LoRA |
