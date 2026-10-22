@@ -43,7 +43,7 @@ Use CUDA on an NVIDIA card, Vulkan on AMD or Intel, and CPU only if there is no 
 - **Training Studio.** Style adapters for ACE-Step 1.5, MiniMax-Music3 and YuE2, trained on your own GPU. See [Training Studio](docs/user/studios/training-studio.md).
 - **Auto-Gen and Custom-Gen.** Pick a genre and let the language model write the caption, lyrics and title, or set every field yourself. See [Auto-Gen](docs/user/studios/insta-gen.md) and [Custom-Gen](docs/user/studios/create.md).
 - **Lyric Studio.** A lyrics workspace with artist profiles, several LLM providers, bulk generation and the same generation controls as Custom-Gen. See [Lyric Studio](docs/user/studios/lyric-studio.md).
-- **Cover Studio.** Style-matched covers of a reference track on ACE-Step and YuE2: a two-step Prepare flow that fixes the structure and assigns lyrics, then a Build page that assembles the song section by section. See [Cover Studio](docs/user/studios/cover-studio.md).
+- **Cover Studio.** Style-matched covers of a reference track on ACE-Step and YuE2. ACE-Step conditions on the source audio directly; YuE2 adds a two-step Prepare flow (fix the structure, assign lyrics) and a Build page that assembles the song section by section. See [Cover Studio](docs/user/studios/cover-studio.md).
 - **Repaint, Song Builder and Stem Builder.** Regenerate one region and keep the rest, build a song a section at a time, or generate a new instrument stem over a backing track (ACE-Step). See [Repaint Studio](docs/user/studios/repaint-studio.md), [Song Builder](docs/user/studios/song-builder.md) and [Stem Builder](docs/user/studios/stem-builder.md).
 - **Compare.** A/B listening with one shared playhead for seed sweeps, plugin tests and checkpoint ladders, with a loudness and spectral analyser. See [Compare](docs/user/studios/compare-studio.md).
 - **STORM.** A live performance mode that streams crossfaded slots while you retune the style, lyrics, seed and sampler. It runs on ACE-Step, YuE2 and Stable Audio 3. See [STORM](docs/user/studios/storm.md).
@@ -54,7 +54,7 @@ Use CUDA on an NVIDIA card, Vulkan on AMD or Intel, and CPU only if there is no 
 - **Post-processing chain.** Mastering against a reference track, a VST3 host, StableStep refinement through Stable Audio 3, PP-VAE and denoising. See [Generation](docs/user/generation.md#post-processing).
 - **Model Manager.** Starter packs and every model file, downloaded in the app with resumable progress, including importance-matrix quants that keep the small sizes usable. See [Model Manager](docs/user/studios/model-manager.md) and [Model files](docs/user/models.md).
 - **Phones and the PWA.** Every studio has a narrow-screen layout, and over HTTPS the app installs to your home screen. See [Install on your phone](docs/user/getting-started.md#install-on-your-phone).
-- **DAW facade.** `/api/v1/daw` lets a DAW client generate and analyse audio against the running app. See the [API reference](docs/dev/api.md#apiv1daw).
+- **DAW facade.** `/api/v1/daw` lets a DAW client generate and analyse audio against the running app. See the [API reference](docs/dev/api.md#daw-facade-notes-apiv1daw).
 - **Agents.** Two local MCP servers let an agent drive the app. See [MCP](docs/user/mcp.md).
 - **RunPod and Colab.** No suitable GPU? Rent one on RunPod ([guide](docs/dev/runpod.md)) or use the Colab notebook ([guide](docs/user/colab.md)).
 
