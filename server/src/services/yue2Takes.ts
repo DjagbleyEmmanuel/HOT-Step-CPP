@@ -593,6 +593,13 @@ export function deleteBuildTake(id: string, userId: string, takeId: string, revi
   return view(stored);
 }
 
+/** Deletes the whole build: its session folder with every take's audio and codes. Refused while takes or the build render are rendering. */
+export function deleteBuild(id: string, userId: string): void {
+  load(id, userId);
+  if (runs.has(id) || previewRuns.has(id)) throw new TakesError('Takes are still rendering; cancel them first.', 409);
+  fs.rmSync(sessionDir(id), { recursive: true, force: true });
+}
+
 /** A 16-bit PCM WAV cut to its first `seconds`; chunks after the data are dropped. */
 export function cropWav(wav: Buffer, seconds: number): Buffer {
   let off = 12, frameBytes = 4, rate = 48000;

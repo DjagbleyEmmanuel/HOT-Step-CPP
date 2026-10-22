@@ -378,6 +378,24 @@ test('cover-local lyrics: validated, revisioned, isolated, and the next take fol
     hold = false;
   });
 
+  await t.test('delete build: refused while rendering and for another user, then removes the folder', async () => {
+    const { deleteBuild } = await import('./yue2Takes.js');
+    hold = true; cancelled = false;
+    const s = start();
+    generateBuildTakes(s.id, 'user', 0, 1, 0);
+    await until(() => getBuildSession(s.id, 'user').pending[0]?.progress === 25);
+    assert.throws(() => deleteBuild(s.id, 'user'), /still rendering/);
+    await cancelBuildTakes(s.id, 'user');
+    await settle(s.id);
+    hold = false;
+    const dir = path.join(config.data.audioDir, 'takes', s.id);
+    assert.throws(() => deleteBuild(s.id, 'other'), /not found/);
+    assert.ok(fs.existsSync(dir));
+    deleteBuild(s.id, 'user');
+    assert.ok(!fs.existsSync(dir));
+    assert.throws(() => getBuildSession(s.id, 'user'), /not found/);
+  });
+
   await t.test('candidates made before an edit cannot be kept; mutations on the old revision fail', async () => {
     const s = start();
     generateBuildTakes(s.id, 'user', 0, 1, 0);

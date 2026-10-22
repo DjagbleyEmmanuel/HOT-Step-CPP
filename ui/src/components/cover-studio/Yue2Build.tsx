@@ -243,6 +243,13 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       finally { setBusy(false); }
     },
     startOver: () => { setSessionId(''); setError(''); },
+    /** Deletes the build on the server (refused while takes render), then returns to the empty state. */
+    deleteBuild: async () => {
+      setBusy(true);
+      try { await yue2CoverApi.buildDeleteAll(live!.id); setSessionId(''); setError(''); }
+      catch (err: any) { setError(err.message); }
+      finally { setBusy(false); }
+    },
   };
 }
 
@@ -418,6 +425,8 @@ interface PageProps {
   /** Where Save song starts the song: seconds into a first-section take, or null for the top. */
   onTrim?: (take: string, seconds: number | null) => void;
   onStartOver: () => void;
+  /** Deletes the whole build on the server, then returns to the empty state. */
+  onDeleteBuild: () => void;
   onSave: () => void;
   onBack: () => void;
 }
@@ -620,6 +629,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40">Save the song so far</button>
             <button type="button" onClick={() => { setMenu(false); p.onStartOver(); }}
               className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-zinc-100 dark:hover:bg-white/5">Start over</button>
+            <button type="button" onClick={() => { setMenu(false); if (window.confirm('Delete this build and all its takes? This cannot be undone.')) p.onDeleteBuild(); }}
+              className="block w-full px-3 py-1.5 text-left text-red-500 hover:bg-zinc-100 dark:hover:bg-white/5">Delete build</button>
           </div>}
         </div>
       </div>

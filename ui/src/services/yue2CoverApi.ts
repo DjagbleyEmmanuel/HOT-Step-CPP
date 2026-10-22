@@ -259,6 +259,8 @@ export const yue2CoverApi = {
     request<Yue2BuildSession>(`/build/${id}/trim`, { method: 'POST', body: JSON.stringify({ revision, take, seconds }) }),
   buildDelete: (id: string, revision: number, take: string) =>
     request<Yue2BuildSession>(`/build/${id}/takes/${take}?revision=${revision}`, { method: 'DELETE' }),
+  buildDeleteAll: (id: string) =>
+    request<{ ok: true }>(`/build/${id}`, { method: 'DELETE' }),
   planScoreSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }) =>
     request<Yue2ScorePlan>('/sections/plan-score', { method: 'POST', body: JSON.stringify(input) }),
   suggestAssignments: (input: Yue2CoverSourceInput & { prepare: PrepareV2; useRecording?: boolean }) =>
