@@ -12,8 +12,10 @@
 //      Negative controls: the DoRA norm wired as a constant (a real bug class)
 //      and one gradient scaled by 1.05 must both be caught.
 //   3. Replay against the official trainer: block 0 of a captured step
-//      (_experiments/sa3-training/gate/block0-step2.safetensors, made by
-//      block_fixture.py from the stage-4 reference). Output and every gradient
+//      (_experiments/sa3-training/gate/block0-step2.safetensors; regenerate
+//      with tools/sa3-training-block-fixture.py --step 2 and --step 1, which
+//      asserts the replay reproduces the stage-4 reference capture before it
+//      writes anything; see its header for provenance). Output and every gradient
 //      are compared with the official block recomputed in fp32 (tight), and
 //      with the bf16 training capture itself (the official fp32 recompute
 //      sits up to 2.5% from it). Negative control: the gradients must not
@@ -298,6 +300,8 @@ static void case_placement(ggml_backend_t backend, ggml_type wtype) {
            ggml_type_name(wtype), ggml_graph_n_nodes(r.gf), r.refused, r.refused ? " -> " : "", r.refused_ops.c_str(),
            hist.c_str());
     CHECK(r.refused == 0, "placement: %s refuses %d node(s): %s", ggml_backend_name(backend), r.refused, r.refused_ops.c_str());
+    // Every op placed but the graph still failed to allocate: that is a failure, not a skip.
+    CHECK(ok || r.refused != 0, "placement: graph allocation failed on %s", ggml_backend_name(backend));
     if (ok) {
         const double l = r.compute();
         CHECK(std::isfinite(l), "placement: non-finite loss on %s", ggml_backend_name(backend));
@@ -576,7 +580,7 @@ int main() {
         return 1;
     }
     if (!replay) {
-        printf("sa3-train-grad-test: replay SKIPPED (no fixture; set SA3_GATE_FIXTURES)\n");
+        printf("sa3-train-grad-test: replay SKIPPED (no fixture: run tools/sa3-training-block-fixture.py, or set SA3_GATE_FIXTURES)\n");
         return 77;
     }
     printf("sa3-train-grad-test: all checks passed\n");

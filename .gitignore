@@ -86,6 +86,7 @@ tools/codegraph/node_modules/
 !tools/listening-save.test.mjs
 !tools/engine-smoke.mjs
 !tools/sa3-training-reference.py
+!tools/sa3-training-block-fixture.py
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
 !tools/yue2-vae-train/
