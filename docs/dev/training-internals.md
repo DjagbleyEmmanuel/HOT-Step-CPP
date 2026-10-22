@@ -6,6 +6,48 @@ can place individual children elsewhere.
 
 *The complete map of HOT-Step's native training system (Training Studio). Written as the handoff/continuation doc: everything an agent or contributor needs to keep working on this subsystem in a fresh session. Built 2026-07-27/28; all measurements from an RTX 5090 (32 GB, sm_120).*
 
+## Stable Audio 3 Medium training
+
+`trainSa3Runner.ts` owns preparation, `ace-train sa3-train`, engine restoration
+and publication. `GET /api/training/datasets/:id/sa3-train` returns readiness,
+defaults and saved runs; POST starts a new run or resumes one by `resumeRun`.
+Preparation calls real SuperSep level 5, preserves sources and writes a derived
+44.1 kHz stereo snapshot. `sa3Dataset.ts` maps parsed caption, genre, BPM, key
+and signature to plain prompt text. Lyrics never enter that prompt.
+
+The trainer freezes the Medium base DiT, SAME and T5Gemma. CUDA keeps the DiT
+base in BF16; adapters and optimizer state are F32. CPU upcasts adapter-site
+weights to F32 because its BF16 OUT_PROD is unsupported. The segmented backward
+graphs run on one backend, with an operation-support audit before execution;
+unsupported operations fail instead of falling back to another device.
+AdamW runs on host adapter masters. Do not describe the whole training loop as
+GPU-only. Defaults are rank/alpha 16, LR 1e-4, batch 1 and 1,000 steps.
+The seconds embedder is frozen in the server workflow.
+
+Runs live under `<adapters>/sa3-medium/<dataset>/<adapter>/<timestamp>/`.
+`run.json` records the recipe and model provenance; `train-manifest.json` and
+`dataset/` preserve the prepared snapshot. `state.gguf` contains resume state;
+`adapter-raw.gguf` contains raw training parameters. Neither is an inference
+adapter. `adapter.gguf` stores `dora-rows-v1` row scales against the inference
+DiT and is validated before atomic publication to `<models>/sa3-adapters/`.
+The local training base is distinct from the distilled inference DiT.
+
+Resume may increase total steps but keeps the other recipe fields. It reuses
+the snapshot and the engine checks model, conditioning and timing fingerprints.
+Cancellation writes `STOP`; startup/encoding cancellation has a 30-second kill
+fallback and may leave no checkpoint. The runner restores the engine in its
+cleanup path, including after failed training.
+
+For integration checks on an idle dev stack, create a dedicated test dataset
+and run `node tools/sa3-training-check.mjs --dataset <id> --out <new directory>`.
+The checker trains three steps with a 12-second crop, resumes to five, checks
+picker publication and renders two held-out captions at strengths 0 and 1 with
+seed 42. It keeps a JSON receipt and WAVs, checks finite/non-silent audio and
+requires the paired files to differ. This is a mechanical round-trip check,
+not a listening verdict or a 1,000-step quality pilot. Run its `--self-test`
+without models. GPU memory, operation placement and steady timings need
+separate receipts, on the same HEAD and recipe for each machine.
+
 ## YuE2 joint training
 
 The opt-in `fixed-recipe` method defaults to the bf16 LM base (the request's `base` is kept when set, and the standalone prepare route takes the same `base`), rank-64 LoRA (alpha 64) at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing. Like every method it trains on a -14 LUFS cache, but nothing refuses another level. The server forces these values, apart from the base, even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.

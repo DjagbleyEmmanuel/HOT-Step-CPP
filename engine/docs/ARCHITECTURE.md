@@ -12,6 +12,30 @@ Everything here was checked against `engine/src/request.cpp`,
 `engine/tools/hot-step-server.cpp` and the CLI sources in `engine/tools/`. When the
 code and this page disagree, the code wins; fix the page.
 
+## Stable Audio 3 training CLI
+
+```text
+ace-train sa3-train --models <models> --base-dit <medium-base.gguf> --inference-dit <medium.gguf> --manifest <train-manifest.json> --out <new-run> --steps 1000 --rank 16 --alpha 16 --lr 0.0001 --duration 12 --seed 42 --checkpoint-every 100 --export-every 0 --bwd mm --jsonl
+ace-train sa3-train-check --models <models> --base-dit <medium-base.gguf> --fixtures <reference-directory>
+```
+
+`--duration` sets the maximum crop in seconds; the 12-second example is a smoke
+configuration, while the server default is 380 seconds. `--cache` overrides the
+pre-encoding cache, otherwise `<out>/cache`. `--inference-dit` defaults to
+`<models>/sa3-dit-BF16.gguf`. `--resume` reads `<out>/state.gguf` and checks the
+saved run fingerprint. Total `--steps` includes completed updates.
+`--checkpoint-every` sets the state-save interval; `--export-every 0` disables
+periodic inference snapshots. Final raw, state and inference files are separate.
+
+`--bwd mm` is the default backward path; `--bwd outprod` selects OUT_PROD.
+`--tf32 on|off` defaults off. The standalone `--train-seconds` option also trains
+the seconds embedder, but the server deliberately excludes it from published
+adapters because that adapter site has no inference loading contract.
+Writing `<out>/STOP` requests a checkpoint stop at the next training step.
+`--jsonl` emits start, data, progress, step, checkpoint, export, stopped, done
+and error events. A stopped run is resumable when state exists; it is not a
+completed publication. See [training internals](../../docs/dev/training-internals.md#stable-audio-3-medium-training).
+
 ## Request JSON reference
 
 `adapter_runtime_dora` is an optional boolean shared by ACE-Step and MiniMax-Music3

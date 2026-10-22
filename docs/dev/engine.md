@@ -471,6 +471,22 @@ to guidance plugins.
 New plugins need no C++ rebuild. Writing one is covered in
 [plugins-authoring.md](plugins-authoring.md).
 
+## Stable Audio 3 training
+
+`ace-train sa3-train` trains Medium DoRA-rows adapters against the separate
+Medium base checkpoint. SAME and T5Gemma pre-encode the prepared instrumental
+snapshot. The base stays frozen, segmented backward graphs train the adapters,
+and AdamW updates their F32 host masters. CUDA and CPU are supported by the
+server runner; operation support is checked before graph execution.
+
+Raw adapters and optimizer state stay in the run directory. Inference exports
+contain row scales computed against the installed inference DiT and are
+validated before entering `models/sa3-adapters`. `sa3-train-check` replays the
+official-reference fixtures. See [training internals](training-internals.md#stable-audio-3-medium-training)
+for the API, preparation and integrated checker, and the
+[CLI reference](../../engine/docs/ARCHITECTURE.md#stable-audio-3-training-cli)
+for standalone arguments.
+
 ## Stable Audio 3 sampling
 
 `POST /sa3-synth` generates from caption tokens using the same SA3 model and
