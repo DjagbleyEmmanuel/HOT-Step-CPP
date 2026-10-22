@@ -205,9 +205,13 @@ static bool sa3t_preencode(const Sa3TrainArgs & a, int64_t C, std::vector<Sa3Sam
     if (!sa3t_read_padding(a.base_dit, pad, err)) return false;
     const std::string enc_path = a.models_dir + "/sa3-same-enc-F16.gguf", t5_path = a.models_dir + "/sa3-text-enc-BF16.gguf";
     std::error_code ec;
-    const std::string ident = "v1|" + enc_path + "|" + std::to_string(std::filesystem::file_size(std::filesystem::u8path(enc_path), ec)) +
-                              "|" + std::to_string(std::filesystem::file_size(std::filesystem::u8path(t5_path), ec)) + "|" +
-                              sa3t_hex_key(pad.data(), pad.size() * sizeof(float), "");
+    // cache identity: encoder weights by content (a same-size replacement must miss) + base padding
+    const std::string enc_sha = sa3t_file_sha(enc_path), t5_sha = sa3t_file_sha(t5_path);
+    if (enc_sha.empty() || t5_sha.empty()) {
+        *err = "cannot read the SAME encoder / T5Gemma in " + a.models_dir;
+        return false;
+    }
+    const std::string ident = "v2|" + enc_sha + "|" + t5_sha + "|" + sa3t_hex_key(pad.data(), pad.size() * sizeof(float), "");
     std::filesystem::create_directories(std::filesystem::u8path(a.cache_dir), ec);
     SA3Same       enc{};
     SA3T5GemmaEnc t5{};
@@ -339,7 +343,9 @@ static int sa3_train_run(Sa3TrainArgs a) {
     const std::string base_sha = sa3t_file_sha(a.base_dit), inf_sha = sa3t_file_sha(a.inference_dit);
     if (base_sha.empty() || inf_sha.empty()) return fail("cannot hash the base or inference DiT");
     std::string dhash;
-    for (const Sa3Sample & s : data) dhash += sa3t_hex_key(s.latents.data(), s.latents.size() * 4, s.audio_path);
+    for (const Sa3Sample & s : data)  // latents, text conditioning and timing: any change makes a different run
+        dhash += sa3t_hex_key(s.latents.data(), s.latents.size() * 4, s.audio_path) +
+                 sa3t_hex_key(s.text.data(), s.text.size() * 4, std::to_string(s.n_samples) + "|" + std::to_string(s.seconds_total));
     char fpbuf[512];
     snprintf(fpbuf, sizeof(fpbuf), "r%lld a%g lr%g wd%g b%g/%g seed%llu C%lld secs%d base%s data%s", (long long) a.rank, a.alpha,
              a.lr, a.wd, a.beta1, a.beta2, (unsigned long long) a.seed, (long long) C, (int) a.train_seconds,
