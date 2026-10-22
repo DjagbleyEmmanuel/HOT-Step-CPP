@@ -10,7 +10,6 @@ const root = path.resolve(__dirname, '../..');
 const binary = path.join(__dirname, 'node_modules', '@colbymchenry', 'codegraph', 'npm-shim.js');
 const graphDir = path.join(root, '.codegraph');
 const marker = path.join(graphDir, 'wrapper-sync.json');
-const lock = path.join(graphDir, 'codegraph.lock');
 const environment = {
   ...process.env,
   DO_NOT_TRACK: '1',
@@ -87,47 +86,13 @@ function pause(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-// codegraph.lock holds the writer's PID. A writer killed mid-sync leaves the
-// file behind and nothing else removes it, so a dead holder's lock is cleared.
-// Cleaners claim the file by renaming it to a name only they own (rename is
-// atomic, so one wins), then inspect the claimed copy. A lock that turns out to
-// be live is linked back, never overwritten. Nobody unlinks a shared path.
-function clearStaleLock() {
-  const claim = `${lock}.${process.pid}.claim`;
-  try { fs.renameSync(lock, claim); } catch { return; }
-  try {
-    const pid = Number.parseInt(fs.readFileSync(claim, 'utf8'), 10);
-    let dead = false;
-    if (Number.isInteger(pid) && pid > 0) {
-      try { process.kill(pid, 0); } catch (error) { dead = error.code === 'ESRCH'; }
-    }
-    if (dead) {
-      process.stderr.write(`cg: removed stale lock from dead pid ${pid}
-`);
-    } else {
-      // ponytail: a writer taking the lock in this instant sees it free; codegraph's own file lock still guards the db.
-      try { fs.linkSync(claim, lock); } catch {}
-    }
-  } catch {
-    try { fs.linkSync(claim, lock); } catch {}
-  } finally {
-    try { fs.unlinkSync(claim); } catch {}
-  }
-}
-
-function waitForLock() {
-  for (let attempt = 0; fs.existsSync(lock); attempt++) {
-    clearStaleLock();
-    if (!fs.existsSync(lock)) return;
-    if (attempt >= 20) throw new Error('index busy, use grep (codegraph lock did not clear)');
-    pause(250);
-  }
-}
-
+// codegraph owns its write lock file in .codegraph: its sync clears a lock left by a
+// dead PID and reports a live holder as LockUnavailableError, retried below.
+// Do not check or remove the lock file here; an existence check blocked every
+// reader forever on a dead writer's lock, and outside cleanup races live writers.
 function sync() {
   let lastError;
   for (let attempt = 0; attempt < 5; attempt++) {
-    waitForLock();
     const freshness = fingerprint();
     if (synced(freshness) && fs.existsSync(path.join(graphDir, 'codegraph.db'))) return;
     const result = run(process.execPath, [binary, 'sync', root]);
