@@ -63,6 +63,7 @@ disco stem extraction it starts) twice.
 | `.env` values | `shell-queue/env` | Fresh each load; seeds the editable form |
 | GPUs, stem storage | shared `gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
 | Data folder | `shell-queue/data-folder` | Fresh each visit; refetched after a cancel or a failed command |
+| Update notice | `shell-queue/updates` | Fresh each visit; Check now writes its result into the entry |
 | File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | shared `adapter-scan` | Fresh per click |
 | YuE2 caption source | `shell-queue/yue2-captions` | Fresh; failures caught by the caller, never cached as empty |
@@ -132,7 +133,7 @@ launch the app or claim network counts.
 | Browser-owned queue | Status reads per running job at the existing 1.5 s and 2.5 s loops; no projection poll |
 | Post-processing re-run | `GET /api/songs/:id/postprocess?jobId=` every 1.5 s, one at a time, stops at done or failed |
 | Cover art (library menu) | `GET /api/cover-art/generate/:jobId` every 2 s, stops at done or failed |
-| Settings | `/api/health`, `/api/settings/env`, `/api/settings/gpus`, `/api/stem-studio/stats`, `/api/settings/data-folder` on open |
+| Settings | `/api/health`, `/api/settings/env`, `/api/settings/gpus`, `/api/stem-studio/stats`, `/api/settings/data-folder`, `/api/updates/status` on open |
 | Presets (Storm AI-continue) | `/api/preferences/presets/:family`, `/api/preferences/settings/:family` on load and after writes |
 
 1. Open Library, Create and the Recent Songs column together. Count one

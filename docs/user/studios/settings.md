@@ -34,6 +34,7 @@ it to snap that one field back. The reset persists like any other change — it 
 
 | Control | What it does |
 |---|---|
+| Updates | Shows the installed build (release tag or source commit, plus the build variant), a Release / Master selector, the time of the last successful check and **Check now**. When something newer exists a banner links to its GitHub release notes or commit. Changing the selector only changes which feed is checked, never your installation. It is a notice only: nothing is downloaded or installed. A copy with no build record, a source checkout with uncommitted changes, and a failed check each get a plain message, and a failed check is never shown as "up to date". |
 | Display Language | Sets the application interface language. Applies immediately. |
 | Generic artwork | Which set of stand-in cover images a track shows until it has one of its own; each track keeps the same image within a set. |
 | "Disco Mode": Extract drum stems for visualisations | After generation, extracts kick, snare, and hi-hat stems to drive the beat-reactive visual effects (rainbow borders, snare flash, hi-hat particles). Adds roughly 60 to 90 seconds per song. |

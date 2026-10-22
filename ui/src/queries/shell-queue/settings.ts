@@ -5,6 +5,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { adapterApi, healthApi, settingsApi } from '../../services/api';
 import { dataFolderApi } from '../../services/dataFolderApi';
+import { updatesApi } from '../../services/updatesApi';
 import { getStemStats } from '../../services/stemStudioApi';
 import { serverKey, sharedKeys } from '../keys';
 
@@ -52,5 +53,13 @@ export const adapterScanOptions = (folder: string) => queryOptions({
 export const browseOptions = (dir: string, filter?: string) => queryOptions({
   queryKey: sharedKeys.browse(dir, filter),
   queryFn: ({ signal }) => adapterApi.browse(dir, filter, { signal }),
+  staleTime: 0,
+});
+
+/** The server's cached update notice. Never calls GitHub; a manual check
+ *  writes its result straight into this entry. */
+export const updatesStatusOptions = () => queryOptions({
+  queryKey: serverKey('shell-queue/updates'),
+  queryFn: ({ signal }) => updatesApi.status({ signal }),
   staleTime: 0,
 });

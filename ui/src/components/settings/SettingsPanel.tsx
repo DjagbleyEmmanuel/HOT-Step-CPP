@@ -18,6 +18,7 @@ import { songApi, settingsApi } from '../../services/api';
 import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { DataFolderPanel } from './DataFolderPanel';
+import { UpdatesPanel } from './UpdatesPanel';
 import { AdapterReferencesAction } from './AdapterReferencesAction';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
@@ -780,6 +781,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* ═══════════════ GENERAL TAB ═══════════════ */}
       {activeTab === 'general' && (
       <>
+      <UpdatesPanel />
       {/* Language Section */}
       <div className="settings-section">
         <div className="settings-section-header">
