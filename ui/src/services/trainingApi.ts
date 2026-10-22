@@ -45,6 +45,41 @@ export function setTrainingWorker(name: string | null): void {
 // ── Core enums ────────────────────────────────────────────────────────────
 export type TagPosition = 'prepend' | 'append' | 'replace';
 
+/** SA3 Medium DoRA-rows. Resume preserves the saved recipe and snapshot. */
+export interface StartSa3TrainingRequest {
+  adapterName?: string;
+  steps?: number;
+  rank?: number;
+  alpha?: number;
+  learningRate?: number;
+  duration?: number;
+  seed?: number;
+  checkpointEvery?: number;
+  exportEvery?: number;
+  resumeRun?: string;
+}
+
+export type Sa3Recipe = Required<Omit<StartSa3TrainingRequest, 'adapterName' | 'resumeRun'>>;
+export interface Sa3TrainingStatus {
+  available: boolean;
+  backend: string;
+  missing: string[];
+  defaults: Sa3Recipe;
+  activeJob: TrainingJobSummary | null;
+  runs: Array<{
+    run: string; adapterName: string; recipe: Sa3Recipe; resumable: boolean;
+    published: string | null; baseSha256?: string; inferenceSha256?: string;
+  }>;
+}
+
+export function getSa3TrainingStatus(id: string, opts?: TrainingReadOptions): Promise<Sa3TrainingStatus> {
+  return request(`/datasets/${encodeURIComponent(id)}/sa3-train`, undefined, opts);
+}
+
+export function startSa3Training(id: string, opts: StartSa3TrainingRequest, target?: TrainingTarget): Promise<{ jobId: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/sa3-train`, { method: 'POST', ...jsonBody(opts) }, target);
+}
+
 export type MergePolicy =
   | 'fill_missing'        // default: only write fields currently empty
   | 'overwrite_caption'
@@ -53,7 +88,7 @@ export type MergePolicy =
 
 export type TrainingJobKind =
   | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'build'
-  | 'preprocess' | 'train-lm' | 'train-dit'
+  | 'preprocess' | 'train-lm' | 'train-dit' | 'sa3-train'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3. Both GPU-lane and engine-stopping — an MM3 training step
   // peaks at 31.7 GB of a 32 GB card.

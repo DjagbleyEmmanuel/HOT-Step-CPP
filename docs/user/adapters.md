@@ -52,6 +52,14 @@ same dataset again adds a new run folder and never overwrites an old one.
 
 ## File formats
 
+Stable Audio 3 Medium training publishes validated DoRA-rows GGUF files into
+`models/sa3-adapters/`, shared with StableStep. Its raw adapter and optimizer
+checkpoints remain in the training run folder and are not inference files.
+Training Studio's SA3 card has a catalogue picker and fixed-seed auditions at
+strength 0 or 1. See [Stable Audio 3 training](training/sa3.md) for vocal
+stripping, the recipe and resume. This catalogue lives under the models root,
+separately from the ACE-Step, MiniMax-Music3 and YuE2 adapter directories above.
+
 ACE-Step DiT adapters load from three shapes:
 
 - A single `.safetensors` file. ComfyUI-style LoRA files, which store alpha per tensor,

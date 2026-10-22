@@ -316,6 +316,13 @@ freely, including commercially, and that only companies need a commercial licenc
 
 ## Stable Audio 3
 
+Training Studio's Train page offers an independent **Training target** picker for
+SA3 Medium DoRA-rows. Open Training Studio while another backend is selected,
+then choose SA3 as the training target. Preparation strips vocals with SuperSep
+level 5 and keeps the originals. Training supports CUDA and CPU; the card lists
+missing model files. See [Stable Audio 3 training](training/sa3.md) for the
+recipe, cancellation, saved-run resume and fixed-seed adapter auditions.
+
 SA3 generation defaults to 8 steps with the MD Pingpong Blend Lua sampler.
 You can select native Pingpong or Euler instead, or enable a solver in Sampler
 Plugins to override the default solver.

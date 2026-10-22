@@ -11,6 +11,7 @@
 // and differ only in which slice of the store they read.
 
 import { useQuery } from '@tanstack/react-query';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import {
   AlertTriangle, Check, Copy, Cpu, Database, FileCode2, Flag, Headphones, Layers, Loader2, PauseCircle, Target, Waves, XCircle,
 } from 'lucide-react';
@@ -23,6 +24,9 @@ import type { TrainDitOptions, TrainLmOptions } from '../../services/trainingApi
 import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Sa3TrainCard } from './Sa3TrainCard';
 import { formatDurationMs, totalEpochMs } from '../../utils/trainingEta';
 import { AuditionCard, type MilestoneAuditionRequest } from './AuditionCard';
 import { JobProgress } from './JobProgress';
@@ -58,6 +62,8 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   // toggle — so this branches on the active backend, in this one place, rather
   // than inventing a flag that would have to mean "which of two unrelated UIs".
   const backendId = useBackendStore(s => s.activeBackendId);
+  const [trainingTarget, setTrainingTarget] = usePersistedState('hs-trainingTarget', 'active');
+  const sa3Mode = backendId === 'sa3' || trainingTarget === 'sa3';
   const mm3Mode = backendId === 'minimax-m3';
   // Same rule, one backend along: YuE2 trains a NAR LoRA from cached VAE
   // latents and has no DiT path, no tensor cache and no preprocess variant.
@@ -156,9 +162,9 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     return () => window.clearTimeout(handle);
   }, [lmSize, adapterName, ditAdapterName]);
   const lmQuery = useQuery({ ...trainingQueries.trainLmStatus(trainingWorker, selectedDatasetId ?? '', {
-    lmSize: debounced.lmSize, adapterName: debounced.adapterName.trim() || undefined }), enabled: !!selectedDatasetId });
+    lmSize: debounced.lmSize, adapterName: debounced.adapterName.trim() || undefined }), enabled: !!selectedDatasetId && !sa3Mode });
   const ditQuery = useQuery({ ...trainingQueries.trainDitStatus(trainingWorker, selectedDatasetId ?? '', {
-    adapterName: debounced.ditAdapterName.trim() || undefined }), enabled: !!selectedDatasetId });
+    adapterName: debounced.ditAdapterName.trim() || undefined }), enabled: !!selectedDatasetId && !sa3Mode });
   const error = storeError || lmQuery.error?.message || ditQuery.error?.message || lmRecipe.error?.message || ditRecipe.error?.message || null;
   const trainLmStatus = lmQuery.data ?? null;
   const trainDitStatus = ditQuery.data ?? null;
@@ -211,7 +217,18 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     );
   };
 
+  const targetPicker = section === 'train' && backendId !== 'sa3' ? (
+    <div className={`${CARD} flex flex-col gap-1`}>
+      <ParamLabel label={t('trainingStudio.sa3.target')} info={t('trainingStudio.sa3.targetInfo')} />
+      <StyledSelect value={trainingTarget} onChange={setTrainingTarget} accent="amber" options={[
+        { value: 'active', label: t('trainingStudio.sa3.activeTarget') },
+        { value: 'sa3', label: t('trainingStudio.sa3.title') },
+      ]} />
+    </div>
+  ) : null;
+
   const header = (
+    <>
     <div className="flex items-start gap-3">
       <Cpu size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
       <div className="min-w-0">
@@ -224,6 +241,8 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
             : t('trainingStudio.train.subtitle')}</p>
       </div>
     </div>
+    {targetPicker}
+    </>
   );
 
   // ── Gate 1: no dataset selected ─────────────────────────────────────────
@@ -264,6 +283,13 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
       </div>
     );
   }
+
+  // SA3 scans source audio and prepares its own snapshot before training.
+  // It does not require ACE's built manifest or tensor cache.
+  if (sa3Mode && section === 'train') return <div className="flex flex-col gap-4">
+    {targetPicker}
+    <Sa3TrainCard key={`${trainingWorker}:${detail.id}`} datasetId={detail.id} slug={detail.slug} />
+  </div>;
 
   // ── Gate 2: no ace-train binary ─────────────────────────────────────────
   if (!tl?.available) {
