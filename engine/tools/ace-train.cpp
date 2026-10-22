@@ -64,6 +64,7 @@
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
 #include "train/preprocess-run.h"  // pulls in st-write.h + preprocess-io.h
 #include "train/spike-run.h"       // Phase-0 training spike (evidence code)
+#include "train/sa3-train-run.h"   // Stable Audio 3 DoRA-rows trainer
 
 #include <cstdarg>
 #include <cstdio>
@@ -300,6 +301,20 @@ static void print_usage(void) {
             "                [--lm-adapter-scale 1] [--lm-adapter-scale-attn 1]\n"
             "                [--lm-adapter-scale-mlp 1] [--trigger <word>] prepends\n"
             "                \"<word>, \" to every caption, the shape --trigger-prepend trained.\n"
+            "  sa3-train     Stable Audio 3 medium DoRA-rows adapter training (official\n"
+            "                train_lora.py recipe; CUDA or CPU, Vulkan/Metal lack OUT_PROD).\n"
+            "                --manifest <json> --models <dir> --base-dit <sa3-dit-base-BF16.gguf>\n"
+            "                --out <dir> [--steps 1000] [--rank 16] [--alpha 16] [--lr 1e-4]\n"
+            "                [--duration 380] crop seconds (needs ~11 GB VRAM; 30 s ~4 GB)\n"
+            "                [--seed 42] [--checkpoint-every 100] [--export-every 0]\n"
+            "                [--resume] [--cache <dir>] [--inference-dit <gguf>]\n"
+            "                [--train-seconds] also adapt the seconds_total embedder (upstream\n"
+            "                does; the dora-rows-v1 export cannot carry it, so off by default)\n"
+            "                [--bwd mm|outprod] [--tf32 on|off] [--jsonl]. <out>/STOP stops after\n"
+            "                the current step with state saved; --resume continues bit-for-bit.\n"
+            "  sa3-train-check  Replay the official SA3 trainer capture (tools/sa3-training-\n"
+            "                step-fixture.py): --fixtures <dir> --base-dit <gguf> --models <dir>\n"
+            "                [--bwd mm|outprod]. Exit 77 when fixtures or the base are absent.\n"
             "  mm3-train-dit MiniMax-Music3 flow-DiT LoRA training.\n"
             "                --cache <dir from mm3-condition> --models <dir> --out <dir>\n"
             "                [--dora] learn per-output magnitudes alongside LoRA factors.\n"
@@ -4553,6 +4568,69 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
     return mm3_train_dit_run(a);
 }
 
+// ─── sa3-train / sa3-train-check ────────────────────────────────────────────
+//
+// Same two environment latches as mm3-train-dit, set before any backward is
+// built: GGML_BACKWARD_MM=1 (HOT-ggml mm-backward) unless --bwd outprod, and
+// NVIDIA_TF32_OVERRIDE=0 unless --tf32 on.
+static void sa3_train_latches(bool bwd_mm, bool tf32) {
+#ifdef _WIN32
+    if (bwd_mm) _putenv("GGML_BACKWARD_MM=1");
+    if (!tf32) _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    if (bwd_mm) setenv("GGML_BACKWARD_MM", "1", 1);
+    if (!tf32) setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+}
+
+static int cmd_sa3_train(int argc, char ** argv) {
+    Sa3TrainArgs a;
+    bool         bwd_mm = true, tf32 = false;
+    std::string  fixtures;
+    const bool   check = !strcmp(argv[0], "sa3-train-check");
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--manifest"))         a.manifest      = next("--manifest");
+        else if (!strcmp(argv[i], "--models"))           a.models_dir    = next("--models");
+        else if (!strcmp(argv[i], "--base-dit"))         a.base_dit      = next("--base-dit");
+        else if (!strcmp(argv[i], "--inference-dit"))    a.inference_dit = next("--inference-dit");
+        else if (!strcmp(argv[i], "--out"))              a.out_dir       = next("--out");
+        else if (!strcmp(argv[i], "--cache"))            a.cache_dir     = next("--cache");
+        else if (!strcmp(argv[i], "--fixtures"))         fixtures        = next("--fixtures");
+        else if (!strcmp(argv[i], "--steps"))            a.steps         = atoll(next("--steps"));
+        else if (!strcmp(argv[i], "--rank"))             a.rank          = atoll(next("--rank"));
+        else if (!strcmp(argv[i], "--alpha"))            a.alpha         = (float) atof(next("--alpha"));
+        else if (!strcmp(argv[i], "--lr"))               a.lr            = (float) atof(next("--lr"));
+        else if (!strcmp(argv[i], "--duration"))         a.duration      = atof(next("--duration"));
+        else if (!strcmp(argv[i], "--seed"))             a.seed          = (uint64_t) atoll(next("--seed"));
+        else if (!strcmp(argv[i], "--checkpoint-every")) a.ckpt_every    = atoll(next("--checkpoint-every"));
+        else if (!strcmp(argv[i], "--export-every"))     a.export_every  = atoll(next("--export-every"));
+        else if (!strcmp(argv[i], "--resume"))           a.resume        = true;
+        else if (!strcmp(argv[i], "--train-seconds"))    a.train_seconds = true;
+        else if (!strcmp(argv[i], "--bwd"))              bwd_mm          = strcmp(next("--bwd"), "outprod") != 0;
+        else if (!strcmp(argv[i], "--tf32"))             tf32            = !strcmp(next("--tf32"), "on");
+        else if (!strcmp(argv[i], "--jsonl"))            g_jsonl         = true;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    sa3_train_latches(bwd_mm, tf32);
+    if (check) {
+        if (fixtures.empty() || a.base_dit.empty() || a.models_dir.empty()) {
+            fprintf(stderr, "ace-train sa3-train-check: --fixtures, --base-dit and --models are required\n");
+            return 2;
+        }
+        return sa3_train_check(fixtures, a.base_dit, a.models_dir);
+    }
+    if (a.manifest.empty() || a.models_dir.empty() || a.base_dit.empty() || a.out_dir.empty()) {
+        fprintf(stderr, "ace-train sa3-train: --manifest, --models, --base-dit and --out are required\n");
+        return 2;
+    }
+    return sa3_train_run(a);
+}
+
 // ─── yue2-nar-train ─────────────────────────────────────────────────────────
 //
 // YuE2 NAR-half LoRA trainer. Modelled on cmd_mm3_train_dit above, including
@@ -6553,6 +6631,9 @@ static int ace_train_main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "mm3-train-dit")) {
         return cmd_mm3_train_dit(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "sa3-train") || !strcmp(argv[1], "sa3-train-check")) {
+        return cmd_sa3_train(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-preprocess")) {
         return cmd_yue2_preprocess(argc - 1, argv + 1);

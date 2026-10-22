@@ -87,6 +87,7 @@ tools/codegraph/node_modules/
 !tools/engine-smoke.mjs
 !tools/sa3-training-reference.py
 !tools/sa3-training-block-fixture.py
+!tools/sa3-training-step-fixture.py
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
 !tools/yue2-vae-train/
