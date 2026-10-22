@@ -21,6 +21,21 @@ export const VARIANTS = {
   'macos/arm64': ['metal'],
 };
 
+/** Contract violations in a parsed build-info.json; mirrored by server/src/config.ts parseBuildInfo. */
+export function buildInfoErrors(info) {
+  if (!info || typeof info !== 'object') return ['not an object'];
+  const bad = [];
+  const want = (field, ok) => { if (!ok) bad.push(`bad ${field} ${JSON.stringify(info[field])}`); };
+  want('format', info.format === BUILD_INFO_FORMAT);
+  want('tag', info.tag === null || (typeof info.tag === 'string' && /^v\S+$/.test(info.tag)));
+  want('sha', typeof info.sha === 'string' && /^[0-9a-f]{40}$/.test(info.sha));
+  want('engineSha', typeof info.engineSha === 'string' && /^[0-9a-f]{40}$/.test(info.engineSha));
+  want('channel', info.channel === (info.tag ? 'release' : 'master'));
+  want('variant', VARIANTS[`${info.os}/${info.arch}`]?.includes(info.variant) === true);
+  want('updaterProtocol', info.updaterProtocol === UPDATER_PROTOCOL);
+  return bad;
+}
+
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 

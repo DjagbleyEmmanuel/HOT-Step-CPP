@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILD_INFO_FILE, BUILD_INFO_FORMAT, VARIANTS } from './build-info.mjs';
+import { BUILD_INFO_FILE, buildInfoErrors } from './build-info.mjs';
 
 export function checkReleaseLayout(root) {
   const errors = [];
@@ -51,16 +51,9 @@ export function checkPackageBuildInfo(root, { os, variant }) {
   let info;
   try { info = JSON.parse(fs.readFileSync(path.join(root, BUILD_INFO_FILE), 'utf8')); }
   catch (e) { return [`${BUILD_INFO_FILE}: ${e.code === 'ENOENT' ? 'missing' : 'unreadable'}`]; }
-  const errors = [];
-  const want = (field, ok) => { if (!ok) errors.push(`${BUILD_INFO_FILE}: bad ${field} ${JSON.stringify(info[field])}`); };
-  want('format', info.format === BUILD_INFO_FORMAT);
-  want('os', info.os === os);
-  want('variant', info.variant === variant && VARIANTS[`${info.os}/${info.arch}`]?.includes(variant));
-  want('sha', /^[0-9a-f]{40}$/.test(info.sha));
-  want('engineSha', /^[0-9a-f]{40}$/.test(info.engineSha));
-  want('channel', info.channel === (info.tag ? 'release' : 'master'));
-  want('tag', info.tag === null || /^v\S+$/.test(info.tag));
-  want('updaterProtocol', Number.isInteger(info.updaterProtocol));
+  const errors = buildInfoErrors(info).map(e => `${BUILD_INFO_FILE}: ${e}`);
+  if (info?.os !== os || info?.variant !== variant) errors.push(`${BUILD_INFO_FILE}: is ${info?.os} ${info?.variant}, expected ${os} ${variant}`);
+  if (errors.length) return errors;
   let version = '';
   try { version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().replace(/^v/, ''); } catch { errors.push('VERSION: missing'); }
   if (info.tag && version !== info.tag.slice(1)) errors.push(`${BUILD_INFO_FILE}: tag ${info.tag} disagrees with VERSION ${version}`);

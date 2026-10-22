@@ -59,16 +59,38 @@ export interface BuildInfo {
   engineSha: string;
   updaterProtocol: number;
 }
-/** The package's exact identity; null (unknown) for older releases and git checkouts. */
+// Same table and rules as release/build-info.mjs (buildInfoErrors).
+const BUILD_VARIANTS: Record<string, string[]> = {
+  'windows/x64': ['cuda13.1', 'cuda12.8', 'cuda12-volta', 'vulkan', 'cpu'],
+  'linux/x64': ['cuda13.1', 'cuda12.8', 'cuda12-volta', 'vulkan', 'rocm', 'cpu'],
+  'macos/arm64': ['metal'],
+};
+const FULL_SHA = /^[0-9a-f]{40}$/;
+/** A build-info.json that meets the whole contract, else null (unknown identity). */
+export function parseBuildInfo(text: string): BuildInfo | null {
+  let i: any;
+  try { i = JSON.parse(text); } catch { return null; }
+  const ok = i && typeof i === 'object'
+    && i.format === 1
+    && (i.tag === null || (typeof i.tag === 'string' && /^v\S+$/.test(i.tag)))
+    && typeof i.sha === 'string' && FULL_SHA.test(i.sha)
+    && typeof i.engineSha === 'string' && FULL_SHA.test(i.engineSha)
+    && i.channel === (i.tag ? 'release' : 'master')
+    && BUILD_VARIANTS[`${i.os}/${i.arch}`]?.includes(i.variant) === true
+    && i.updaterProtocol === 0;
+  return ok ? i : null;
+}
+/** The package's exact identity; null (unknown) for older releases, git checkouts and invalid files. */
 export const BUILD_INFO: BuildInfo | null = (() => {
-  try {
-    const info = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, 'build-info.json'), 'utf-8'));
-    if (info?.format === 1 && typeof info.sha === 'string' && typeof info.variant === 'string') return info;
-    console.warn('[Config] Ignoring build-info.json with an unknown format');
-  } catch (e: any) {
+  let text: string;
+  try { text = fs.readFileSync(path.join(PROJECT_ROOT, 'build-info.json'), 'utf-8'); }
+  catch (e: any) {
     if (e.code !== 'ENOENT') console.warn('[Config] Could not read build-info.json:', e.message);
+    return null;
   }
-  return null;
+  const info = parseBuildInfo(text);
+  if (!info) console.warn('[Config] Ignoring build-info.json that breaks its contract; identity unknown');
+  return info;
 })();
 const ENV_EXAMPLE_PATH = path.join(PROJECT_ROOT, '.env.example');
 if (!fs.existsSync(ENV_PATH) && fs.existsSync(ENV_EXAMPLE_PATH)) {
