@@ -87,8 +87,25 @@ function pause(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// codegraph.lock holds the writer's PID. A writer killed mid-sync leaves the
+// file behind and nothing else removes it, so a dead holder's lock is cleared.
+function clearStaleLock() {
+  let pid;
+  try { pid = Number.parseInt(fs.readFileSync(lock, 'utf8'), 10); } catch { return; }
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error.code !== 'ESRCH') return; // EPERM: alive, owned by someone else
+    try { fs.unlinkSync(lock); process.stderr.write(`cg: removed stale lock from dead pid ${pid}
+`); } catch {}
+  }
+}
+
 function waitForLock() {
   for (let attempt = 0; fs.existsSync(lock); attempt++) {
+    clearStaleLock();
+    if (!fs.existsSync(lock)) return;
     if (attempt >= 20) throw new Error('index busy, use grep (codegraph lock did not clear)');
     pause(250);
   }
