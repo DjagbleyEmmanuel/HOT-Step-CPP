@@ -89,33 +89,29 @@ function pause(ms) {
 
 // codegraph.lock holds the writer's PID. A writer killed mid-sync leaves the
 // file behind and nothing else removes it, so a dead holder's lock is cleared.
-// Cleaners take an O_EXCL mutex and re-read the lock inside it, so one cleaner
-// cannot unlink a live lock a writer created after another cleaner's unlink.
-const reclaim = `${lock}.reclaim`;
-
+// Cleaners claim the file by renaming it to a name only they own (rename is
+// atomic, so one wins), then inspect the claimed copy. A lock that turns out to
+// be live is linked back, never overwritten. Nobody unlinks a shared path.
 function clearStaleLock() {
-  let fd;
+  const claim = `${lock}.${process.pid}.claim`;
+  try { fs.renameSync(lock, claim); } catch { return; }
   try {
-    fd = fs.openSync(reclaim, 'wx');
-  } catch {
-    // Held by another cleaner; a crashed one must not wedge us, so expire it.
-    try { if (Date.now() - fs.statSync(reclaim).mtimeMs > 10000) fs.unlinkSync(reclaim); } catch {}
-    return;
-  }
-  try {
-    const pid = Number.parseInt(fs.readFileSync(lock, 'utf8'), 10);
-    if (!Number.isInteger(pid) || pid <= 0) return;
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if (error.code !== 'ESRCH') return; // EPERM: alive, owned by someone else
-      fs.unlinkSync(lock);
+    const pid = Number.parseInt(fs.readFileSync(claim, 'utf8'), 10);
+    let dead = false;
+    if (Number.isInteger(pid) && pid > 0) {
+      try { process.kill(pid, 0); } catch (error) { dead = error.code === 'ESRCH'; }
+    }
+    if (dead) {
       process.stderr.write(`cg: removed stale lock from dead pid ${pid}
 `);
+    } else {
+      // ponytail: a writer taking the lock in this instant sees it free; codegraph's own file lock still guards the db.
+      try { fs.linkSync(claim, lock); } catch {}
     }
-  } catch {} finally {
-    fs.closeSync(fd);
-    try { fs.unlinkSync(reclaim); } catch {}
+  } catch {
+    try { fs.linkSync(claim, lock); } catch {}
+  } finally {
+    try { fs.unlinkSync(claim); } catch {}
   }
 }
 
