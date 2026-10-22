@@ -593,10 +593,11 @@ export function deleteBuildTake(id: string, userId: string, takeId: string, revi
   return view(stored);
 }
 
-/** Deletes the whole build: its session folder with every take's audio and codes. Refused while takes or the build render are rendering. */
-export function deleteBuild(id: string, userId: string): void {
+/** Deletes the whole build: its session folder with every take's audio and codes. Refused while takes or the build render are rendering, or while `hasActiveSave` reports a Save song job that will read the folder. */
+export function deleteBuild(id: string, userId: string, hasActiveSave: (id: string) => boolean = () => false): void {
   load(id, userId);
   if (runs.has(id) || previewRuns.has(id)) throw new TakesError('Takes are still rendering; cancel them first.', 409);
+  if (hasActiveSave(id)) throw new TakesError('A Save song render is queued or running for this build.', 409);
   fs.rmSync(sessionDir(id), { recursive: true, force: true });
 }
 

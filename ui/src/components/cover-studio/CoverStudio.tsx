@@ -75,6 +75,8 @@ import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics
 // serializes anyway, this keeps the client-side recombine→submit→poll ordered.
 const _coverQueue: Array<() => Promise<void>> = [];
 let _coverRunning = false;
+/** Builds with a Save song queued or rendering: Delete build waits, because the render reads the build's files. */
+const _savingBuilds = new Map<string, number>();
 // Survives Cover Studio remounts (it unmounts when you leave the tab) so a
 // previously-sent library track isn't re-applied every time you revisit (#61).
 let _lastConsumedCoverTs = 0;
@@ -1284,6 +1286,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const qId = addManualQueueItem({ title, artistName: String(buildSession.params.artistName || ''), caption: String(buildSession.params.caption || '') });
     updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
     setIsGenerating(true);
+    _savingBuilds.set(sessionId, (_savingBuilds.get(sessionId) ?? 0) + 1);
     enqueueCoverJob(async () => {
       try {
         const res = await generateApi.submit(params as any);
@@ -1293,7 +1296,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         // still the open one; any other outcome keeps it for a retry.
         if (outcome === 'succeeded') finishSavedBuild(sessionId);
       } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
-      finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
+      finally {
+        const left = (_savingBuilds.get(sessionId) ?? 1) - 1;
+        if (left > 0) _savingBuilds.set(sessionId, left); else _savingBuilds.delete(sessionId);
+        if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); }
+      }
     });
     showToast('Saving the build as a song: it is in the queue');
   };
@@ -1318,7 +1325,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
       onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}
       onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={(take, crop) => void build.keep(take, crop)} onDelete={take => void build.remove(take)}
-      onUndo={section => void build.undo(section)} onStartOver={build.startOver} onDeleteBuild={() => void build.deleteBuild()} onSave={saveBuild}
+      onUndo={section => void build.undo(section)} onStartOver={build.startOver} onDeleteBuild={() => buildSession && _savingBuilds.has(buildSession.id) ? showToast('A Save song render is queued for this build; delete it once that finishes.') : void build.deleteBuild()} onSave={saveBuild}
       onCrop={(take, frame, mode) => void build.crop(take, frame, mode)} onTrim={(take, seconds) => void build.trim(take, seconds)} onPreview={() => void build.preview()}
       onBack={() => setBuildMode(false)} />;
   };

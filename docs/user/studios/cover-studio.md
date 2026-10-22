@@ -538,6 +538,11 @@ Edits on Prepare do not change a build that exists. Choose **Start over** in
 Build actions or beside **Build in progress** on Prepare to start a new build
 from Prepare. **Open** on Prepare returns to the existing build.
 
+**Delete build** in Build actions removes the whole build from disk, with every
+take, after a confirm, and returns to the empty state. It is refused while takes
+or the Play build render are rendering, and while a Save song render for the
+build is queued or running; try again once those finish.
+
 A take's seed reproduces its composition only with the same group size. The
 same seed rendered alone can differ from one rendered in a group of four.
 

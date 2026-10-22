@@ -390,6 +390,7 @@ test('cover-local lyrics: validated, revisioned, isolated, and the next take fol
     hold = false;
     const dir = path.join(config.data.audioDir, 'takes', s.id);
     assert.throws(() => deleteBuild(s.id, 'other'), /not found/);
+    assert.throws(() => deleteBuild(s.id, 'user', id => id === s.id), /Save song render is queued/);
     assert.ok(fs.existsSync(dir));
     deleteBuild(s.id, 'user');
     assert.ok(!fs.existsSync(dir));
