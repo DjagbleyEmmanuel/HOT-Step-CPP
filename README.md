@@ -1,9 +1,8 @@
 # HOT-Step CPP
 
-A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Four backends run natively in the C++ engine and switch from the sidebar: **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2** and **Stable Audio 3**. It also runs on Windows, Linux and macOS, on a rented RunPod GPU, in Colab, and from your phone.
+A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Four backends run natively in the C++ engine and switch from the sidebar: **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2** and **Stable Audio 3**. It also runs on Windows, Linux and macOS, in Colab, and from your phone (a RunPod image arrives with the next release).
 
 [![Open in Colab](https://img.shields.io/badge/Open%20in%20Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white)](https://colab.research.google.com/github/scragnog/HOT-Step-CPP/blob/master/colab/HOT-Step.ipynb)
-[![Open in RunPod](https://img.shields.io/badge/Open%20in%20RunPod-673AB7?style=for-the-badge)](docs/dev/runpod.md)
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/ezVtmg9GKX)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/scragnog)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-scragnog-FFD21E?style=for-the-badge)](https://huggingface.co/scragnog)
@@ -56,7 +55,7 @@ Use CUDA on an NVIDIA card, Vulkan on AMD or Intel, and CPU only if there is no 
 - **Phones and the PWA.** Every studio has a narrow-screen layout, and over HTTPS the app installs to your home screen. See [Install on your phone](docs/user/getting-started.md#install-on-your-phone).
 - **DAW facade.** `/api/v1/daw` lets a DAW client generate and analyse audio against the running app. See the [API reference](docs/dev/api.md#daw-facade-notes-apiv1daw).
 - **Agents.** Two local MCP servers let an agent drive the app. See [MCP](docs/user/mcp.md).
-- **RunPod and Colab.** No suitable GPU? Rent one on RunPod ([guide](docs/dev/runpod.md)) or use the Colab notebook ([guide](docs/user/colab.md)).
+- **Colab.** No suitable GPU? Use the Colab notebook ([guide](docs/user/colab.md)).
 
 The full list, one line per feature, is in [FEATURES.md](FEATURES.md).
 
@@ -113,7 +112,7 @@ For contributors:
 
 ## Building from source
 
-For GPU hosting, see the [RunPod Pod template guide](docs/dev/runpod.md). For Colab, see [Running on Google Colab](docs/user/colab.md).
+For Colab, see [Running on Google Colab](docs/user/colab.md).
 
 Most people should use a [release](#download). To build it yourself, including the engine, the dev loop and portable packaging, follow [Building from source](docs/dev/building.md). On Linux and WSL the root `Makefile` covers the whole flow with `make setup`, `make build`, `make install` and `make run`; on Windows use `dev.bat` and `LAUNCH.bat`.
 
