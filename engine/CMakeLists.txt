@@ -1010,6 +1010,14 @@ if(BUILD_TESTING)
     add_test(NAME sa3-dora-load COMMAND sa3-dora-load-test)
     set_tests_properties(sa3-dora-load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
+    # SA3 training gate: one DiT block's backward (placement, finite
+    # differences, official-trainer replay). Skips (77) without the replay fixture.
+    add_executable(sa3-train-grad-test tests/test-sa3-train-grad.cpp)
+    link_ggml_backends(sa3-train-grad-test)
+    target_link_libraries(sa3-train-grad-test PRIVATE yyjson)
+    add_test(NAME sa3-train-grad COMMAND sa3-train-grad-test)
+    set_tests_properties(sa3-train-grad PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+
     # YuE2 joint/AITK DoRA graph fixture: LoRA identity at m == nrm, rescale
     # forward/backward, exact vs expanded row norms.
     add_executable(yue2-aitk-dora-test tests/test-yue2-aitk-dora.cpp)
