@@ -4135,7 +4135,7 @@ int main(int argc, char ** argv) {
         {
             ModelKey k{};
             k.kind = MODEL_SA3_GGML;
-            k.path = models_dir;  // 4 sa3-*.gguf in the models root
+            k.path = std::string(models_dir) + "/sa3-dit-BF16.gguf";  // refine is BF16-only
             k.adapter_stack = adapter_sig;  // "" = stock; else distinct cached model
             Sa3GgmlRefine * sa3 = store_require_sa3_ggml(g_store, k);
             if (!sa3) {
@@ -4422,6 +4422,31 @@ int main(int argc, char ** argv) {
             return;
         }
 
+        // Generation DiT: `synth_model` = bare filename in the models root, the
+        // same field name and meaning as ACE's request. Empty, not sa3-dit-*.gguf
+        // or not on disk falls back to BF16; the training base is refused.
+        std::string dit_file = "sa3-dit-BF16.gguf";
+        if (req.has_param("synth_model") && !req.get_param_value("synth_model").empty()) {
+            const std::string want = req.get_param_value("synth_model");
+            if (want.find('/') != std::string::npos || want.find('\\') != std::string::npos ||
+                want.find("..") != std::string::npos) {
+                json_error(res, 400, "Invalid synth_model (bare filename expected)");
+                return;
+            }
+            if (want.rfind("sa3-dit-base-", 0) == 0) {
+                json_error(res, 400, "sa3-dit-base-* is the training base, not a generation DiT");
+                return;
+            }
+            const bool is_sa3_dit = want.rfind("sa3-dit-", 0) == 0 && want.size() > 13 &&
+                                    want.compare(want.size() - 5, 5, ".gguf") == 0;
+            if (is_sa3_dit && file_exists(std::string(models_dir) + "/" + want)) {
+                dit_file = want;
+            } else {
+                fprintf(stderr, "[Server] SA3 synth: synth_model %s %s, falling back to %s\n", want.c_str(),
+                        is_sa3_dit ? "not installed" : "is not an sa3-dit-*.gguf", dit_file.c_str());
+            }
+        }
+
         // Duration — the one param synth has that refine does not. Refine gets
         // its length from the input WAV; here it is the request. Tiled
         // encode/decode (sa3_chunk_starts) handles any length, so the ceiling
@@ -4611,9 +4636,9 @@ int main(int argc, char ** argv) {
             return;
         }
 
-        fprintf(stderr, "[Server] SA3 synth: %.2fs, steps=%d, sampler=%s, seed=%llu, backend=gguf\n",
+        fprintf(stderr, "[Server] SA3 synth: %.2fs, steps=%d, sampler=%s, seed=%llu, backend=gguf, dit=%s\n",
                 duration_sec, steps, pingpong ? "pingpong" : "euler",
-                (unsigned long long) seed);
+                (unsigned long long) seed, dit_file.c_str());
 
         // Acquire model + run. Same ModelKey / store / ModelHandle as refine.
         std::vector<float> out44;
@@ -4622,7 +4647,7 @@ int main(int argc, char ** argv) {
         {
             ModelKey k{};
             k.kind = MODEL_SA3_GGML;
-            k.path = models_dir;
+            k.path = std::string(models_dir) + "/" + dit_file;
             k.adapter_stack = adapter_sig;
             Sa3GgmlRefine * sa3 = store_require_sa3_ggml(g_store, k);
             if (!sa3) { json_error(res, 500, "SA3 GGML model load failed"); return; }
@@ -4658,6 +4683,7 @@ int main(int argc, char ** argv) {
         }
         std::string wav = audio_encode_wav(out_native, T_out, sr_out, sa3_out_fmt);
         free(out_native);
+        res.set_header("X-SA3-DiT", dit_file);
         res.set_content(wav, "audio/wav");
     }));
 
