@@ -11,7 +11,6 @@
 // and differ only in which slice of the store they read.
 
 import { useQuery } from '@tanstack/react-query';
-import { usePersistedState } from '../../hooks/usePersistedState';
 import {
   AlertTriangle, Check, Copy, Cpu, Database, FileCode2, Flag, Headphones, Layers, Loader2, PauseCircle, Target, Waves, XCircle,
 } from 'lucide-react';
@@ -22,22 +21,17 @@ import { useRunEvents } from '../../queries/training-runs/hooks';
 import { runQueries } from '../../queries/training-runs/queries';
 import type { TrainDitOptions, TrainLmOptions } from '../../services/trainingApi';
 import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
-import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Sa3TrainCard } from './Sa3TrainCard';
 import { formatDurationMs, totalEpochMs } from '../../utils/trainingEta';
 import { AuditionCard, type MilestoneAuditionRequest } from './AuditionCard';
 import { JobProgress } from './JobProgress';
-import { Mm3TrainCard } from './Mm3TrainCard';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
-import { Yue2OptimisePanel } from './Yue2OptimisePanel';
-import { Yue2TrainStages } from './Yue2TrainStages';
+import { getTrainingPlugin } from './trainingPlugins';
+import type { TrainingTargetId } from './trainingPluginTypes';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const STATUS_RELOAD_DEBOUNCE_MS = 400;
@@ -52,22 +46,25 @@ function formatBytes(bytes: number): string {
 }
 
 /** `section` picks the YuE2 page this panel hosts: its Prepare and Optimise
- *  phases share this panel's dataset gates. Other backends only use 'train'. */
-export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }> = ({ section = 'train' }) => {
+ *  phases share this panel's dataset gates. Other backends only use 'train'.
+ *  `target` is the studio's one effective training target (useTrainingTarget);
+ *  the target picker lives in TrainingStudio, above the tabs. */
+export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare' | 'optimise' | 'train' }> = ({ target, section = 'train' }) => {
   const { t } = useTranslation();
   // WHICH TRAINING, not which flag. ACE trains a DiT and a planner LM from a
   // preprocessed tensor cache; MiniMax-Music3 trains an LM from RVQ codes and
   // has no DiT path and no preprocess variant. Those are two different
   // features that happen to share a phase, not one feature with a capability
-  // toggle — so this branches on the active backend, in this one place, rather
-  // than inventing a flag that would have to mean "which of two unrelated UIs".
-  const backendId = useBackendStore(s => s.activeBackendId);
-  const [trainingTarget, setTrainingTarget] = usePersistedState('hs-trainingTarget', 'active');
-  const sa3Mode = backendId === 'sa3' || trainingTarget === 'sa3';
-  const mm3Mode = backendId === 'minimax-m3';
+  // toggle — so this branches on the target, in this one place, rather than
+  // inventing a flag that would have to mean "which of two unrelated UIs".
+  // The target-owned pages render through the plug-in; the gates below keep
+  // their order, because each backend meets a different subset of them.
+  const plugin = getTrainingPlugin(target);
+  const sa3Mode = target === 'sa3';
+  const mm3Mode = target === 'minimax-m3';
   // Same rule, one backend along: YuE2 trains a NAR LoRA from cached VAE
   // latents and has no DiT path, no tensor cache and no preprocess variant.
-  const yue2Mode = backendId === 'yue2';
+  const yue2Mode = target === 'yue2';
   const capabilities = useTrainingStore(s => s.capabilities);
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);
@@ -217,16 +214,6 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     );
   };
 
-  const targetPicker = section === 'train' && backendId !== 'sa3' ? (
-    <div className={`${CARD} flex flex-col gap-1`}>
-      <ParamLabel label={t('trainingStudio.sa3.target')} info={t('trainingStudio.sa3.targetInfo')} />
-      <StyledSelect value={trainingTarget} onChange={setTrainingTarget} accent="amber" options={[
-        { value: 'active', label: t('trainingStudio.sa3.activeTarget') },
-        { value: 'sa3', label: t('trainingStudio.sa3.title') },
-      ]} />
-    </div>
-  ) : null;
-
   const header = (
     <>
     <div className="flex items-start gap-3">
@@ -241,7 +228,6 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
             : t('trainingStudio.train.subtitle')}</p>
       </div>
     </div>
-    {targetPicker}
     </>
   );
 
@@ -287,8 +273,9 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   // SA3 scans source audio and prepares its own snapshot before training.
   // It does not require ACE's built manifest or tensor cache.
   if (sa3Mode && section === 'train') return <div className="flex flex-col gap-4">
-    {targetPicker}
-    <Sa3TrainCard key={`${trainingWorker}:${detail.id}`} datasetId={detail.id} slug={detail.slug} />
+    <React.Fragment key={`${trainingWorker}:${detail.id}`}>
+      {plugin.renderTrain?.({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}
+    </React.Fragment>
   </div>;
 
   // ── Gate 2: no ace-train binary ─────────────────────────────────────────
@@ -326,9 +313,8 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     return (
       <div className="flex flex-col gap-4">
         {header}
-        {section === 'optimise'
-          ? <Yue2OptimisePanel datasetId={detail.id} />
-          : <Yue2TrainStages datasetId={detail.id} trigger={detail.customTag || ''} section={section === 'prepare' ? 'prepare' : 'train'} />}
+        {(section === 'optimise' ? plugin.renderOptimise : section === 'prepare' ? plugin.renderPrepare : plugin.renderTrain)
+          ?.({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}
       </div>
     );
   }
@@ -363,7 +349,7 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <Mm3TrainCard datasetId={detail.id} trigger={detail.customTag || ''} />
+        {plugin.renderTrain?.({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}
       </div>
     );
   }
