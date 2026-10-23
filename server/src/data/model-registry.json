@@ -2809,6 +2809,7 @@
       "variant": null,
       "quant": "BF16",
       "sizeBytes": 2908308288,
+      "sha256": "550ecd0f7dd7b8bd30c3da8e6370e39393898fd1c9eace3e10714f5102e80492",
       "repo": "scragnog/HOT-Step-CPP-StableStep",
       "description": "GGML backend: Stable Audio 3 diffusion transformer (BF16 GGUF). Runs via GGML on CUDA, Vulkan or CPU — the fastest option on NVIDIA in current testing.",
       "tags": []
