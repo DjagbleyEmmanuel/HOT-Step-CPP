@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.review.intro": "Runs with rungs you have not scored yet. Click one to render previews, listen and score.",
+    "trainingStudio.review.empty": "Nothing waiting. Runs appear here once they have a saved checkpoint pair.",
+    "trainingStudio.review.done": "Scored or finished ({{n}})",
     "trainingStudio.mm3.previewArtistCaption": "Artist caption",
     "trainingStudio.mm3.previewControlCaption": "Control caption",
     "trainingStudio.mm3.previewBase": "Base",
