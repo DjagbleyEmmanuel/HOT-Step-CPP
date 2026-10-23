@@ -667,8 +667,7 @@ static bool yue2_stream_clean(const std::string & reason) {
 }
 
 // Why a lyric_schedule run can't go ahead on these songs, or nullptr.
-static const char * yue2_lyric_schedule_refusal(bool use_cfg, bool have_abc, const std::vector<Yue2SongState> & songs) {
-    if (use_cfg) return "needs cfg_scale 1 (no rule for the guidance set)";
+static const char * yue2_lyric_schedule_refusal(bool have_abc, const std::vector<Yue2SongState> & songs) {
     if (!have_abc || !songs[0].abc_given) return "needs a supplied score (abc)";
     for (size_t b = 1; b < songs.size(); b++) {
         if (songs[b].prefix_ids != songs[0].prefix_ids) return "needs every song of the batch to share one prompt";
@@ -737,12 +736,17 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const Yue2LyricSchedule & lsched = req.lyric_schedule;
     Yue2ScheduleRows          lsched_rows;
     if (lsched.on) {
-        if (const char * why = yue2_lyric_schedule_refusal(use_cfg, have_abc, songs)) {
+        if (const char * why = yue2_lyric_schedule_refusal(have_abc, songs)) {
             if (err) *err = std::string("lyric_schedule ") + why;
             return false;
         }
         const Yue2SongState & s0 = songs[0];
-        if (!yue2_schedule_rows(&tok, lsched, s0.style, s0.lyrics, req.cot, s0.abc_text, s0.abc_ids, &lsched_rows, err)) {
+        // Under guidance the negative prompt carries the same score after the
+        // bare instruction (yue2_negative_prefix): [EOD] + instruction + [ABC_START].
+        const int64_t neg_abc_base = use_cfg && req.cot != YUE2_COT_OFF
+            ? 1 + (int64_t) yue2_bpe_encode(&tok, yue2_instruction(req.cot)).size() + 1 : -1;
+        if (!yue2_schedule_rows(&tok, lsched, s0.style, s0.lyrics, req.cot, s0.abc_text, s0.abc_ids, &lsched_rows, err,
+                                neg_abc_base)) {
             return false;
         }
         for (size_t k = 0; k < lsched.sections.size(); k++) {
@@ -870,8 +874,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             // prefix is replayed through the scheduled decode one frame at a
             // time, as sampling would have run it: token i under the spans
             // due at frame i + 1. A plain prefill would build unmasked rows.
-            // The schedule needs one shared prompt and no guidance (checked
-            // above), so every set replays the same frame under the same spans.
+            // The schedule needs one shared prompt (checked above), so every
+            // set replays the same frame, a negative set under its own spans.
             std::vector<int32_t> frame_ids((size_t) S);
             for (int64_t i = 0; i < supplied_n; i++) {
                 if (cancel && cancel->load()) {
@@ -883,6 +887,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 for (const Yue2SongState & sg : songs) {
                     yue2_schedule_spans(lsched, lsched_rows, (double) (i + 1) * 0.04,
                                         &cache.prompt_bias[(size_t) sg.cond_set]);
+                    if (use_cfg) yue2_schedule_spans(lsched, lsched_rows, (double) (i + 1) * 0.04,
+                                                     &cache.prompt_bias[(size_t) sg.neg_set], true);
                 }
                 std::fill(frame_ids.begin(), frame_ids.end(), supplied_ids[(size_t) i]);
                 if (!yue2_ar_decode_batch(m, cache, frame_ids.data(), &logits, err, S)) {
@@ -1165,6 +1171,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 const Yue2SongState & sg = songs[(size_t) slot_song[(size_t) i]];
                 yue2_schedule_spans(lsched, lsched_rows, (double) sg.codec_ids.size() * 0.04,
                                     &cache.prompt_bias[(size_t) sg.cond_set]);
+                if (use_cfg) yue2_schedule_spans(lsched, lsched_rows, (double) sg.codec_ids.size() * 0.04,
+                                                 &cache.prompt_bias[(size_t) sg.neg_set], true);
             }
         }
         // The last content token is forwarded even on the final step so the

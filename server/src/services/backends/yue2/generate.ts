@@ -565,10 +565,10 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const scheduleMode = params.yue2LyricSchedule === 'mask' ? 'mask'
     : params.yue2LyricSchedule === 'bias' ? 'bias'
     : undefined;
-  // The engine only schedules the no-guidance set (yue2-pipeline.h: "needs
-  // cfg_scale 1 (no rule for the guidance set)"); cot is never 'off' here
-  // (abc requires it), so the engine's own default CFG is 1.0 unless
-  // overridden above.
+  // Lyric Timing stays at CFG 1: the engine can hide the same score lines in
+  // the guidance set (yue2-lyric-schedule.h), but a guided Lyric Timing render
+  // has not been tested. cot is never 'off' here (abc requires it), so the
+  // engine's own default CFG is 1.0 unless overridden above.
   const effectiveCfg = cfg_scale ?? 1.0;
   let lyric_schedule: Yue2SynthRequest['lyric_schedule'];
   if (scheduleMode) {
@@ -576,7 +576,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
       notes.push(`Lyric schedule (${scheduleMode}) needs a supplied score and lyrics — rendering without it.`);
     } else if (effectiveCfg !== 1) {
       notes.push(`Lyric schedule (${scheduleMode}) skipped — CFG ${effectiveCfg} is not 1 `
-        + '(the engine only schedules the no-guidance set); rendering without it at the requested CFG.');
+        + '(Lyric Timing is only tested without guidance); rendering without it at the requested CFG.');
     } else {
       const num = (value: unknown, fallback: number) =>
         value === undefined || value === null || value === '' ? fallback : Number(value);

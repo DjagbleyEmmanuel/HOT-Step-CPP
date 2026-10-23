@@ -359,7 +359,9 @@ export interface Yue2SynthRequest {
   end_bias_ramp_sec?: number;
   /** C6 lyric schedule (lyricSchedule.ts): hide each timed section's lyrics,
    *  and optionally its score lines, from the composer until its first Vocal
-   *  note. Absent = off. Needs abc, one prompt for the batch and cfg_scale 1. */
+   *  note, plus any blind windows (improv bars). Absent = off. Needs abc and
+   *  one prompt for the batch; under guidance the negative prompt hides the
+   *  same score lines. */
   lyric_schedule?: Yue2LyricScheduleWire;
   /** HOT-Step: name of a registered Lua postprocess plugin to route the VAE
    *  decode through (yue2-pipeline.h's yue2_run_vae_stage hook). Absent/empty =
