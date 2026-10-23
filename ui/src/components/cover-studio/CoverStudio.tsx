@@ -1075,6 +1075,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const applyRemeter = () => {
     if (remeterOpen?.abc && prep.applyStructuralOp({ kind: 'replace', abc: remeterOpen.abc })) setRemeter(null);
   };
+  // Bar lines a beat or more off the song's downbeats: the same preview, then one edit.
+  const [barShift, setBarShift] = useState<{ from: string; beats: number; abc?: string; error?: string } | null>(null);
+  const barShiftOpen = barShift?.from === sheetAbc ? barShift : null;
+  const previewBarShift = async (beats: number) => {
+    if (!token) return;
+    const from = sheetAbc;
+    const settle = (result: object) => setBarShift(current =>
+      current?.from === from && current.beats === beats ? { ...current, ...result } : current);
+    setBarShift({ from, beats });
+    try { settle(await yue2CoverApi.shiftBars(from, beats)); }
+    catch (err) { settle({ error: (err as Error).message }); }
+  };
+  const applyBarShift = () => {
+    if (barShiftOpen?.abc && prep.applyStructuralOp({ kind: 'replace', abc: barShiftOpen.abc })) setBarShift(null);
+  };
 
   // The original source, never a recombined mix: its vocal stem is what the
   // aligner reads, and its path is what finds the dataset song.
@@ -1881,6 +1896,34 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                     <button type="button" onClick={applyRemeter} disabled={!remeterOpen.abc}
                       className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Apply 4/4</button>
                     <button type="button" onClick={() => setRemeter(null)} className="text-xs text-zinc-500">Cancel</button>
+                  </div>
+                </div>}
+                {sheetAbc.trim() && !barShiftOpen && <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-zinc-500">Bar lines off?</span>
+                  {([[-1, 'A beat earlier', 'after'], [1, 'A beat later', 'before']] as const).map(([beats, label, when]) =>
+                    <button key={beats} type="button" onClick={() => void previewBarShift(beats)} disabled={sheetPreparing}
+                      title={`Move every bar line ${label.toLowerCase()}, keeping each note where it sounds. Use it when the bar-1 click lands a beat ${when} the song's downbeat. Shows a preview before applying.`}
+                      className="rounded-md border border-cyan-500/50 px-2 py-1 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-40">{label}</button>)}
+                </div>}
+                {barShiftOpen && <div className="space-y-2 rounded-lg border border-cyan-500/30 p-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                    <button type="button" onClick={() => void previewBarShift(barShiftOpen.beats === 1 ? -1 : barShiftOpen.beats - 1)}
+                      className="rounded-md border border-zinc-300 dark:border-white/10 px-2">−</button>
+                    <span>Bar lines {Math.abs(barShiftOpen.beats)} beat{Math.abs(barShiftOpen.beats) > 1 ? 's' : ''} {barShiftOpen.beats < 0 ? 'earlier' : 'later'}</span>
+                    <button type="button" onClick={() => void previewBarShift(barShiftOpen.beats === -1 ? 1 : barShiftOpen.beats + 1)}
+                      className="rounded-md border border-zinc-300 dark:border-white/10 px-2">+</button>
+                  </div>
+                  {barShiftOpen.error ? <p role="alert" className="text-xs text-red-500">The bar lines cannot be moved: {barShiftOpen.error}</p>
+                    : !barShiftOpen.abc ? <p className="text-xs text-zinc-500">Moving…</p>
+                    : <>
+                      <p className="text-xs text-zinc-500">Every note keeps its time; notes across a new bar line are tied and section starts move with their bar lines.
+                        Applying replaces this cover's score (the dataset files are not changed) and can be undone above; the structure then needs confirming again.</p>
+                      <AbcChart abc={barShiftOpen.abc} disabled height={240} playingBar={null} onAbcChange={() => {}} />
+                    </>}
+                  <div className="flex gap-3">
+                    <button type="button" onClick={applyBarShift} disabled={!barShiftOpen.abc}
+                      className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Apply</button>
+                    <button type="button" onClick={() => setBarShift(null)} className="text-xs text-zinc-500">Cancel</button>
                   </div>
                 </div>}
               </PrepareStructure>

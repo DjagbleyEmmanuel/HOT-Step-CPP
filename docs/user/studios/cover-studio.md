@@ -166,6 +166,17 @@ Cover Studio draft to resume the workflow.
    comments or lyric lines inside the music, or voices that disagree on their
    bars, is refused with the reason and left as it was. Transcription still
    writes the meter it detects.
+   If the bar lines sit a beat off the song's downbeats, so the chords change and
+   the vocal lands a beat early or late in each bar, use **A beat earlier** or
+   **A beat later** under **Bar lines off?** in step 1. **Bar click**, beside the
+   ABC/Chart switch, plays a click on beat 1 of every bar while the score plays:
+   if the click lands a beat before the song's downbeat, move the bar lines later;
+   a beat after, earlier. The preview's **−** and **+** change the shift a beat at
+   a time. Every note keeps its time: a note a new bar line cuts is tied across
+   it, the first bar becomes a short pickup (later) or loses beats (earlier), and
+   section starts move with their bar lines. **Apply** replaces this cover's score
+   like the 2/4 conversion, so the structure needs confirming again, and the
+   same notation limits apply, plus tuplets, grace notes and broken rhythms.
    For uploaded sources, transcription and approval use the draft's revision;
    a result from an older source or a cancelled transcription cannot replace the
    current score.

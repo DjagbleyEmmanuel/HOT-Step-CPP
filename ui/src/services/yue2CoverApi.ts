@@ -217,6 +217,8 @@ export const yue2CoverApi = {
    *  before a section, the last bar). Fails (422) on anything it cannot convert exactly. */
   remeterScore: (abc: string, pickup: boolean) =>
     apiClient.post<{ abc: string; twoFourBars: number }>(`${BASE}/score/remeter`.replace(/^\/api/, ''), { abc, pickup }),
+  shiftBars: (abc: string, beats: number) =>
+    apiClient.post<{ abc: string }>(`${BASE}/score/shift-bars`.replace(/^\/api/, ''), { abc, beats }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }) =>
     request<Yue2SectionMatch>('/sections/match', { method: 'POST', body: JSON.stringify(input) }),
   /** `lyrics` is the build's own text; without it the session follows params.lyrics. */

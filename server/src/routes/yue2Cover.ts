@@ -10,7 +10,7 @@ import { getDb } from '../db/database.js';
 import { yue2Align } from '../services/backends/yue2/client.js';
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
 import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
-import { remeterTwoFourToFourFour } from '../services/backends/yue2/coverScoreTransform.js';
+import { remeterTwoFourToFourFour, shiftBarLines } from '../services/backends/yue2/coverScoreTransform.js';
 import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows/coverWorkflow.js';
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
@@ -120,6 +120,20 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
       }
       let result;
       try { result = remeterTwoFourToFourFour(abc, pickup); }
+      catch (err) { throw new CoverRequestError((err as Error).message, 422); }
+      res.json(result);
+    } catch (err) { fail(res, err); }
+  });
+
+  // A preview too: every bar line moved by whole beats, for a score whose downbeats landed off.
+  router.post('/score/shift-bars', (req: Request, res: Response) => {
+    try {
+      const { abc, beats } = req.body || {};
+      if (typeof abc !== 'string' || !abc.trim() || !Number.isInteger(beats)) {
+        throw new CoverRequestError('abc and a whole number of beats are required.');
+      }
+      let result;
+      try { result = shiftBarLines(abc, beats); }
       catch (err) { throw new CoverRequestError((err as Error).message, 422); }
       res.json(result);
     } catch (err) { fail(res, err); }
