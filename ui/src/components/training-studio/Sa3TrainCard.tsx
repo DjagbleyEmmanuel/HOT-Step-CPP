@@ -6,7 +6,7 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { pollWhile } from '../../queries/contract';
 import { localOptions } from '../../queries/global-models/options';
 import { scopeOf, serverKey } from '../../queries/keys';
-import { renderSa3PreviewCommand, sa3PreviewOptions } from '../../queries/sa3-previews/queries';
+import { manualRenderRequest, renderSa3PreviewCommand, sa3PreviewOptions } from '../../queries/sa3-previews/queries';
 import { generationStatusOptions } from '../../queries/shell-queue/queue';
 import { generateApi } from '../../services/api';
 import type { Sa3PreviewRecord } from '../../services/sa3PreviewApi';
@@ -127,11 +127,10 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
   const previewsQuery = useQuery({ ...sa3PreviewOptions(worker, datasetId, viewRun, busy), enabled: !!viewRun });
   const [rendering, setRendering] = useState<number | null>(null);
   const renderMutation = useMutation({
-    mutationFn: async ({ step, retry }: { step: number; retry: boolean }) => {
+    mutationFn: async (step: number) => {
       setRendering(step);
       try {
-        await renderSa3PreviewCommand(client, worker, datasetId, { run: viewRun, step,
-          ...(retry ? {} : { settings: { prompts, seconds: preview.seconds, seeds } }) });
+        await renderSa3PreviewCommand(client, worker, datasetId, manualRenderRequest(viewRun, step));
       } finally { setRendering(null); }
     },
   });
@@ -252,7 +251,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
         return <TrainingPreviewRung key={step} title={t('trainingStudio.sa3.preview.step', 'Step {{step}}', { step })} takes={previewTakes(records, t)}
           badges={records.some(p => p.final) && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.sa3.preview.final', 'final')}</span>}
           actions={<button type="button" className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40"
-            disabled={busy || rendering !== null || (!failed && previewInvalid)} onClick={() => renderMutation.mutate({ step, retry: failed })}>
+            disabled={busy || rendering !== null} onClick={() => renderMutation.mutate(step)}>
             {rendering === step ? t('trainingStudio.sa3.preview.rendering', 'Rendering…') : failed ? t('trainingStudio.sa3.preview.retry', 'Retry') : t('trainingStudio.sa3.preview.renderMore', 'Render more')}
           </button>} />;
       })}

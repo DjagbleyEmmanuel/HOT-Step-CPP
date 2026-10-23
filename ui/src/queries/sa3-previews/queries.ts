@@ -19,6 +19,10 @@ export const sa3PreviewOptions = (worker: string | null, datasetId: string, run:
 export const invalidateSa3Previews = (client: QueryClient, worker: string | null, datasetId: string) =>
   queryManager.keys(client, sa3PreviewKeys.dataset(worker, datasetId));
 
+/** A manual render or retry never carries browser form values: the server renders with the selected
+ *  run's own saved settings, so a reload, a resumed run or previews switched off cannot override them. */
+export const manualRenderRequest = (run: string, step: number): Sa3PreviewRenderRequest => ({ run, step });
+
 /** Render or retry once; only a success refreshes this dataset's previews on the captured worker. */
 export async function renderSa3PreviewCommand(client: QueryClient, worker: string | null, datasetId: string, body: Sa3PreviewRenderRequest) {
   const result = await renderSa3Preview(datasetId, body, worker);

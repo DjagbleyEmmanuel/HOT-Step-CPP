@@ -12,3 +12,6 @@ runs once, never retries, and on success invalidates only that worker's
 previews for that dataset (`sa3PreviewKeys.dataset`). Cadence, prompts, seconds
 and seeds are form state in the SA3 card until a job starts; the server echoes
 the run's own settings in the list response.
+
+Manual renders and retries send only the run and step (`manualRenderRequest`), so the
+server uses the selected run's own saved settings, never the card's form values.

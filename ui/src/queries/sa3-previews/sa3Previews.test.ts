@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { createQueryClient } from '../client';
 import { sa3PreviewKeys } from './keys';
-import { invalidateSa3Previews, renderSa3PreviewCommand, sa3PreviewOptions, sa3PreviewsPending } from './queries';
+import { invalidateSa3Previews, manualRenderRequest, renderSa3PreviewCommand, sa3PreviewOptions, sa3PreviewsPending } from './queries';
 
 const originalFetch = globalThis.fetch;
 const clients: ReturnType<typeof createQueryClient>[] = [];
@@ -46,4 +46,13 @@ test('a render invalidates that worker and dataset only, and a failed one invali
   assert.equal(c.getQueryState(mine.queryKey)?.isInvalidated, false);
   await invalidateSa3Previews(c, null, 'ds');
   assert.equal(sa3PreviewKeys.dataset(null, 'ds')[1], 'training-runs/sa3-previews');
+});
+
+test('a manual render sends only run and step, so the run keeps its saved prompts after a reload, resume or previews off', async () => {
+  assert.deepEqual(manualRenderRequest('a/1', 8), { run: 'a/1', step: 8 });
+  const c = cache();
+  let sent: unknown;
+  globalThis.fetch = async (_url, init) => { sent = JSON.parse(String(init?.body)); return json(list('done')); };
+  await renderSa3PreviewCommand(c, null, 'ds', manualRenderRequest('a/1', 8));
+  assert.deepEqual(sent, { run: 'a/1', step: 8 });
 });
