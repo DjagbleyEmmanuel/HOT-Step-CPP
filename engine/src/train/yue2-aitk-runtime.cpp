@@ -50,9 +50,10 @@ void event(const char * stage, int step = -1) { std::cout << "{\"stage\":\"" << 
 // Live interval edits (GH #307). The server rewrites --params-file while the
 // run trains; an unchanged mtime costs one stat, so this runs every step. A
 // file that does not parse is retried next step (it may be mid-write); a bad
-// value is logged and skipped; unknown keys are ignored. The file as it stood
-// at startup is skipped: the server passes those values as arguments.
-struct ParamsWatch { std::filesystem::file_time_type seen{}, bad{}; };
+// value is logged and skipped; unknown keys are ignored. Only a revision newer
+// than --params-rev applies: older ones are already in the arguments, and an
+// edit made after the server built them, before startup, still lands.
+struct ParamsWatch { std::filesystem::file_time_type seen{}, bad{}; std::int64_t rev = 0; };
 void poll_params(yue2_aitk_runtime::Config & config, ParamsWatch & watch) {
     if (config.params_file.empty()) return;
     std::error_code ec;
@@ -68,6 +69,9 @@ void poll_params(yue2_aitk_runtime::Config & config, ParamsWatch & watch) {
         watch.bad = mtime; yyjson_doc_free(doc); return;
     }
     watch.seen = mtime;
+    yyjson_val * rev = yyjson_obj_get(root, "rev");
+    if (!yyjson_is_uint(rev) || (std::int64_t) yyjson_get_uint(rev) <= watch.rev) { yyjson_doc_free(doc); return; }
+    watch.rev = (std::int64_t) yyjson_get_uint(rev);
     const auto apply = [&](const char * key, std::int32_t * field, std::int32_t lo) {
         yyjson_val * v = yyjson_obj_get(root, key);
         if (!v) return;
@@ -318,7 +322,7 @@ void yue2_aitk_clear_cancel() { g_cancel = 0; }
 
 static int run_impl(Config config, std::string * error) {
     ParamsWatch params_watch;
-    { std::error_code ec; params_watch.seen = std::filesystem::last_write_time(std::filesystem::u8path(config.params_file), ec); }
+    params_watch.rev = config.params_rev;
     if (!fresh_output(std::filesystem::u8path(config.output), error)) return 1;
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }

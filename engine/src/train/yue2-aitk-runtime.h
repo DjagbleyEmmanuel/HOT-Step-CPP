@@ -27,7 +27,8 @@ struct Config {
     std::int32_t steps = 0;
     std::int32_t save_every = 250;
     std::int32_t pause_at = 0; // absolute step; 0 disables preview pauses
-    std::string params_file;   // JSON re-read between steps when it changes: save_every, pause_at
+    std::string params_file;   // JSON re-read between steps when it changes: rev, save_every, pause_at
+    std::int32_t params_rev = 0; // the file revision these arguments already carry
     float cursor_weight = 0.08f;
     bool cursor_weight_explicit = false;
     std::uint64_t seed = 0;
@@ -314,7 +315,7 @@ inline void usage(FILE * out) {
     std::fprintf(out,
         "ace-train yue2-joint-train --checkpoint <ConvRot.safetensors> "
         "--dataset <schema1-manifest.json> --output <new-run-dir> "
-        "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] [--params-file <json>] "
+        "--steps N --save-every N --seed N --device CUDA0 [--resume <record>] [--pause-at N] [--params-file <json> [--params-rev N]] "
         "[--cursor-weight 0.08 (0 disables lyric timing)] [--rank N] [--alpha F] "
         "[--adapter-type lora|lokr|dora] [--lokr-dim 32] [--lokr-factor 8] "
         "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
@@ -490,6 +491,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             parsed.cursor_weight=weight; parsed.cursor_weight_explicit=true;
         } else if (!std::strcmp(arg, "--params-file")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.params_file, error)) return ParseResult::error;
+        } else if (!std::strcmp(arg, "--params-rev")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.params_rev)) { if (error) *error = "--params-rev must be a nonnegative integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--pause-at")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.pause_at)) { if (error) *error = "--pause-at must be a nonnegative integer"; return ParseResult::error; }
