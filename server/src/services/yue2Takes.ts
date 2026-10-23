@@ -37,7 +37,7 @@ import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import { blindYue2Schedule } from './backends/yue2/lyricSchedule.js';
 import {
   BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
-  planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
+  occurrenceLabel, planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 
@@ -418,20 +418,20 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const last = to + 1 >= occurrences;
   const length = clock[to + 1] - clock[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
-  const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i].section)?.label ?? `#${i + 1}`;
+  const name = (i: number) => occurrenceLabel(stored.arrangement, i) ?? `#${i + 1}`;
   // The audio renders from the lead-in a take plays from: the NAR and VAE skip
   // what is already kept, which is what made late sections slow.
   const renderFrom = start ? Math.max(0, start - LEAD_IN_S * YUE2_FPS) : 0;
-  // An "% Improv" section is composed with the score and lyrics hidden (a
-  // blind window), from where this take starts sampling to the section's end
-  // on the score clock, so its prefix still prefills in one pass.
+  // An Improv occurrence (or a score section labelled Improv) is composed with
+  // the score and lyrics hidden (a blind window), from where this take starts
+  // sampling to the section's end on the score clock, so its prefix still
+  // prefills in one pass.
   const blind: Array<[number, number]> = [];
   for (let k = from; k <= to; k++) {
     const a = Math.max(clock[k], start + 1), b = clock[k + 1];
     if (/^improv/i.test(name(k)) && b > a) blind.push([a / YUE2_FPS, b / YUE2_FPS]);
   }
   if (blind.length) {
-    if (request.cfg_scale !== undefined && request.cfg_scale !== 1) throw new TakesError('An Improv section needs Condition strength 1.');
     request.lyric_schedule = blindYue2Schedule(request.abc!, request.lyrics ?? '', blind);
   }
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
@@ -745,7 +745,7 @@ export function cropBuildTake(id: string, userId: string, takeId: string, revisi
     refuseReach(base);
     next = base;
   } else {
-    const name = (i: number) => stored.arrangement.sections.find(s => s.id === stored.arrangement.plan[i]?.section)?.label ?? `section ${i + 1}`;
+    const name = (i: number) => occurrenceLabel(stored.arrangement, i) ?? `section ${i + 1}`;
     const plan = cropPlan(base, frame, mode, name);
     const cut = frame as number;
     const occurrences = base.occurrences.slice(0, Math.max(0, plan.to - base.from + 1));
@@ -955,7 +955,7 @@ export function applyBuildLyrics(id: string, userId: string, revision: unknown, 
   // New lyrics for the whole build replace the unbuilt occurrences' own too.
   const built = nextOccurrence(stored);
   stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? ''),
-    plan: stored.arrangement.plan.map((o, i) => (i < built ? o : { id: o.id, section: o.section })) };
+    plan: stored.arrangement.plan.map((o, i) => (i < built ? o : (({ lyrics: _, ...rest }) => rest)(o))) };
   save(stored);
   return view(stored);
 }

@@ -55,8 +55,13 @@ export function buildNext(session: Yue2BuildSession | null): number {
 }
 
 /** One occurrence of the output: a score section placed in the song. Kept ones are built and locked.
- *  `lyrics` is its own sung lines, when it has been given some. */
-export interface PlanItem { id: string; section: number; kept: boolean; lyrics?: string }
+ *  `lyrics` is its own sung lines, when it has been given some. An improv has section -1 and
+ *  `improv` bars: rests in the score, composed without it. */
+export interface PlanItem { id: string; section: number; kept: boolean; lyrics?: string; improv?: number }
+
+/** The bar counts the Improv button offers. */
+export const IMPROV_BARS = [2, 4, 8, 16];
+const IMPROV_COLOUR = '#a855f7';
 
 /** The output in order. Before a session exists it is empty: the song is built up from the source bar. */
 export function planItems(session: Yue2BuildSession | null): PlanItem[] {
@@ -64,14 +69,15 @@ export function planItems(session: Yue2BuildSession | null): PlanItem[] {
   if (!session) return [];
   const { sections, plan } = session.arrangement;
   return plan.map((o, i) => ({ id: o.id, section: sections.findIndex(s => s.id === o.section), kept: i < built,
-    ...(o.lyrics === undefined ? {} : { lyrics: o.lyrics }) }));
+    ...(o.lyrics === undefined ? {} : { lyrics: o.lyrics }), ...(o.section === 'improv' ? { improv: o.bars } : {}) }));
 }
 
 /** The ids `POST /build/:id/plan` takes for the unbuilt part of the output after `edit`. */
 export function editedPlan(items: PlanItem[], next: number,
-  edit: { add: number } | { remove: string } | { move: string; by: -1 | 1 }): string[] {
+  edit: { add: number } | { improv: number } | { remove: string } | { move: string; by: -1 | 1 }): string[] {
   const upcoming = items.slice(next).map(i => i.id);
   if ('add' in edit) return [...upcoming, `s${edit.add}`];
+  if ('improv' in edit) return [...upcoming, `improv:${edit.improv}`];
   if ('remove' in edit) return upcoming.filter(id => id !== edit.remove);
   const at = upcoming.indexOf(edit.move), to = at + edit.by;
   if (at < 0 || to < 0 || to >= upcoming.length) return upcoming;
@@ -463,9 +469,11 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const chunkStage = ({ starting: 'Starting', semantic: 'Composing', plan: 'Planning', nar: 'Rendering', vae: 'Decoding audio', aligning: 'Aligning lyrics' } as Record<string, string>)[chunk?.phase ?? ''] ?? 'Rendering';
   const done = !!items.length && next >= items.length;
   const editable = !p.busy && waiting === 0 && !p.loading;
-  const nameOf = (i: PlanItem) => p.sections[i.section]?.label ?? '?';
-  // The source section after the song's last one: where the source would go next, if the user wants it.
-  const nextSource = items.length ? items[items.length - 1].section + 1 : 0;
+  const nameOf = (i: PlanItem) => (i.improv ? 'Improv' : p.sections[i.section]?.label ?? '?');
+  // The source section after the song's last source section (an improv adds none): where the source would go next, if the user wants it.
+  const nextSource = (items.filter(i => !i.improv).at(-1)?.section ?? -1) + 1;
+  const colourOf = (i: PlanItem) => (i.improv ? IMPROV_COLOUR : colours[i.section]);
+  const [improvBars, setImprovBars] = useState(8);
   const sourcePopup = useHoverPopup<number>();
   const [sourceLoop, setSourceLoop] = useState(false);
   const section = useSectionPlayer(p.scoreAbc, p.recordingUrl);
@@ -582,6 +590,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     if (await p.onGenerate(range, count, submittedCaption(caption, p.caption), pendingLyrics(drafts, current))) setDrafts({});
   };
   const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
+  const itemBars = (i: PlanItem) => i.improv ?? bars(i.section);
   const rangeLabel = range === null ? '' : `${nameOf(items[next])}${range > next ? ` → ${nameOf(items[range])}` : ''}`;
   const edit = (change: Parameters<typeof editedPlan>[2], ends = finished) => {
     // The only section, nothing kept: the server keeps at least one, so go back to no build at all.
@@ -643,6 +652,15 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <div className="flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-semibold uppercase tracking-wide">Source</span>
           <span className="ml-auto">Click a section to add it to the end of the song; repeat it as often as you like.</span>
+          <span className="flex items-center rounded-md border-t-4" style={{ borderColor: IMPROV_COLOUR, backgroundColor: `${IMPROV_COLOUR}22` }}>
+            <button type="button" disabled={!editable} onClick={() => { selectAdded.current = true; edit({ improv: improvBars }); }}
+              title="Adds bars the model makes up itself to the end of the song: its takes compose them without the score or the lyrics, then the next section follows the score again."
+              className="px-2 py-1 text-[11px] font-semibold text-zinc-800 dark:text-zinc-100 disabled:opacity-40">+ Improv</button>
+            <div className="w-24">
+              <StyledSelect accent="purple" size="sm" aria-label="Improv length in bars" value={improvBars} disabled={!editable}
+                onChange={v => setImprovBars(Number(v))} options={IMPROV_BARS.map(n => ({ value: n, label: `${n} bars` }))} />
+            </div>
+          </span>
         </div>
         <div className="flex gap-1 select-none" aria-label="Source sections">
           {p.sections.map((src, i) => {
@@ -688,14 +706,14 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
           {items.map((item, i) => {
             const picked = range !== null && i >= next && i <= range;
             const start = spine?.starts[i];
-            return <div key={item.id} style={{ flexGrow: Math.max(1, bars(item.section)), flexBasis: 0, borderColor: colours[item.section],
-              backgroundColor: item.kept ? `${colours[item.section]}55` : picked ? `${colours[item.section]}33` : `${colours[item.section]}12` }}
+            return <div key={item.id} style={{ flexGrow: Math.max(1, itemBars(item)), flexBasis: 0, borderColor: colourOf(item),
+              backgroundColor: item.kept ? `${colourOf(item)}55` : picked ? `${colourOf(item)}33` : `${colourOf(item)}12` }}
               onClick={() => { if (item.kept) { if (spine && buildAudio && start != null) toggle(`s${item.id}`, buildAudio, start / FPS, spine.frames / FPS); } else setTarget(t => t === item.id ? null : item.id); }}
               title={item.kept ? (buildAudio ? `Play the build from ${nameOf(item)}` : 'Render the build so far to play it') : item.id === target ? 'Click again to clear the selection' : `Build up to ${nameOf(item)}`}
               className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${!item.kept && i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
                 {item.kept ? '✓ ' : i === next ? '→ ' : ''}{nameOf(item)}</p>
-              <p className="truncate text-[10px] text-zinc-500">{item.kept ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${bars(item.section)} bars`}</p>
+              <p className="truncate text-[10px] text-zinc-500">{item.kept ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${itemBars(item)} bars`}</p>
               {item.kept && <button type="button" onClick={e => { e.stopPropagation(); undo(i); }}
                 title={`Undo back to ${nameOf(item)}, to build it again`}
                 className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-500 hover:text-pink-500 group-hover:block"><RotateCcw className="w-3 h-3" /></button>}
@@ -783,7 +801,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 <Scissors className="w-3 h-3" />Crop previous section{spine.cropOf || trimAt !== null ? ' (cropped)' : ''}</button>;
               const full = takeWindow(base);
               const offset = (base.audioStart ?? 0) / FPS;
-              const colour = colours[items[base.to]?.section ?? -1] ?? '#06b6d4';
+              const colour = (items[base.to] ? colourOf(items[base.to]) : undefined) ?? '#06b6d4';
               const changed = keptCrop.in !== current.in || keptCrop.out !== current.out;
               const needsMode = keptCrop.out !== current.out && cropNeedsMode(base, keptCrop);
               const apply = () => {
@@ -816,7 +834,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               const full = takeWindow(take);
               const win = takeWindow(take, set);
               const offset = (take.audioStart ?? 0) / FPS;
-              const colour = colours[items[take.from]?.section ?? -1] ?? '#ec4899';
+              const colour = (items[take.from] ? colourOf(items[take.from]) : undefined) ?? '#ec4899';
               const needsMode = !!set && cropNeedsMode(take, set);
               const setCrop = (c: TakeCrop | null) => setCrops(all => {
                 const rest = { ...all };

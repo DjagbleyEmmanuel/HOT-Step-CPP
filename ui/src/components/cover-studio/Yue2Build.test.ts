@@ -140,3 +140,13 @@ test('locked build settings read as one line', () => {
     'vocal melody only, free tempo, source key, condition strength 1, AR strength 0.6');
   assert.match(settingsSummary({ voices: 'both', tempo: 96, keyShift: 2, cfgScale: 1.2, arStrength: 0.5 }, 'C major'), /^vocal \+ instrumental line, 96 BPM, \+2 st \(D major\)/);
 });
+
+test('an improv is its own occurrence with its bars, added by bar count, unsung', async () => {
+  const { planItems, editedPlan, occurrenceLines } = await import('./Yue2Build');
+  const session = arranged(['s0', 'improv'], 1);
+  session.arrangement.plan[1].bars = 8;
+  const items = planItems(session);
+  assert.deepEqual(items.map(i => [i.id, i.section, i.improv]), [['o0', 0, undefined], ['o1', -1, 8]]);
+  assert.deepEqual(editedPlan(items, 1, { improv: 4 }), ['o1', 'improv:4']);
+  assert.equal(occurrenceLines('[S0]\nwords\n', session, items[1]), null);
+});

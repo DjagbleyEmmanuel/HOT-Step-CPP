@@ -532,6 +532,18 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(requests.at(-1)!.lyric_schedule, undefined, 'the take after it reads the score again');
   });
 
+  await t.test('an improv added to the plan writes its rest bars and is composed blind', async () => {
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s0', 's1', 'improv:2', 's2'], false);
+    const [opening] = await take(s.id, 1, 1);
+    keepBuildTake(s.id, 'user', opening.id, 1);
+    const [improv] = await take(s.id, 2, 1);
+    const req = requests.at(-1)!;
+    assert.match(req.abc!, /% Improv\nV: Vocal\nz6\|z6\|\n% chorus/);
+    assert.deepEqual(req.lyric_schedule!.blind!.map(w => [w.from_sec, w.to_sec]), [[12.04, 18]]);
+    assert.equal(improv.occurrences.length, 1);
+  });
+
   await t.test('skip, repeat and continue: each take resumes the kept output under the composed prompt', async () => {
     const s = start();
     const planned = editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2', 's3'], true);

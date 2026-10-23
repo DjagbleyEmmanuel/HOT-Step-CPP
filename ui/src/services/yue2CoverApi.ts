@@ -168,7 +168,8 @@ export interface Yue2SourceSection { id: string; label: string; startBar: number
 export interface Yue2Arrangement {
   sections: Yue2SourceSection[];
   /** `lyrics`: the occurrence's own sung lines, when it has been given some. */
-  plan: Array<{ id: string; section: string; lyrics?: string }>;
+  /** section is a source section id, or 'improv' with its own bar count. */
+  plan: Array<{ id: string; section: string; lyrics?: string; bars?: number }>;
   /** The plan ends the song; until then a take runs a few seconds into the source section after the last one. */
   finished: boolean;
 }
