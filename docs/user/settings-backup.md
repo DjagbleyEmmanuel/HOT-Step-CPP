@@ -4,7 +4,7 @@ Export JSON saves application settings and Lyric Studio data in one file. Keep t
 file to restore your setup later or move Lyric Studio to another installation.
 
 The file contains the General and Performance application settings, Lyric Studio
-preferences, artists, lyric collections, profiles, generated lyrics, album presets,
+prompt preferences, artists, lyric collections, profiles, generated lyrics, album presets,
 and the database links to generated audio. It uses version 1 of the backup format,
 with `version`, `exportedAt`, `settings`, and `lyricStudio` fields.
 
@@ -33,6 +33,12 @@ Audio and image files, model weights, adapter weights, reference tracks, trainin
 data, library songs, playlists, and accounts are not copied. Environment settings
 and API keys in `.env`, theme, language, and other browser preferences are also
 outside this format. Their existing values are kept on import.
+
+Only custom Lyric Studio prompts, stored as `prompt_*`, and the Inspire system
+prompt, stored as `instagen_system_prompt`, are included from the server's settings
+table. The active backend, model selections, adapter folders and slots, and training
+defaults are kept on the destination machine. Files that include other server
+setting keys are rejected during preview and import.
 
 Audio links and preset paths retain their original values. When moving to another
 machine, copy their files separately and update paths as needed. Training collections

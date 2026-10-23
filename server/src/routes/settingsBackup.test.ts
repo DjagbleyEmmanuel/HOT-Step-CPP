@@ -46,7 +46,16 @@ test('settings backup validates, previews and atomically restores only the expor
     db.prepare('INSERT INTO audio_generations (generation_id, hotstep_job_id, audio_url) VALUES (?, ?, ?)')
       .run(generation.id, 'fixture-job', '/audio/fixture.wav');
     rows.upsertPreset(collection.id, { adapterPath: 'fixture.safetensors' });
-    rows.setSetting('fixture.preference', 'original');
+    const lyricPreferences = { prompt_profile: 'Profile instructions', prompt_lyrics: 'Lyric instructions', instagen_system_prompt: 'Inspire instructions' };
+    for (const [key, value] of Object.entries(lyricPreferences)) rows.setSetting(key, value);
+    const localPreferences = {
+      active_backend_id: 'yue2', yue2_lm_adapter_ar: 'local/ar.safetensors',
+      yue2_lm_adapter_nar: 'local/nar.safetensors', yue2_lm_adapter_folder: 'local/adapters',
+      sa3_dit_model: 'local-dit', active_models_v1: '{"local":"model"}',
+      training_defaults_v1: '{"trainLm":{"steps":100}}',
+      promptXunrelated: 'Literal underscore required', Prompt_custom: 'Case-sensitive prefix required',
+    };
+    for (const [key, value] of Object.entries(localPreferences)) rows.setSetting(key, value);
     const usersBefore = db.prepare('SELECT * FROM users').all();
     db.prepare("INSERT INTO songs (id, user_id, title, audio_url) SELECT 'backup-library-sentinel', id, 'Library fixture', '/audio/fixture.wav' FROM users LIMIT 1").run();
     const songsBefore = db.prepare('SELECT * FROM songs').all();
@@ -54,8 +63,14 @@ test('settings backup validates, previews and atomically restores only the expor
     assert.equal(exported.status, 200, JSON.stringify(exported.body));
     const file = JSON.parse(JSON.stringify(exported.body));
 
+    await t.test('export includes only Lyric Studio prompt preferences', () => {
+      assert.deepEqual(file.settings.lyricStudio, lyricPreferences);
+    });
     await t.test('round trip includes the actual migrated schema and leaves users alone', async () => {
-      rows.setSetting('fixture.preference', 'changed');
+      rows.setSetting('prompt_profile', 'changed');
+      rows.setSetting('prompt_new_local', 'Remove this prompt on replacement');
+      rows.setSetting('active_backend_id', 'ace');
+      localPreferences.active_backend_id = 'ace';
       rows.getOrCreateArtist('Replacement fixture');
       const result = await post('import', { backup: file, confirmed: true });
       assert.equal(result.status, 200, JSON.stringify(result.body));
@@ -65,6 +80,10 @@ test('settings backup validates, previews and atomically restores only the expor
       assert.deepEqual(again.lyricStudio, file.lyricStudio);
       assert.deepEqual(db.prepare('SELECT * FROM users').all(), usersBefore);
       assert.deepEqual(db.prepare('SELECT * FROM songs').all(), songsBefore);
+      for (const [key, value] of Object.entries(localPreferences)) assert.equal(rows.getSetting(key), value, key);
+      assert.equal(rows.getSetting('prompt_profile'), lyricPreferences.prompt_profile);
+      assert.equal(rows.getSetting('instagen_system_prompt'), lyricPreferences.instagen_system_prompt);
+      assert.equal(rows.getSetting('prompt_new_local'), '');
     });
     await t.test('preview reports replacement counts without writing', async () => {
       rows.getOrCreateArtist('Current extra fixture');
@@ -72,10 +91,25 @@ test('settings backup validates, previews and atomically restores only the expor
       assert.equal(result.status, 200);
       assert.equal(result.body.current.artists, 2);
       assert.equal(result.body.incoming.artists, 1);
+      assert.equal(result.body.current.settings, Object.keys(lyricPreferences).length);
+      assert.equal(result.body.incoming.settings, Object.keys(lyricPreferences).length);
       assert.equal((db.prepare('SELECT COUNT(*) AS n FROM artists').get() as { n: number }).n, 2);
     });
     await t.test('missing confirmation cannot overwrite', async () => {
       assert.equal((await post('import', { backup: file })).status, 400);
+    });
+    await t.test('preview and import reject settings outside the Lyric Studio allowlist without writing', async () => {
+      for (const key of [...Object.keys(localPreferences), 'unknown_key']) {
+        const bad = structuredClone(file);
+        bad.settings.lyricStudio[key] = 'foreign setting';
+        for (const action of ['preview', 'import']) {
+          const before = db.prepare('SELECT * FROM settings ORDER BY key').all();
+          const result = await post(action, { backup: bad, confirmed: true });
+          assert.equal(result.status, 400, `${action}: ${key}`);
+          assert.match(result.body.error, /settings\.lyricStudio/);
+          assert.deepEqual(db.prepare('SELECT * FROM settings ORDER BY key').all(), before);
+        }
+      }
     });
     await t.test('unknown versions and wrong shapes give a clear 400', async () => {
       const version = await post('preview', { backup: { ...file, version: 99 } });

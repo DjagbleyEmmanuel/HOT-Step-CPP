@@ -6,6 +6,12 @@ const id = z.number().int().positive();
 const integer = z.number().int();
 const nullableText = text.nullable();
 const nullableNumber = z.number().nullable();
+const LYRIC_PROMPT_PREFIX = 'prompt_';
+const INSTAGEN_PROMPT_KEY = 'instagen_system_prompt';
+const LYRIC_SETTINGS_FILTER = 'substr(key, 1, ?) = ? OR key = ?';
+const LYRIC_SETTINGS_PARAMS = [LYRIC_PROMPT_PREFIX.length, LYRIC_PROMPT_PREFIX, INSTAGEN_PROMPT_KEY] as const;
+const lyricSettingKey = text.refine(key => key.startsWith(LYRIC_PROMPT_PREFIX) || key === INSTAGEN_PROMPT_KEY,
+  'Only Lyric Studio prompt settings can be imported.');
 const jsonText = (kind: 'array' | 'object') => text.refine(value => {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -54,7 +60,7 @@ const lyricSchema = z.object({
 }).strict();
 const backupSchema = z.object({
   version: z.literal(1), exportedAt: z.iso.datetime(),
-  settings: z.object({ app: appSchema, lyricStudio: z.record(text, text) }).strict(),
+  settings: z.object({ app: appSchema, lyricStudio: z.record(lyricSettingKey, text) }).strict(),
   lyricStudio: lyricSchema,
 }).strict();
 
@@ -100,7 +106,8 @@ export function exportSettingsBackup(db: Database.Database, app: unknown): Setti
     const lyricStudio = Object.fromEntries(Object.entries(backupTables).map(([table, schema]) => [
       table, db.prepare(`SELECT ${Object.keys(schema.shape).map(key => `"${key}"`).join(',')} FROM ${table} ORDER BY id`).all(),
     ]));
-    const settings = Object.fromEntries((db.prepare('SELECT key, value FROM settings ORDER BY key').all() as { key: string; value: string }[])
+    const settings = Object.fromEntries((db.prepare(`SELECT key, value FROM settings WHERE ${LYRIC_SETTINGS_FILTER} ORDER BY key`)
+      .all(...LYRIC_SETTINGS_PARAMS) as { key: string; value: string }[])
       .map(row => [row.key, row.value]));
     return validateBackup({ version: 1, exportedAt: new Date().toISOString(), settings: { app, lyricStudio: settings }, lyricStudio });
   })();
@@ -109,7 +116,9 @@ export function exportSettingsBackup(db: Database.Database, app: unknown): Setti
 export function previewSettingsBackup(db: Database.Database, input: unknown): BackupPreview {
   const data = validateBackup(input);
   const current = Object.fromEntries([...Object.keys(backupTables), 'settings'].map(table => [
-    table, (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count,
+    table, ((table === 'settings'
+      ? db.prepare(`SELECT COUNT(*) AS count FROM settings WHERE ${LYRIC_SETTINGS_FILTER}`).get(...LYRIC_SETTINGS_PARAMS)
+      : db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()) as { count: number }).count,
   ])) as BackupCounts;
   const incoming = { ...Object.fromEntries(Object.entries(data.lyricStudio).map(([table, rows]) => [table, rows.length])),
     settings: Object.keys(data.settings.lyricStudio).length } as BackupCounts;
@@ -122,7 +131,7 @@ export function importSettingsBackup(db: Database.Database, input: unknown): Set
     // Parent generations may occur after their children in an exported file.
     db.pragma('defer_foreign_keys = ON');
     for (const table of Object.keys(backupTables).reverse()) db.prepare(`DELETE FROM ${table}`).run();
-    db.prepare('DELETE FROM settings').run();
+    db.prepare(`DELETE FROM settings WHERE ${LYRIC_SETTINGS_FILTER}`).run(...LYRIC_SETTINGS_PARAMS);
     for (const [table, schema] of Object.entries(backupTables)) {
       const columns = Object.keys(schema.shape);
       const insert = db.prepare(`INSERT INTO ${table} (${columns.map(key => `"${key}"`).join(',')}) VALUES (${columns.map(() => '?').join(',')})`);
