@@ -33,7 +33,7 @@ import {
   getHfToken, setHfToken, looksLikeGatedError, aceMidiExe,
   modelDir, isModelDownloaded, startModelDownload, getModelStates,
   MUSCRIPTOR_MODELS, type MuscriptorModel, partialMidiFromEvents,
-  BEAT_MODEL, readGrid, alignToAudio, exportArgs, type MidiExportOptions,
+  BEAT_MODEL, readGrid, alignToAudio, exportArgs, speculativeArgs, type MidiExportOptions,
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
 import { engineFormatPath } from '../services/audioConvert.js';
@@ -76,6 +76,8 @@ interface MidiJob {
   sourceFileName: string;
   songId?: string;
   model: MuscriptorModel;
+  /** speculative decoding with the small model as draft (large only) */
+  speculative: boolean;
   // live event stream (JSONL objects from ace-midi, replayed to SSE clients)
   events: any[];
   chunksDone: number;
@@ -173,6 +175,7 @@ async function runTranscription(job: MidiJob): Promise<void> {
       '--out', midPath(job.id),
       '--jsonl',
       ...beatArgs,
+      ...speculativeArgs(job.model, job.speculative, isModelDownloaded('small')),
     ], { windowsHide: true });
     job.child = child;
 
@@ -356,7 +359,7 @@ router.post('/models/:size/download', (req: Request, res: Response) => {
 
 /** POST /transcribe — queue a transcription job */
 router.post('/transcribe', (req: Request, res: Response) => {
-  const { sourceAudioUrl, sourceFileName, songId, model } = req.body || {};
+  const { sourceAudioUrl, sourceFileName, songId, model, speculative } = req.body || {};
   if (!sourceAudioUrl || typeof sourceAudioUrl !== 'string') {
     res.status(400).json({ error: 'sourceAudioUrl is required' });
     return;
@@ -378,6 +381,7 @@ router.post('/transcribe', (req: Request, res: Response) => {
     sourceFileName: sourceFileName || path.basename(sourceAudioUrl),
     songId: songId || undefined,
     model: m,
+    speculative: speculative !== false,
     events: [],
     chunksDone: 0,
     chunksTotal: 0,
