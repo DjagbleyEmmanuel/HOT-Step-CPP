@@ -23,6 +23,7 @@
 // is that worker. Mutations take no signal: aborting a read is fine, but a
 // cancelled request must never be mistaken for cancelling a server job.
 import { apiClient, type ReadOptions } from './httpClient';
+import type { Sa3DatasetAssets } from '../../../server/src/contracts/training';
 
 export interface TrainingTarget { worker?: string | null }
 export interface TrainingReadOptions extends TrainingTarget, ReadOptions {}
@@ -1447,6 +1448,8 @@ export interface TrainingAdapterHit {
  *  the server computes them unconditionally — so DatasetAssetChips.tsx picks
  *  which block to render off the active backend. */
 export interface DatasetAssets {
+  /** Verified SA3 preparation, cache, snapshots and publication. */
+  sa3?: Sa3DatasetAssets;
   labeled: boolean;           // at least one caption — shared across backends
   built: boolean;             // dataset.json written — shared across backends
   tensorVariants: number;     // preprocessed variant dirs
