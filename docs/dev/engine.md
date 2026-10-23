@@ -502,6 +502,20 @@ uninstalled name falls back to `sa3-dit-BF16.gguf`. The training base
 response header names the DiT that ran. `/sa3-refine` always uses BF16. Full
 contract: [ARCHITECTURE](../../engine/docs/ARCHITECTURE.md).
 
+Checkpoint previews add `snapshot_run=<dataset>/<adapter>/<stamp>`,
+`snapshot_step=N` and optional `snapshot_scale` (default 1, a finite number or
+400). `sa3-preview-resolver.h` loads the run's `snapshots/step-N.gguf` as an extra
+adapter stacked after any named ones. It is an internal path beside the public
+adapter names: `models/sa3-adapters` parsing and the `/sa3/props` catalogue are
+unchanged, and snapshots never appear there. The resolver checks the run and step
+charsets (no separators beyond the two slashes), keeps the canonical file under
+the training runs root, reads the step file once, hashes those bytes and loads an
+immutable content-addressed copy from `sa3-medium/.preview-cache` (newest 16
+kept), and requires a `dora-rows-v1` export whose inference base matches the DiT
+the request loads. The content hash is part of the model key, so a rewritten step
+file loads fresh. Failures are 400. `tools/sa3-preview-proof.mjs` checks the render
+effect, the rejections and cache freshness.
+
 Seed breeding is limited to noise-only synthesis. `seed_b` selects a second
 noise stream and `seed_blend` mixes it into the initial latent and each pingpong
 re-noise draw. Node resolves an omitted or blank blend to 0.5 when seed B is set;

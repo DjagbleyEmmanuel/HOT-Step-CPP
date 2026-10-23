@@ -25,7 +25,9 @@ pre-encoding cache, otherwise `<out>/cache`. `--inference-dit` defaults to
 `<models>/sa3-dit-BF16.gguf`. `--resume` reads `<out>/state.gguf` and checks the
 saved run fingerprint. Total `--steps` includes completed updates.
 `--checkpoint-every` sets the state-save interval; `--export-every 0` disables
-periodic inference snapshots. Final raw, state and inference files are separate.
+periodic inference snapshots. Final raw, state and inference files are separate. The server's checkpoint previews run the
+trainer in segments: an absolute `--steps` bound, then `--resume` with a larger one in the
+same `--out`, with `--export-every 0`; `<out>/state.gguf` records the completed step.
 
 `--bwd mm` is the default backward path; `--bwd outprod` selects OUT_PROD.
 `--tf32 on|off` defaults off. The standalone `--train-seconds` option also trains
@@ -196,6 +198,14 @@ of caching the same file under a second key. The
 response header `X-SA3-DiT` names the DiT that ran. The store keys the SA3 model
 on the DiT path, so each quant caches as its own entry. `/sa3-refine` takes no
 DiT parameter and always loads `sa3-dit-BF16.gguf`.
+
+SA3 checkpoint previews: `/sa3-synth` accepts `snapshot_run` (`<dataset>/<adapter>/<stamp>`),
+`snapshot_step` (positive decimal) and `snapshot_scale` (finite float, default 1) to load
+the captured training export `snapshots/step-N.gguf` under the SA3 training runs root as an
+extra adapter. Bad charsets, a file outside the root, a non-`dora-rows-v1` GGUF, an
+inference base that differs from the loaded DiT or an unparseable scale return 400. The
+public adapter names and `/sa3/props` are unaffected. Details:
+[engine reference](../../docs/dev/engine.md#stable-audio-3-sampling).
 
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch

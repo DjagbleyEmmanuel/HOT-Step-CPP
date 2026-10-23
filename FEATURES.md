@@ -323,7 +323,7 @@ Audio-to-MIDI transcription on its own native engine, with the song's tempo, tim
 
 ## Training Studio
 
-Build datasets from your own audio and train adapters on your GPU, for all three backends. Details: [Training Studio](docs/user/studios/training-studio.md), [ACE-Step training](docs/user/training/ace-step.md), [MiniMax-Music3 training](docs/user/training/minimax-music3.md), [YuE2 training](docs/user/training/yue2.md), [Training internals](docs/dev/training-internals.md)
+Build datasets from your own audio and train adapters on your GPU, for ACE-Step, MiniMax-Music3, YuE2 and Stable Audio 3. Details: [Training Studio](docs/user/studios/training-studio.md), [ACE-Step training](docs/user/training/ace-step.md), [MiniMax-Music3 training](docs/user/training/minimax-music3.md), [YuE2 training](docs/user/training/yue2.md), [Training internals](docs/dev/training-internals.md)
 
 | Feature | What it does |
 |---|---|
@@ -332,6 +332,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Local captioning | MOSS-Music-8B-Instruct in native GGML (`ace-caption`), in ACE-Step or MM3 caption formats. |
 | Review grid | Spreadsheet editing of every track with bulk actions and scoped re-labels. |
 | Dataset build | Writes a Side-Step-compatible `dataset.json` with trigger placement and genre ratio. |
+| Training target | One training target (the active backend, or Stable Audio 3) drives the phase tabs, dataset chips, Train page and checkpoint previews; it is locked while a job runs. [Details](docs/user/studios/training-studio.md) |
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM LoRA (0.6B, 1.7B, 4B) and DiT LoRA. |
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |
@@ -340,7 +341,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
 | Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
-| Stable Audio 3 training | Independent SA3 Medium DoRA-rows target with SuperSep level 5 vocal stripping, saved-run resume, adapter picker and fixed-seed SA3 auditions regardless of the selected backend. [Details](docs/user/training/sa3.md) |
+| Stable Audio 3 training | Independent SA3 Medium DoRA-rows target with SuperSep level 5 vocal stripping, saved-run resume, adapter picker and checkpoint previews rendered during training (the YuE2 preview view), a four-chip dataset card and fixed-seed SA3 auditions regardless of the selected backend. [Details](docs/user/training/sa3.md) |
 | YuE2 checkpoint previews | Adjustable music adapter scale, default 0.6, with sound adapter strength fixed at 1.0 for training and manual previews. [Details](docs/user/training/yue2.md#recommended-settings) |
 | YuE2 saved presets | Named training settings load with server-resolved legacy defaults while current dataset and output paths stay in place. [Details](docs/user/training/yue2.md#recommended-settings) |
 | Adapter methods | DoRA, rsLoRA, LoRA+, HiRA, LoHa, PiSSA and HRA, plus learned artist tokens and a trainable KV prefix on the LM trainers. |

@@ -48,6 +48,90 @@ not a listening verdict or a 1,000-step quality pilot. Run its `--self-test`
 without models. GPU memory, operation placement and steady timings need
 separate receipts, on the same HEAD and recipe for each machine.
 
+### SA3 checkpoint previews and the segmented trainer
+
+`runSa3TrainJob` has two modes. Without `preview` settings it runs one trainer
+process to `run.steps` and publishes, as above. With them (`everySteps > 0` and
+at least one prompt; the `preview` option is accepted on a new run only and is
+saved in `run.json`) it follows YuE2's serial lifecycle:
+
+1. Stop the engine. `ace-train sa3-train` runs to the next preview step as an
+   absolute `--steps` bound with `--export-every 0`, saves `state.gguf` and its
+   inference export, and exits. `sa3NextBound` picks the bound; `run.goalSteps`
+   keeps progress and the chart at the logical goal. Total steps is not in the
+   resume fingerprint or the AdamW update, so only the process arguments change
+   between segments.
+2. `captureSa3Snapshot` (`sa3Snapshots.ts`) validates the export and keeps it
+   once as `<run>/snapshots/step-N.gguf`. A capture is never replaced.
+3. Restart the engine and render every prompt and seed (`renderSa3Previews`,
+   `sa3Preview.ts`), stop the engine, then resume with `--resume` in the same
+   run directory. A failed render is logged and training continues once the
+   engine is stopped again; a failed engine stop or restart aborts the run.
+4. Only the last step's export is published to `<models>/sa3-adapters/`. Its
+   snapshot is captured too, and its previews render after the engine is back,
+   never twice for a step.
+
+A resumed job first renders any captured step that still owes previews
+(`sa3PreviewPending` reads stored statuses, so a cut-off round counts as owed),
+and re-exports a preview step whose capture was lost by running `--steps` at the
+saved step. `tools/sa3-resume-proof.mjs` compares 12 uninterrupted steps with
+4+4+4 segments: restart states bitwise, draws exact, loss and final tensors
+within `abs 1e-6 + 1e-5*|ref|`. EMA is display state and resets, so it is not
+part of that evidence.
+
+Records live in `<run>/previews/index.json`, one per step, prompt and seed;
+audio is written before its record is committed. Types are in
+`server/src/contracts/training.ts`. Routes are scoped by the dataset and an
+opaque run id (`<adapterName>/<stamp>`, resolved by `sa3RunById` under the
+dataset's own runs, never a browser path):
+
+| Route | Purpose |
+|---|---|
+| `GET /datasets/:id/sa3-previews?run=` | `{ run, settings, previews }`; the newest run when `run` is omitted. A done record carries an `audioUrl`. |
+| `POST /datasets/:id/sa3-previews/render` | `{ run, step, settings? }`: renders or retries the step's cells that have no done render. 400 if the step has no captured snapshot, 409 with a job on the dataset, 503 with the engine down. Runs on the GPU lane. |
+| `GET /datasets/:id/sa3-previews/audio?run=&file=` | One WAV, only for a done record's own file name inside the run's `previews` folder (links resolved; it must stay inside the run). |
+
+Renders go to `/sa3-synth` with `snapshot_run=<dataset>/<adapter>/<stamp>` and
+`snapshot_step=N` (see [engine](engine.md#stable-audio-3-sampling)), so no
+filesystem path crosses the wire.
+
+### Training Studio shell and plug-ins
+
+Training Studio resolves one **effective target** above the tabs
+(`useTrainingTarget.ts`, rules in `trainingTargets.ts`): the persisted override
+(`hs-trainingTarget`, default `active`) or the active backend. A queued or
+running target-bound job pins the target to its own (`targetForJobKind`). The
+target feeds the phase stepper, dataset chips, Preprocess gate, Train page and
+previews, so changing a view cannot retarget a submitted job. An unknown stored
+value means `active`; an unregistered backend trains as ACE.
+
+Each target is one plug-in (`plugins/{ace,yue2,mm3,sa3}.tsx`, registry
+`trainingPlugins.tsx`). The static half is `TrainingTargetSpec` in
+`trainingTargets.ts` (`phases`, `reachablePhases`, `phaseLabels`,
+`prepareStages`, `trainStages`, `recipeFields`, `previewSource`). The rendering
+half is `TrainingPlugin` in `trainingPluginTypes.ts` (`chips`, `readiness`,
+`renderPrepare`, `renderOptimise`, `renderTrain`, `performAll`). Chip rules are
+pure functions in `plugins/chips.ts`; gate order is `resolveTrainGate`
+(`trainGates.ts`). A phase the target cannot stand on falls back to Train
+(`resolvePhase`). SA3 has `phases: ['dataset', 'train']`, so no Preprocess. The
+shell owns layout and selection; each plug-in owns its parameters and
+serialization, and server validation stays authoritative. This is not a generic
+form engine.
+
+The preview view is shared. `TrainingPreviewPanel.tsx` holds the settings
+block, field, checkpoint card and take rows (presentation only, no server
+state). YuE2's ladder, MM3's strip and the SA3 card all draw it and keep their
+own actions and scoring. `previewSource` records where each target's previews
+come from: `yue2-ladder`, `mm3-records`, `sa3-previews` or `none`. ACE is
+`none`: it has no checkpoint exports or renderer, so it keeps Audition. SA3
+previews are read through `ui/src/queries/sa3-previews/`.
+
+The SA3 asset block (`Sa3DatasetAssets`, `datasetAssets.ts`) is read fresh like
+the other backends' blocks, from the preparation and export receipts: prepared
+audio and clip count, the encoding cache only when its fingerprint validates,
+captured snapshots across the dataset's runs, and the newest published adapter.
+Readiness is never inferred from a finished run alone.
+
 ## YuE2 joint training
 
 The opt-in `fixed-recipe` method defaults to the bf16 LM base (the request's `base` is kept when set, and the standalone prepare route takes the same `base`), rank-64 LoRA (alpha 64) at the native four fused sites, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, no condition dropout or lyric timing. Like every method it trains on a -14 LUFS cache, but nothing refuses another level. The server forces these values, apart from the base, even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.

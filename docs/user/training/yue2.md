@@ -1,6 +1,6 @@
 # YuE2 training
 
-This guide covers training YuE2 adapters in the [Training Studio](../studios/training-studio.md) with Joint Training, the default method: what gets trained, what the dataset needs, which preset to start from, and how to refine and pick the finished adapter by ear. YuE2 must be the active backend, because the Training Studio trains for whichever backend is selected in the top bar. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
+This guide covers training YuE2 adapters in the [Training Studio](../studios/training-studio.md) with Joint Training, the default method: what gets trained, what the dataset needs, which preset to start from, and how to refine and pick the finished adapter by ear. YuE2 must be the training target: by default the Training Studio trains for the backend selected in the top bar, and the **Training target** picker above the phase tabs overrides that. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train
 

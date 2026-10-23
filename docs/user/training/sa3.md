@@ -8,9 +8,23 @@ Small, SFX and other adapter families are outside this workflow.
 ## Where to find it
 
 Open Training Studio with ACE-Step, MiniMax-Music3 or YuE2 selected in the top
-bar. Open a dataset, go to Train and choose **Stable Audio 3 Medium · DoRA-rows**
-under **Training target**. This target is independent of the generation backend.
-The SA3 backend currently hides the Training Studio sidebar entry.
+bar. The **Training target** picker sits above the phase tabs; choose
+**Stable Audio 3 Medium · DoRA-rows**. The choice is remembered and drives every
+tab: the dataset chips, the phase tabs and the Train page. It is independent of
+the generation backend, and the picker is read-only while any training job is
+queued or running, so a view change cannot retarget a submitted job. The SA3
+backend currently hides the Training Studio sidebar entry.
+
+SA3 has two tabs, **Dataset** and **Train**. It has no Preprocess tab: the Train
+page prepares the audio and the trainer encodes it. Each dataset card shows four
+chips that report what is on disk, not what a finished run implies:
+
+| Chip | On when |
+|---|---|
+| Audio | Vocal-stripped, resampled instrumentals exist for the dataset (with the clip count) |
+| Encoded | The trainer's encoding cache exists and still matches the prepared audio |
+| Snapshots | At least one checkpoint snapshot was captured (with the count) |
+| Adapter | A validated adapter was published (hover for its name and date) |
 
 Training requires CUDA or CPU and the `ace-train` binary. The card lists missing
 models. Install the SA3 Medium training base, inference DiT, SAME encoder,
@@ -24,6 +38,9 @@ runner. No measured VRAM or step-time guarantee is available yet.
    musical metadata, and exclude tracks you do not want to train on.
 2. Select the SA3 training target. You do not need ACE preprocessing or Build:
    the runner scans the current source files and prepares its own snapshot.
+   The Train page follows the YuE2 layout: run and recipe, a collapsible
+   Checkpoint previews block, progress and log, the checkpoint list, then the
+   audition card.
 3. Choose **New run**, enter an adapter name and review the recipe below.
 4. Click **Prepare and train**. Preparation strips vocals with SuperSep level 5,
    then resamples the derived instrumentals to 44.1 kHz stereo. Originals and
@@ -62,10 +79,50 @@ Defaults come from the server. The initial recipe uses batch size 1.
 | Crop seconds | 380 | Maximum crop, from 1 to 384 seconds; shorter crops use less memory |
 | Training seed | 42 | Training randomness, preserved on resume |
 | Checkpoint interval | 100 | Steps between saves of resumable optimizer state |
-| Export interval | 0 | Periodic inference snapshots in the run folder; 0 disables periodic snapshots |
+| Export interval | 0 | Periodic inference snapshots in the run folder; 0 disables periodic snapshots. With checkpoint previews on, the preview cadence replaces it (see below) |
 
 Start with a short crop when checking whether your hardware can train the model.
 The recipe is a starting point; listening comparisons decide which adapter to keep.
+
+## Checkpoint previews
+
+Previews work like YuE2's: while a run trains, the app renders short clips from
+saved checkpoints so you can hear whether it is heading the right way. Open the
+**Checkpoint previews** block on the Train card. It is on by default.
+
+| Setting | Default | What it changes |
+|---|---|---|
+| Render previews at saved checkpoints | On | Off captures no snapshots and renders nothing |
+| Preview every (steps) | The recipe's checkpoint interval (100) | A preview round after every this many steps |
+| Preview seconds | 30 | Length of each clip, 1 to 384 seconds; longer clips take longer at every round |
+| Preview seeds | 424242 | Up to four whole-number seeds, comma separated |
+| Preview prompts | None | One prompt per line, up to eight. Add at least one, or turn previews off |
+
+Every round renders each prompt with each seed, so checkpoints compare like for
+like. Use instrumental prompts that were not in your training captions, and keep
+them the same for the whole run. The settings are fixed when the run starts; a
+resumed run keeps the ones it began with.
+
+The trainer and the render cannot share the GPU, so each round pauses training:
+the trainer runs to the next preview step and exits, the app saves that
+checkpoint, restarts the engine, renders the clips, stops the engine again and
+resumes the trainer exactly where it stopped. Training in segments gives the same
+result as one uninterrupted run within the trainer's numerical tolerance
+(`tools/sa3-resume-proof.mjs` checks this on a short fixture). A failed preview
+round is logged and training continues. A failed engine restore stops the run.
+
+Checkpoints appear under **Checkpoint previews** below the card as they land,
+one card per step with a player for each prompt and seed. A cut-off round (cancel,
+crash, server restart) shows its missing clips as failed, and a resumed run
+renders what it still owes. **Retry** (or **Render more**) renders the step's clips
+that have no finished render yet, using the settings the run started with. It needs
+the engine up and no job running on the dataset. The last step is marked **final**, and its previews render after
+the adapter is published.
+
+Only the last step is published to the generation picker. Intermediate
+checkpoints are previews only: they live in the run's `snapshots` folder, are
+never loadable from the picker, and are not interchangeable with published
+adapters.
 
 ## Cancel and resume
 
@@ -75,7 +132,7 @@ appears in the resume picker only when saved state exists. Preparation failures
 and runs without checkpoints must start again as a new run.
 
 Select a saved run to resume. Its adapter name, rank, alpha, learning rate,
-crop, seed and save intervals stay fixed. You can increase **Total steps**.
+crop, seed, save intervals and checkpoint-preview settings stay fixed. You can increase **Total steps**.
 Resume uses the saved prepared snapshot, so later edits to the source dataset
 do not silently change the resumed run. A new run gets a separate dated folder.
 

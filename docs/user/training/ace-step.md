@@ -1,6 +1,6 @@
 # ACE-Step training
 
-This guide covers training your own ACE-Step 1.5 adapters in the [Training Studio](../studios/training-studio.md): what each adapter type changes, how to prepare a dataset, which settings to start from and how to tell whether the result is any good. It assumes ACE-Step is the active backend, because the Training Studio trains for whichever backend is selected in the top bar. For how the trainers work inside, see [training internals](../../dev/training-internals.md).
+This guide covers training your own ACE-Step 1.5 adapters in the [Training Studio](../studios/training-studio.md): what each adapter type changes, how to prepare a dataset, which settings to start from and how to tell whether the result is any good. It assumes ACE-Step is the training target: by default the Training Studio trains for the backend selected in the top bar, and the **Training target** picker above the phase tabs overrides that. For how the trainers work inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train
 
@@ -33,7 +33,7 @@ Changing the trigger word or its position after preprocessing makes Preprocess r
 
 ## Preprocessing
 
-Preprocess encodes the dataset into training tensors against one DiT base. Pick a BF16 base: the app warns on quantized bases, and results from them may be degraded. The sound adapter can only be trained against the base you preprocessed with, so choose the base you intend to generate with.
+Preprocess encodes the dataset into training tensors against one DiT base. It is a collapsible stage card with the run button outside the fold, like YuE2's stages, and the **Tensors** chip on the dataset card turns on when tensors exist. The Train page uses the same cards for the planner (LM) and sound (DiT) adapters. Pick a BF16 base: the app warns on quantized bases, and results from them may be degraded. The sound adapter can only be trained against the base you preprocessed with, so choose the base you intend to generate with.
 
 Defaults: max duration 600 s per track, peak normalisation to -1 dB, max caption tokens 512, max lyric tokens 2048. The engine stops for the duration of the job and restarts afterwards. Measured on an RTX 5090, preprocessing uses about 6 GB of VRAM and takes about 3 seconds per song.
 
