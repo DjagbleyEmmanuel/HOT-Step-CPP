@@ -316,9 +316,9 @@ freely, including commercially, and that only companies need a commercial licenc
 
 ## Stable Audio 3
 
-Training Studio's Train page offers an independent **Training target** picker for
-SA3 Medium DoRA-rows. Open Training Studio while another backend is selected,
-then choose SA3 as the training target. Preparation strips vocals with SuperSep
+Training Studio's **Training target** picker, above the phase tabs, trains
+SA3 Medium DoRA-rows while another backend is selected. The choice drives every
+tab and is locked while a job runs. SA3 shows only Dataset and Train tabs. Preparation strips vocals with SuperSep
 level 5 and keeps the originals. Training supports CUDA and CPU; the card lists
 missing model files. See [Stable Audio 3 training](training/sa3.md) for the
 recipe, cancellation, saved-run resume and fixed-seed adapter auditions.
