@@ -4515,8 +4515,12 @@ int main(int argc, char ** argv) {
         // snapshot_step=N, snapshot_scale (default 1). Internal, bounded to the
         // training runs (sa3-preview-resolver.h); stacks after named adapters.
         if (req.has_param("snapshot_run") || req.has_param("snapshot_step")) {
-            const float snap_scale = req.has_param("snapshot_scale")
-                                         ? strtof(req.get_param_value("snapshot_scale").c_str(), nullptr) : 1.0f;
+            float snap_scale = 1.0f;
+            if (req.has_param("snapshot_scale") &&
+                !sa3_parse_snapshot_scale(req.get_param_value("snapshot_scale"), snap_scale)) {
+                json_error(res, 400, "Invalid snapshot_scale (finite number expected)");
+                return;
+            }
             std::string snap_path, snap_sig;
             const std::string snap_err = sa3_resolve_snapshot(
                 adapters_dir, req.get_param_value("snapshot_run"), req.get_param_value("snapshot_step"),

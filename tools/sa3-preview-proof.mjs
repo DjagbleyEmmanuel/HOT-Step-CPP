@@ -14,10 +14,16 @@
 //    the same request must render differently, and match the public adapter
 //    path when that export is published byte-identically.
 // 5. The public adapter-name parser and /sa3/props catalogue are unchanged.
+// 0. First, with no GPU: builds a small C++ test of the resolver with clang++
+//    against ggml-base and swaps the step file between the resolver's read and
+//    its validate/hash/load steps. The resolver must accept or reject the bytes
+//    it read, never the replacement. Also rejects non-finite and junk scales.
+//    --unit-only stops after this part.
 //
 // Needs the rebuilt dev engine on an idle GPU. Removes its fixtures unless --keep.
 //   node tools/sa3-preview-proof.mjs --adapters <dir> --models <dir>
 //        [--engine http://127.0.0.1:8085] [--source <dataset>/<adapter>/<stamp>]
+//   node tools/sa3-preview-proof.mjs --unit-only
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -35,9 +41,102 @@ const adapters = arg('adapters');
 const models = arg('models');
 const source = arg('source', 'sa3-integrated-proof/proof-1792701425811/2026-10-22_21-37-05');
 const keep = process.argv.includes('--keep');
-if (!adapters || !models) {
+const unitOnly = process.argv.includes('--unit-only');
+if (!unitOnly && (!adapters || !models)) {
   console.error('usage: node tools/sa3-preview-proof.mjs --adapters <dir> --models <dir> [--engine url] [--source run] [--keep]');
   process.exit(2);
+}
+
+let failed = 0;
+const check = (name, ok, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}`);
+  if (!ok) failed++;
+};
+
+// 0. Resolver unit: replacement between reads, scale parsing.
+const UNIT_CPP = String.raw`
+#include "sa3-preview-resolver.h"
+#include <cstdio>
+namespace fs = std::filesystem;
+static int fails = 0;
+static void check(const std::string & name, bool ok, const std::string & d = "") {
+    printf("%s unit: %s%s%s\n", ok ? "PASS" : "FAIL", name.c_str(), d.empty() ? "" : ": ", d.c_str());
+    if (!ok) fails++;
+}
+static void put(const fs::path & p, const std::string & base, const char * pad) {
+    gguf_context * g = gguf_init_empty();
+    gguf_set_val_str(g, "general.architecture", "sa3-adapter");
+    gguf_set_val_str(g, "sa3.adapter_format", "dora-rows-v1");
+    gguf_set_val_str(g, "sa3.inference_base_id", base.c_str());
+    gguf_set_val_str(g, "test.pad", pad);
+    fs::create_directories(p.parent_path());
+    gguf_write_to_file(g, p.u8string().c_str(), true);
+    gguf_free(g);
+}
+int main(int, char ** argv) {
+    const fs::path root = fs::u8path(argv[1]);
+    fs::remove_all(root);
+    fs::create_directories(root / "sa3-medium");
+    const fs::path dit = root / "dit.gguf";
+    { std::ofstream(dit, std::ios::binary) << "stand-in generation DiT"; }
+    const std::string good = "stabilityai/stable-audio-3-medium sha256:" + sa3_preview_sha(dit);
+    const std::string bad  = "stabilityai/stable-audio-3-medium sha256:" + std::string(64, '0');
+    const fs::path step = root / "sa3-medium" / "d" / "a" / "1" / "snapshots" / "step-1.gguf";
+    const std::string ad = root.u8string();
+    std::string path, sig, err;
+
+    put(step, good, "A");
+    const std::string a_sha = sa3_preview_sha(step);
+    err = sa3_resolve_snapshot(ad.c_str(), "d/a/1", "1", dit.u8string(), 1.0f, path, sig, [&] { put(step, bad, "B"); });
+    check("valid A swapped for wrong-base B after read: A accepted", err.empty(), err);
+    check("loader path holds A's bytes", sa3_preview_sha(fs::u8path(path)) == a_sha);
+    check("cache key carries A's hash", sig.find(a_sha) != std::string::npos);
+    check("loader path is not the step file", fs::u8path(path) != fs::canonical(step));
+
+    put(step, bad, "B");
+    err = sa3_resolve_snapshot(ad.c_str(), "d/a/1", "1", dit.u8string(), 1.0f, path, sig, [&] { put(step, good, "A"); });
+    check("wrong-base B swapped for valid A after read: B rejected", err.find("different DiT") != std::string::npos, err);
+
+    put(step, good, "A");
+    std::string path_a, path_c;
+    err = sa3_resolve_snapshot(ad.c_str(), "d/a/1", "1", dit.u8string(), 1.0f, path_a, sig);
+    put(step, good, "C");
+    const std::string c_sha = sa3_preview_sha(step);
+    err += sa3_resolve_snapshot(ad.c_str(), "d/a/1", "1", dit.u8string(), 1.0f, path_c, sig);
+    check("rewrite gets a new staged copy", err.empty() && path_c != path_a && sa3_preview_sha(fs::u8path(path_c)) == c_sha, err);
+    check("earlier staged copy is untouched", sa3_preview_sha(fs::u8path(path_a)) == a_sha);
+
+    float v = 0;
+    for (const char * s : { "nan", "NaN", "inf", "-inf", "1e40", "-1e40", "1x", "", " ", "0.5 ", "0x" })
+        check(std::string("scale rejects '") + s + "'", !sa3_parse_snapshot_scale(s, v));
+    for (const char * s : { "1", "0.5", "-0.25", "1e-3", "2" })
+        check(std::string("scale accepts '") + s + "'", sa3_parse_snapshot_scale(s, v) && std::isfinite(v));
+    fs::remove_all(root);
+    return fails;
+}
+`;
+function unit() {
+  const dir = path.join(repo, '.tmp', 'sa3-preview-unit');
+  fs.mkdirSync(dir, { recursive: true });
+  const src = path.join(dir, 'unit.cpp'), exe = path.join(dir, 'unit.exe');
+  fs.writeFileSync(src, UNIT_CPP);
+  const clang = process.platform === 'win32' ? 'C:/Program Files/LLVM/bin/clang++.exe' : 'clang++';
+  const lib = path.join(repo, 'engine', 'build', 'ggml', 'src', 'Release', 'ggml-base.lib');
+  const c = spawnSync(clang, ['-std=c++17', '-O1', '-D_CRT_SECURE_NO_WARNINGS', `-I${path.join(repo, 'engine', 'src')}`,
+    `-I${path.join(repo, 'engine', 'ggml', 'include')}`, src, lib, '-o', exe], { encoding: 'utf8' });
+  check('unit test builds', c.status === 0, c.status ? String(c.stderr || c.error).slice(-600) : '');
+  if (c.status === 0) {
+    const env = { ...process.env, PATH: `${path.join(repo, 'engine', 'build', 'Release')}${path.delimiter}${process.env.PATH}` };
+    const r = spawnSync(exe, [path.join(dir, 'root')], { encoding: 'utf8', env });
+    process.stdout.write(r.stdout || '');
+    check('unit test ran clean', r.status === 0, `exit ${r.status} ${String(r.stderr || '').slice(-300)}`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+unit();
+if (unitOnly) {
+  console.log(failed ? `sa3-preview-proof: FAIL (${failed})` : 'sa3-preview-proof: PASS (unit only)');
+  process.exit(failed ? 1 : 0);
 }
 
 const [slug, , stamp] = source.split('/');
@@ -49,12 +148,6 @@ const escRun = `${slug}/sa3-preview-escape/${stamp}`;
 const escLink = path.join(runsRoot, ...escRun.split('/'));
 const outside = path.join(repo, '.tmp', 'sa3-preview-proof-outside');
 const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-
-let failed = 0;
-const check = (name, ok, detail = '') => {
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? `: ${detail}` : ''}`);
-  if (!ok) failed++;
-};
 
 function cleanup() {
   if (fs.existsSync(escLink)) fs.rmdirSync(escLink); // junction only, never its target
@@ -151,6 +244,8 @@ try {
   await expect400('step zero', { snapshot_run: fixRun, snapshot_step: '0' }, 'Invalid snapshot_step');
   await expect400('missing step', { snapshot_run: fixRun, snapshot_step: '999999' }, 'not found');
   await expect400('run without step', { snapshot_run: fixRun }, 'Invalid snapshot_step');
+  for (const v of ['nan', 'inf', '-inf', '1e40', '1x', ''])
+    await expect400(`snapshot_scale '${v}'`, { snapshot_run: fixRun, snapshot_step: String(step), snapshot_scale: v }, 'Invalid snapshot_scale');
 
   fs.mkdirSync(path.join(outside, 'snapshots'), { recursive: true });
   fs.copyFileSync(snap, path.join(outside, 'snapshots', `step-${step}.gguf`));
