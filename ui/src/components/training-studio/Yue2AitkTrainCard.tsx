@@ -18,6 +18,7 @@ import {
   jobStreamUrl,
   pickLadderRun,
   startYue2AitkPrepare,
+  updateYue2JointIntervals,
   type TrainingJobSummary,
   type TrainingMetricEvent,
   type TrainingStreamEvent,
@@ -407,6 +408,50 @@ export function createPresetLoadGate() {
     },
   };
 }
+
+/** GH #307: change the checkpoint and preview interval of the run training
+ *  now. Blank fields stay as they are; the trainer takes the rest up between
+ *  steps. Preview every shows only on a run that pauses for previews. */
+const LiveIntervals: React.FC<{ datasetId: string; jobId: string; worker?: string | null; options?: Record<string, unknown> }> = ({ datasetId, jobId, worker, options }) => {
+  const { t } = useTranslation();
+  const preview = options?.preview as Yue2JointPreviewOptions | undefined;
+  const [saveEvery, setSaveEvery] = useState('');
+  const [previewEvery, setPreviewEvery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const current = { saveEvery: typeof options?.saveEvery === 'number' ? options.saveEvery : undefined, previewEvery: preview?.enabled && preview.everySteps > 0 ? preview.everySteps : undefined };
+  const apply = async () => {
+    setBusy(true); setNote('');
+    try {
+      const done = await updateYue2JointIntervals(datasetId, jobId, {
+        ...(saveEvery ? { saveEvery: Number(saveEvery) } : {}), ...(previewEvery ? { previewEvery: Number(previewEvery) } : {}) }, { worker });
+      setSaveEvery(''); setPreviewEvery('');
+      setNote(t('trainingStudio.yue2.method.intervalsApplied', 'Now: checkpoint every {{save}}', { save: done.saveEvery })
+        + (done.previewEvery ? t('trainingStudio.yue2.method.intervalsAppliedPreview', ', preview every {{preview}}', { preview: done.previewEvery }) : ''));
+    } catch (err) { setNote(err instanceof Error ? err.message : String(err)); }
+    finally { setBusy(false); }
+  };
+  const field = 'w-24 px-2 py-1 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
+  return (
+    <div className="mt-2 flex items-end gap-3 flex-wrap">
+      <label className="flex flex-col gap-1">
+        <ParamLabel label={t('trainingStudio.yue2.method.liveSaveEvery', 'Checkpoint every')} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('trainingStudio.yue2.method.liveSaveEveryInfo', 'Change how often this run saves a checkpoint, without stopping it. Counted from step 0: 50 saves at 50, 100, 150 and so on. Takes effect after the step in progress.')} />
+        <input className={field} type="number" min={1} value={saveEvery} placeholder={current.saveEvery === undefined ? '' : String(current.saveEvery)} onChange={e => setSaveEvery(e.target.value)} />
+      </label>
+      {current.previewEvery !== undefined && <label className="flex flex-col gap-1">
+        <ParamLabel label={t('trainingStudio.yue2.method.livePreviewEvery', 'Preview every')} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('trainingStudio.yue2.method.livePreviewEveryInfo', 'Change how many steps this run trains between preview pauses, counted from the last pause. If the new pause is already behind the current step, the run pauses for a preview after the step in progress.')} />
+        <input className={field} type="number" min={1} value={previewEvery} placeholder={String(current.previewEvery)} onChange={e => setPreviewEvery(e.target.value)} />
+      </label>}
+      <button type="button" onClick={() => void apply()} disabled={busy || (!saveEvery && !previewEvery)}
+        className="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500/80 text-black hover:bg-amber-400 disabled:opacity-40">
+        {t('trainingStudio.yue2.method.liveApply', 'Apply to this run')}
+      </button>
+      {note && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{note}</span>}
+    </div>
+  );
+};
 
 export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<Record<string, unknown>>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
@@ -1697,6 +1742,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}
       </div>
+      {job?.status === 'running' && isJointJob(job, datasetId) && <LiveIntervals key={job.id} datasetId={datasetId} jobId={job.id} worker={trainingWorker}
+        options={aitkRuns.find(r => r.jobId === job.id)?.options} />}
       {stepHistory.length > 0 && (
         <div className="mt-3">
           <Yue2SplitChart points={stepHistory} milestones={milestones} totalSteps={job?.total ?? 0} vramMb={chartVram}

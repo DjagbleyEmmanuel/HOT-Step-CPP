@@ -417,6 +417,27 @@ steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
 ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
 
+### Live interval edits (GH #307, 2026-10-23)
+
+`PATCH /datasets/:id/yue2-joint-runs/:jobId/params` with `{ saveEvery?, previewEvery? }`
+(whole numbers from 1 to the step cap) calls `updateYue2JointParams`. It changes the job's
+options, so later segments start with the new `--save-every` and preview cadence, and writes
+`<outDir>/.params.json` (`{ save_every, pause_at? }`) for the trainer running now. Every
+segment gets `--params-file <outDir>/.params.json`. `poll_params` in `yue2-aitk-runtime.cpp`
+runs once per step, before the save check: one `last_write_time`, and a read plus yyjson parse
+only when the mtime has moved. Measured on the RTX 5090 workstation: 1.7-2.0 µs for the stat
+and 17 µs for stat, read and parse, against steps of 0.3-5 s, so it polls every step.
+
+The file as it stood when the trainer started is skipped: the segment's arguments already
+carry those values, and a `pause_at` left by an earlier segment would otherwise pause the next
+one at once. A file that does not parse is retried next step (the server may be mid-write). An
+out-of-range value is logged and skipped. Unknown keys are ignored. `pause_at` is written only
+while the segment's pause comes from the preview cadence (not from a live plan check), as
+segment start + previewEvery, clamped to the step cap; the runner's checkpoint validator reads
+the same live pause (`yue2JointLivePace`). The route answers 409 when the run is not training
+on this machine; the UI sends it with the training target, so a worker's run is reached
+through the worker. `klCheckpointEvery` is not editable live.
+
 ### YuE2 preparation operations
 
 `stages: ['joint']` with `mode: 'train-after-preparation'` is direct Start-training.

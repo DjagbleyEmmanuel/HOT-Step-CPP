@@ -2682,6 +2682,14 @@ export async function runYue2Cleanup(id: string, body: { run: string; step: numb
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
 }
 
+/** PATCH /datasets/:id/yue2-joint-runs/:jobId/params — the checkpoint and
+ *  preview interval of the run training now, on the machine training it. */
+export async function updateYue2JointIntervals(
+  id: string, jobId: string, body: { saveEvery?: number; previewEvery?: number }, reqOpts?: TrainingTarget,
+): Promise<{ saveEvery: number; previewEvery?: number }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}/params`, { method: 'PATCH', ...jsonBody(body) }, reqOpts);
+}
+
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — a finished run and its checkpoints. */
 export async function deleteYue2AitkRun(id: string, jobId: string): Promise<{ output: string }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });

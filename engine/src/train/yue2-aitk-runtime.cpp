@@ -20,6 +20,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -46,6 +47,42 @@ bool fresh_output(const std::filesystem::path & path, std::string * error) {
     return true;
 }
 void event(const char * stage, int step = -1) { std::cout << "{\"stage\":\"" << stage << "\"" << (step >= 0 ? ",\"step\":" + std::to_string(step) : "") << "}\n" << std::flush; }
+// Live interval edits (GH #307). The server rewrites --params-file while the
+// run trains; an unchanged mtime costs one stat, so this runs every step. A
+// file that does not parse is retried next step (it may be mid-write); a bad
+// value is logged and skipped; unknown keys are ignored. The file as it stood
+// at startup is skipped: the server passes those values as arguments.
+struct ParamsWatch { std::filesystem::file_time_type seen{}, bad{}; };
+void poll_params(yue2_aitk_runtime::Config & config, ParamsWatch & watch) {
+    if (config.params_file.empty()) return;
+    std::error_code ec;
+    const auto path = std::filesystem::u8path(config.params_file);
+    const auto mtime = std::filesystem::last_write_time(path, ec);
+    if (ec || mtime == watch.seen) return;
+    std::ifstream in(path, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    yyjson_doc * doc = yyjson_read(text.data(), text.size(), 0);
+    yyjson_val * root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_obj(root)) {
+        if (mtime != watch.bad) std::fprintf(stderr, "[yue2-aitk] %s is not a JSON object; retrying next step\n", config.params_file.c_str());
+        watch.bad = mtime; yyjson_doc_free(doc); return;
+    }
+    watch.seen = mtime;
+    const auto apply = [&](const char * key, std::int32_t * field, std::int32_t lo) {
+        yyjson_val * v = yyjson_obj_get(root, key);
+        if (!v) return;
+        if (!yyjson_is_uint(v) || yyjson_get_uint(v) < (std::uint64_t) lo || yyjson_get_uint(v) > (std::uint64_t) config.steps) {
+            std::fprintf(stderr, "[yue2-aitk] params: %s must be an integer from %d to %d; skipped\n", key, lo, config.steps);
+            return;
+        }
+        const auto value = (std::int32_t) yyjson_get_uint(v);
+        if (value != *field) std::fprintf(stderr, "[yue2-aitk] params: %s %d -> %d\n", key, *field, value);
+        *field = value;
+    };
+    apply("save_every", &config.save_every, 1);
+    apply("pause_at", &config.pause_at, 0);
+    yyjson_doc_free(doc);
+}
 std::string lower_hash(std::string value) {
     for (char & c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return value;
@@ -280,6 +317,8 @@ bool yue2_aitk_cancel_requested() { return g_cancel != 0; }
 void yue2_aitk_clear_cancel() { g_cancel = 0; }
 
 static int run_impl(Config config, std::string * error) {
+    ParamsWatch params_watch;
+    { std::error_code ec; params_watch.seen = std::filesystem::last_write_time(std::filesystem::u8path(config.params_file), ec); }
     if (!fresh_output(std::filesystem::u8path(config.output), error)) return 1;
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }
@@ -1414,6 +1453,7 @@ static int run_impl(Config config, std::string * error) {
                     }
                 }
             }
+            poll_params(config, params_watch);
             if (completed % config.save_every == 0 || completed == end_step())
                 if (!save_checkpoint(completed)) { fail(error, "checkpoint publication failed"); return 1; }
             // Decoder stop: the reconstruction meter has flattened over the

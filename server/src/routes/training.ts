@@ -59,6 +59,7 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   POST   /datasets/:id/yue2-preprocess                — audio -> cached YuE2 VAE latents
 //   POST   /datasets/:id/yue2-train                     — start a YuE2 NAR LoRA training job
 //   POST   /datasets/:id/yue2-joint-train              — start explicit AITK joint training
+//   PATCH  /datasets/:id/yue2-joint-runs/:jobId/params — checkpoint/preview interval of the live run
 //   GET    /datasets/:id/yue2-runs                      — previous YuE2 runs + their adapters
 //   GET    /datasets/:id/yue2-ar                        — per-stage AR readiness + defaults
 //   POST   /datasets/:id/yue2-tokenize                  — manifest -> codes/ (codec_ids)
@@ -178,7 +179,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
-import { legacyYue2DoraError, parseYue2JointStopMode, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
+import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
@@ -4308,6 +4309,21 @@ router.delete('/datasets/:id/yue2-joint-runs/:jobId', async (req: Request, res: 
     const active = queue.activeJobForDataset(ds.id);
     if (active?.id === jobId || run.status === 'running') { res.status(409).json({ error: 'That run is still training; stop it first' }); return; }
     res.json(await deleteYue2Run(jobId));
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+
+/** PATCH /datasets/:id/yue2-joint-runs/:jobId/params — change the checkpoint
+ * and preview interval of the run training now (GH #307). Body:
+ * { saveEvery?, previewEvery? }; the trainer takes them up between steps. */
+router.patch('/datasets/:id/yue2-joint-runs/:jobId/params', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const active = queue.activeJobForDataset(ds.id);
+    if (active?.id !== req.params.jobId || active.kind !== 'yue2-joint-train') { res.status(409).json({ error: 'That run is not training on this machine' }); return; }
+    const result = updateYue2JointParams(active, req.body ?? {});
+    if ('error' in result) { res.status(result.status).json({ error: result.error }); return; }
+    res.json(result);
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
