@@ -210,6 +210,19 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   });
   const [yue2Ar, setYue2Ar] = useState(() => restore('yue2Ar', ''));
   const [yue2Nar, setYue2Nar] = useState(() => restore('yue2Nar', ''));
+  // #304: Base renders with no adapters, so a pair picked in the model picker
+  // was silently dropped. Custom's empty slots take the picker's pair, and a
+  // studio with no mode saved, loaded or clicked yet opens in Custom when the
+  // picker holds both halves. A saved mode always wins.
+  const modeChosen = useRef(restore<string | null>('pairMode', null) !== null);
+  const chooseRenderMode = (mode: Yue2RenderMode) => { modeChosen.current = true; setRenderMode(mode); };
+  const pickerAr = String(yue2Models?.defaults?.lmAdapterAr ?? '');
+  const pickerNar = String(yue2Models?.defaults?.lmAdapterNar ?? '');
+  useEffect(() => {
+    if (pickerAr) setYue2Ar(v => v || pickerAr);
+    if (pickerNar) setYue2Nar(v => v || pickerNar);
+    if (pickerAr && pickerNar && !modeChosen.current) { modeChosen.current = true; setRenderMode('custom'); }
+  }, [pickerAr, pickerNar]);
   const [selectedYue2ArtistId, setSelectedYue2ArtistId] = useState<number | null>(() => restore('selectedYue2ArtistId', null));
   const [selectedYue2LyricsSetId, setSelectedYue2LyricsSetId] = useState<number | null>(() => restore('selectedYue2LyricsSetId', null));
   const eligibleIds = new Set(allPresets.filter(p => p.yue2_ar_adapter_path && p.yue2_nar_adapter_path).map(p => p.lyrics_set_id));
@@ -500,6 +513,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-advancedMode')) setAdvancedMode(f['cover-studio-advancedMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-pairMode')) {
       const mode = f['cover-studio-pairMode'];
+      modeChosen.current = true;
       setRenderMode(mode === 'pair' ? 'custom' : mode === 'artist' || mode === 'custom' ? mode : 'base');
     }
     if (Object.hasOwn(f, 'cover-studio-yue2Ar')) setYue2Ar(f['cover-studio-yue2Ar'] as never);
@@ -1964,6 +1978,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} />
         {/* Right: Artist + Settings */}
         {yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
+          {renderMode === 'base' && (pickerAr || pickerNar) && <p className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">
+            Base ignores the picked LoRA; use Custom to apply it.</p>}
           <Yue2CoverPanel
           caption={artistCaption} onCaptionChange={value => { setArtistCaption(value); setCaptionMode('custom'); }}
           captionMode={captionMode} onCaptionMode={selectCaptionSource}
@@ -1976,7 +1992,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           buildStatus={buildSession ? `Build in progress: ${Math.min(nextBuild, buildSession.sections.length)} of ${buildSession.sections.length} sections` : ''}
           onStartOverBuild={buildSession ? build.startOver : undefined}
           instrumental={renderInstrumental} onInstrumentalChange={() => showToast('Instrumental follows the lyrics: mark every section Instrumental in Assign lyrics, or give a section words.')}
-          renderMode={renderMode} onRenderMode={setRenderMode}
+          renderMode={renderMode} onRenderMode={chooseRenderMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
           keepChords={keepChords} onKeepChords={setKeepChords}
