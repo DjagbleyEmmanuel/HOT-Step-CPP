@@ -102,6 +102,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 #include "hot-step-families.h"
 
 #include <algorithm>   // std::sort (HOT-Step /sa3/props adapter list)
+#include <cctype>      // std::tolower (HOT-Step /sa3-synth synth_model guard)
 #include <atomic>
 #include <condition_variable>
 #include <cmath>
@@ -4433,7 +4434,13 @@ int main(int argc, char ** argv) {
                 json_error(res, 400, "Invalid synth_model (bare filename expected)");
                 return;
             }
-            if (want.rfind("sa3-dit-base-", 0) == 0) {
+            // Refusal is case-insensitive: the models dir may be on a case-insensitive
+            // filesystem, so "sa3-dit-BASE-..." would open the training base.
+            // Acceptance stays case-sensitive so one file can't cache under two keys.
+            std::string lower = want;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return (char) std::tolower(c); });
+            if (lower.rfind("sa3-dit-base-", 0) == 0) {
                 json_error(res, 400, "sa3-dit-base-* is the training base, not a generation DiT");
                 return;
             }

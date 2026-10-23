@@ -495,6 +495,13 @@ adapter path as StableStep. The Node backend defaults to 8 steps and the
 `pingpong` or `euler` selects a native loop; an opted-in solver plugin takes
 precedence over the default Lua solver.
 
+The optional `synth_model` query field picks the generation DiT by bare
+filename, such as `sa3-dit-Q8_0.gguf`. A missing, empty, non-`sa3-dit-*.gguf` or
+uninstalled name falls back to `sa3-dit-BF16.gguf`. The training base
+`sa3-dit-base-*` (any case) and path-like names return 400. The `X-SA3-DiT`
+response header names the DiT that ran. `/sa3-refine` always uses BF16. Full
+contract: [ARCHITECTURE](../../engine/docs/ARCHITECTURE.md).
+
 Seed breeding is limited to noise-only synthesis. `seed_b` selects a second
 noise stream and `seed_blend` mixes it into the initial latent and each pingpong
 re-noise draw. Node resolves an omitted or blank blend to 0.5 when seed B is set;

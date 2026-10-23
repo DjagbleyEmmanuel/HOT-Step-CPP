@@ -185,6 +185,18 @@ SA3 seed breeding: `/sa3-synth` accepts `seed_b` (int64, `-1` = off) and `seed_b
 from the `seed` noise toward the `seed_b` noise (same std::mt19937_64 gaussian at
 `seed_b`); `0` gives `seed` exactly, `1` gives `seed_b`. No effect on `/sa3-refine`.
 
+SA3 generation DiT: `/sa3-synth` accepts `synth_model`, a bare filename in the
+models root (the same field name ACE uses for its DiT), for example
+`sa3-dit-Q8_0.gguf`. The engine uses `sa3-dit-BF16.gguf` and logs the reason when
+the value is missing or empty, does not match `sa3-dit-*.gguf`, or names a file
+that is not installed. It returns 400 for a name containing `/`, `\` or `..`, and
+for the training base `sa3-dit-base-*` in any letter case. The `sa3-dit-*.gguf`
+match is case-sensitive, so a differently cased name falls back to BF16 instead
+of caching the same file under a second key. The
+response header `X-SA3-DiT` names the DiT that ran. The store keys the SA3 model
+on the DiT path, so each quant caches as its own entry. `/sa3-refine` takes no
+DiT parameter and always loads `sa3-dit-BF16.gguf`.
+
 **`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
 unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
 item `b` of `/lm` gets `lm_seed + b`.
