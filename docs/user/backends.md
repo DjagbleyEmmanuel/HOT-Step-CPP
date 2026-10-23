@@ -186,7 +186,12 @@ What sets it apart:
   it, and the generation log says why.
 - Cover Studio takes an uploaded or Library recording and uses SheetSage2 to
   transcribe its melody and chords into ABC. Review and approve the full score before rendering.
-  You can supply ABC yourself without installing SheetSage2. The recording does
+  You can supply ABC yourself without installing SheetSage2. When the vocal has
+  no melody SheetSage2 can hear (rap, screamed vocals), Cover Studio separates
+  the vocal and writes its rhythm on the Vocal line as one repeated note, keeping
+  the chords and the instrumental line. Edit the notes if you want a tune. The
+  rhythm follows the source's density and sections, not every syllable exactly.
+  The recording does
   not condition the audio renderer: YuE2 composes from the approved score,
   caption and lyrics. By default, rendering keeps only the vocal melody,
   removes chord symbols and the score tempo, and keeps the source key. You can
