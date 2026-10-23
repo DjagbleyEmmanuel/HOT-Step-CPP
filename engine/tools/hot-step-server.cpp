@@ -93,6 +93,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 // therefore included mid-file, next to minimax/mm3-job.h). Included here so
 // yue2_weights_present is visible by name to hot-step-families.h's family
 // table immediately below — MUST come before that include.
+#include "sa3-preview-resolver.h"  // HOT-Step /sa3-synth checkpoint snapshots
 #include "yue2/yue2-model.h"
 
 // ── HOT-Step hook: in-process model family registry ────────────────────
@@ -4409,7 +4410,7 @@ int main(int argc, char ** argv) {
         yyjson_mut_doc_free(doc);
     });
 
-    svr.Post("/sa3-synth", on_worker([models_dir](const httplib::Request & req, httplib::Response & res) {
+    svr.Post("/sa3-synth", on_worker([models_dir, adapters_dir](const httplib::Request & req, httplib::Response & res) {
         auto file_exists = [](const std::string & p) {
             FILE * f = fopen(p.c_str(), "rb");
             if (f) { fclose(f); return true; }
@@ -4508,6 +4509,26 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "[Server] SA3 synth: %zu adapter(s) requested\n",
                         adapter_specs.size());
             }
+        }
+
+        // Checkpoint preview: snapshot_run=<dataset>/<adapter>/<stamp>,
+        // snapshot_step=N, snapshot_scale (default 1). Internal, bounded to the
+        // training runs (sa3-preview-resolver.h); stacks after named adapters.
+        if (req.has_param("snapshot_run") || req.has_param("snapshot_step")) {
+            const float snap_scale = req.has_param("snapshot_scale")
+                                         ? strtof(req.get_param_value("snapshot_scale").c_str(), nullptr) : 1.0f;
+            std::string snap_path, snap_sig;
+            const std::string snap_err = sa3_resolve_snapshot(
+                adapters_dir, req.get_param_value("snapshot_run"), req.get_param_value("snapshot_step"),
+                std::string(models_dir) + "/" + dit_file, snap_scale, snap_path, snap_sig);
+            if (!snap_err.empty()) {
+                json_error(res, 400, snap_err.c_str());
+                return;
+            }
+            adapter_specs.push_back({ snap_path, snap_scale });
+            if (!adapter_sig.empty()) adapter_sig += ";";
+            adapter_sig += snap_sig;
+            fprintf(stderr, "[Server] SA3 synth: snapshot %s\n", snap_path.c_str());
         }
 
         if (!have_gguf) {
