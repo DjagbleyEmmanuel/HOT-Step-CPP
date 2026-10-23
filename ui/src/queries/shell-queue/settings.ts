@@ -3,7 +3,8 @@
 // file browser's directory listings.
 
 import { queryOptions } from '@tanstack/react-query';
-import { adapterApi, healthApi, settingsApi } from '../../services/api';
+import { adapterApi, healthApi, reportLogsApi, settingsApi } from '../../services/api';
+import { audioQueueApi } from '../../services/audioQueueApi';
 import { dataFolderApi } from '../../services/dataFolderApi';
 import { updatesApi } from '../../services/updatesApi';
 import { getStemStats } from '../../services/stemStudioApi';
@@ -25,6 +26,23 @@ export const envOptions = () => queryOptions({
 export const gpusOptions = () => queryOptions({
   queryKey: sharedKeys.gpus(),
   queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
+});
+
+/** Log tails for the Report an issue tab; fresh each visit so the report shows the latest lines. */
+export const reportLogsOptions = () => queryOptions({
+  queryKey: serverKey('shell-queue/report-logs'),
+  queryFn: ({ signal }) => reportLogsApi.snapshot({ signal }),
+  staleTime: 0,
+});
+
+/** Newest failed audio queue item, for the Report an issue tab. Auth. */
+export const reportFailedJobOptions = () => queryOptions({
+  queryKey: serverKey('shell-queue/report-failed-job', { auth: true }),
+  queryFn: async ({ signal }) => {
+    const { items } = await audioQueueApi.list({ signal });
+    return items.filter(i => i.status === 'failed').sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  },
+  staleTime: 0,
 });
 
 export const stemStatsOptions = () => queryOptions({

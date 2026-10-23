@@ -59,6 +59,8 @@ disco stem extraction it starts) twice.
 |---|---|---|
 | Post-processing run | `shell-queue/post-process` | Query observer, 1.5 s while running, stops at a terminal status; one completion event |
 | Cover art job | `shell-queue/cover-art-job` | Observer, 2 s, stops at a terminal status, five-minute safety stop |
+| Report log tails | `shell-queue/report-logs` | Fresh each visit; the Report an issue tab redacts and trims them |
+| Last failed job | `shell-queue/report-failed-job` | Auth; fresh each visit; newest failed audio queue item |
 | Server version | `shell-queue/health` | Settings footer |
 | `.env` values | `shell-queue/env` | Fresh each load; seeds the editable form |
 | GPUs, stem storage | shared `gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
