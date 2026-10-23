@@ -84,17 +84,30 @@ function cells(runId: Sa3RunId, step: number, settings: Sa3PreviewSettings, fina
 /** True when some cell of `step` has no finished render (done or failed). A
  *  skipped or cut-off cell is still owed. */
 export function sa3PreviewPending(runDir: string, runId: Sa3RunId, step: number, settings: Sa3PreviewSettings): boolean {
-  const records = listSa3PreviewRecords(runDir);
+  // Raw statuses: the list view shows a cut-off render as failed, but it is still owed.
+  const records = readRecords(runDir);
   return cells(runId, step, settings, false).some(c => !records.some(r => sameCell(r, c) && (r.status === 'done' || r.status === 'failed')));
 }
 
-/** The audio file of a record, or null for anything that is not a plain file
- *  name inside <run>/previews. */
+/** <run>/previews with links resolved, or null when it resolves outside the run. */
+function previewsDir(runDir: string): string | null {
+  try {
+    const run = fs.realpathSync(runDir), dir = fs.realpathSync(path.join(runDir, 'previews'));
+    return dir === path.join(run, 'previews') ? dir : null;
+  } catch { return null; }
+}
+
+/** The audio of a done record, or null for any other name, and for a
+ *  previews folder or file that a junction or symlink takes outside the run. */
 export function sa3PreviewAudioPath(runDir: string, file: string): string | null {
   if (!/^step-[0-9]+-p[0-9]+-s[0-9]+-[a-f0-9]{8}\.wav$/.test(file)) return null;
-  const root = path.resolve(runDir, 'previews'), candidate = path.resolve(root, file);
-  try { return candidate.startsWith(root + path.sep) && fs.statSync(candidate).isFile() ? candidate : null; }
-  catch { return null; }
+  if (!readRecords(runDir).some(r => r.status === 'done' && r.file === file)) return null;
+  const dir = previewsDir(runDir);
+  if (!dir) return null;
+  try {
+    const real = fs.realpathSync(path.join(dir, file));
+    return path.dirname(real) === dir && fs.statSync(real).isFile() ? real : null;
+  } catch { return null; }
 }
 
 export interface Sa3PreviewDeps {
@@ -145,7 +158,9 @@ export async function renderSa3Previews(input: Sa3PreviewInput): Promise<{ done:
         const wav = await deps.synth(query, signal);
         if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF') throw new Error('SA3 preview render returned no WAV');
         const file = `step-${c.step}-p${c.promptIndex}-s${c.seed}-${randomBytes(4).toString('hex')}.wav`;
-        fs.writeFileSync(path.join(input.runDir, 'previews', file), wav, { flag: 'wx' });
+        const dir = previewsDir(input.runDir);
+        if (!dir) throw new Error('SA3 previews folder resolves outside the run');
+        fs.writeFileSync(path.join(dir, file), wav, { flag: 'wx' });
         upsert(input.runDir, { ...c, status: 'done', file });
         counts.done++;
       } catch (err: any) {

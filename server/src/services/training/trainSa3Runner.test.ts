@@ -387,6 +387,26 @@ test('SA3 preview renders record each cell once, keep going past failures and re
   fs.writeFileSync(index, JSON.stringify(stale));
   assert.equal(previews.listSa3PreviewRecords(dir).find(r => r.step === 8)?.status, 'failed');
   assert.equal(previews.sa3PreviewPending(dir, input.runId, 8, PREVIEW), true);
+  // Every cell of a step cut off: still owed (raw status, not the list view's failed).
+  const cut = JSON.parse(fs.readFileSync(index, 'utf8')).filter((r: { step: number }) => r.step !== 8);
+  cut.push(...[1, 2].map((seed, i) => ({ ...cut[0], step: 12, seed, status: i ? 'queued' : 'rendering', file: undefined })));
+  fs.writeFileSync(index, JSON.stringify(cut));
+  assert.deepEqual(previews.listSa3PreviewRecords(dir).filter(r => r.step === 12).map(r => r.status), ['failed', 'failed']);
+  assert.equal(previews.sa3PreviewPending(dir, input.runId, 12, PREVIEW), true);
+  assert.deepEqual(await previews.renderSa3Previews({ ...input, step: 12 }), { done: 2, failed: 0, skipped: 0 });
+  assert.equal(previews.sa3PreviewPending(dir, input.runId, 12, PREVIEW), false);
+  // A recorded name only, and never through a previews folder that leaves the run.
+  const done = previews.listSa3PreviewRecords(dir).find(r => r.status === 'done')!.file!;
+  fs.copyFileSync(path.join(dir, 'previews', done), path.join(dir, 'previews', 'step-4-p0-s9-00000000.wav'));
+  assert.equal(previews.sa3PreviewAudioPath(dir, 'step-4-p0-s9-00000000.wav'), null);
+  const outside = fs.mkdtempSync(path.join(root, 'outside-'));
+  fs.cpSync(path.join(dir, 'previews'), outside, { recursive: true });
+  fs.rmSync(path.join(dir, 'previews'), { recursive: true });
+  fs.symlinkSync(outside, path.join(dir, 'previews'), 'junction');
+  assert.equal(previews.sa3PreviewAudioPath(dir, done), null);
+  fs.rmdirSync(path.join(dir, 'previews')); // the junction, not its target
+  fs.renameSync(outside, path.join(dir, 'previews'));
+  assert.ok(previews.sa3PreviewAudioPath(dir, done));
   const ac = new AbortController(); ac.abort();
   assert.deepEqual(await previews.renderSa3Previews({ ...input, step: 8, signal: ac.signal }), { done: 0, failed: 0, skipped: 2 });
   assert.throws(() => previews.parseSa3PreviewSettings({ everySteps: 4, prompts: [] }), /prompt/);
