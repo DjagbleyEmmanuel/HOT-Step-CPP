@@ -20,7 +20,7 @@ See [Terminal](#terminal), [Theme, restart, and shutdown](#theme-restart-and-shu
 
 ## Workflow
 
-1. Open Settings and pick a tab: General, Environment, AI Services, Storage & Data, or Performance.
+1. Open Settings and pick a tab: General, Environment, AI Services, Storage & Data, Performance, or Report an issue.
 2. On the Environment tab, edit any field, then click **Save Environment** (or **Save Changes** on the AI Services tab, which shares the same save bar). Only changed keys are written to `.env`.
 3. If a changed key needs a restart to take effect, the save bar shows which one and a **Restart now** button appears. Click it to restart the server and engine; the UI reconnects on its own once they are back.
 4. General, Performance, and language/theme changes apply immediately and do not need a restart.
@@ -88,6 +88,15 @@ With an Anthropic API key set, Claude model choices come from Anthropic's curren
 | Keep DiT & VAE loaded | Keeps both the DiT diffusion model and VAE decoder in VRAM at once instead of swapping them between stages. Eliminates roughly 13 seconds of load/unload per generation; uses about 8.2 GB more VRAM for an XL model. Applies per generation request, no restart. This is a different control from "Keep Models in VRAM" on the Environment tab, see [Tips and limits](#tips-and-limits). |
 | Cache LM audio codes | When a generation repeats the same seed and parameters, reuses the previously computed audio codes instead of re-running the LM. Saves roughly 12 seconds on repeat generations. On by default; every other toggle on this tab starts off. |
 | Generation Timeout | Longest the app waits for a single generation before marking it timed out, from 10 minutes up to 6 hours, 30 minutes by default. This budget is per track, not per batch: a 9-track batch spends it nine times over, once per track as the engine picks each one up. Increase it for high step counts or slower hardware. |
+
+### Report an issue tab
+
+| Control | What it does |
+|---|---|
+| Title / What happened | Your summary and description of the problem. |
+| Exact text that will be sent | A live preview of the whole report: your description, system info (app and build version, OS, GPU, compute backend, engine, model file names), the tail of the server and engine logs, and the last failed job. Home folder, user name, IP addresses, email addresses and anything that looks like a key or token are masked in the logs. Read it before you send. |
+| Send to GitHub | Opens a prefilled new-issue page in your browser, tagged `in-app`. You submit it from your own GitHub account; nothing is sent from the app. The link is kept under about 7,500 characters, so the oldest log lines are dropped first and a notice says so. |
+| Copy full logs | Copies the report with the full log buffers (still masked) so you can paste or attach it to the issue. |
 
 ### Storage & Data tab
 
