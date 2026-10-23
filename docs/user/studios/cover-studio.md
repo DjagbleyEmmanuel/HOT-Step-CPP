@@ -478,22 +478,22 @@ the top reads covering artist, then song, as the saved track is named.
    lead-in and its new part, not the whole song again, so late sections take
    about as long as early ones. The composer still hears everything kept. Takes covering the first
    section play from the beginning. Each card shows a waveform, playhead and the new part's length.
-   The play button pauses and resumes from the same spot. Tap the waveform to
-   play from that point, lead-in included; the playhead shows where you are.
+   The play button pauses and resumes from the same spot. Tap or drag along the
+   waveform to play from that point, lead-in included; the playhead shows where you are.
    Playback stops when you keep, delete the take being played, undo, or leave
    the page. **Keep** adds that take to the build and advances to the next
    section. Use the trash button to delete an unwanted candidate.
 
-   To crop a take, drag across its waveform over the part to keep, or play it
-   and press **End at playhead** (and, on a take of the first section, **Start
+   To crop a take, play it and press **End at playhead** (and, on a take of the first section, **Start
    at playhead**). What is cut is dimmed, with a red line at the end and, on a
    first-section take, a green line at the start. The end stays in the part
    that take composed, and the start at least a second before it. An end inside
    a section asks what the next take does: compose that section again from the
    cut, or move on to the next section there. While the song is still open and
    nothing follows, moving on means the next section you add starts at the cut.
-   **Keep** waits for the answer, then keeps the take and cuts it; **No crop**
-   clears it. The next takes continue from exactly the cropped audio. The start
+   Choosing either keeps the take and cuts it at once; composing again also
+   queues the same number of new takes from the cut, with that take's caption.
+   For a cut that needs no answer, press **Keep**. **No crop** clears the crop. The next takes continue from exactly the cropped audio. The start
    only changes the saved song: **Render Final Song** starts there with a
    half-second fade in, and **Play build** starts there too. The audio before it
    still feeds the composer, so later takes are unaffected.

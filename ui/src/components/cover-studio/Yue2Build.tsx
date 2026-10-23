@@ -161,12 +161,6 @@ export function cropNeedsMode(take: Yue2BuildTake, crop: TakeCrop): boolean {
   return point.inside && point.occurrence <= take.to;
 }
 
-/** The crop a drag over [a, b] seconds picks: the part to keep. A take that cannot start later keeps its start. */
-export function selectCrop(take: Yue2BuildTake, a: number, b: number): TakeCrop {
-  const none: TakeCrop = { in: null, out: null, mode: null };
-  return moveCropEdge(take, cropLimits(take).inMax > 0 ? moveCropEdge(take, none, 'in', a) : none, 'out', b);
-}
-
 /** What 'advance' does for a cut inside `name`: move on to `following`, or, with nothing after it,
  *  end the song only when the plan ends there; an open plan carries on from the cut. */
 export const advanceLabel = (name: string, following: string | null, finished: boolean) =>
@@ -220,11 +214,14 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       if (!started) { started = await yue2CoverApi.buildStart(params, draft.text ?? undefined); setSessionId(started.id); }
       return yue2CoverApi.buildPlan(started.id, started.revision, upcoming, finished);
     }),
-    /** Keeps a take, then applies the crop set on it: the out point cuts the kept take, the in point starts the saved song later. */
-    keep: (take: string, crop?: TakeCrop) => call(async () => {
+    /** Keeps a take, then applies the crop set on it: the out point cuts the kept take, the in point starts the saved song later.
+     *  With `count`, a 'regenerate' cut then queues that many takes composing from the cut to the take's end, with its caption. */
+    keep: (take: string, crop?: TakeCrop, count?: number) => call(async () => {
+      const kept = live!.takes.find(t => t.id === take);
       let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take);
       if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined);
       if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in);
+      if (count && kept && crop?.out != null && crop.mode === 'regenerate') next = await yue2CoverApi.buildGenerate(next.id, next.revision, kept.to, count, kept.caption || undefined);
       return next;
     }),
     /** Renders everything kept so far once, for Play build. */
@@ -259,42 +256,29 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
   };
 }
 
-/** A take's waveform, the way Compare's works: the playhead always shows, a tap seeks (and plays),
- *  and a drag picks the part to keep. What a crop leaves out is dimmed; green and red mark its ends. */
-function TakeWave({ peaks, from, to, playhead, crop, canIn, colour, onSeek, onSelect }: {
+/** A take's waveform: the playhead always shows, and a tap or drag seeks (and plays). Crops are set
+ *  with the buttons under it. What a crop leaves out is dimmed; green and red mark its ends. */
+function TakeWave({ peaks, from, to, playhead, crop, canIn, colour, onSeek }: {
   peaks: number[]; from: number; to: number; playhead: number | null; crop: TakeCrop | null; canIn: boolean; colour: string;
-  onSeek: (at: number) => void; onSelect?: (a: number, b: number) => void;
+  onSeek: (at: number) => void;
 }) {
-  const drag = useRef<{ x0: number; t0: number; moved: boolean } | null>(null);
-  const [region, setRegion] = useState<[number, number] | null>(null);
+  const scrubbing = useRef(false);
   const span = Math.max(0.1, to - from);
   const x = (t: number) => Math.min(100, Math.max(0, ((t - from) / span) * 100));
   const at = (clientX: number, box: Element) => {
     const r = box.getBoundingClientRect();
     return from + Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width))) * span;
   };
-  const shown = region ?? (crop ? [crop.in ?? from, crop.out ?? to] as [number, number] : null);
+  const shown = crop ? [crop.in ?? from, crop.out ?? to] as [number, number] : null;
   const inX = shown ? x(shown[0]) : 0, outX = shown ? x(shown[1]) : 100;
   const w = peaks.length ? 100 / peaks.length : 0;
   return (
     <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="block h-14 w-full cursor-crosshair touch-none rounded bg-zinc-100/60 dark:bg-white/5" role="group"
-      aria-label={onSelect ? 'Tap to play from a point; drag to choose the part to keep' : 'Tap to play from a point'}
-      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x0: e.clientX, t0: at(e.clientX, e.currentTarget), moved: false }; }}
-      onPointerMove={e => {
-        const d = drag.current;
-        if (!d || !onSelect) return;
-        if (Math.abs(e.clientX - d.x0) > 6) d.moved = true;
-        if (d.moved) { const t = at(e.clientX, e.currentTarget); setRegion([Math.min(d.t0, t), Math.max(d.t0, t)]); }
-      }}
-      onPointerUp={e => {
-        const d = drag.current;
-        drag.current = null;
-        setRegion(null);
-        if (!d) return;
-        if (d.moved && onSelect) { const t = at(e.clientX, e.currentTarget); onSelect(Math.min(d.t0, t), Math.max(d.t0, t)); }
-        else onSeek(d.t0);
-      }}
-      onPointerCancel={() => { drag.current = null; setRegion(null); }}>
+      aria-label="Tap or drag to play from a point"
+      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); scrubbing.current = true; onSeek(at(e.clientX, e.currentTarget)); }}
+      onPointerMove={e => { if (scrubbing.current) onSeek(at(e.clientX, e.currentTarget)); }}
+      onPointerUp={() => { scrubbing.current = false; }}
+      onPointerCancel={() => { scrubbing.current = false; }}>
       {peaks.map((p, k) => <rect key={k} x={k * w + w * 0.15} width={w * 0.7} y={20 - Math.max(0.5, p * 19)} height={Math.max(1, p * 38)}
         fill={k * w + w / 2 >= inX && k * w + w / 2 <= outX ? colour : '#a1a1aa'} />)}
       {shown && <>
@@ -420,8 +404,8 @@ interface PageProps {
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
   onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
-  /** Keeps a take, with the crop set on it if any. */
-  onKeep: (take: string, crop?: TakeCrop) => void;
+  /** Keeps a take, with the crop set on it if any; `count` regenerates from a 'regenerate' cut at once. */
+  onKeep: (take: string, crop?: TakeCrop, count?: number) => void;
   onDelete: (take: string) => void;
   onUndo: (section?: number) => void;
   /** Restores the last kept take's uncropped original (frame null). */
@@ -554,8 +538,9 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   /** Where the playhead is on the song's clock while `key` plays, else null. */
   const playheadOf = (key: string) => playing?.key === key && progress !== null ? playing.from + progress * (playing.to - playing.from) : null;
   /** A take's crop controls under its waveform: what it keeps, its ends set at the playhead, and,
-   *  for a cut inside a section, what the next take does. */
-  const cropTools = (take: Yue2BuildTake, crop: TakeCrop | null, head: number | null, set: (crop: TakeCrop | null) => void) => {
+   *  for a cut inside a section, what the next take does. `onMode`, when given, acts on that choice at once. */
+  const cropTools = (take: Yue2BuildTake, crop: TakeCrop | null, head: number | null, set: (crop: TakeCrop | null) => void,
+    onMode?: (crop: TakeCrop) => void) => {
     const limits = cropLimits(take);
     const c: TakeCrop = crop ?? { in: null, out: null, mode: null };
     const cropped = c.in !== null || c.out !== null;
@@ -567,7 +552,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       <div className="flex flex-wrap items-center gap-2">
         <span className="basis-full"><Scissors className="mr-1 inline w-3 h-3" />{cropped
           ? `Keeps ${limits.inMax > 0 ? clock(c.in ?? 0) : 'it from the start'} to ${clock(c.out ?? limits.end)}${point && pointItem ? `, ending ${point.inside ? 'inside' : 'at the start of'} ${nameOf(pointItem)}` : ''}${c.in !== null ? '; the saved song fades in there' : ''}.`
-          : 'Tap the waveform to play from a point; drag across it to keep part of it.'}</span>
+          : 'Tap or drag the waveform to play from a point; End at playhead crops the take there.'}</span>
         {limits.inMax > 0 && <button type="button" className={button} disabled={head === null} onClick={() => set(moveCropEdge(take, c, 'in', head!))}>Start at playhead</button>}
         <button type="button" className={button} disabled={head === null} onClick={() => set(moveCropEdge(take, c, 'out', head!))}>End at playhead</button>
         {cropped && <button type="button" className={button} onClick={() => set(null)}>No crop</button>}
@@ -576,7 +561,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
         <span>The next take:</span>
         {([['regenerate', `composes ${nameOf(pointItem)} again from the cut`],
           ['advance', advanceLabel(nameOf(pointItem), following ? nameOf(following) : null, finished)]] as const)
-          .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={c.mode === mode} onClick={() => set({ ...c, mode })}
+          .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={c.mode === mode} onClick={() => (onMode ?? set)({ ...c, mode })}
             className={`rounded-lg border px-2 py-1 ${c.mode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
       </div>}
     </div>;
@@ -825,7 +810,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 </div>
                 <TakeWave peaks={base.peaks ?? []} from={full.from} to={full.to} playhead={playheadOf('kept')} crop={keptCrop}
                   canIn={cropLimits(base).inMax > 0} colour={colour}
-                  onSeek={at => seek('kept', base.audioUrl, full.from, full.to, at, offset)} onSelect={(a, b) => setKeptCrop(selectCrop(base, a, b))} />
+                  onSeek={at => seek('kept', base.audioUrl, full.from, full.to, at, offset)} />
                 {cropTools(base, keptCrop, playheadOf('kept'), c => setKeptCrop(c ?? { in: null, out: null, mode: null }))}
               </div>;
             })()}
@@ -857,8 +842,10 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                 </div>
                 <TakeWave peaks={take.peaks ?? []} from={full.from} to={full.to} playhead={playheadOf(take.id)} crop={set}
                   canIn={cropLimits(take).inMax > 0} colour={colour}
-                  onSeek={at => seek(take.id, take.audioUrl, full.from, full.to, at, offset)} onSelect={(a, b) => setCrop(selectCrop(take, a, b))} />
-                {(set || playing?.key === take.id) && cropTools(take, set, playheadOf(take.id), setCrop)}
+                  onSeek={at => seek(take.id, take.audioUrl, full.from, full.to, at, offset)} />
+                {(set || playing?.key === take.id) && cropTools(take, set, playheadOf(take.id), setCrop,
+                  // Choosing what the next take does keeps this one; 'regenerate' then composes again from the cut.
+                  editable && s && keepable(s, take) ? c => { stop(); p.onKeep(take.id, c, c.mode === 'regenerate' ? count : undefined); } : undefined)}
               </div>;
             })}
             {waiting > 0 && <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 px-3 py-3 text-xs text-amber-600">

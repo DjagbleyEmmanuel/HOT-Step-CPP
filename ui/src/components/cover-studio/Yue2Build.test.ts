@@ -123,13 +123,8 @@ test('take crop: the in point only on a first-section take, a second clear of th
   assert.equal(cropNeedsMode(later, none), false);
 });
 
-test('a drag picks the part of a take to keep; a cut with nothing after it ends the song only when the plan does', async () => {
-  const { selectCrop, advanceLabel } = await import('./Yue2Build');
-  const first = { id: 'a', from: 0, to: 0, frames: 250, starts: [0, 200], audioUrl: '', seed: 1, occurrences: ['o0'] } as any;
-  assert.deepEqual(selectCrop(first, 1.234, 8), { in: 1.24, out: 8, mode: null });
-  // A later take cannot start later: only its end moves.
-  const later = { ...first, from: 1, to: 1, prefix: 150, starts: [0, 150, 220] };
-  assert.deepEqual(selectCrop(later, 6.5, 7.6), { in: null, out: 7.6, mode: null });
+test('a cut with nothing after it ends the song only when the plan does', async () => {
+  const { advanceLabel } = await import('./Yue2Build');
   assert.equal(advanceLabel('verse', 'chorus', false), 'moves on to chorus');
   assert.equal(advanceLabel('verse', null, true), 'keeps verse cut short and ends the song');
   assert.match(advanceLabel('verse', null, false), /next section you add starts at the cut/);
