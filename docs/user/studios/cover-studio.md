@@ -79,6 +79,11 @@ AR composer and NAR renderer. Existing Artist lists only artists with at least o
 album preset containing both YuE2 adapter paths. The selected mode and choices
 are saved with the draft.
 
+Custom starts with the AR and NAR adapters selected in the YuE2 model picker.
+When no mode has been chosen yet and the picker holds both halves, Cover Studio
+opens in Custom. Base never uses the picker's adapters; while the picker holds
+one, a note above Render mode says so.
+
 ## Cover details in Library
 
 Finished covers keep their Covering band label visible as a Tag on Library

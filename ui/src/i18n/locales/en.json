@@ -2492,6 +2492,7 @@
     "cover.lyricsFound": "Lyrics found!",
     "cover.noLyricsFound": "No lyrics found",
     "cover.missingSrcOrLyrics": "Missing source audio",
+    "cover.yue2BaseIgnoresLora": "Base ignores the picked LoRA; use Custom to apply it.",
     "cover.recombiningStems": "Recombining stems...",
     "cover.genStarted": "Cover generation started!",
     "cover.coverGenerated": "Cover generated!",

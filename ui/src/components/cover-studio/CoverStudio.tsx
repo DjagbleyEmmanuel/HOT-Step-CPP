@@ -1979,7 +1979,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         {/* Right: Artist + Settings */}
         {yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
           {renderMode === 'base' && (pickerAr || pickerNar) && <p className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">
-            Base ignores the picked LoRA; use Custom to apply it.</p>}
+            {t('cover.yue2BaseIgnoresLora')}</p>}
           <Yue2CoverPanel
           caption={artistCaption} onCaptionChange={value => { setArtistCaption(value); setCaptionMode('custom'); }}
           captionMode={captionMode} onCaptionMode={selectCaptionSource}
