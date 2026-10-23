@@ -1,0 +1,39 @@
+# Settings and Lyric Studio backup
+
+Export JSON saves application settings and Lyric Studio data in one file. Keep this
+file to restore your setup later or move Lyric Studio to another installation.
+
+The file contains the General and Performance application settings, Lyric Studio
+preferences, artists, lyric collections, profiles, generated lyrics, album presets,
+and the database links to generated audio. It uses version 1 of the backup format,
+with `version`, `exportedAt`, `settings`, and `lyricStudio` fields.
+
+## Export
+
+In Settings, choose **Export JSON** in the backup panel. Your browser downloads a
+dated JSON file. This is a copy of the selected settings and data, rather than a
+copy of the whole database.
+
+## Import
+
+1. Export your current data first if you want to keep it.
+2. Choose **Choose JSON to import** and select a backup file smaller than 40 MB.
+3. Review the current and incoming record counts. Import replaces all application
+   settings and all Lyric Studio records, including records added after the preview.
+4. Choose **Replace settings and Lyric Studio data**, then confirm **Replace data**.
+
+Selecting a file and reviewing its counts do not change anything. Invalid files
+and unsupported versions are rejected with a message. Database replacement runs
+as one transaction, so a database error rolls back the import. Application settings
+apply in the browser after the server confirms the import.
+
+## What stays outside the backup
+
+Audio and image files, model weights, adapter weights, reference tracks, training
+data, library songs, playlists, and accounts are not copied. Environment settings
+and API keys in `.env`, theme, language, and other browser preferences are also
+outside this format. Their existing values are kept on import.
+
+Audio links and preset paths retain their original values. When moving to another
+machine, copy their files separately and update paths as needed. Training collections
+are kept as they are, so check any links to replaced Lyric Studio collections.
