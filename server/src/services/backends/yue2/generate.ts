@@ -1288,6 +1288,9 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes, {
       // No chunk cap means the engine can render the full 360 s song at 25 fps.
       narChunkFrames: req.nar_chunk_frames || 9000,
+      // Decode and output can stay silent while processing a whole batch.
+      // Keep the wall-clock deadline, rather than cancelling at 15 minutes.
+      quietCompletionPhases: ['vae_decode', 'vae', 'encoding_output'],
     });
     clearInterval(detailTimer);
     detailTimer = undefined;

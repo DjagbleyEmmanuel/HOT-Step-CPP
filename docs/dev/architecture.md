@@ -247,8 +247,11 @@ to shut down first. See [building.md](building.md#engine-rebuild-rules).
    or 9000 frames for an uncapped song. During NAR and the completed semantic
    handoff, the silence allowance is 400 ms per frame plus 2 minutes, with a
    15-minute floor and a 9000-frame ceiling. Actual phase/step changes reset
-   the timer; repeated running responses do not. Other phases retain their
-   existing limits, and the user-configured wall-clock timeout still applies.
+   the timer; repeated running responses do not. YuE2 decode and output phases
+   (`vae_decode`, legacy `vae`, and `encoding_output`) can be silent for a whole
+   batch, so they use the user-configured wall-clock timeout alone. Downstream
+   post-processing starts after this polling loop returns. Other phases retain
+   their existing inactivity limits.
 5. The UI polls `GET /api/generate/status/:id` until the job finishes.
 
 `ace-server` answers HTTP on one thread. While it runs DiT, VAE or adapter work it cannot
