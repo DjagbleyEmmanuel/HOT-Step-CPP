@@ -67,3 +67,9 @@ test('buildReport enforces the cap when system info or title alone is oversized'
   assert.ok(b.url.length <= MAX_URL_LENGTH, String(b.url.length));
   assert.ok(b.title.length < big.length);
 });
+
+test('redact masks credential values of any length or shape', () => {
+  const out = redact('WORKER_TOKEN=12345678\npassword=abcde\n"api_key": "1234567890"\nsecret=1\nnum_tokens=64', names);
+  assert.ok(!/12345678|abcde|1234567890|secret=1\b/.test(out), out);
+  assert.match(out, /num_tokens=64/);
+});

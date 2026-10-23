@@ -22,9 +22,9 @@ export function redact(text: string, { home, user }: RedactNames = {}): string {
   if (user && user.length >= 2) out = out.replace(new RegExp(`\\b${esc(user)}\\b`, 'gi'), '<user>');
   out = out
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 <redacted>')
-    // Prefixed keys too (WORKER_TOKEN, HF_TOKEN). Short or purely numeric values (max_tokens=512) stay.
+    // Prefixed keys too (WORKER_TOKEN, HF_TOKEN). Only a numeric count under a plural "tokens" key (max_tokens=512) stays.
     .replace(/([\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization|credential)[\w-]*["']?\s*[:=]\s*["']?)([^\s"',;]+)/gi,
-      (m, k, v) => (v.length < 6 || /^\d+$/.test(v) ? m : `${k}<redacted>`))
+      (m, k, v) => (/tokens["']?\s*[:=]\s*["']?$/i.test(k) && /^\d+$/.test(v) ? m : `${k}<redacted>`))
     .replace(/\b(?:sk|pk|ghp|gho|ghs|github_pat|hf|xox[abp])[-_][A-Za-z0-9_-]{16,}/g, '<redacted>')
     .replace(/\b[A-Za-z0-9_-]{40,}\b/g, m => (/\d/.test(m) && /[A-Za-z]/.test(m) ? '<redacted>' : m))
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<email>')
