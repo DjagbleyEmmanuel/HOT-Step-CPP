@@ -87,6 +87,16 @@ struct Yue2LyricSection {
     std::vector<std::pair<int64_t, int64_t>> abc;  // codepoint spans into the request abc (section lines, no fields)
 };
 
+// An improvised stretch of a section-by-section take: while the composer
+// writes frames in [from_sec, to_sec) these lyric and score spans are hidden
+// whatever the sections say, so it plays from the style and what it already
+// played instead of the lead sheet.
+struct Yue2BlindWindow {
+    double from_sec = 0.0, to_sec = 0.0;
+    std::vector<std::pair<int64_t, int64_t>> lyric;  // codepoint spans into the request lyrics
+    std::vector<std::pair<int64_t, int64_t>> abc;    // codepoint spans into the request abc
+};
+
 struct Yue2LyricSchedule {
     bool   on       = false;
     float  bias     = -INFINITY;  // additive attention bias on hidden rows; -inf = hard mask
@@ -94,6 +104,7 @@ struct Yue2LyricSchedule {
     double lead_sec = 0.0;        // reveal a section this long before its first note
     int    behind   = -1;         // hide sections this many before the current one; -1 = never
     std::vector<Yue2LyricSection> sections;
+    std::vector<Yue2BlindWindow>  blind;
 };
 
 struct Yue2Request {
@@ -685,7 +696,9 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
 
     // "lyric_schedule": {"mode": "bias"|"mask", "bias"?: <0, "abc"?: bool,
-    //   "lead_sec"?: s, "behind"?: n, "sections": [{"start_sec", "lyric": [c0,c1], "abc"?: [c0,c1]}]}
+    //   "lead_sec"?: s, "behind"?: n, "sections": [{"start_sec", "lyric": [c0,c1], "abc"?: [c0,c1]}],
+    //   "blind"?: [{"from_sec", "to_sec", "lyric"?: [[c0,c1],...], "abc"?: [[c0,c1],...]}]}
+    // At least one section or blind window.
     if (yyjson_val * ls = yyjson_obj_get(root, "lyric_schedule"); ls && !yyjson_is_null(ls)) {
         std::string why;
         Yue2LyricSchedule & sc = out->lyric_schedule;
@@ -704,7 +717,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         if (!yyjson_is_obj(ls)) why = "must be an object";
         else if (!yue2_req_str(ls, "mode", &mode, &p, err)) why = "mode must be a string";
         else if (mode != "bias" && mode != "mask") why = "mode must be \"bias\" or \"mask\"";
-        else if (!yyjson_is_arr(secs) || yyjson_arr_size(secs) < 1 || yyjson_arr_size(secs) > 256) why = "sections must hold 1..256 entries";
+        else if (!yyjson_is_arr(secs) || yyjson_arr_size(secs) > 256) why = "sections must hold 0..256 entries";
         if (why.empty() && mode == "bias") {
             if (!yue2_req_num(ls, "bias", &x, &p, err) || !p || !(x < 0.0 && x >= -60.0)) why = "bias must be in [-60, 0) for mode \"bias\"";
             else sc.bias = (float) x;
@@ -753,6 +766,39 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
                 sc.sections.push_back(sec);
             }
         }
+        yyjson_val * bl = yyjson_obj_get(ls, "blind");
+        if (why.empty() && bl && !yyjson_is_null(bl)) {
+            if (!yyjson_is_arr(bl) || yyjson_arr_size(bl) > 16) why = "blind must hold 0..16 windows";
+            size_t idx = 0, max = 0;
+            yyjson_val * e = nullptr;
+            if (why.empty()) yyjson_arr_foreach(bl, idx, max, e) {
+                Yue2BlindWindow w;
+                yyjson_val * f = yyjson_is_obj(e) ? yyjson_obj_get(e, "from_sec") : nullptr;
+                yyjson_val * t = yyjson_is_obj(e) ? yyjson_obj_get(e, "to_sec") : nullptr;
+                bool ok = yyjson_is_num(f) && yyjson_is_num(t) && std::isfinite(yyjson_get_num(f)) &&
+                          std::isfinite(yyjson_get_num(t)) && yyjson_get_num(f) >= 0 && yyjson_get_num(t) > yyjson_get_num(f);
+                for (const char * key : { "lyric", "abc" }) {
+                    yyjson_val * a = ok ? yyjson_obj_get(e, key) : nullptr;
+                    if (!a || yyjson_is_null(a)) continue;
+                    if (!yyjson_is_arr(a) || yyjson_arr_size(a) > 4096) { ok = false; break; }
+                    size_t ai = 0, amax = 0;
+                    yyjson_val * x1 = nullptr;
+                    yyjson_arr_foreach(a, ai, amax, x1) {
+                        int64_t c0 = 0, c1 = 0;
+                        if (!span(x1, &c0, &c1)) { ok = false; break; }
+                        (key[0] == 'l' ? w.lyric : w.abc).emplace_back(c0, c1);
+                    }
+                }
+                if (!ok) {
+                    why = "blind[" + std::to_string(idx) + "] needs 0 <= from_sec < to_sec and optional lyric/abc [[c0,c1],...] with c1 > c0";
+                    break;
+                }
+                w.from_sec = yyjson_get_num(f);
+                w.to_sec   = yyjson_get_num(t);
+                sc.blind.push_back(std::move(w));
+            }
+        }
+        if (why.empty() && sc.sections.empty() && sc.blind.empty()) why = "needs at least one section or blind window";
         if (!why.empty()) {
             if (err) *err = "lyric_schedule: " + why;
             yyjson_doc_free(doc);

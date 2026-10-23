@@ -514,6 +514,24 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(requests.at(-1)!.lyric_schedule, undefined, 'Lyric Timing is off for builds');
   });
 
+  await t.test('an Improv section is composed blind: score and lyrics hidden for its bars only', async () => {
+    const improv = score.replace('% chorus', '% Improv\nV: Vocal\nz6|z6|\n% chorus');
+    const s = start(lyrics, improv);
+    const [opening] = await take(s.id, 1, 0);
+    assert.equal(requests.at(-1)!.lyric_schedule, undefined);
+    keepBuildTake(s.id, 'user', opening.id, 0);
+    await take(s.id, 2, 0);
+    const blind = requests.at(-1)!.lyric_schedule!;
+    // Intro and verse 0-12 s, improv 12-18 s; sampling resumes after frame 300.
+    assert.deepEqual([blind.mode, blind.sections, blind.blind!.map(w => [w.from_sec, w.to_sec])], ['mask', [], [[12.04, 18]]]);
+    assert.deepEqual(blind.blind![0].lyric, [[0, Array.from(lyrics.trimEnd()).length]]);
+    assert.ok(blind.blind![0].abc!.some(([a, b]) => Array.from(improv).slice(a, b).join('').includes('E6|F6|')), 'the chorus lines are hidden too');
+    assert.ok(blind.blind![0].abc!.every(([a, b]) => !/^[MLQKV]:/m.test(Array.from(improv).slice(a, b).join(''))), 'field lines stay visible');
+    keepBuildTake(s.id, 'user', getBuildSession(s.id, 'user').takes.at(-1)!.id, 0);
+    await take(s.id, 3, 0);
+    assert.equal(requests.at(-1)!.lyric_schedule, undefined, 'the take after it reads the score again');
+  });
+
   await t.test('skip, repeat and continue: each take resumes the kept output under the composed prompt', async () => {
     const s = start();
     const planned = editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2', 's3'], true);

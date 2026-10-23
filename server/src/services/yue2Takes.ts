@@ -34,6 +34,7 @@ import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
+import { blindYue2Schedule } from './backends/yue2/lyricSchedule.js';
 import {
   BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
   planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
@@ -421,6 +422,18 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   // The audio renders from the lead-in a take plays from: the NAR and VAE skip
   // what is already kept, which is what made late sections slow.
   const renderFrom = start ? Math.max(0, start - LEAD_IN_S * YUE2_FPS) : 0;
+  // An "% Improv" section is composed with the score and lyrics hidden (a
+  // blind window), from where this take starts sampling to the section's end
+  // on the score clock, so its prefix still prefills in one pass.
+  const blind: Array<[number, number]> = [];
+  for (let k = from; k <= to; k++) {
+    const a = Math.max(clock[k], start + 1), b = clock[k + 1];
+    if (/^improv/i.test(name(k)) && b > a) blind.push([a / YUE2_FPS, b / YUE2_FPS]);
+  }
+  if (blind.length) {
+    if (request.cfg_scale !== undefined && request.cfg_scale !== 1) throw new TakesError('An Improv section needs Condition strength 1.');
+    request.lyric_schedule = blindYue2Schedule(request.abc!, request.lyrics ?? '', blind);
+  }
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
   if (previewRuns.has(id)) throw new TakesError('Wait for the build render to finish first.');
   const identity = takeIdentity(stored, to);

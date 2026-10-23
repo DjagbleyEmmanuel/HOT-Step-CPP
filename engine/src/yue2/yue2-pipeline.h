@@ -750,6 +750,11 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             for (const auto & x : lsched_rows.rows[k]) r += " [" + std::to_string(x.first) + "," + std::to_string(x.second) + ")";
             fprintf(stderr, "[YuE2-C6] section %zu first note %.3fs rows%s\n", k, lsched.sections[k].start_sec, r.c_str());
         }
+        for (size_t k = 0; k < lsched.blind.size(); k++) {
+            std::string r;
+            for (const auto & x : lsched_rows.blind[k]) r += " [" + std::to_string(x.first) + "," + std::to_string(x.second) + ")";
+            fprintf(stderr, "[YuE2-C6] blind %.3fs..%.3fs rows%s\n", lsched.blind[k].from_sec, lsched.blind[k].to_sec, r.c_str());
+        }
         fprintf(stderr, "[YuE2-C6] bias %g, abc %s, lead %.3fs, behind %d, prefix %zu\n", (double) lsched.bias,
                 lsched.abc ? "on" : "off", lsched.lead_sec, lsched.behind, s0.prefix_ids.size());
     }
@@ -860,7 +865,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         // every song of a resumed batch starts from the same prefix.
         supplied_ids.reserve((size_t) supplied_n);
         for (int32_t c : req.codec_ids) supplied_ids.push_back(c + YUE2_CODEC_OFFSET);
-        if (resume && lsched.on) {
+        if (resume && lsched.on && yue2_schedule_touches_prefix(lsched, lsched_rows, supplied_n)) {
             // A C6 schedule changes the attention of every codec row, so the
             // prefix is replayed through the scheduled decode one frame at a
             // time, as sampling would have run it: token i under the spans

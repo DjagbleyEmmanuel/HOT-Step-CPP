@@ -438,6 +438,16 @@ the top reads covering artist, then song, as the saved track is named.
    different captions may be audible. Hover a take's
    name to see the prompt it was sent; ✎ marks a take with its own caption.
 
+   For a stretch the model makes up itself, add a section labelled `% Improv` to
+   the score on Prepare, with as many bars of rests as you want on each voice and
+   no lyrics, then place it on the Song bar like any other section. While a take
+   composes those bars, the composer can't see the score or the lyrics, only the
+   caption, the key, meter and tempo, and what it has already played. The score and
+   lyrics come back at the section's end, so the next section follows the score
+   again. A caption for those takes steers what it plays. The take may lose its
+   place or end early after the improv; generate a few and keep one that comes
+   back in. Improv takes need **Condition strength** 1.
+
    The lyrics beside the takes are editable: one box per chosen section, showing
    the lines it sings without its tag. An instrumental section shows none. Edits
    apply to that section only, when you press Generate, so a second chorus can
