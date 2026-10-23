@@ -19,7 +19,7 @@ import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/traini
 
 import React, { useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, ShieldCheck, Volume2, XCircle,
+  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, ShieldCheck, XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -34,6 +34,7 @@ import { Mm3PreviewStrip } from './Mm3PreviewStrip';
 import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
 import { TrainingChart } from './TrainingChart';
+import { TrainingPreviewSettings } from './TrainingPreviewPanel';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -757,22 +758,28 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 Above Advanced on purpose: this is the control that decides
                 whether the user finds out at step 200 or at step 800 that the
                 run is going the wrong way. */}
-            <div className="mt-3 rounded-lg border border-zinc-200 dark:border-white/10 p-3">
-              <div className="flex items-center gap-2">
-                <Volume2 size={13} className="text-amber-500" />
-                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                  {t('trainingStudio.mm3.previewTitle', 'Audio previews during training')}
-                </span>
-              </div>
-              <p className="text-[10px] text-zinc-500 leading-snug mt-1">
-                {t('trainingStudio.mm3.previewBlurb',
-                  'Renders a sample from the checkpoint while the run is still going, so you can hear '
-                  + 'whether it is heading the right way and abort if not. Each preview point pauses '
-                  + 'training for about a minute: the trainer has to hand the whole card to the render, '
-                  + 'so it saves its optimizer state, exits, renders, and resumes exactly where it was. '
-                  + 'Zero in both fields turns previews off.')}
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+            <TrainingPreviewSettings
+              title={t('trainingStudio.mm3.previewTitle', 'Audio previews during training')}
+              enabled={form.previewEverySteps > 0 || form.previewEveryMinutes > 0}
+              onEnabledChange={enabled => setEdits(previous => ({ ...previous,
+                previewEverySteps: enabled ? base.previewEverySteps : 0,
+                previewEveryMinutes: enabled ? base.previewEveryMinutes : 0,
+              }))}
+              enableLabel={t('trainingStudio.mm3.previewEnabled', 'Render previews during training')}
+              enableInfo={t('trainingStudio.mm3.previewEnabledInfo', 'Pauses the trainer to render checkpoint samples, then resumes it. Turn off to set both preview cadences to zero.')}
+              enableDefault={base.previewEverySteps > 0 || base.previewEveryMinutes > 0}
+              afterToggle={
+                <p className="text-[10px] text-zinc-500 leading-snug mt-1">
+                  {t('trainingStudio.mm3.previewBlurb',
+                    'Renders a sample from the checkpoint while the run is still going, so you can hear '
+                    + 'whether it is heading the right way and abort if not. Each preview point pauses '
+                    + 'training for about a minute: the trainer has to hand the whole card to the render, '
+                    + 'so it saves its optimizer state, exits, renders, and resumes exactly where it was. '
+                    + 'Zero in both fields turns previews off.')}
+                </p>
+              }
+            >
+              <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
                 <NumField label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
                   value={form.previewEverySteps} onChange={v => set('previewEverySteps', v)}
                   defaultValue={base.previewEverySteps} onReset={() => reset('previewEverySteps')}
@@ -809,7 +816,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   through the SAME override the caption box below uses:
                   picking a song here only takes effect while that box is
                   blank. */}
-              <label className="flex flex-col gap-1 mt-3">
+              <label className="md:col-span-2 flex flex-col gap-1 mt-3">
                 <ParamLabel
                   label={t('trainingStudio.mm3.previewSong', 'Preview song')}
                   info={form.previewCaption.trim()
@@ -837,7 +844,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   className="w-full"
                 />
               </label>
-              <label className="flex flex-col gap-1 mt-3">
+              <label className="md:col-span-2 flex flex-col gap-1 mt-3">
                 <ParamLabel
                   label={t('trainingStudio.mm3.previewCaption', 'Preview caption')}
                   info={t('trainingStudio.mm3.previewCaptionHint',
@@ -857,7 +864,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   onChange={e => set('previewCaption', e.target.value)}
                 />
               </label>
-              <div className="flex flex-col gap-1.5 mt-3">
+              <div className="md:col-span-2 flex flex-col gap-1.5 mt-3">
                 <Toggle accent="amber" checked={form.previewControl}
                   onChange={v => set('previewControl', v)}
                   defaultValue={base.previewControl} onReset={() => reset('previewControl')}
@@ -874,7 +881,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     'Free - the engine is still up before the run starts. Without it there is '
                     + 'nothing to judge "worse than base" against.')} />
               </div>
-            </div>
+            </TrainingPreviewSettings>
 
             {/* -- Prior preservation -------------------------------------- */}
             <div className="mt-3 rounded-lg border border-zinc-200 dark:border-white/10 p-3">
@@ -1381,9 +1388,6 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         )}
       </div>
 
-      {/* ── Previous runs, and continuing one ── */}
-      <Mm3RunsPanel datasetId={datasetId} />
-
       {/* ── Live run: the shared job machinery, unchanged ── */}
       {mine && activeJob && (
         <div className={CARD}>
@@ -1451,6 +1455,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
           )}
         </div>
       )}
+      <Mm3RunsPanel key={datasetId} datasetId={datasetId} />
     </div>
   );
 };
