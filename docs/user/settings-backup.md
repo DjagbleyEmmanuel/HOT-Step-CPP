@@ -17,7 +17,7 @@ copy of the whole database.
 ## Import
 
 1. Export your current data first if you want to keep it.
-2. Choose **Choose JSON to import** and select a backup file smaller than 40 MB.
+2. Choose **Choose JSON to import** and select a backup file smaller than 500 MB.
 3. Review the current and incoming record counts. Import replaces all application
    settings and all Lyric Studio records, including records added after the preview.
 4. Choose **Replace settings and Lyric Studio data**, then confirm **Replace data**.
