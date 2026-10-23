@@ -1,5 +1,16 @@
 {
   "translation": {
+    "trainingStudio.mm3.previewArtistCaption": "Artist caption",
+    "trainingStudio.mm3.previewControlCaption": "Control caption",
+    "trainingStudio.mm3.previewBase": "Base",
+    "trainingStudio.mm3.previewStep": "Step {{step}}",
+    "trainingStudio.mm3.previewTake": "{{seconds}} s · seed {{seed}} · rendered in {{renderSeconds}} s",
+    "trainingStudio.mm3.previewLoss": "Loss {{loss}}",
+    "trainingStudio.mm3.previewEnabled": "Render previews during training",
+    "trainingStudio.mm3.previewEnabledInfo": "Pauses the trainer to render checkpoint samples, then resumes it. Turn off to set both preview cadences to zero.",
+    "trainingStudio.ace.checkpointPreviews": "Checkpoint previews",
+    "trainingStudio.ace.noCheckpointPreviews": "ACE does not support automatic checkpoint previews. Use Audition below to compare LM adapters and saved milestones.",
+    "trainingStudio.ace.datasetChanged": "Dataset changed while the recipe was resolved. Review the form and start again.",
     "trainingStudio.sa3.target": "Training target",
     "trainingStudio.sa3.targetInfo": "Choose the active generation backend or train a Stable Audio 3 Medium adapter from this dataset.",
     "trainingStudio.sa3.activeTarget": "Active generation backend",
