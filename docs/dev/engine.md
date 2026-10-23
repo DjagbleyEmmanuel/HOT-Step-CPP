@@ -99,6 +99,27 @@ The Node server starts `ace-server` with `--models`, `--host` and `--port`, and 
 data folder (`server/src/services/aceEngineProcess.ts`). The app's default port is
 8085; the binary's own default is 8080.
 
+### ace-midi speculative decoding
+
+`ace-midi --draft-model <dir> [--speculative-k 1-4]` ports upstream MuScriptor PR #95.
+The draft (small) proposes k tokens one step at a time; the target checks `[current,
+p1..pk]` in one block and keeps the proposals up to the first disagreement, plus its own
+token there. Rejected K/V rows are not undone: `n_past` moves back and the next write
+overwrites them. The block runs through `ggml_soft_max_ext` with an explicit causal mask,
+because `ggml_diag_mask_inf` is wrong on CUDA when `n_past > 0`. Models of different card
+sizes pair fine (small 1393, large 1395); only the 1393 emittable tokens are compared.
+
+Measured on a 4-minute track, RTX 5090: large 121.6 s scalar, 90.1 s at k=2, 79.4 s at
+k=4; medium 60.9 / 66.1 / 59.6 s. The MIDI was byte-identical to scalar decoding in every
+run, CPU included. Decode is launch-bound (about 0.21 ms per layer per token at any width,
+so a 14-layer small step costs 2.9 ms against 10 ms for 48-layer large), which is why only
+large gains. The app passes `--draft-model small --speculative-k 4` for large only
+(`speculativeArgs` in `server/src/services/muscriptor.ts`).
+
+Upstream PR #94 (preallocated KV cache without a NaN fill, native reshapes instead of
+einops, one cache write per step) has no GGML counterpart to port: the cache is allocated
+uninitialised already, and graph build plus allocation is about 6% of a decode step.
+
 ### ace-midi tempo, meter and bars
 
 `ace-midi --beat-model <dir>` runs Beat This! (`tools/beat-this.h`, a GGML port of
