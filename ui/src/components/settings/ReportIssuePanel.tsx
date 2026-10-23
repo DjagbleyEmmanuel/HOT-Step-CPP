@@ -76,7 +76,7 @@ export function ReportIssuePanel() {
       <ParamLabel label={t('settings.report.descriptionLabel', 'What happened')} info={t('settings.report.descriptionInfo')} />
       <textarea className="h-32 w-full rounded border border-zinc-500/30 bg-transparent p-2" value={description} onChange={e => setDescription(e.target.value)} />
       <ParamLabel label={t('settings.report.previewLabel', 'Exact text that will be sent')} info={t('settings.report.previewInfo')} />
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-500/30 p-3 text-xs">{`${parts.title}\n\n${report.body}`}</pre>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-500/30 p-3 text-xs">{`${report.title}\n\n${report.body}`}</pre>
       {report.trimmed && <p role="status">{t('settings.report.trimmed')}</p>}
       <div className="flex gap-3">
         <button className="settings-save-btn" onClick={send}>{t('settings.report.send', 'Send to GitHub')}</button>

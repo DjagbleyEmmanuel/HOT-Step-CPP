@@ -19,14 +19,17 @@ export function redact(text: string, { home, user }: RedactNames = {}): string {
   }
   // Any other profile path (another drive, a log from a different account).
   out = out.replace(/((?:[A-Za-z]:)?[\\/](?:Users|home)[\\/])[^\\/\s"':]+/gi, '$1<user>');
-  if (user && user.length >= 3) out = out.replace(new RegExp(`\\b${esc(user)}\\b`, 'gi'), '<user>');
+  if (user && user.length >= 2) out = out.replace(new RegExp(`\\b${esc(user)}\\b`, 'gi'), '<user>');
   out = out
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 <redacted>')
-    .replace(/\b((?:api[_-]?key|token|secret|password|passwd|authorization)["']?\s*[:=]\s*["']?)[^\s"',;]+/gi, '$1<redacted>')
+    // Prefixed keys too (WORKER_TOKEN, HF_TOKEN). Short or purely numeric values (max_tokens=512) stay.
+    .replace(/([\w-]*(?:api[_-]?key|token|secret|password|passwd|authorization|credential)[\w-]*["']?\s*[:=]\s*["']?)([^\s"',;]+)/gi,
+      (m, k, v) => (v.length < 6 || /^\d+$/.test(v) ? m : `${k}<redacted>`))
     .replace(/\b(?:sk|pk|ghp|gho|ghs|github_pat|hf|xox[abp])[-_][A-Za-z0-9_-]{16,}/g, '<redacted>')
     .replace(/\b[A-Za-z0-9_-]{40,}\b/g, m => (/\d/.test(m) && /[A-Za-z]/.test(m) ? '<redacted>' : m))
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<email>')
     .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '<ip>')
+    .replace(/(?<![\w:])::1(?![\w:])/g, '<ip>')
     .replace(/(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?![\w:])/gi, m => ((m.includes('::') || m.split(':').length >= 6) && /[0-9a-f]{2,}/i.test(m) ? '<ip>' : m));
   return out;
 }
@@ -43,7 +46,7 @@ export interface ReportParts {
 const fence = (name: string, lines: string[]) =>
   `<details><summary>${name}</summary>\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n</details>`;
 
-export function renderBody({ description, system, sections }: ReportParts): string {
+export function renderBody({ description, system, sections }: Omit<ReportParts, 'title'>): string {
   const logs = sections.filter(s => s.lines.length).map(s => fence(s.name, s.lines));
   return [
     description.trim() && `## Description\n\n${description.trim()}`,
@@ -57,30 +60,40 @@ export function buildUrl(title: string, body: string): string {
   return `${ISSUE_URL}?${q.toString().replace(/\+/g, '%20')}`;
 }
 
-/** Builds the issue URL under `max` characters. The oldest log lines go first,
- *  from whichever section is longest; only if that is not enough is the
- *  description cut. Returns the exact body the URL carries. */
-export function buildReport(parts: ReportParts, max = MAX_URL_LENGTH): { url: string; body: string; trimmed: boolean } {
+/** Builds the issue URL under `max` characters, always. Cuts in this order: the
+ *  oldest log lines (from the longest section), the description, the system
+ *  info, the title. Returns the exact title and body the URL carries. */
+export function buildReport(parts: ReportParts, max = MAX_URL_LENGTH): { url: string; title: string; body: string; trimmed: boolean } {
   const sections = parts.sections.map(s => ({ ...s, lines: [...s.lines] }));
-  const make = (description: string) => {
-    const body = renderBody({ ...parts, description, sections });
-    return { body, url: buildUrl(parts.title, body) };
+  let { title, description, system } = parts;
+  const make = () => {
+    const body = renderBody({ description, system, sections });
+    return { title, body, url: buildUrl(title, body) };
   };
-  let built = make(parts.description);
+  let built = make();
   let trimmed = false;
+  let cutDescription = 0;
   while (built.url.length > max) {
     const longest = sections.reduce((a, b) => (b.lines.length > a.lines.length ? b : a), sections[0]);
-    if (!longest?.lines.length) break;
-    // Drop half the longest section's oldest lines per pass; the URL is re-encoded each time.
-    longest.lines.splice(0, Math.max(1, Math.ceil(longest.lines.length / 2)));
+    if (longest?.lines.length) {
+      // Drop half the longest section's oldest lines per pass; the URL is re-encoded each time.
+      longest.lines.splice(0, Math.max(1, Math.ceil(longest.lines.length / 2)));
+    } else if (description.trim()) {
+      description = description.slice(0, Math.floor(description.length * 0.8));
+      cutDescription = 1;
+    } else if (system) {
+      system = system.slice(0, Math.floor(system.length * 0.8));
+    } else if (title) {
+      title = title.slice(0, Math.floor(title.length * 0.8));
+    } else break;
     trimmed = true;
-    built = make(parts.description);
+    built = make();
   }
-  let description = parts.description;
-  while (built.url.length > max && description.length > 0) {
-    description = description.slice(0, Math.floor(description.length * 0.8));
-    built = make(`${description}\n[description cut to fit the link; use Copy full logs and paste the rest]`);
-    trimmed = true;
+  if (cutDescription && description.trim()) {
+    const note = '\n[description cut to fit the link; use Copy full logs and paste the rest]';
+    description += note;
+    const marked = make();
+    if (marked.url.length <= max) built = marked; else description = description.slice(0, -note.length);
   }
   return { ...built, trimmed };
 }
