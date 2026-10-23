@@ -55,6 +55,12 @@ captured with the job. See [Cover Studio](studios/cover-studio.md).
 
 ## Models
 
+With Stable Audio 3 active, Models lists the installed generation DiTs from the
+models folder, including quant names ending in `-imat`. BF16 is the default.
+Training files named `sa3-dit-base-*` are excluded. The selection is saved on the
+server and captured when a job is queued. If a selected file is removed, the
+engine falls back to BF16 and the generation log records the filename it loaded.
+
 | Control | What it does |
 |---|---|
 | Format | Filter chips (GGUF, SafeTensors, ONNX), shown when models in more than one format are installed. They only filter the lists; a selected model stays selected when its format is hidden. |
