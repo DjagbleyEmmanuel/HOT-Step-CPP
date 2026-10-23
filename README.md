@@ -10,7 +10,7 @@ A desktop app for local AI music generation, built on [acestep.cpp](https://gith
 **Questions, feedback, or want to share what you've made?** [Join the Discord](https://discord.gg/ezVtmg9GKX). It's where I'm most active for HOT-Step discussion and support.
 
 > ### Training Studio
-> Train style adapters for ACE-Step 1.5, MiniMax-Music3 and YuE2 inside the app, with no Python and no external tools. Point it at a folder of songs and it runs the whole pipeline: dataset labelling (local BPM/key analysis, lyrics, and AI captions from a model running on your machine), preprocessing, then native C++/GGML training on your GPU. YuE2 adds a Joint Training method that trains its AR and NAR adapters in one run. Training against a quantized base brings the MiniMax-Music3 VRAM floor from 31.4 GB down to about 10 GB. Runs pause, resume, survive a restart and render an audio preview at every checkpoint.
+> Train style adapters for ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3 inside the app, with no Python and no external tools. Point it at a folder of songs and it runs the whole pipeline: dataset labelling (local BPM/key analysis, lyrics, and AI captions from a model running on your machine), preprocessing, then native C++/GGML training on your GPU. YuE2 adds a Joint Training method that trains its AR and NAR adapters in one run. Training against a quantized base at a smaller rank brings the MiniMax-Music3 VRAM floor from 31.4 GB down to about 10 GB. Runs pause, resume and survive a restart. MiniMax-Music3, YuE2 and Stable Audio 3 runs render audio previews at checkpoints; on ACE-Step, Audition compares adapters and saved milestones instead.
 >
 > It is GPU-hungry, and a few individual options inside it are still marked experimental. Find it in the sidebar as **Training**, and read [Training Studio](docs/user/studios/training-studio.md) first.
 
@@ -30,29 +30,29 @@ Use CUDA on an NVIDIA card, Vulkan on AMD or Intel, and CPU only if there is no 
 
 ### Quick start
 
-1. Download the archive for your platform and GPU, and extract it into a folder of its own.
+1. Download the archive for your platform and GPU, and extract it into a folder of its own. Your library, models and settings go in a `HOT-Step-Data` folder that the app creates beside it, so a later version finds them again ([Data folder and upgrades](docs/user/data-folder.md)).
 2. Run `HOT-Step.bat` on Windows, or `./HOT-Step.sh` from a terminal on Linux and macOS.
 3. Your browser opens at `http://localhost:3001`. Leave the console window open; closing it stops the app.
-4. The Model Manager opens on first launch. Download the **Quick Start** pack from the ACE-Step 1.5 tab (about 9 GB), then click **Restart** in the sidebar.
+4. The Model Manager opens on first launch. Download the **Quick Start** pack from the ACE-Step 1.5 tab (about 9 GB). The engine starts by itself once the download finishes.
 5. Write a style description and lyrics in **Custom-Gen** and click **Generate**. The full walkthrough is in [Getting started](docs/user/getting-started.md).
 
 ## Highlights
 
 - **Four backends, one app.** ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3 run in the same engine process. The backend picker appears whenever two or more are registered, the sidebar lists only the studios the active backend supports, and the global bar hides controls that do nothing on it. See [Backends](docs/user/backends.md).
-- **Training Studio.** Style adapters for ACE-Step 1.5, MiniMax-Music3 and YuE2, trained on your own GPU. See [Training Studio](docs/user/studios/training-studio.md).
+- **Training Studio.** Style adapters for ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3, trained on your own GPU. See [Training Studio](docs/user/studios/training-studio.md).
 - **Auto-Gen and Custom-Gen.** Pick a genre and let the language model write the caption, lyrics and title, or set every field yourself. See [Auto-Gen](docs/user/studios/insta-gen.md) and [Custom-Gen](docs/user/studios/create.md).
 - **Lyric Studio.** A lyrics workspace with artist profiles, several LLM providers, bulk generation and the same generation controls as Custom-Gen. See [Lyric Studio](docs/user/studios/lyric-studio.md).
 - **Cover Studio.** Style-matched covers of a reference track on ACE-Step and YuE2. ACE-Step conditions on the source audio directly; YuE2 adds a two-step Prepare flow (fix the structure, assign lyrics) and a Build page that assembles the song section by section. See [Cover Studio](docs/user/studios/cover-studio.md).
 - **Repaint, Song Builder and Stem Builder.** Regenerate one region and keep the rest, build a song a section at a time, or generate a new instrument stem over a backing track (ACE-Step). See [Repaint Studio](docs/user/studios/repaint-studio.md), [Song Builder](docs/user/studios/song-builder.md) and [Stem Builder](docs/user/studios/stem-builder.md).
 - **Compare.** A/B listening with one shared playhead for seed sweeps, plugin tests and checkpoint ladders, with a loudness and spectral analyser. See [Compare](docs/user/studios/compare-studio.md).
-- **STORM.** A live performance mode that streams crossfaded slots while you retune the style, lyrics, seed and sampler. It runs on ACE-Step, YuE2 and Stable Audio 3. See [STORM](docs/user/studios/storm.md).
+- **STORM.** A live performance mode that streams crossfaded slots while you retune the style, lyrics, seed and sampler. It runs on ACE-Step and YuE2. See [STORM](docs/user/studios/storm.md).
 - **Stem separation.** BS-RoFormer, Mel-Band RoFormer, MDX23C and Leap Xe running in native GGML, with a mixer and ZIP export. See [Stem Separator](docs/user/studios/stem-studio.md).
 - **MIDI Studio.** Audio-to-MIDI transcription on a native GGML port of MuScriptor, with tempo and bar detection, a live piano roll and playback. See [MIDI Studio](docs/user/studios/midi-studio.md).
-- **Lua plugins.** Solvers, schedulers, guidance modes and postprocess steps are Lua files: drop one into `engine/plugins/` and it appears in the UI at the next launch, no rebuild. See [Plugins](docs/user/plugins.md) and [Plugin authoring](docs/dev/plugins-authoring.md).
+- **Lua plugins.** Solvers, schedulers, guidance modes and postprocess steps are Lua files: drop one into the `plugins/` folder of your data folder (or `engine/plugins/` in a source checkout) and it appears in the UI at the next launch, no rebuild. See [Plugins](docs/user/plugins.md) and [Plugin authoring](docs/dev/plugins-authoring.md).
 - **LoRA, LoKr and DoRA adapters.** Merge or runtime mode, per-group strengths, stacking, and per-section masking from the lyrics. See [Adapters](docs/user/adapters.md).
 - **Post-processing chain.** Mastering against a reference track, a VST3 host, StableStep refinement through Stable Audio 3, PP-VAE and denoising. See [Generation](docs/user/generation.md#post-processing).
 - **Model Manager.** Starter packs and every model file, downloaded in the app with resumable progress, including importance-matrix quants that keep the small sizes usable. See [Model Manager](docs/user/studios/model-manager.md) and [Model files](docs/user/models.md).
-- **Phones and the PWA.** Every studio has a narrow-screen layout, and over HTTPS the app installs to your home screen. See [Install on your phone](docs/user/getting-started.md#install-on-your-phone).
+- **Phones and the PWA.** A navigation drawer, a full-screen player and narrow-screen layouts for Custom-Gen, Lyric Studio, Repaint, Stem Separator, MIDI Studio and Training, and over HTTPS the app installs to your home screen. See [Install on your phone](docs/user/getting-started.md#install-on-your-phone).
 - **DAW facade.** `/api/v1/daw` lets a DAW client generate and analyse audio against the running app. See the [API reference](docs/dev/api.md#daw-facade-notes-apiv1daw).
 - **Agents.** Two local MCP servers let an agent drive the app. See [MCP](docs/user/mcp.md).
 - **Colab.** No suitable GPU? Use the Colab notebook ([guide](docs/user/colab.md)).
@@ -118,7 +118,7 @@ Most people should use a [release](#download). To build it yourself, including t
 
 ## Troubleshooting
 
-Every session writes its logs to a new folder under `logs/` next to the launcher: `node_console.log`, `ace_engine.log`, and one `gen_*.log` per generation.
+Every session writes its logs to a new folder under `logs/` in your data folder (by default `HOT-Step-Data`, beside the extracted app folder): `node_console.log`, `ace_engine.log`, and one `gen_*.log` per generation.
 [Troubleshooting](docs/user/troubleshooting.md) covers the common failures (no models found, out of VRAM, GPU not used, macOS blocking the app) and what to attach to an issue.
 Questions rather than bugs go to the [Discord](https://discord.gg/ezVtmg9GKX).
 
@@ -134,7 +134,7 @@ Questions rather than bugs go to the [Discord](https://discord.gg/ezVtmg9GKX).
 - **Alexander Allan ([MDMAchine](https://github.com/MDMAchine))**: the STORM solver plugin (adaptive STORK/DPM++3M hybrid) and the MD Audio Tiled Core postprocess plugin (tiled VAE decode with OLA crossfading, dual-pass merge, and a DSP chain).
 - **[ComfyUI_MusicTools](https://github.com/jeankassio/ComfyUI_MusicTools)**: the Vocal Naturalizer DSP algorithm by Jean Kassio (MIT License).
 - **[JK-AceStep-Nodes](https://github.com/jeankassio/JK-AceStep-Nodes)**: the Audio Quality Evaluator metrics by Jean Kassio (MIT License).
-- **[Stability AI](https://stability.ai)**: Stable Audio 3 (diffusion transformer, SAME-L autoencoder and T5Gemma text encoder), powering the StableStep refiner through our native ONNX/GGML conversions, distributed under the [Stability AI Community License](https://stability.ai/community-license-agreement). *Powered by Stability AI.*
+- **[Stability AI](https://stability.ai)**: Stable Audio 3 (diffusion transformer, SAME-L autoencoder and T5Gemma text encoder), powering HOT-Step's fourth backend, its Stable Audio 3 training and the StableStep refiner through our native GGML conversions, distributed under the [Stability AI Community License](https://stability.ai/community-license-agreement). *Powered by Stability AI.*
 - **[MuScriptor](https://github.com/muscriptor/muscriptor)**: multi-instrument music transcription model by Kyutai and Mirelo (Simon Rouard, Michael Krause, Axel Roebel, Carl-Johann Simon-Gabriel, Alexandre Défossez, [arXiv:2607.08168](https://arxiv.org/abs/2607.08168)), powering MIDI Studio through our native GGML port (code MIT, model weights CC BY-NC 4.0).
 
 ## License

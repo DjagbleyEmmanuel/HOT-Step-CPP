@@ -7,13 +7,14 @@ Small, SFX and other adapter families are outside this workflow.
 
 ## Where to find it
 
-Open Training Studio with ACE-Step, MiniMax-Music3 or YuE2 selected in the top
-bar. The **Training target** picker sits above the phase tabs; choose
-**Stable Audio 3 Medium · DoRA-rows**. The choice is remembered and drives every
-tab: the dataset chips, the phase tabs and the Train page. It is independent of
-the generation backend, and the picker is read-only while any training job is
-queued or running, so a view change cannot retarget a submitted job. The SA3
-backend currently hides the Training Studio sidebar entry.
+Open Training Studio. With Stable Audio 3 as the active backend, the studio
+trains for it directly and the **Training target** picker is hidden. With
+ACE-Step, MiniMax-Music3 or YuE2 selected in the engine picker at the top of the
+sidebar, choose **Stable Audio 3 Medium · DoRA-rows** in the **Training target**
+picker above the phase tabs. The choice is remembered and drives every tab: the
+dataset chips, the phase tabs and the Train page. The picker is read-only while
+the open dataset has a training job queued or running, so a view change cannot
+retarget a submitted job.
 
 SA3 has two tabs, **Dataset** and **Train**. It has no Preprocess tab: the Train
 page prepares the audio and the trainer encodes it. Each dataset card shows four
@@ -43,9 +44,10 @@ runner. No measured VRAM or step-time guarantee is available yet.
    audition card.
 3. Choose **New run**, enter an adapter name and review the recipe below.
 4. Click **Prepare and train**. Preparation strips vocals with SuperSep level 5,
-   then resamples the derived instrumentals to 44.1 kHz stereo. Originals and
-   their sidecars stay intact. Derived instrumentals are cached using source,
-   model and separation-setting fingerprints.
+   then resamples the derived instrumentals to 44.1 kHz stereo and cuts them to
+   their first 384 seconds. Originals and their sidecars stay intact. Derived
+   instrumentals are cached using source, model and separation-setting
+   fingerprints.
 5. Follow the preparation count, encoding count and training steps in the card.
    The loss chart updates during training. Expand **Training log** for details.
    Generation pauses while the trainer runs, and the engine restarts afterward.
@@ -60,8 +62,9 @@ It is not an upstream training requirement.
 Keep HOT-Step's existing key/value sidecars and `dataset.json`. No new source
 format is needed. Preparation maps the parsed caption, genre, BPM, key and time
 signature into a prompt such as `warm analogue pad, synthwave, 96 BPM, A minor,
-4/4`. Lyrics and bookkeeping fields are omitted. Duration conditioning comes
-from the measured audio length, not a sidecar estimate.
+4/4`. Lyrics and bookkeeping fields are omitted. An included track with none of
+those five fields stops preparation. Duration conditioning comes from the
+measured audio length, not a sidecar estimate.
 
 Upstream-style plain caption `.txt` files exist only in the derived export.
 Do not feed HOT-Step key/value sidecars directly to the upstream trainer: it
@@ -79,7 +82,10 @@ Defaults come from the server. The initial recipe uses batch size 1.
 | Crop seconds | 380 | Maximum crop, from 1 to 384 seconds; shorter crops use less memory |
 | Training seed | 42 | Training randomness, preserved on resume |
 | Checkpoint interval | 100 | Steps between saves of resumable optimizer state |
-| Export interval | 0 | Periodic inference snapshots in the run folder; 0 disables periodic snapshots. With checkpoint previews on, the preview cadence replaces it (see below) |
+
+The form has no export interval of its own. With checkpoint previews on, the run
+saves an inference snapshot at every preview step (see below); with them off, it
+saves none before the final export.
 
 Start with a short crop when checking whether your hardware can train the model.
 The recipe is a starting point; listening comparisons decide which adapter to keep.
@@ -93,7 +99,7 @@ saved checkpoints so you can hear whether it is heading the right way. Open the
 | Setting | Default | What it changes |
 |---|---|---|
 | Render previews at saved checkpoints | On | Off captures no snapshots and renders nothing |
-| Preview every (steps) | The recipe's checkpoint interval (100) | A preview round after every this many steps |
+| Preview every (steps) | 100, the default checkpoint interval | A preview round after every this many steps |
 | Preview seconds | 30 | Length of each clip, 1 to 384 seconds; longer clips take longer at every round |
 | Preview seeds | 424242 | Up to four whole-number seeds, comma separated |
 | Preview prompts | None | One prompt per line, up to eight. Add at least one, or turn previews off |
@@ -112,7 +118,8 @@ result as one uninterrupted run within the trainer's numerical tolerance
 round is logged and training continues. A failed engine restore stops the run.
 
 Checkpoints appear under **Checkpoint previews** below the card as they land,
-one card per step with a player for each prompt and seed. A cut-off round (cancel,
+one card per step with a player for each prompt and seed. The list opens on the
+newest run; the menu above it switches to an earlier one. A cut-off round (cancel,
 crash, server restart) shows its missing clips as failed, and a resumed run
 renders what it still owes. **Retry** (or **Render more**) renders the step's clips
 that have no finished render yet, using the settings the run started with. It needs

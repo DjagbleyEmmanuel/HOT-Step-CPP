@@ -63,13 +63,13 @@ disco stem extraction it starts) twice.
 | `.env` values | `shell-queue/env` | Fresh each load; seeds the editable form |
 | GPUs, stem storage | shared `gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
 | Data folder | `shell-queue/data-folder` | Fresh each visit; refetched after a cancel or a failed command |
-| Update notice | `shell-queue/updates` | Fresh each visit; Check now writes its result into the entry |
+| Update notice | `shell-queue/updates` | Fresh each visit; polled every 2 s while a check started elsewhere (startup, another tab) is still running; Check now writes its result into the entry |
 | File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | shared `adapter-scan` | Fresh per click |
 | YuE2 caption source | `shell-queue/yue2-captions` | Fresh; failures caught by the caller, never cached as empty |
 | Workflow job (queue) | shared `workflow-job`, `after` 0 | Fresh per read, no retry |
 | Waveform peaks | shared `peaks` | `audio/peaksClient.ts`; never stale, `forgetPeaks` removes a rewritten file's entry, failures uncached |
-| Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop and retranscribe call `invalidateSidecars` |
+| Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop (`TrimControls.tsx`) and retranscribe (`SongActionsMenu.tsx`) refresh them through `queryManager.sidecars.all` |
 | YuE2 lead sheet | shared `score-abc` (`lyrics.ts`) | One entry per base render, read when a song actions menu opens; missing or the SPA shell caches null |
 | Presets and settings documents | `shell-queue/presets`, `shell-queue/setting` | Default adapters for `PresetCollection` and `SettingDocument`; fresh reads, dropped when unread (gcTime 0), writes invalidate |
 
@@ -91,14 +91,16 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `components/create/MasteringSection.tsx` | query (global-models references); upload and delete are mutations |
 | `components/create/Mm3ComposeButton.tsx` | mutation (compose) |
 | `components/create/trainingCreateDraft.ts` | transport: one-shot handoff read applied to the form once |
-| `components/details/MetadataEditorModal.tsx` | mutation; App invalidates |
+| `components/details/MetadataEditorModal.tsx` | mutation: the save runs through `writeAndInvalidate` with the `song:written` event, the cover upload through `useUpload` |
 | `components/details/Yue2CoverDrift.tsx` | mutation (measure) |
 | `components/library/CoverArtPromptModal.tsx` | query (job); prompt preview is a one-shot pre-fill of an editable field; generate is a mutation |
 | `components/library/ImportTracksModal.tsx` | mutation; `song-created` invalidates |
 | `components/player/LyricsBar.tsx`, `SectionMarkers.tsx` | query (shared `lrc`, `lyrics-json`) |
 | `components/player/TrimControls.tsx` | mutation; invalidates song views and sidecars |
+| `components/settings/AdapterReferencesAction.tsx` | mutation (album preset adapter-reference cleanup); `lireekApi` invalidates the lireek snapshots after it |
 | `components/settings/DataFolderPanel.tsx` | query; preview, schedule, cancel and restart are commands |
 | `components/settings/SettingsPanel.tsx` | query (health, env, GPUs, stem stats); saves, purges and restart are mutations |
+| `components/settings/UpdatesPanel.tsx` | query (`shell-queue/updates`); Check now is a `useMutation` that writes its result into the entry |
 | `components/shared/FileBrowserModal.tsx` | query |
 | `components/shared/LatentImport.tsx` | mutation (upload) |
 | `components/shared/PresetSyncNotices.tsx` | query through `PresetCollection` |
@@ -106,7 +108,7 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `components/shared/StudioDraftPicker.tsx` | consumer of cover-lyrics' draft service; its Query adoption is that owner's |
 | `components/shared/UnifiedRecentSongs.tsx` | query |
 | `hooks/usePolling.ts` | deleted; it had no callers |
-| `services/audioQueueApi.ts`, `dataFolderApi.ts`, `preferencesApi.ts`, `workflowApi.ts` | transport; reads take `ReadOptions` |
+| `services/audioQueueApi.ts`, `dataFolderApi.ts`, `preferencesApi.ts`, `updatesApi.ts`, `workflowApi.ts` | transport; reads take `ReadOptions` |
 | `services/exportImportApi.ts` | mutation (imports, export resolve, profile validation) |
 | `services/presetCollection.ts`, `settingDocument.ts` | query (default adapters) |
 | `stores/audioGenQueueStore.ts` | query (all server reads); commands direct; `lireekApi` preset reads and health probes stay transport (cover-lyrics' client; liveness) |

@@ -8,16 +8,19 @@ reviewed score. Both use your caption and lyrics or an Instrumental choice.
 
 ## Where to find it
 
-Sidebar: **Cover Studio**. You need to be signed in to upload a source track, and
-the active backend must support covers. ACE and YuE2 offer different cover workflows;
-MiniMax-Music3 shows a "not supported" notice. The [backend switcher](../backends.md) appears once a second
+Sidebar: **Cover Studio**, listed while ACE-Step 1.5 or YuE2 is the active backend.
+The two offer different cover workflows. MiniMax-Music3 and Stable Audio 3 have no
+covers, so the sidebar leaves the studio out, and switching to one of them while
+Cover Studio is open moves the app to Custom-Gen. You need to be signed in to upload
+a source track. The [engine picker](../backends.md#switching-backends) appears once a second
 backend is registered, so on a single-backend install this is not a decision you
 have to make.
 
 ## ACE workflow
 
-1. Drop a source track into the upload zone (MP3, WAV, FLAC, OGG, M4A, Opus, AAC),
+1. Drop a source track of up to 200 MB into the upload zone (MP3, WAV, FLAC, OGG, M4A, Opus, AAC),
    or send one over from [Library](library.md) with "Send to Cover Studio". A
+   Library song uses its stored BPM and key when it has them. A
    `.latent`/`.hslat` file exported from an earlier HOT-Step generation can be
    imported instead of audio, and pre-fills lyrics, caption, BPM and key from its
    embedded metadata.
@@ -30,17 +33,18 @@ have to make.
    change. This browser's copy is still the one you edit. The draft belongs
    to this browser: another browser or tool that edits the same draft never
    overwrites your fields. If that happens, your next change is saved as a
-   new draft and a short note under the header says so. If a save fails, a
-   note says the draft wasn't saved; your edits stay in this browser, and the
-   next change tries again. To go back to a saved draft, open the **Drafts**
-   fold under the Generate button (collapsed by default) and pick one from
-   **Load a saved draft**; if the form has edits not yet saved
+   new draft and a short note in the **Drafts** fold says so. If a save fails,
+   a note there says the draft wasn't saved; your edits stay in this browser,
+   and the next change tries again. The **Drafts** fold sits under the Generate
+   button and is collapsed by default, so open it to see these notes. To go
+   back to a saved draft, pick one from **Load saved draft** in that fold; if
+   the form has edits not yet saved
    to a draft, you are asked first. A draft whose uploaded source has gone
    missing is reported as unavailable, so you can reupload it. Loading a
    draft never starts a job.
    In YuE2 mode, the Drafts fold also has a name box. Enter a name
    and choose **Save named draft** to keep a separate snapshot of the current
-   score and settings. **Load a saved draft** restores that snapshot. Leaving
+   score and settings. **Load saved draft** restores that snapshot. Leaving
    Cover Studio and returning also restores the current browser's score,
    adapter choices, caption, and other controls without a manual save.
 3. Fix the analysis if Essentia got it wrong: the ÷2 / Detected / ×2 buttons and a
@@ -54,8 +58,9 @@ have to make.
    values never carry over; type new values after the load. Source analysis may
    still run. The switch is remembered in this browser; turning it back on uses
    automatic values on the next load.
-4. Optionally turn on Advanced Mode to split the source into stems, then mute or
-   lower individual stems in the mixer that opens. Splitting alone changes
+4. Optionally turn on Advanced Mode, pick a separation level and press **Split
+   Stems** to split the source into stems, then mute or lower individual stems in
+   the mixer that opens (**Configure Stems** reopens it). Splitting alone changes
    nothing: an untouched split recombines at full volume, which is the original
    audio.
 5. Fill in artist and title and search Genius for lyrics, paste your own, or turn
@@ -64,7 +69,9 @@ have to make.
    that artist's profile or past generations, and if a matching album preset
    carries an adapter, loads that adapter (and its reference track, if any) for
    the render. Skip this and write the Style Description yourself for an
-   artist-free cover, using the Caption LLM button to draft one if you like.
+   artist-free cover. With an artist picked, the **Generate** button beside
+   Style Description redrafts the caption with the provider chosen under
+   **Caption LLM** in the source column.
 7. Set Structure Fidelity, Source Preservation, Tempo Scale and Pitch Shift, and
    optionally a Timbre Reference track, then generate.
 
@@ -88,9 +95,11 @@ one, a note above Render mode says so.
 
 Finished covers keep their Covering band label visible as a Tag on Library
 cards and rows. YuE2's AR scale and VAE badges help compare takes. In the
-track's **How it was made** panel, the Cover Studio group shows the stored
-source label and identity, score voices, chord choice, tempo, key and cover
-CFG when available. MusicXML sources are identified as scores, without a
+track's **How it was made** panel, the Cover Studio group shows the covering
+band and source artist, then, for a YuE2 cover, the stored source label and
+identity, score voices, chord choice, tempo, key and cover CFG when available.
+For an ACE-Step cover it shows the source ID, structure fidelity and source
+preservation. MusicXML sources are identified as scores, without a
 source audio ID. A source identity can be a stored URL or ID; a recording
 hash is not currently saved with the song.
 
@@ -101,20 +110,22 @@ Cover Studio draft to resume the workflow.
 ## YuE2 workflow
 
 1. Choose **Source Audio** or **Import MusicXML** in the left panel. Source Audio
-   accepts a recording of at most 100 MB and 10 minutes, or a song sent from
-   Library. Detected BPM and key are shown for reference; they do not change
-   the YuE2 cover request. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file,
-   select a part when prompted, and review conversion warnings. Switching modes
+   accepts a recording of at most 10 minutes, or a song sent from Library. A
+   file over 100 MB is transcribed and aligned from a cached MP3 copy; the
+   upload itself stops at 200 MB. Detected BPM and key are shown for reference; they do not change
+   the YuE2 cover request. In MusicXML mode, choose a `.musicxml`, `.xml` or `.mxl` file
+   of up to 8 MB, select a part when prompted, and review conversion warnings. Switching modes
    clears the previous source and its Prepare confirmations.
 2. For Source Audio, transcription starts by itself once the recording has
    loaded (after the upload, the analysis and the dataset lookup, which can supply
    a score of its own). SheetSage2 writes the melody and detected chords into ABC.
-   The score panel shows queue and transcription progress, with Cancel and
-   **Retranscribe**; **Transcribe full score** is there if the automatic run was
+   The score panel shows queue and transcription progress, with **Cancel
+   transcription** and **Retranscribe**; **Transcribe full score** is there if the automatic run was
    cancelled or failed. A source restored with the page is not transcribed again. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
-   In Source Audio mode you can also paste ABC or import MusicXML in the score
-   editor to replace the transcribed ABC while keeping the source recording.
+   In Source Audio mode you can also paste ABC (then **Apply ABC text**) or
+   import MusicXML in the score editor to replace the transcribed ABC while
+   keeping the source recording.
    In MusicXML mode the imported score already supplies ABC, without SheetSage2
    or a source recording. The file picker and drop area are in the left panel.
    Import writes the score in YuE2's own layout: the chosen part's melody on the
@@ -143,8 +154,7 @@ Cover Studio draft to resume the workflow.
    before confirming the structure, because the guess is a simple pitch-class match and can
    misread passing notes or name a seventh that isn't there. In MusicXML mode the
    score's title fills an empty Title field and its lyrics fill an empty lyrics
-   box; text you have already typed is kept. A score with lyrics also turns
-   **Instrumental** off, since that would discard them.
+   box; text you have already typed is kept.
    Importing over an existing score asks before replacing it. Neither path uses
    source audio as an inference conditioning signal after approval.
    A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before confirming or generating.
@@ -152,8 +162,15 @@ Cover Studio draft to resume the workflow.
    (see [Prepare](#prepare-fix-the-structure-then-assign-lyrics)). Each step ends
    with a confirmation, and Generate stays disabled until both are current for the
    source. Editing the score or changing the source audio, stem mix or source mode
-   withdraws them. The raw ABC editor is still there as an advanced editor in step
-   1; a change made in it counts as a structure edit. **MIDI**, beside the ABC/Chart
+   withdraws them. Confirming the structure also approves the score for
+   rendering, and the lead sheet then reads **Score approved**; if that approval
+   fails, **Approve score** beside the step buttons tries again. The raw ABC editor is still there as an advanced editor in step
+   1; a change made in it counts as a structure edit. **Chart**, beside **ABC**,
+   shows the same score as bar cards grouped by section: click a bar to play from
+   it, click a chord to edit or clear it, use **+ chord** to add one at the start
+   of a bar, and click the tempo to change it (20 to 300 BPM). Those edits count
+   as structure edits too. The lead sheet's player sounds the Vocal voice on a
+   choir patch so it stands apart from the piano Ins line. **MIDI**, beside the ABC/Chart
    switch, downloads the score as a MIDI file: the vocal and instrumental lines as
    separate tracks and the chord symbols as a comping track, at the score's tempo
    and meter, for a DAW or notation app.
@@ -166,18 +183,18 @@ Cover Studio draft to resume the workflow.
    stays in 2/4. Turn on **First bar is a pickup** when the preview puts the
    downbeats mid-bar: bar 1 then stays in 2/4 and pairing starts at bar 2.
    **Apply 4/4** replaces this cover's score (the dataset's `.abc` is not
-   changed), so the structure needs confirming again; **Undo conversion** brings the
+   changed), so the structure needs confirming again; step 1's **Undo** brings the
    2/4 score back. A score with repeats, endings, double bars, voice overlays,
    comments or lyric lines inside the music, or voices that disagree on their
    bars, is refused with the reason and left as it was. Transcription still
    writes the meter it detects.
    If the bar lines sit a beat off the song's downbeats, so the chords change and
    the vocal lands a beat early or late in each bar, use **A beat earlier** or
-   **A beat later** under **Bar lines off?** in step 1. **Bar click**, beside the
-   ABC/Chart switch, plays a click on beat 1 of every bar while the score plays:
+   **A beat later** under **Bar lines off?** in step 1. **Bar click** (on by
+   default), beside the ABC/Chart switch, plays a click on beat 1 of every bar while the score plays:
    if the click lands a beat before the song's downbeat, move the bar lines later;
    a beat after, earlier. The preview's **−** and **+** change the shift a beat at
-   a time. Every note keeps its time: a note a new bar line cuts is tied across
+   a time, up to one beat short of a whole bar. Every note keeps its time: a note a new bar line cuts is tied across
    it, the first bar becomes a short pickup (later) or loses beats (earlier), and
    section starts move with their bar lines. **Apply** replaces this cover's score
    like the 2/4 conversion, so the structure needs confirming again, and the
@@ -185,8 +202,11 @@ Cover Studio draft to resume the workflow.
    For uploaded sources, transcription and approval use the draft's revision;
    a result from an older source or a cancelled transcription cannot replace the
    current score.
-4. Paste lyrics or search by artist and title; choose **Instrumental** to render
-   without lyrics. An Instrumental cover moves the melody to Ins whether or not
+4. Paste lyrics or search by artist and title. To render without lyrics, mark
+   every section Instrumental in step 2 of Prepare; **Mark every empty section
+   Instrumental** does it in one go. The **Instrumental** switch in the settings
+   column follows those assignments and cannot be set by itself; clicking it
+   only says so. An Instrumental cover moves the melody to Ins whether or not
    re-planning is on; the score is already in hand. An instrument plays the
    score's Vocal melody instead of a wordless voice. Where
    both voices play at once the melody wins and Ins keeps only the notes it
@@ -200,23 +220,26 @@ Cover Studio draft to resume the workflow.
    Section edits and lyric assignment happen on the Prepare tab, described under
    [Prepare](#prepare-fix-the-structure-then-assign-lyrics) below. The old chip
    editor and the **Match sections to score** and **Match score to lyrics** buttons
-   are gone; lyric suggestions replace them and never rewrite the score.
+   are gone. **Sections from lyrics** in step 1 re-sections the score from the
+   lyrics, and the lyric suggestions in step 2 never rewrite the score.
    Prepare edits only this cover's draft. Dataset files are not touched.
    When a dataset song's tempo or key differs from the score's, Analysis
    shows the score's values with **Save to dataset**. After a confirmation it
-   replaces the BPM and key in the song's `.txt`, keeping a backup the same way.
+   replaces the BPM and key in the song's `.txt`, keeping the old file as a backup.
    If the transcriber counted half or double time, use **½×** or **2×** next
    to the score tempo first; the button saves the adjusted value. For uploaded
    sources, the server calculates that tempo and key from the current ABC and
    applies the confirmed dataset save.
-5. Choose **Base YuE2** or an adapter pair. In pair mode, select a Lyric Studio
-   artist and, if it has multiple albums with YuE2 adapters, an album. Cover
-   Studio fills the matching AR and NAR adapters. Either manual selector can
-   override that choice. The selected artist fills **Covering band**, which you
-   can edit. Downloads use the filename prepend from Lyric Studio settings,
+5. Pick the voice in **Render mode** (described above). With **Existing Artist**,
+   select a Lyric Studio artist and, if it has more than one album with YuE2
+   adapters, an **Album**; Cover Studio loads that album's AR and NAR adapters
+   and uses the artist's name as the covering band. With **Custom**, choose both
+   the **AR composer** and the **NAR renderer**; Generate waits until both are
+   set. Base YuE2 and Custom take the name from **Covering band**. Downloads use the filename prepend from Lyric Studio settings,
    followed by the covering band and the title with its source-band cover suffix.
-   **Score to render** defaults to both the vocal and instrumental lines, no
-   chord symbols, free tempo and source key. Choose vocal melody only if you
+   The score settings **Voices**, **Keep chords**, **Tempo** and **Pitch Shift**
+   default to both the vocal and instrumental lines, no chord symbols, free tempo
+   and source key. Choose **Vocal melody only** if you
    want to omit the transcribed instrumental line; keep chords to preserve more
    of the original arrangement, retain or set tempo, or shift the key by up to
    twelve semitones. Keep chords also sets Chain of Thought: on, the render uses
@@ -253,7 +276,9 @@ you last clicked brings it back, and clicking another section moves it there.
 
 When the transcription lumps several lyric sections together (one long "verse"
 holding Verse 1, Verse 2 and a Pre-Chorus), and the pasted lyrics are tagged
-correctly, click **Sections from lyrics** while editing the structure. It
+correctly, click **Sections from lyrics** while editing the structure. The
+button needs a Source Audio recording and lyrics, from the dataset, a Genius
+search or a paste in step 2. It
 aligns the lyrics to the source recording's vocal and starts a section at the
 bar where each tagged block is sung, named after its tag. Sections with no
 Vocal notes, such as an intro, interlude or outro, stay where they are. A block
@@ -284,7 +309,7 @@ them.
 
 **Fix bar grouping** rewrites a run of bars as bars of one meter, in every voice.
 The step flags short bars inside the score (a warning, not an error: a short bar
-can be deliberate). Choose **From bar**, **To bar** and the **New meter**, press
+can be deliberate); click a flagged bar number to open this panel on it. Choose **From bar**, **To bar** and the **New meter**, press
 **Preview**, and look at the result before **Apply**. A run such as 3/4 + 4/4 + 1/4
 holds eight quarter-note beats and becomes two 4/4 bars. Notes that cross a new
 barline are split and tied, chord symbols keep their positions, and nothing
@@ -326,15 +351,18 @@ The right side has one row for each section of the confirmed score, in order. Ea
 row shows its words, **Instrumental**, or **Needs words**, and a **Hear** button.
 The score itself is read-only here.
 
-- Assign a block to a section from the block's **Assign to…** menu, or select a
-  block and use **Put selected block here** on the row. Putting a block on a
+- Assign a block to a section from the block's **Assign to…** menu, drag it onto
+  the row, or select a block and use **Put selected block here** on the row. Putting a block on a
   section that already has words asks whether to **Append** or **Swap**; it never
   silently replaces words. Several blocks can fill one section, in the order you
   set.
 - **Split before line…** cuts a block at a line, **Join with next** merges two
-  blocks. A block cannot span two sections until you split it.
+  blocks. A block cannot span two sections until you split it. **Edit** changes
+  a block's words; a line that opens with square brackets is refused because it
+  reads as a tag.
 - **Exclude** keeps a block in the draft without singing it. **Instrumental**
-  marks a section as wordless.
+  marks a section as wordless, and **Mark every empty section Instrumental**
+  does that for every section still without words.
 - Suggestions from the tags and the order are made when you first arrive at this
   step, once per confirmed structure, as long as a section still needs words. They
   mark doubtful ones **not sure** and list blocks left unplaced. **Suggest from tags
@@ -425,7 +453,9 @@ the top reads covering artist, then song, as the saved track is named.
    really composed an ending locks the song; one that ran on into the next source
    section does not, so you can still add sections or untick **Ends the song**
    after removing what followed it. Editing the plan is refused while
-   takes render, and takes made for an earlier plan can no longer be kept. The
+   takes render. A take whose own sections the edit changes can no longer be
+   kept; one that composed an ending stays keepable only while the song still
+   ends after it. The
    plan is saved with the build, so it survives a reload and is what **Render
    Final Song** renders.
 2. Choose 1 to 10 takes (4 by default), then press **Generate N takes of A → B**, with the
@@ -497,7 +527,8 @@ the top reads covering artist, then song, as the saved track is named.
    cut, or move on to the next section there. While the song is still open and
    nothing follows, moving on means the next section you add starts at the cut.
    Choosing either keeps the take and cuts it at once; composing again also
-   queues the same number of new takes from the cut, with that take's caption.
+   queues new takes from the cut, as many as the take count shows, with that
+   take's caption.
    For a cut that needs no answer, press **Keep**. **No crop** clears the crop. The next takes continue from exactly the cropped audio. The start
    only changes the saved song: **Render Final Song** starts there with a
    half-second fade in, and **Play build** starts there too. The audio before it
@@ -521,7 +552,7 @@ the top reads covering artist, then song, as the saved track is named.
 
 5. When every section is built, press **Render Final Song** in the Takes box.
    It submits the kept audio codes as an ordinary generation job, with the usual
-   post-processing, drift check and Library save. To render before the song is
+   post-processing and Library save. To render before the song is
    finished, open **Build actions** and choose **Save the song so far**. Once
    the song is saved, the build clears so the next Build starts fresh. If the
    render fails, is cancelled or times out, the build stays so you can try again.
@@ -557,7 +588,8 @@ strength**, the same controls and explanations as on Prepare. Before a build
 exists they are Prepare's settings and change at once. Once a build exists it
 has its own copy: change the row, then choose **Apply**. Until the first keep,
 Apply rewrites the build's score and request with the new settings, keeps the
-planned sections, and Prepare follows. Takes made before it can no longer be
+planned sections, and Prepare follows. If the rewritten score's sections no
+longer match, the plan goes back to the score's order. Takes made before it can no longer be
 kept. After a keep, the kept audio was composed under the old settings, so the
 row folds to one line saying the settings are locked and listing them. **Change**
 opens it again, and its button becomes **Start a fresh build with these**: it sets
@@ -591,16 +623,18 @@ recording identity; its title comes from the score unless you edit the Title
 field, while lyrics and style come from the fields you set. YuE2 ends duration
 when its model finishes the song.
 
-After the file upload finishes, Cover Studio shows **Analyzing** while it opens
-the source. When its audio exactly matches one unambiguous dataset track and
+On either backend, after the file upload finishes, Cover Studio shows
+**Analyzing BPM & Key...** while it opens the source. When its audio exactly matches one unambiguous dataset track and
 that track's sidecar has valid BPM and key, it uses those values without running
-Essentia. Cover Studio also reads eligible dataset lyrics, labels them **from
-dataset**, skips the Genius lookup, and lets you edit them. An instrumental
-sidecar selects Instrumental. If the sidecar is absent or incomplete, the
+Essentia and marks them **from dataset**. Cover Studio also reads eligible dataset
+lyrics, labels them **Lyrics from dataset · editable**, disables the Genius
+lookup, and lets you edit them. On ACE-Step, an instrumental sidecar turns on
+Instrumental. If the sidecar is absent or incomplete, the
 usual lookup and analysis path applies. Dataset lyrics are recorded as such in
 the cover's generation parameters until you edit them. A saved `<stem>.abc`
-beside the dataset audio opens in the score editor without a transcription job;
-**Retranscribe** replaces that saved score after a successful run.
+beside the dataset audio opens in the score editor without a transcription job,
+labelled **Score from dataset · editable**. A transcription of a dataset song
+that succeeds saves its score there, so **Retranscribe** replaces the saved one.
 
 ## ACE-Step controls
 
@@ -614,9 +648,9 @@ beside the dataset audio opens in the score editor without a transcription job;
 | Key fix | Dropdown of all 24 major/minor keys, overrides the detected key. |
 | Language | Vocal language used for the generation. |
 | Advanced Mode | Splits the source into stems (SuperSep, selectable separation level), then opens a mixer for muting or attenuating individual stems before generation. |
-| Target Artist (optional) | Grid of trained artists. Selecting one auto-fills Style Description and, when available, an album adapter preset. |
+| Target Artist (optional) | Grid of Lyric Studio artists. Selecting one auto-fills Style Description and, when available, an album adapter preset. |
 | Album | Appears when the selected artist has more than one album preset with an adapter; picks which one to apply. |
-| Style Description | Free-text caption for genre, instruments, vocal style, production and mood. Auto-filled from the target artist, always editable. Its Generate button redrafts it with the selected Caption LLM provider on demand; the same provider fills it automatically on artist selection when no existing caption is found. |
+| Style Description | Free-text caption for genre, instruments, vocal style, production and mood. Auto-filled from the target artist, always editable. Its Generate button, shown once an artist is picked, redrafts it with the selected Caption LLM provider on demand; the same provider fills it automatically on artist selection when no existing caption is found. |
 | Instrumental | Skips the lyrics requirement and sends the track as instrumental. |
 | Structure Fidelity | 0 to 1, default 0.5. How closely the output follows the source's arrangement. |
 | Source Preservation | 0 to 1, default 0. "0 = fresh generation from noise, 1 = closely preserve the original." Above 0, a Noise Method choice appears. Classic (Truncate), the default, drops the early steps and runs the rest. Full Denoise (Rescale) runs the same number of steps, spaced by the selected scheduler across the remaining range. |
@@ -630,8 +664,8 @@ its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 
-- Cover generation needs ACE or YuE2 active. MiniMax-Music3 replaces the studio
-  with a not-supported notice.
+- Cover generation needs ACE-Step 1.5 or YuE2 active. Under MiniMax-Music3 or
+  Stable Audio 3 the sidebar does not list the studio.
 - Splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.
