@@ -1,7 +1,7 @@
 # MIDI Studio
 
 Turns a track into multi-instrument MIDI. Pick a song from your library, or
-upload a WAV or MP3, and the native transcription engine writes a `.mid` with
+upload a WAV, MP3 or FLAC, and the native transcription engine writes a `.mid` with
 separate parts for drums, bass, guitar, keys, and the rest of the mix. Reach
 for it when you want the notes behind a track, not just the audio, for
 example to see what a bassline is doing or to pull a MIDI file into a DAW.
@@ -61,7 +61,7 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Control | What it does |
 |---|---|
 | Choose from Library | Search your [library](library.md) and pick a track with audio as the transcription source. |
-| Upload from PC | Upload a local `.wav` or `.mp3` as the source (same as dragging a file onto the panel). |
+| Upload from PC | Upload a local `.wav`, `.mp3` or `.flac` as the source (same as dragging a file onto the panel). FLAC is converted to WAV before transcription. |
 | Transcription model | `small` (103M, fastest, runs on CPU), `medium` (307M, balanced, GPU recommended), or `large` (1.4B, best quality, GPU required). |
 | Download weights | Downloads the selected model's gated weights from Hugging Face using your saved token. Shows live progress; needs a saved token first. |
 | Transcribe to MIDI | Queues a transcription job for the selected source and model. Disabled until a source is picked and that model's weights are downloaded. |

@@ -284,7 +284,7 @@ export const MidiStudio: React.FC = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".wav,.mp3,audio/wav,audio/mpeg"
+              accept=".wav,.mp3,.flac,audio/wav,audio/mpeg,audio/flac"
               className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); e.target.value = ''; }}
             />

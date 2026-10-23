@@ -2,7 +2,7 @@
 //
 // Transcribes library tracks to multi-instrument MIDI via the NATIVE ace-midi
 // engine binary (MuScriptor GGML port — docs/plans/muscriptor-cpp-port.md).
-// ace-midi reads WAV/MP3 directly, streams note events as JSONL on stdout
+// ace-midi reads WAV/MP3 directly (FLAC etc. are converted first), streams note events as JSONL on stdout
 // (relayed live over SSE for the piano roll), and writes the .mid.
 // Weights are gated on Hugging Face; the download endpoints fetch them with
 // the user's stored read token. Results persist to data/midi/<jobId>/.
@@ -36,6 +36,7 @@ import {
   BEAT_MODEL, readGrid, alignToAudio, exportArgs, type MidiExportOptions,
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
+import { engineFormatPath } from '../services/audioConvert.js';
 import { addMidiLyrics } from '../services/midiLyrics.js';
 import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
@@ -158,7 +159,9 @@ async function runTranscription(job: MidiJob): Promise<void> {
     if (!fs.existsSync(srcPath)) throw new Error(`Source audio not found: ${srcPath}`);
 
     job.status = 'transcribing';
-    console.log(`[MidiStudio] Job ${job.id}: ace-midi ${path.basename(srcPath)} (model=${job.model})`);
+    // ace-midi decodes only WAV (16-bit) and MP3; FLAC and the rest go through ffmpeg
+    const enginePath = engineFormatPath(srcPath, dir);
+    console.log(`[MidiStudio] Job ${job.id}: ace-midi ${path.basename(enginePath)} (model=${job.model})`);
 
     // With the beat model the MIDI gets tempo, time signature and bar lines
     const beatArgs = isModelDownloaded(BEAT_MODEL)
@@ -166,7 +169,7 @@ async function runTranscription(job: MidiJob): Promise<void> {
       : [];
     const child = spawn(exe, [
       '--model', modelDir(job.model),
-      '--transcribe', srcPath,
+      '--transcribe', enginePath,
       '--out', midPath(job.id),
       '--jsonl',
       ...beatArgs,
