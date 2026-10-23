@@ -407,6 +407,7 @@ Configuration for engine, server, providers, downloads and storage, with album-p
 | Download defaults | WAV, FLAC, Opus or MP3, bitrate, mastered or original, and optional latent file. A Download folder saves downloaded tracks there instead of the browser's download location; zip exports still go through the browser. |
 | Filename trigger | Use an adapter's filename as its trigger word, prepended, appended or replacing the caption. |
 | Display language and theme | Interface language, light or dark theme, and generic artwork sets. |
+| Settings and Lyric Studio backup | Export versioned JSON and preview a validated replacement before confirming import. [Details](docs/user/settings-backup.md). |
 | Storage cleanup | Stem storage counter and separate nukes for generations, written lyrics and profiles. |
 | Data folder | Release data persists outside the app across versions; the Data folder panel moves it, points at another folder, starts an empty library or imports a previous install. A development checkout can move and repoint its data too. See [Data folder and upgrades](docs/user/data-folder.md). |
 | Updates | Shows the installed build and compares it with the Release or Master feed on GitHub, at startup once a day or with Check now. It only tells you; the app does not update itself. |

@@ -29,6 +29,10 @@ A small reset arrow appears beside a General or Performance setting whenever its
 from the default; click it to snap that one field back. The reset persists like any other change;
 it is not a page reload. The Environment and AI Services fields have no reset arrow.
 
+## Settings and Lyric Studio backup
+
+The Storage & Data tab can export a versioned JSON backup of application settings and Lyric Studio data. Import validates the file, shows replacement counts, and asks before overwriting. Media files and environment settings are excluded. See [Settings and Lyric Studio backup](../settings-backup.md).
+
 ## Controls
 
 ### General tab

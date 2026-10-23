@@ -18,6 +18,7 @@ import { songApi, settingsApi } from '../../services/api';
 import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { DataFolderPanel } from './DataFolderPanel';
+import { SettingsBackupPanel } from './SettingsBackupPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ReportIssuePanel } from './ReportIssuePanel';
 import { AdapterReferencesAction } from './AdapterReferencesAction';
@@ -975,6 +976,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {activeTab === 'storage' && (
       <>
       <DataFolderPanel />
+      <SettingsBackupPanel settings={settings} onSettingsChange={onSettingsChange} />
       {/* Stem Storage Section */}
       <div className="settings-section">
         <div className="settings-section-header">

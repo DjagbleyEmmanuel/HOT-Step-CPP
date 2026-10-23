@@ -5,6 +5,10 @@ The Node server reads its configuration from environment variables, almost all o
 what it changes. None of them are required: with no `.env` the app finds the engine, the
 models and its data folder on its own.
 
+## Settings backups
+
+Settings can export application settings and Lyric Studio records as versioned JSON. Import replaces those records in one database transaction after confirmation. It does not change `.env` or machine-specific environment settings. See [Settings and Lyric Studio backup](../user/settings-backup.md).
+
 ## How configuration is loaded
 
 1. `config.ts` sets the project root. If `HOT_STEP_ROOT` is set (the portable launchers set
