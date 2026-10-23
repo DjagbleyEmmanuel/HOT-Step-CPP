@@ -36,6 +36,14 @@ Use CUDA on an NVIDIA card, Vulkan on AMD or Intel, and CPU only if there is no 
 4. The Model Manager opens on first launch. Download the **Quick Start** pack from the ACE-Step 1.5 tab (about 9 GB). The engine starts by itself once the download finishes.
 5. Write a style description and lyrics in **Custom-Gen** and click **Generate**. The full walkthrough is in [Getting started](docs/user/getting-started.md).
 
+### Windows blocks the app (Smart App Control or SmartScreen)
+
+The release files are not code-signed, so Windows can refuse to start `HOT-Step.bat` or the bundled executables.
+
+- **SmartScreen ("Windows protected your PC"):** click **More info**, then **Run anyway**. If the zip itself was flagged, right-click it before extracting, open **Properties**, tick **Unblock** and click **OK**.
+- **Smart App Control (the app is blocked with no "Run anyway" option):** open **Windows Security**, then **App & browser control**, then **Smart App Control settings**, and set it to **Off**. Windows only lets you turn this back on by resetting the PC, so decide before you switch it.
+- Extract the archive into a folder of its own before running, not from inside the zip.
+
 ## Highlights
 
 - **Four backends, one app.** ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3 run in the same engine process. The backend picker appears whenever two or more are registered, the sidebar lists only the studios the active backend supports, and the global bar hides controls that do nothing on it. See [Backends](docs/user/backends.md).
