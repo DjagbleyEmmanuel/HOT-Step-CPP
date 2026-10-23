@@ -31,6 +31,7 @@ import { TrainingRunStats } from './TrainingRunStats';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
 import { getTrainingPlugin } from './trainingPlugins';
+import { aceDitRecipeInput, aceLmRecipeInput, resolveTrainGate } from './trainGates';
 import type { TrainingTargetId } from './trainingPluginTypes';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
@@ -60,11 +61,8 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   // The target-owned pages render through the plug-in; the gates below keep
   // their order, because each backend meets a different subset of them.
   const plugin = getTrainingPlugin(target);
+  // SA3 has no ACE status to read, so the ACE queries below stay off for it.
   const sa3Mode = target === 'sa3';
-  const mm3Mode = target === 'minimax-m3';
-  // Same rule, one backend along: YuE2 trains a NAR LoRA from cached VAE
-  // latents and has no DiT path, no tensor cache and no preprocess variant.
-  const yue2Mode = target === 'yue2';
   const capabilities = useTrainingStore(s => s.capabilities);
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);
@@ -177,9 +175,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   const handleStart = async () => {
     setStarting(true);
     try {
-      const recipe = await resolveTrainingRecipe<TrainLmFormState>('ace-lm', {
-        ...form, ...(trainLmStatus?.variantKey ? { variantKey: trainLmStatus.variantKey } : {}),
-      });
+      const recipe = await resolveTrainingRecipe<TrainLmFormState>('ace-lm', aceLmRecipeInput(form, trainLmStatus?.variantKey));
       assertRecipeWorker(recipe);
       await startTrainLm(recipe.execution as TrainLmOptions);
     } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setStarting(false); }
@@ -188,9 +184,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   const handleStartDit = async () => {
     setDitStarting(true);
     try {
-      const recipe = await resolveTrainingRecipe<TrainDitFormState>('ace-dit', {
-        ...ditForm, ...(trainDitStatus?.variantKey ? { variantKey: trainDitStatus.variantKey } : {}),
-      }, ditForm.adapterType);
+      const recipe = await resolveTrainingRecipe<TrainDitFormState>('ace-dit', aceDitRecipeInput(ditForm, trainDitStatus?.variantKey), ditForm.adapterType);
       assertRecipeWorker(recipe);
       await startTrainDit(recipe.execution as TrainDitOptions);
     } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setDitStarting(false); }
@@ -231,8 +225,18 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
     </>
   );
 
+  // The gates below are decided by resolveTrainGate (trainGates.ts), which pins
+  // their order per target; each branch only renders its page.
+  const gate = resolveTrainGate({
+    target, section, hasSelectedDataset: !!selectedDatasetId, loaded: !!detail && !!capabilities,
+    binaryAvailable: !!tl?.available, built: !!detail?.builtAt && !!detail.datasetJsonPath,
+    statusPending: !trainLmStatus && (trainLmLoading || statusPending),
+    noVariant: !!trainLmStatus && trainLmStatus.variantKey === '',
+    jobActive, jobKind,
+  });
+
   // ── Gate 1: no dataset selected ─────────────────────────────────────────
-  if (!selectedDatasetId) {
+  if (gate === 'pick-dataset') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -262,7 +266,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
     );
   }
 
-  if (!detail || !capabilities) {
+  if (gate === 'loading' || !detail || !capabilities) {
     return (
       <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
         <Loader2 size={18} className="animate-spin mr-2" /> …
@@ -272,14 +276,14 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
 
   // SA3 scans source audio and prepares its own snapshot before training.
   // It does not require ACE's built manifest or tensor cache.
-  if (sa3Mode && section === 'train') return <div className="flex flex-col gap-4">
+  if (gate === 'sa3') return <div className="flex flex-col gap-4">
     <React.Fragment key={`${trainingWorker}:${detail.id}`}>
       {plugin.renderTrain?.({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}
     </React.Fragment>
   </div>;
 
   // ── Gate 2: no ace-train binary ─────────────────────────────────────────
-  if (!tl?.available) {
+  if (gate === 'no-binary') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -309,7 +313,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   // the shared status fetches, and the "Perform all stages" chain; the five
   // stage cards themselves live in Yue2TrainCard.tsx (1, 4) and
   // Yue2ArTrainCard.tsx (2, 3, 5).
-  if (yue2Mode) {
+  if (gate === 'yue2') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -320,7 +324,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   }
 
   // ── Gate 3: not built ───────────────────────────────────────────────────
-  if (!detail.builtAt || !detail.datasetJsonPath) {
+  if (gate === 'needs-build') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -345,7 +349,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   // preprocess-variant gate below, which is an ACE concept: MM3 trains from
   // RVQ codes and has no tensor cache, so falling through would block it on a
   // prerequisite it does not have.
-  if (mm3Mode) {
+  if (gate === 'mm3') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -356,7 +360,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
 
   // Status still in flight on first open — deciding gate 4 needs it. Covers the
   // debounce window too (statusPending), not just the request itself.
-  if (!trainLmStatus && (trainLmLoading || statusPending)) {
+  if (gate === 'status-loading') {
     return (
       <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
         <Loader2 size={18} className="animate-spin mr-2" /> …
@@ -367,7 +371,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   // ── Gate 4: no preprocessed tensors ─────────────────────────────────────
   // Only when the status actually loaded — a failed read must not masquerade
   // as "you never preprocessed".
-  if (trainLmStatus && trainLmStatus.variantKey === '') {
+  if (gate === 'needs-preprocess') {
     return (
       <div className="flex flex-col gap-4">
         {header}
@@ -391,7 +395,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: 'prepare
   // train-dit is NOT "another kind" — it is the second card on this very panel.
   // Neither is 'audition': the AuditionCard lives here too, and bailing out
   // here would unmount the card (and its players) for the whole run.
-  if (jobActive && jobKind !== 'train-lm' && jobKind !== 'train-dit' && jobKind !== 'audition') {
+  if (gate === 'other-job') {
     return (
       <div className="flex flex-col gap-4">
         {header}

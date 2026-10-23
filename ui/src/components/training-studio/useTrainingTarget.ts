@@ -10,7 +10,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
 import {
-  TRAINING_TARGET_STORAGE_KEY, parseTargetOverride, resolveTrainingTarget,
+  TRAINING_TARGET_STORAGE_KEY, isTargetPinned, parseTargetOverride, resolveTrainingTarget,
   type TrainingTargetOverride,
 } from './trainingTargets';
 import type { TrainingTargetId } from './trainingPluginTypes';
@@ -50,7 +50,7 @@ export interface TrainingTargetState {
   target: TrainingTargetId;
   override: TrainingTargetOverride;
   setOverride: (next: TrainingTargetOverride) => void;
-  /** True while a submitted job pins the target; the picker is read-only then. */
+  /** True while any queued/running target-bound job pins the target; the picker is read-only then. */
   locked: boolean;
 }
 
@@ -62,7 +62,6 @@ export function useTrainingTarget(): TrainingTargetState {
   const running = jobStatus === 'queued' || jobStatus === 'running';
   const runningJobKind = running ? jobKind : null;
   const target = resolveTrainingTarget({ override, activeBackendId, runningJobKind });
-  const free = resolveTrainingTarget({ override, activeBackendId });
   const set = useCallback((next: TrainingTargetOverride) => setOverride(next), []);
-  return { target, override, setOverride: set, locked: target !== free };
+  return { target, override, setOverride: set, locked: isTargetPinned(runningJobKind) };
 }

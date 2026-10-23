@@ -6,9 +6,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Database, Disc3, FolderOpen, FolderPlus, GraduationCap, ListChecks, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
+import { useTrainingTarget } from './useTrainingTarget';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -49,8 +48,9 @@ export const DatasetList: React.FC = () => {
   // caches, preparation, joint training, refinement per dataset). ACE's bulk
   // path is the pipeline behind "Import multiple…" and MM3 has none, so the
   // button appears only when YuE2 is the active backend.
-  const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const isYue2 = activeBackendId === YUE2_BACKEND_ID;
+  // YuE2's batch actions and done-filter follow the effective target, so an
+  // SA3 override does not keep them.
+  const isYue2 = useTrainingTarget().target === 'yue2';
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [batchWizardOpen, setBatchWizardOpen] = useState(false);

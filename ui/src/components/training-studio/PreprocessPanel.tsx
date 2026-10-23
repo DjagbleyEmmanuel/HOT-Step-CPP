@@ -10,7 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Database, Layers, Loader2, PauseCircle, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { PreprocessOptions } from '../../services/trainingApi';
-import { useBackendStore } from '../../stores/backendStore';
+import { useTrainingTarget } from './useTrainingTarget';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { JobProgress } from './JobProgress';
 import { Mm3CodesCard } from './Mm3CodesCard';
@@ -31,8 +31,8 @@ export const PreprocessPanel: React.FC = () => {
   // it; MiniMax-Music3 has neither. Showing ACE's variant list while MM3 is
   // active offers caches an MM3 run can never consume — so the phase switches
   // wholesale, it does not merge.
-  const backendId = useBackendStore(s => s.activeBackendId);
-  const mm3Mode = backendId === 'minimax-m3';
+  // The studio's effective target, not the raw backend: a running job pins it.
+  const mm3Mode = useTrainingTarget().target === 'minimax-m3';
   const capabilities = useTrainingStore(s => s.capabilities);
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);

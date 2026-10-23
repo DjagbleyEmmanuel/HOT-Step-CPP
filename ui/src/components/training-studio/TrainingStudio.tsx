@@ -217,6 +217,9 @@ export const TrainingStudio: React.FC = () => {
               onChange={(v: string) => setOverride(v as TrainingTargetOverride)} options={[
                 { value: 'active', label: t('trainingStudio.sa3.activeTarget') },
                 { value: 'sa3', label: t('trainingStudio.sa3.title') },
+                // While a job pins the target, show it: ACE/MM3/YuE2 ids match neither option above.
+                ...(locked && target !== 'sa3'
+                  ? [{ value: target, label: backends.find(b => b.id === target)?.displayName ?? target }] : []),
               ]} />
           </div>
         )}

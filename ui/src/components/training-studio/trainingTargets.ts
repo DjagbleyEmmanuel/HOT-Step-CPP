@@ -55,6 +55,10 @@ export function resolveTrainingTarget(input: {
   return input.override === 'active' ? targetForBackend(input.activeBackendId) : input.override;
 }
 
+/** True while a queued/running target-bound job pins the target, whatever the picker says. */
+export const isTargetPinned = (runningJobKind: TrainingJobKind | null | undefined): boolean =>
+  targetForJobKind(runningJobKind) !== null;
+
 // ── Static per-target facts ──────────────────────────────────────────────
 
 const stage = (id: string, labelKey: string, label: string): TrainingStageSpec => ({ id, labelKey, label });
