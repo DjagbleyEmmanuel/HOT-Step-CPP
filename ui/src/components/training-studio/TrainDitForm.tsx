@@ -772,7 +772,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </span>
 
           <label className="flex flex-col gap-1.5">
-            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : isLokr ? 'LoKR default 0.01' : 'LoRA default 5e-4', { onReset: onReset('learningRate') })}
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : isLokr ? 'LoKR default 2e-3' : 'LoRA default 5e-4', { onReset: onReset('learningRate') })}
             <input
               type="number" min={0.00001} max={1} step={0.00001}
               value={value.learningRate} disabled={lock}

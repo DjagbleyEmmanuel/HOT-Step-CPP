@@ -492,7 +492,7 @@ export const TrainLmForm: React.FC<Props> = ({
           onChange={(v) => onChange({ regEvery: v ? 3 : 0 })}
           label={t('trainingStudio.train.priorPreservation')}
           info={t('trainingStudio.train.priorPreservationInfo')}
-          meta="Default on · every 3rd step"
+          meta="Default off · every 3rd step when on"
           className="mt-1"
           defaultValue={D.regEvery > 0}
         />
@@ -580,7 +580,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('lm.optimizer', 'Default Prodigy (auto step size) · Muon and AdamW supported', { onReset: onReset('optimizer') })}
+            {P('lm.optimizer', 'Default AdamW · Prodigy (auto step size) and Muon supported', { onReset: onReset('optimizer') })}
             <StyledSelect
               accent="amber"
               value={value.optimizer}

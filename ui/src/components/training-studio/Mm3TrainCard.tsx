@@ -587,7 +587,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 value={form.steps}
                 onChange={v => set('steps', v)}
                 defaultValue={base.steps} onReset={() => reset('steps')}
-                meta={t('trainingStudio.mm3.stepsMeta', 'default 800')}
+                meta={t('trainingStudio.mm3.stepsMeta', 'default 500')}
                 info={form.stopMode === 'loss'
                   ? t('trainingStudio.mm3.maxStepsHint',
                       'The cap. If the target never arrives, the run ends here.')
@@ -662,7 +662,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <NumField label={t('trainingStudio.mm3.rank', 'Rank')} value={form.rank}
                 onChange={v => set('rank', v)}
                 defaultValue={base.rank} onReset={() => reset('rank')}
-                meta={t('trainingStudio.mm3.rankMeta', 'default 256, follows the VRAM recommendation')}
+                meta={t('trainingStudio.mm3.rankMeta', 'default 128, follows the VRAM recommendation')}
                 info={t('trainingStudio.mm3.rankInfo',
                   'The LoRA\'s capacity — how many parameters the adapter learns. Higher captures more '
                   + 'detail but needs more VRAM and is more prone to overfitting on a small dataset; '
@@ -670,7 +670,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <NumField label={t('trainingStudio.mm3.maxFrames', 'Crop (frames)')} value={form.maxFrames}
                 onChange={v => set('maxFrames', v)} step={50} min={64} max={9000}
                 defaultValue={base.maxFrames} onReset={() => reset('maxFrames')}
-                meta={t('trainingStudio.mm3.maxFramesMeta', 'default 1500 frames')}
+                meta={t('trainingStudio.mm3.maxFramesMeta', 'default 9000 frames')}
                 info={t('trainingStudio.mm3.maxFramesInfo',
                   'How many frames of audio each training crop covers. Longer crops give the model more '
                   + 'context per step but cost VRAM quadratically and slow each step down; shorter crops '
@@ -808,7 +808,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               </div>
               {/* Explicit song pick (2026-09-05): a select over the dataset's
                   usable rows, default = auto. Fixes the auto-pick landing on
-                  a noise interlude (oasis_morningglory's "instrumental_2",
+                  a noise interlude (an album dataset's "instrumental_2",
                   40s of "[Instrumental]") by letting a user route around
                   whatever the ladder in mm3Preview.ts picks — the ladder
                   itself was also fixed the same day, this is the manual
@@ -965,7 +965,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   <NumField label={t('trainingStudio.mm3.alpha', 'Alpha')} value={form.alpha}
                     onChange={v => set('alpha', v)}
                     defaultValue={base.alpha} onReset={() => reset('alpha')}
-                    meta={t('trainingStudio.mm3.alphaMeta', 'default 256')}
+                    meta={t('trainingStudio.mm3.alphaMeta', 'default 128')}
                     info={t('trainingStudio.mm3.alphaInfo',
                       'Scales how strongly the LoRA\'s learned update is applied on top of the frozen '
                       + 'weights. Usually left equal to rank; raising it relative to rank strengthens '

@@ -578,7 +578,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <EnvTextRow envKey="OPENAI_MODEL" label={t('settings.ai.openaiModel')} description={t('settings.ai.openaiModelDesc')}
           value={envValues.OPENAI_MODEL || ''} onChange={handleEnvChange} placeholder="gpt-4o-mini" />
         <EnvTextRow envKey="ANTHROPIC_MODEL" label={t('settings.ai.anthropicModel')} description={t('settings.ai.anthropicModelDesc')}
-          value={envValues.ANTHROPIC_MODEL || ''} onChange={handleEnvChange} placeholder="claude-3-5-haiku-20241022" />
+          value={envValues.ANTHROPIC_MODEL || ''} onChange={handleEnvChange} placeholder="claude-haiku-4-5-20251001" />
         <EnvTextRow envKey="OLLAMA_MODEL" label={t('settings.ai.ollamaModel')} description={t('settings.ai.ollamaModelDesc')}
           value={envValues.OLLAMA_MODEL || ''} onChange={handleEnvChange} placeholder="llama3" />
         <EnvTextRow envKey="LMSTUDIO_MODEL" label={t('settings.ai.lmstudioModel')} description={t('settings.ai.lmstudioModelDesc')}

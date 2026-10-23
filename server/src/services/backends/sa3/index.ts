@@ -107,7 +107,8 @@ const SA3_EXTENSIONS: BackendExtensionParam[] = [
     label: 'Sampler Plugins',
     hint: 'Drive the SA3 denoise with the shared Lua solver/scheduler/guidance '
         + 'plugins instead of the native pingpong loop. Full-loop (owns_loop) '
-        + 'solvers are fine here — SA3 renders in one pass, no window seams. '
+        + 'solvers are not offered: SA3 is distilled for pingpong sampling and '
+        + 'they skip the per-step re-noise it needs. '
         + 'Guidance is mostly decorative: SA3 has no CFG uncond branch, so '
         + 'APG-family modes pass through unchanged.',
     default: false,

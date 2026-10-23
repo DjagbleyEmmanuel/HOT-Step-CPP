@@ -178,7 +178,7 @@ export const TrainingStudio: React.FC = () => {
               {multiBackend && activeBackend && (
                 <span
                   title={t('trainingStudio.backendHint',
-                    'Training follows the active generation backend. Switch it with the backend pill in the bar at the top of the window.') as string}
+                    'Training follows the active generation backend. Switch it with the engine picker at the top of the sidebar.') as string}
                   className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
                 >
                   <Layers size={11} />

@@ -112,7 +112,7 @@ export const DatasetList: React.FC = () => {
             <button
               onClick={() => setYue2BatchOpen(true)}
               title={t('trainingStudio.yue2.batch.ctaHint',
-                'Train several of these datasets one after another on the server: preparation, joint training and refinement each. Survives reloads and restarts.') as string}
+                'Train several of these datasets one after another on the server: preparation, then joint training for each. Survives page reloads; after a server restart the batch comes back paused until you resume it.') as string}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
             >
               <ListChecks size={14} /> {t('trainingStudio.yue2.batch.cta', 'Train multiple…')}
