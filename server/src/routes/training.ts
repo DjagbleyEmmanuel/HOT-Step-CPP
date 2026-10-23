@@ -71,6 +71,9 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   POST   /datasets/:id/train-dit                      — start a DiT LoRA training job
 //   POST   /datasets/:id/sa3-train                      — prepare and train SA3 Medium DoRA-rows
 //   GET    /datasets/:id/sa3-train                      — readiness, recipe and resumable SA3 runs
+//   GET    /datasets/:id/sa3-previews?run=              — SA3 checkpoint-preview records
+//   POST   /datasets/:id/sa3-previews/render            — render or retry one captured SA3 step
+//   GET    /datasets/:id/sa3-previews/audio?run=&file=  — one SA3 preview WAV (Range aware)
 //   GET    /datasets/:id/train-dit                      — DiT adapter / variant status
 //   GET    /previews/:previewId/:slot                   — stream a codes preview (Range aware)
 //   POST   /datasets/:id/audition                       — start an A/B codes-audition job
@@ -164,7 +167,10 @@ import { essentiaAvailable, essentiaTempoProfile } from '../services/training/es
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
 import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
-import { listSa3Runs, resolveSa3Run, sa3Readiness } from '../services/training/trainSa3Runner.js';
+import { listSa3Runs, resolveSa3Run, sa3Readiness, sa3RunById, SA3_RUN_ID, type Sa3Run } from '../services/training/trainSa3Runner.js';
+import { listSa3PreviewRecords, parseSa3PreviewSettings, renderSa3Previews, sa3PreviewAudioPath, SA3_PREVIEW_DEFAULTS } from '../services/training/sa3Preview.js';
+import { sa3SnapshotSteps } from '../services/training/sa3Snapshots.js';
+import type { Sa3PreviewListResponse } from '../contracts/training.js';
 import {
   buildYue2AitkPrepareArgs, validateYue2AitkPrepareOptions,
   parseYue2AitkModels,
@@ -5856,6 +5862,82 @@ router.get('/datasets/:id/sa3-train', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     res.json({ ...sa3Readiness(), runs: listSa3Runs(ds.id, ds.slug),
       activeJob: active ? queue.toSummary(active) : null });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// ── SA3 checkpoint previews (contracts/training.ts) ─────────────────────
+// Runs are named by their opaque id and resolved under the dataset's own runs;
+// audio is served only by the file name a record holds.
+
+type Sa3PreviewRun = { id: string; dir: string; run: Sa3Run };
+
+/** The asked run (400 malformed, 404 unknown), or the newest one when none is asked. */
+function sa3PreviewRun(ds: TrainingDatasetRow, asked: unknown, res: Response): Sa3PreviewRun | null | undefined {
+  // Newest by run stamp: listSa3Runs orders by adapter name first.
+  const id = typeof asked === 'string' && asked.trim() ? asked.trim()
+    : listSa3Runs(ds.id, ds.slug).map(r => r.run).sort((a, b) => b.split('/')[1].localeCompare(a.split('/')[1]))[0];
+  if (id === undefined) return null;
+  if (!SA3_RUN_ID.test(id)) { res.status(400).json({ error: 'Invalid SA3 run' }); return undefined; }
+  try { return { id, ...sa3RunById(ds.id, ds.slug, id) }; }
+  catch { res.status(404).json({ error: 'SA3 run not found' }); return undefined; }
+}
+
+function sa3PreviewList(ds: TrainingDatasetRow, r: Sa3PreviewRun | null): Sa3PreviewListResponse {
+  if (!r) return { run: null, settings: SA3_PREVIEW_DEFAULTS, previews: [] };
+  return { run: r.id, settings: r.run.preview ?? SA3_PREVIEW_DEFAULTS,
+    previews: listSa3PreviewRecords(r.dir).map(({ file, ...p }) => ({ ...p,
+      audioUrl: p.status === 'done' && file && sa3PreviewAudioPath(r.dir, file)
+        ? `/api/training/datasets/${encodeURIComponent(ds.id)}/sa3-previews/audio?run=${encodeURIComponent(r.id)}&file=${encodeURIComponent(file)}`
+        : null })) };
+}
+
+router.get('/datasets/:id/sa3-previews', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    const r = sa3PreviewRun(ds, req.query.run, res);
+    if (r !== undefined) res.json(sa3PreviewList(ds, r));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/** Body: Sa3PreviewRenderRequest. Renders the step's cells that have no done
+ *  render yet (a retry renders the failed ones), with the run's settings
+ *  under any given. Needs the engine up and no job on this dataset. */
+router.post('/datasets/:id/sa3-previews/render', async (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    if (typeof b.run !== 'string' || !b.run.trim()) { res.status(400).json({ error: 'SA3 preview render needs a run' }); return; }
+    const r = sa3PreviewRun(ds, b.run, res);
+    if (!r) return;
+    const step = Number(b.step);
+    if (!Number.isSafeInteger(step) || !sa3SnapshotSteps(r.dir).includes(step)) { res.status(400).json({ error: 'No captured snapshot at that step in that run' }); return; }
+    let settings;
+    try { settings = parseSa3PreviewSettings(b.settings, r.run.preview ?? SA3_PREVIEW_DEFAULTS); }
+    catch (err: any) { res.status(400).json({ error: err.message }); return; }
+    if (!settings.prompts.length) { res.status(400).json({ error: 'SA3 previews need at least one prompt' }); return; }
+    if (queue.activeJobForDataset(ds.id)) { res.status(409).json({ error: 'A job is queued or running for this dataset.' }); return; }
+    if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }
+    await runOnGpuLane(async () => {
+      await evictOtherFamilies('sa3');
+      return renderSa3Previews({ runDir: r.dir, runId: r.id, snapshotRun: `${ds.slug}/${r.id}`, step, settings,
+        inferenceDit: path.basename(r.run.inferenceDit), final: step === r.run.steps });
+    }, { label: 'sa3 checkpoint preview', family: 'sa3' });
+    res.json(sa3PreviewList(ds, r));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/datasets/:id/sa3-previews/audio', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    if (typeof req.query.run !== 'string' || !req.query.run.trim()) { res.status(400).json({ error: 'SA3 preview audio needs a run' }); return; }
+    const r = sa3PreviewRun(ds, req.query.run, res);
+    if (!r) return;
+    const file = typeof req.query.file === 'string' ? sa3PreviewAudioPath(r.dir, req.query.file) : null;
+    if (!file) { res.status(404).json({ error: 'Preview audio not found' }); return; }
+    res.type('audio/wav').sendFile(file, { dotfiles: 'allow' }); // validated above; a data folder may sit under a dot directory
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

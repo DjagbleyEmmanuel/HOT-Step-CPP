@@ -11,12 +11,19 @@ import { newRunDir, publishSa3Export, sa3RunsRoot } from './adapterLayout.js';
 import { getDataset } from './datasetsRepo.js';
 import { buildSamples } from './datasetScan.js';
 import { prepareSa3Dataset } from './sa3Dataset.js';
+import { listSa3PreviewRecords, parseSa3PreviewSettings, renderSa3Previews, sa3PreviewPending } from './sa3Preview.js';
+import { captureSa3Snapshot, clearSa3SegmentExport, sa3NextBound, sa3SnapshotSteps, sa3StateStep } from './sa3Snapshots.js';
+import type { Sa3PreviewSettings } from '../../contracts/training.js';
 import { emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, releaseJobCleanup, trainerLine, type TrainingJob } from './labelingQueue.js';
 
 export interface Sa3Run extends Sa3Recipe {
   datasetId: string; adapterName: string; runDir: string; modelsDir: string;
   baseDit: string; inferenceDit: string; manifest: string; resume: boolean;
   published?: string; baseSha256?: string; inferenceSha256?: string;
+  /** Checkpoint previews, fixed when the run starts; a resume keeps them. */
+  preview?: Sa3PreviewSettings;
+  /** Set on a segment's copy only: the logical goal while `steps` is the segment bound. */
+  goalSteps?: number;
 }
 
 const RECIPE_KEYS = ['steps', 'rank', 'alpha', 'learningRate', 'duration', 'seed', 'checkpointEvery', 'exportEvery'];
@@ -43,18 +50,15 @@ function saveRun(run: Sa3Run): void {
  * the same timestamp. Caller checks per-dataset queue/pipeline exclusivity. */
 export function resolveSa3Run(datasetId: string, slug: string, input: Record<string, unknown>): Sa3Run {
   for (const key of Object.keys(input)) {
-    if (![...RECIPE_KEYS, 'adapterName', 'resumeRun'].includes(key)) throw new Error(`Unsupported SA3 option: ${key}`);
+    if (![...RECIPE_KEYS, 'adapterName', 'resumeRun', 'preview'].includes(key)) throw new Error(`Unsupported SA3 option: ${key}`);
   }
   const ready = sa3Readiness();
   if (!ready.available) throw new Error(`SA3 training requires CUDA or CPU, ace-train and all models (backend: ${ready.backend}; missing: ${ready.missing.join(', ')})`);
   const root = sa3RunsRoot(slug);
   if (input.resumeRun !== undefined) {
-    if (typeof input.resumeRun !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}\/[0-9][0-9_-]*$/i.test(input.resumeRun)) throw new Error('Invalid SA3 resumeRun');
-    const dir = path.join(root, ...input.resumeRun.split('/'));
-    const realRoot = fs.realpathSync(root), realDir = fs.realpathSync(dir);
-    if (!realDir.startsWith(realRoot + path.sep)) throw new Error('SA3 resume is outside the dataset runs');
-    const saved = readRun(dir);
-    if (saved.datasetId !== datasetId) throw new Error('SA3 resume belongs to another dataset');
+    if (typeof input.resumeRun !== 'string' || !SA3_RUN_ID.test(input.resumeRun)) throw new Error('Invalid SA3 resumeRun');
+    const { dir, run: saved } = sa3RunById(datasetId, slug, input.resumeRun, 'resume');
+    if (input.preview !== undefined) throw new Error('SA3 resume keeps the preview settings the run started with');
     for (const key of [...RECIPE_KEYS.filter(k => k !== 'steps'), 'adapterName']) {
       if (input[key] !== undefined && input[key] !== saved[key as keyof Sa3Run]) throw new Error(`SA3 resume cannot change ${key}`);
     }
@@ -71,12 +75,28 @@ export function resolveSa3Run(datasetId: string, slug: string, input: Record<str
   const adapterName = input.adapterName ?? slug;
   if (typeof adapterName !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(adapterName)) throw new Error('Invalid SA3 adapterName');
   const recipe = resolveSa3Recipe(input);
+  const preview = input.preview === undefined ? undefined : parseSa3PreviewSettings(input.preview);
   const runDir = newRunDir(path.join(root, adapterName));
   fs.mkdirSync(runDir, { recursive: true });
   const run: Sa3Run = { ...recipe, ...modelPaths(), datasetId, adapterName, runDir,
-    manifest: path.join(runDir, 'train-manifest.json'), resume: false };
+    manifest: path.join(runDir, 'train-manifest.json'), resume: false, ...(preview ? { preview } : {}) };
   saveRun(run);
   return run;
+}
+
+/** `<adapterName>/<stamp>`, the opaque run id the routes and resumeRun take. */
+export const SA3_RUN_ID = /^[a-z0-9][a-z0-9_-]{0,63}\/[0-9][0-9_-]*$/i;
+
+/** Resolve a run id to its folder under this dataset's runs, refusing ids
+ *  that escape the root (junctions included) or belong to another dataset. */
+export function sa3RunById(datasetId: string, slug: string, runId: string, what = 'run'): { dir: string; run: Sa3Run } {
+  if (!SA3_RUN_ID.test(runId)) throw new Error(`Invalid SA3 ${what}`);
+  const root = sa3RunsRoot(slug), dir = path.join(root, ...runId.split('/'));
+  const realRoot = fs.realpathSync(root), realDir = fs.realpathSync(dir);
+  if (!realDir.startsWith(realRoot + path.sep)) throw new Error(`SA3 ${what} is outside the dataset runs`);
+  const run = readRun(dir);
+  if (run.datasetId !== datasetId) throw new Error(`SA3 ${what} belongs to another dataset`);
+  return { dir, run };
 }
 
 function modelPaths() {
@@ -168,9 +188,9 @@ export async function executeSa3Train(job: TrainingJob, run: Sa3Run, launch = sp
         job.phase = 'encode'; job.done = Number(ev.completed) || 0; job.total = Number(ev.total) || 0; emitProgress(job);
       }
       if (ev.type === 'step' && Number.isFinite(ev.loss) && Number.isSafeInteger(ev.step)) {
-        job.phase = 'train'; job.done = ev.step; job.total = run.steps; emitProgress(job);
+        job.phase = 'train'; job.done = ev.step; job.total = run.goalSteps ?? run.steps; emitProgress(job);
         pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step: ev.step,
-          totalSteps: run.steps, loss: ev.loss, stepMs: Number.isFinite(ev.ms) ? ev.ms : undefined });
+          totalSteps: run.goalSteps ?? run.steps, loss: ev.loss, stepMs: Number.isFinite(ev.ms) ? ev.ms : undefined });
       }
       if (ev.type === 'step' && !Number.isFinite(ev.loss)) state.error = 'SA3 trainer reported a non-finite loss';
     } catch { /* non-JSON diagnostic output */ }
@@ -192,27 +212,92 @@ export async function executeSa3Train(job: TrainingJob, run: Sa3Run, launch = sp
 export interface Sa3RunnerDependencies {
   prepare: typeof prepare; execute: (job: TrainingJob, run: Sa3Run) => Promise<Execution>;
   stop: typeof stopAceServer; restart: typeof restartAceServer;
-  publish: typeof publishSa3Export;
+  publish: typeof publishSa3Export; render: typeof renderSa3Previews;
 }
 
+function log(job: TrainingJob, level: 'info' | 'warn' | 'error', message: string): void {
+  pushEvent(job, { type: 'log', level, ts: Date.now(), message });
+}
+
+const sa3Identity = (sha: string) => `stabilityai/stable-audio-3-medium sha256:${sha}`;
+
+/**
+ * One SA3 training job. Without checkpoint previews: one trainer process to
+ * run.steps, then publish. With them, the YuE2 serial lifecycle: the trainer
+ * runs to the next preview step (an absolute --steps bound) and exits, the
+ * server captures snapshots/step-N.gguf, restarts the engine, renders every
+ * prompt and seed, stops the engine and resumes the trainer. The logical goal
+ * stays run.steps throughout; only the process arguments change. Only the
+ * final step's export is published, and its preview renders after the engine
+ * is back. A resumed job first re-exports a preview step whose capture was cut
+ * off and renders any preview a stopped server still owed.
+ */
 export async function runSa3TrainJob(job: TrainingJob, injected: Partial<Sa3RunnerDependencies> = {}): Promise<void> {
   if (isCancelled(job)) return;
-  const deps = { prepare, execute: executeSa3Train, stop: stopAceServer, restart: restartAceServer, publish: publishSa3Export, ...injected };
+  const deps = { prepare, execute: executeSa3Train, stop: stopAceServer, restart: restartAceServer, publish: publishSa3Export,
+    render: renderSa3Previews, ...injected };
   const run = job.opts as Sa3Run;
-  let stopped = false, error: string | undefined;
+  const preview = run.preview && run.preview.everySteps > 0 && run.preview.prompts.length ? run.preview : undefined;
+  // <adapters>/sa3-medium/<slug>/<adapterName>/<stamp>
+  const runId = `${run.adapterName}/${path.basename(run.runDir)}`;
+  const snapshotRun = `${path.basename(path.dirname(path.dirname(run.runDir)))}/${runId}`;
+  let engineDown = false, error: string | undefined;
+  const stopEngine = async () => {
+    // Include a throwing/unsuccessful stop in the restoration scope.
+    job.phase = 'engine-stop'; emitProgress(job); engineDown = true;
+    if (!await deps.stop('Paused for SA3 training')) throw new Error('Engine did not shut down for SA3 training');
+  };
+  const startEngine = async () => {
+    job.phase = 'engine-restart'; emitProgress(job);
+    if (!await deps.restart()) throw new Error('Engine did not restart after SA3 training');
+    engineDown = false;
+  };
+  const renderStep = async (step: number, final: boolean) => {
+    job.phase = 'preview'; emitProgress(job);
+    const n = await deps.render({ runDir: run.runDir, runId, snapshotRun, step, settings: preview!, final,
+      inferenceDit: path.basename(run.inferenceDit), signal: job.controller.signal });
+    if (n.done + n.failed + n.skipped) log(job, n.failed ? 'warn' : 'info',
+      `${final ? 'Final previews' : 'Previews'} at step ${step}: ${n.done} rendered, ${n.failed} failed${n.skipped ? `, ${n.skipped} skipped` : ''}`);
+  };
   job.status = 'running'; job.startedAt = Date.now(); job.cleanupPending = true; job.phase = 'prepare'; emitJob(job);
   try {
     await deps.prepare(job, run);
     if (isCancelled(job)) return;
-    // Include a throwing/unsuccessful stop in the restoration scope.
-    job.phase = 'engine-stop'; emitProgress(job); stopped = true;
-    if (!await deps.stop('Paused for SA3 training')) throw new Error('Engine did not shut down for SA3 training');
-    if (isCancelled(job)) return;
-    job.phase = 'loading-models'; job.total = run.steps; job.done = 0; emitProgress(job);
-    const result = await deps.execute(job, run);
-    if (isCancelled(job)) return;
-    if (!result.done || result.stopped || result.error) throw new Error(result.error || 'SA3 trainer stopped without a completed export');
-    if (![result.baseSha256, result.inferenceSha256].every(s => /^[a-f0-9]{64}$/.test(s))) throw new Error('SA3 trainer omitted base provenance');
+    if (preview) {
+      // The engine is still up: render what a cut-off job owed before training resumes.
+      for (const step of sa3SnapshotSteps(run.runDir).filter(s => s < run.steps)) {
+        if (isCancelled(job)) return;
+        if (sa3PreviewPending(run.runDir, runId, step, preview)) await renderStep(step, false);
+      }
+    }
+    await stopEngine();
+    let result: Execution;
+    for (;;) {
+      if (isCancelled(job)) return;
+      const at = preview ? sa3StateStep(run.runDir) ?? 0 : 0;
+      // A segment that reached a preview step but lost its capture (the server
+      // stopped in between) re-exports that step from state.gguf: --steps at
+      // the saved step trains nothing and writes the export.
+      const recover = !!preview && at > 0 && at < run.steps && at % preview.everySteps === 0 && !sa3SnapshotSteps(run.runDir).includes(at);
+      const bound = !preview ? run.steps : recover ? at : sa3NextBound(at, preview.everySteps, run.steps);
+      job.phase = 'loading-models'; job.total = run.steps; job.done = at; emitProgress(job);
+      result = await deps.execute(job, preview ? { ...run, steps: bound, goalSteps: run.steps, exportEvery: 0,
+        resume: fs.existsSync(path.join(run.runDir, 'state.gguf')) } : run);
+      if (isCancelled(job)) return;
+      if (!result.done || result.stopped || result.error) throw new Error(result.error || 'SA3 trainer stopped without a completed export');
+      if (![result.baseSha256, result.inferenceSha256].every(s => /^[a-f0-9]{64}$/.test(s))) throw new Error('SA3 trainer omitted base provenance');
+      if (!preview) break;
+      const saved = sa3StateStep(run.runDir);
+      if (saved !== bound) throw new Error(`SA3 segment saved step ${saved}, expected ${bound}`);
+      if (bound >= run.steps) break;
+      if (!captureSa3Snapshot(run.runDir, bound, sa3Identity(result.inferenceSha256))) log(job, 'warn', `Snapshot at step ${bound} was already captured; kept the first one`);
+      clearSa3SegmentExport(run.runDir);
+      await startEngine();
+      try { await renderStep(bound, false); }
+      catch (err: any) { log(job, 'warn', `Previews at step ${bound} failed; training continues: ${err?.message || err}`); }
+      if (isCancelled(job)) return;
+      await stopEngine();
+    }
     for (const name of ['state.gguf', 'adapter-raw.gguf']) {
       const file = path.join(run.runDir, name), fd = fs.openSync(file, 'r');
       try {
@@ -223,19 +308,25 @@ export async function runSa3TrainJob(job: TrainingJob, injected: Partial<Sa3Runn
     }
     job.phase = 'export'; emitProgress(job);
     run.baseSha256 = result.baseSha256; run.inferenceSha256 = result.inferenceSha256;
+    if (preview) captureSa3Snapshot(run.runDir, run.steps, sa3Identity(result.inferenceSha256));
     run.published = deps.publish(path.join(run.runDir, 'adapter.gguf'),
-      `${run.adapterName}-${path.basename(run.runDir)}`, `stabilityai/stable-audio-3-medium sha256:${result.inferenceSha256}`, run.modelsDir);
+      `${run.adapterName}-${path.basename(run.runDir)}`, sa3Identity(result.inferenceSha256), run.modelsDir);
     saveRun(run);
-    pushEvent(job, { type: 'log', level: 'info', ts: Date.now(), message: `Published SA3 adapter: ${run.published}` });
+    log(job, 'info', `Published SA3 adapter: ${run.published}`);
   } catch (err: any) { error = err.message || String(err); }
   finally {
-    if (stopped) {
-      job.phase = 'engine-restart'; emitProgress(job);
-      try { if (!await deps.restart()) throw new Error('Engine did not restart after SA3 training'); }
+    if (engineDown) {
+      try { await startEngine(); }
       catch (err: any) {
         error = [error, err.message].filter(Boolean).join('; ');
-        pushEvent(job, { type: 'log', level: 'error', ts: Date.now(), message: err.message });
+        log(job, 'error', err.message);
       }
+    }
+    // Final previews only for a published run with the engine back. A step
+    // already rendered (a resumed run, a retry) is not rendered again.
+    if (preview && !error && !engineDown && !isCancelled(job)) {
+      try { await renderStep(run.steps, true); }
+      catch (err: any) { log(job, 'warn', `Final previews failed; the adapter is published: ${err?.message || err}`); }
     }
     releaseJobCleanup(job);
     if (!isCancelled(job)) { job.phase = error ? 'failed' : 'done'; finishJob(job, error ? 'failed' : 'done', error); }
