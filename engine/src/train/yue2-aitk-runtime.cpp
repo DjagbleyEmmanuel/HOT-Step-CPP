@@ -502,6 +502,20 @@ static int run_impl(Config config, std::string * error) {
             yue2_aitk_graph::bf16_attention_supported() =
                 ggml_backend_supports_op(backend.value, fwd) && ggml_backend_supports_op(backend.value, bwd);
         }
+        // bf16 mode casts the LoRA factors to BF16, so their activation backward
+        // is OUT_PROD with a BF16 src0. CUDA takes it; Metal and CPU refuse
+        // (#240), so those take mm-backward's mul_mat form, as GGUF bases do.
+        // Latched on the first backward, so it is set before any graph is built.
+        ggml_tensor * w = ggml_new_tensor_2d(probe, GGML_TYPE_BF16, 128, 16);
+        ggml_tensor * g = ggml_new_tensor_2d(probe, GGML_TYPE_F32, 16, 128);
+        if (!yue2_aitk_graph::strict_f32() &&
+            !ggml_backend_supports_op(backend.value, ggml_out_prod(probe, w, ggml_transpose(probe, g)))) {
+#ifdef _WIN32
+            _putenv("GGML_BACKWARD_MM=1");
+#else
+            setenv("GGML_BACKWARD_MM", "1", 1);
+#endif
+        }
         ggml_free(probe);
     }
     std::fprintf(stderr, "[yue2-aitk] training device %s via %s; attention %s\n", ggml_backend_dev_name(device), reg_name,
