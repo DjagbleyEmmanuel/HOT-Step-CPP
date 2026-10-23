@@ -34,7 +34,7 @@ import analyzeRoutes from './routes/analyze.js';
 import uploadRoutes from './routes/upload.js';
 import supersepRoutes from './routes/supersep.js';
 import settingsRoutes from './routes/settings.js';
-import settingsBackupRoutes from './routes/settingsBackup.js';
+import settingsBackupRoutes, { backupBodyParser } from './routes/settingsBackup.js';
 import modelManagerRoutes from './routes/modelManager.js';
 import stemStudioRoutes from './routes/stemStudio.js';
 import assistantRoutes from './routes/assistant.js';
@@ -99,6 +99,8 @@ app.use(cors());
 app.use('/api', workerTokenGate);
 app.use('/api', workerUpdateGate);
 app.use('/api/workers', workerRoutes);
+// Backups can exceed 50 MB; this parser runs first and the global one then skips the parsed body.
+app.use('/api/settings/backup', backupBodyParser);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

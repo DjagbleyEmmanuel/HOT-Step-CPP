@@ -8,7 +8,9 @@ process.env.DATA_DIR = directory;
 const express = (await import('express')).default;
 const database = await import('../db/database.js');
 const auth = (await import('./auth.js')).default;
-const backup = (await import('./settingsBackup.js')).default;
+const backupModule = await import('./settingsBackup.js');
+const backup = backupModule.default;
+const backupParser = backupModule.backupBodyParser;
 const service = await import('../services/settingsBackup.js');
 const rows = await import('../db/lireekDb.js');
 
@@ -152,6 +154,23 @@ test('settings backup validates, previews and atomically restores only the expor
       service.importSettingsBackup(db, data);
       assert.equal((db.prepare('SELECT parent_generation_id FROM generations WHERE id = ?').get(generation.id) as { parent_generation_id: number }).parent_generation_id, 999);
       assert.deepEqual(db.pragma('foreign_key_check'), []);
+    });
+    await t.test('a backup past the global 50 MB body limit still previews', async () => {
+      const big = structuredClone(file);
+      big.lyricStudio.generations[0].lyrics = 'x'.repeat(60 * 1024 * 1024);
+      const limited = express();
+      limited.use(backupParser);
+      limited.use(express.json({ limit: '50mb' }));
+      limited.use('/backup', backup);
+      const srv = limited.listen(0, '127.0.0.1');
+      await new Promise<void>(resolve => srv.once('listening', resolve));
+      const addr = srv.address();
+      assert.ok(addr && typeof addr !== 'string');
+      try {
+        const response = await fetch(`http://127.0.0.1:${addr.port}/backup/preview`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ backup: big }) });
+        assert.equal(response.status, 200);
+      } finally { await new Promise<void>(resolve => srv.close(() => resolve())); }
     });
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));

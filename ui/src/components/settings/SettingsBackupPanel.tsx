@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { ParamLabel } from '../shared/ParamLabel';
 
 interface Props { settings: AppSettings; onSettingsChange: (settings: AppSettings) => void }
-const MAX_BYTES = 40 * 1024 * 1024;
+const MAX_BYTES = 500 * 1024 * 1024; // server accepts 512 MB (BACKUP_BODY_LIMIT)
 
 export function SettingsBackupPanel({ settings, onSettingsChange }: Props) {
   const { t } = useTranslation();
@@ -40,7 +40,7 @@ export function SettingsBackupPanel({ settings, onSettingsChange }: Props) {
   });
   const choose = (file: File) => run(async () => {
     setPending(null);
-    if (file.size > MAX_BYTES) throw new Error(t('settings.backup.tooLarge', 'Backup files must be smaller than 40 MB.'));
+    if (file.size > MAX_BYTES) throw new Error(t('settings.backup.tooLarge', 'Backup files must be smaller than 500 MB.'));
     let backup: unknown;
     try { backup = JSON.parse(await file.text()); }
     catch { throw new Error(t('settings.backup.badJson', 'This file is not valid JSON.')); }

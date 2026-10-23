@@ -2129,7 +2129,7 @@
     "settings.tabs.general": "General",
     "settings.tabs.environment": "Environment",
     "settings.tabs.ai": "AI Services",
-    "settings.backup.tooLarge": "Backup files must be smaller than 40 MB.",
+    "settings.backup.tooLarge": "Backup files must be smaller than 500 MB.",
     "settings.backup.badJson": "This file is not valid JSON.",
     "settings.backup.artists": "Artists",
     "settings.backup.albums": "Lyric collections",

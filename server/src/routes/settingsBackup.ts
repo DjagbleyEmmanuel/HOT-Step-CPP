@@ -1,10 +1,14 @@
-// Mount at /api/settings/backup, after the JSON body parser.
+// Mount at /api/settings/backup, behind backupBodyParser (before the global 50 MB parser).
 // POST /export: download JSON; POST /preview: validate without writing; POST /import: confirmed replacement.
-import { Router, type RequestHandler } from 'express';
+import express, { Router, type RequestHandler } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/database.js';
 import { getUserId } from './auth.js';
 import { BackupValidationError, exportSettingsBackup, importSettingsBackup, previewSettingsBackup } from '../services/settingsBackup.js';
+
+// An export holds every prompt ever sent and every profile, and reached 71 MB; it must re-import unchanged.
+export const BACKUP_BODY_LIMIT = '512mb';
+export const backupBodyParser = express.json({ limit: BACKUP_BODY_LIMIT });
 
 export function createSettingsBackupRouter(database: () => Database.Database = getDb, authorized = getUserId) {
   const router = Router();
