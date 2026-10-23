@@ -1043,6 +1043,28 @@ HOT-Approved, the Fixed recipe preset, passes `--caption-dropout-trigger` with
 the trigger, or the dataset slug if no trigger is set. Older prepared datasets
 need re-preparing; the server invalidates the old Fixed recipe preparation cache.
 
+## ace-train YuE2 hold-out evaluation reference
+
+These flags belong to `ace-train yue2-joint-train`. See
+[training internals](../../docs/dev/training-internals.md#yue2-preparation-operations)
+for the evaluation output and sampling procedure.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--holdout-items I,J,...` | none | Exclude distinct zero-based prepared-dataset indices from training; at least one item must remain. With adapted evaluation and no separate evaluation dataset, score only these items |
+| `--eval-adapted --resume <optimizer.resume>` | off | Restore a checkpoint and compare base versus adapted planner CE and decoder MSE without updating weights. Pass the run's training flags and total `--steps` |
+| `--eval-dataset <dataset.json>` | training dataset or its hold-out split | Score every item of this separate prepared dataset; takes precedence over the in-dataset split for evaluation |
+| `--eval-nar-window N` | `--nar-crop-frames` | Adapted-evaluation window in frames; `0` means the whole song |
+| `--eval-seed N` | `--seed` | Unsigned seed for adapted-evaluation draws |
+
+Resume records bind the hold-out split as a set. Supply the same indices on
+training and evaluation resumes. The saved order must contain every non-held-out
+item exactly once and its cursor must index that order. A legacy record with no
+saved split can resume only without a hold-out; a new split requires a new run.
+The summary reports `held_out:true` when using a saved split or a separate
+evaluation dataset, and `false` when scoring the unsplit training dataset.
+These flags do not add a training early-stop rule.
+
 ## fattn-train-test reference
 
 Parity harness for `GGML_OP_FLASH_ATTN_TRAIN{,_BACK}`: compares the fused op

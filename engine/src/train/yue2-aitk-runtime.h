@@ -345,6 +345,52 @@ inline void usage(FILE * out) {
 }
 
 namespace detail {
+// Shared by fresh-run filtering and resume validation. Dataset indices are
+// stable; the split is a set, while the training order retains its shuffle.
+inline bool training_order(size_t item_count, const std::vector<size_t> & holdout,
+                           std::vector<size_t> * order, std::string * error) {
+    std::vector<bool> held(item_count, false);
+    for (size_t k : holdout) {
+        if (k >= item_count || held[k]) {
+            if (error) *error = "--holdout-items must contain distinct in-range indices";
+            return false;
+        }
+        held[k] = true;
+    }
+    if (holdout.size() >= item_count) {
+        if (error) *error = "--holdout-items leaves no training item";
+        return false;
+    }
+    order->clear();
+    for (size_t k = 0; k < item_count; ++k) if (!held[k]) order->push_back(k);
+    return true;
+}
+
+inline bool validate_resume_order(size_t item_count, const std::vector<size_t> & holdout,
+                                  const std::vector<size_t> & saved_holdout,
+                                  const std::vector<size_t> & order, uint64_t cursor,
+                                  std::string * error) {
+    std::vector<size_t> expected, saved_expected;
+    if (!training_order(item_count, holdout, &expected, error) ||
+        !training_order(item_count, saved_holdout, &saved_expected, error)) return false;
+    // Missing metadata is passed as an empty split: legacy runs saw all items.
+    if (expected != saved_expected) {
+        if (error) *error = "resume hold-out split mismatch; start a new run";
+        return false;
+    }
+    auto sorted = order;
+    std::sort(sorted.begin(), sorted.end());
+    if (sorted != expected) {
+        if (error) *error = "resume order must be the nonempty complement of the hold-out split";
+        return false;
+    }
+    if (cursor >= order.size()) {
+        if (error) *error = "resume order cursor is out of range";
+        return false;
+    }
+    return true;
+}
+
 inline bool decimal_u64(const char * text, std::uint64_t * out) {
     if (!text || !*text || !out) return false;
     std::uint64_t value = 0;

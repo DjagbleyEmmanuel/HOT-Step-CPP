@@ -166,9 +166,19 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     { yyjson_val * v=yyjson_obj_get(root,"ar_loss_weight"); const double was=v&&yyjson_is_num(v)?yyjson_get_num(v):1.0; if(was!=double(config.ar_loss_weight)) std::fprintf(stderr,"[yue2-aitk] resume note: ar-loss-weight changed from %.9g to %.9g; the run continues with the new value\n", was, (double)config.ar_loss_weight); }
     { yyjson_val * v=yyjson_obj_get(root,"grad_accum"); const int was=v&&yyjson_is_int(v)?int(yyjson_get_sint(v)):1; if(was!=config.grad_accum) std::fprintf(stderr,"[yue2-aitk] resume note: grad-accum changed from %d to %d; the run continues with the new value\n", was, config.grad_accum); }
     yyjson_val * vrecipe=yyjson_obj_get(root,"recipe"), *vcp=yyjson_obj_get(root,"checkpoint_sha256"), *vds=yyjson_obj_get(root,"dataset_sha256"), *vsm=yyjson_obj_get(root,"source_manifest_sha256"), *vseed=yyjson_obj_get(root,"seed"), *vdev=yyjson_obj_get(root,"cuda_index"), *vstep=yyjson_obj_get(root,"completed_step"), *vcursor=yyjson_obj_get(root,"order_cursor"), *vorder=yyjson_obj_get(root,"order"), *vsampler=yyjson_obj_get(root,"sampler_state");
-    if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || (yyjson_arr_size(vorder)!=item_count && yyjson_arr_size(vorder)+config.holdout_items.size()!=item_count) || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
+    if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
+    std::vector<size_t> saved_holdout;
+    if (yyjson_val * split = yyjson_obj_get(root, "holdout_items")) {
+        if (!yyjson_is_arr(split)) return fail(error, "resume hold-out split is malformed");
+        size_t i = 0, max = 0; yyjson_val * x = nullptr;
+        yyjson_arr_foreach(split, i, max, x) {
+            if (!yyjson_is_uint(x) || yyjson_get_uint(x) >= item_count) return fail(error, "resume hold-out split is malformed");
+            saved_holdout.push_back(static_cast<size_t>(yyjson_get_uint(x)));
+        }
+    }
     plan->completed=static_cast<int>(yyjson_get_sint(vstep)); plan->cursor=static_cast<size_t>(yyjson_get_uint(vcursor)); plan->sampler=std::move(sampler); plan->order.clear(); std::unordered_set<size_t> seen; size_t i=0,max=0; yyjson_val * x=nullptr; yyjson_arr_foreach(vorder,i,max,x) { if(!yyjson_is_uint(x) || yyjson_get_uint(x)>=item_count || !seen.insert(static_cast<size_t>(yyjson_get_uint(x))).second) return fail(error,"resume order is not a permutation"); plan->order.push_back(static_cast<size_t>(yyjson_get_uint(x))); }
-    if (plan->cursor>item_count || plan->completed<0) return fail(error,"resume cursor is out of range");
+    if (!yue2_aitk_runtime::detail::validate_resume_order(item_count, config.holdout_items, saved_holdout,
+                                                       plan->order, yyjson_get_uint(vcursor), error)) return false;
     if (binding) {
         auto history=[&](const char * key, std::vector<double> * out) {
             yyjson_val * a=yyjson_obj_get(root,key); if(!yyjson_is_arr(a)) return;
@@ -210,6 +220,10 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
     if (!root || !arr) { yyjson_mut_doc_free(doc); return {}; }
     yyjson_mut_doc_set_root(doc,root);
+    yyjson_mut_val * split = yyjson_mut_arr(doc);
+    if (!split) { yyjson_mut_doc_free(doc); return {}; }
+    for (size_t k : config.holdout_items) yyjson_mut_arr_add_uint(doc, split, k);
+    yyjson_mut_obj_add_val(doc, root, "holdout_items", split);
     if(cursor_weight>0) yyjson_mut_obj_add_real(doc,root,"cursor_weight",cursor_weight);
     yyjson_mut_obj_add_strcpy(doc,root,"recipe","yue2-aitk-runtime-v1"); yyjson_mut_obj_add_strcpy(doc,root,"checkpoint_sha256",cp.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"dataset_sha256",ds.c_str()); yyjson_mut_obj_add_strcpy(doc,root,"source_manifest_sha256",sm.c_str()); yyjson_mut_obj_add_uint(doc,root,"seed",seed); yyjson_mut_obj_add_int(doc,root,"cuda_index",device); yyjson_mut_obj_add_int(doc,root,"completed_step",completed); yyjson_mut_obj_add_uint(doc,root,"order_cursor",cursor); for(size_t x:order) yyjson_mut_arr_add_uint(doc,arr,x); yyjson_mut_obj_add_val(doc,root,"order",arr); yyjson_mut_obj_add_strcpy(doc,root,"sampler_state",sampler.c_str());
     yyjson_mut_obj_add_strcpy(doc,root,"optimizer",config.optimizer.c_str()); yyjson_mut_obj_add_int(doc,root,"rank",config.rank); yyjson_mut_obj_add_real(doc,root,"alpha",config.alpha); yyjson_mut_obj_add_real(doc,root,"lr",config.lr); yyjson_mut_obj_add_int(doc,root,"warmup",config.warmup); yyjson_mut_obj_add_real(doc,root,"weight_decay",config.weight_decay); yyjson_mut_obj_add_real(doc,root,"prodigy_d0",config.prodigy_d0); yyjson_mut_obj_add_real(doc,root,"muon_lr_scale",config.muon_lr_scale); yyjson_mut_obj_add_int(doc,root,"muon_ns_steps",config.muon_ns_steps);
@@ -413,7 +427,8 @@ static int run_impl(Config config, std::string * error) {
         if (!dataset.trigger.empty()) adapter_meta.push_back({"style_template", dataset.style_template});
     }
     yue2_aitk::Yue2NativeSampler sampler(config.seed);
-    std::vector<size_t> order(dataset.items.size()); std::iota(order.begin(), order.end(), 0);
+    std::vector<size_t> order;
+    if (!detail::training_order(dataset.items.size(), config.holdout_items, &order, error)) return 1;
     size_t cursor = 0; int completed = 0;
     float cursor_weight=config.cursor_weight;
     if(!std::isfinite(cursor_weight)||cursor_weight<0||cursor_weight>10) { fail(error,"invalid lyric timing weight"); return 1; }
@@ -423,20 +438,12 @@ static int run_impl(Config config, std::string * error) {
         if (!yue2_aitk::yue2_aitk_read_resume(config.resume.c_str(), &resume_plan.record)) { fail(error, "cannot read resume record"); return 1; }
         if (!parse_resume_meta(resume_plan.record.runner_metadata, checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, dataset.items.size(), &resume_plan, error,&cursor_weight,config.cursor_weight_explicit,config,&resume_binding)) return 1;
         if (resume_plan.completed > config.steps || resume_plan.completed > INT_MAX || resume_plan.record.state.step != resume_plan.completed) { fail(error, "resume completed step is invalid"); return 1; }
-        if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
         if (resume_binding.planner_frozen_at >= 0 && config.nar_extra_steps <= 0 && !config.unfreeze_planner) { fail(error, "this run's planner is frozen; resume it with --nar-extra-steps (or --unfreeze-planner)"); return 1; }
         if (config.freeze_planner_now && config.nar_extra_steps <= 0) { fail(error, "--freeze-planner-now needs --nar-extra-steps (the decoder's budget after the freeze)"); return 1; }
         order = resume_plan.order; cursor = resume_plan.cursor; completed = resume_plan.completed;
     } else if (config.freeze_planner_now) {
         fail(error, "--freeze-planner-now needs --resume: it freezes the checkpoint's planner"); return 1;
-    }
-    if (!config.holdout_items.empty()) {
-        std::vector<char> held(dataset.items.size(), 0);
-        for (size_t k : config.holdout_items) { if (k >= held.size()) { fail(error, "--holdout-items index is out of range"); return 1; } held[k] = 1; }
-        if (config.holdout_items.size() >= dataset.items.size()) { fail(error, "--holdout-items leaves no training item"); return 1; }
-        order.erase(std::remove_if(order.begin(), order.end(), [&](size_t k) { return held[k] != 0; }), order.end());
-        if (cursor >= order.size()) cursor = 0;
     }
     if (config.resume.empty() && !config.freeze_planner_now) { sampler.rng().shuffle(order); }
     if(cursor_weight>0) for(const auto & item:dataset.items) {
