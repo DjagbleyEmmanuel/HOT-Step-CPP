@@ -18,7 +18,8 @@ import { sanitizeHeaders } from './lyricsSanitizer.js';
 import { buildUserPrompt, captionProblem, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
 import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
-  applyFactSubstitution, captionWithMoss, correctFactsInProse, MM3_INSTRUCTIONS,
+  applyFactSubstitution, captionWithMoss, correctFactsInProse, isLocalCaptioner,
+  LOCAL_CAPTIONER_NAMES, MM3_INSTRUCTIONS, type LocalCaptioner,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow, TrainingSample } from './types.js';
@@ -275,6 +276,7 @@ function isNetworkError(err: any): boolean {
 async function captionWithMossProvider(
   sample: TrainingSample,
   opts: {
+    model: LocalCaptioner;
     wantMm3?: boolean;
     signal?: AbortSignal;
     log?: (level: 'info' | 'warn', message: string) => void;
@@ -294,7 +296,7 @@ async function captionWithMossProvider(
 
   const result = await captionWithMoss(
     sample.audioPath, facts,
-    { wantMm3: opts.wantMm3, signal: opts.signal, log: opts.log },
+    { model: opts.model, wantMm3: opts.wantMm3, signal: opts.signal, log: opts.log },
   );
 
   const out: Record<string, string> = {};
@@ -310,7 +312,7 @@ async function captionWithMossProvider(
     // BPM and key are deliberately NOT taken from MOSS — local analysis already
     // has them exactly, and MOSS is measurably wrong on both (burn: ~102 / C#
     // minor vs Essentia's 90 / E major). Signature likewise.
-    opts.log?.('info', 'captioned locally from audio (MOSS-Music-8B)');
+    opts.log?.('info', `captioned locally from audio (${LOCAL_CAPTIONER_NAMES[opts.model]})`);
   }
 
   if (result.mm3?.trim()) {
@@ -362,10 +364,10 @@ async function writeYue2Alongside(
   if (!caption) return;
 
   const provider = (opts.yue2Provider
-    || (opts.provider === 'moss' ? config.lireek.defaultProvider : opts.provider)
+    || (isLocalCaptioner(opts.provider) ? config.lireek.defaultProvider : opts.provider)
     || '').trim();
-  if (!provider || provider === 'moss') {
-    opts.log?.('warn', 'YuE2 caption skipped — no chat provider configured (MOSS has no text mode)');
+  if (!provider || isLocalCaptioner(provider)) {
+    opts.log?.('warn', 'YuE2 caption skipped — no chat provider configured (the local audio models have no text mode)');
     return;
   }
 
@@ -417,8 +419,8 @@ export async function enhanceCaption(
 ): Promise<Record<string, string>> {
   // Local, audio-grounded path. Checked BEFORE getProvider because 'moss' is not
   // an LLM provider — it has no API key, no model list, and it listens.
-  if (opts.provider === 'moss') {
-    const out = await captionWithMossProvider(sample, opts);
+  if (isLocalCaptioner(opts.provider)) {
+    const out = await captionWithMossProvider(sample, { ...opts, model: opts.provider });
     if (opts.wantYue2 !== false) await writeYue2Alongside(sample, ds, out, opts);
     return out;
   }

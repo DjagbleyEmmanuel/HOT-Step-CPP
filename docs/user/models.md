@@ -19,8 +19,8 @@ quantisation; lower numbers mean smaller files and less VRAM at some cost in qua
 
 Files download from Hugging Face into the models folder: `models/` in the data folder in a
 release (see [Data folder and upgrades](data-folder.md)), or wherever **Models directory** in
-Settings points. MiniMax-Music3, YuE2, MOSS, stem separation and Whisper files go in its
-`mm3/`, `yue2/`, `moss/`, `supersep/` and `whisper/` subfolders, and the Stable Audio 3
+Settings points. MiniMax-Music3, YuE2, MOSS, Music Flamingo, stem separation and Whisper files go in its
+`mm3/`, `yue2/`, `moss/`, `flamingo/`, `supersep/` and `whisper/` subfolders, and the Stable Audio 3
 tokenizer files in `onnx/sa3/`. In a release, runtime libraries go to the data folder's
 `tools/runtime/`; a git checkout keeps them next to the engine binary. A new extracted version
 reuses all of them through the saved data folder location.

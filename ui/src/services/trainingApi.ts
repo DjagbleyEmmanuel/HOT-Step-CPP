@@ -1402,7 +1402,7 @@ export type SampleLabelStatus =
   | 'processing'  // currently being labeled
   | 'error';      // last label attempt failed (see `error`)
 
-export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'llm' | 'tags' | 'filename' | 'user';
+export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'flamingo' | 'llm' | 'tags' | 'filename' | 'user';
 
 // ── Dataset ──────────────────────────────────────────────────────────────
 export interface TrainingDatasetSummary {
@@ -1985,6 +1985,8 @@ export interface TrainingCapabilities {
    * so the panel can say "download the GGUF" rather than "rebuild the engine".
    */
   moss: { available: boolean; missing: string };
+  /** Music Flamingo: second local audio model (captions + local lyric transcription). */
+  flamingo?: { available: boolean; missing: string };
   llm: {
     configured: boolean;
     defaultProvider: string;
@@ -2188,6 +2190,8 @@ export interface LabelOptions {
   tempoSource?: 'beat_this' | 'essentia';  // default beat_this
   keySource?: 'sheetsage' | 'essentia';    // default sheetsage (also saves the lead sheet)
   useGenius?: boolean;     // default false — canonical lyrics (needs token)
+  /** Transcribe lyrics locally (Music Flamingo) where none are left after Genius. */
+  localLyrics?: boolean;
   useCaption?: boolean;    // default false — LLM caption+genre (audio-grounded on gemini)
   useUnderstand?: boolean; // default false — LEGACY /understand path
   mergePolicy?: MergePolicy;

@@ -42,7 +42,9 @@ import { buildDataset } from './datasetBuilder.js';
 import * as audioMeta from './audioMeta.js';
 import { getDataset, updateCounters, updateDataset } from './datasetsRepo.js';
 import type { AceRequest } from '../aceClient.js';
-import { arbitrateSidecarGenre, prepareMossBatch, clearMossBatch } from './mossCaption.js';
+import {
+  arbitrateSidecarGenre, clearMossBatch, isLocalCaptioner, prepareMossBatch, transcribeLyricsLocal,
+} from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import type {
   BuildOptions, CaptionOptions, FieldSource, GeniusOptions, LabelOptions, MergePolicy,
@@ -1193,8 +1195,9 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
       // progressively rather than all at once when the process exits.
       // Placed here, after passALane has already started, so Essentia (CPU) runs
       // concurrently with captioning (GPU) rather than queueing behind it.
-      if (opts.useCaption !== false && opts.caption?.provider === 'moss') {
+      if (opts.useCaption !== false && isLocalCaptioner(opts.caption?.provider)) {
         await prepareMossBatch(targets.map(t => t.audioPath), {
+          model: opts.caption!.provider as 'moss' | 'flamingo',
           wantMm3: true,
           signal: job.controller.signal,
           log: (level, message) => emitLog(job, level, message),
@@ -1208,6 +1211,46 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
 
     if (isCancelled(job)) return;
     if (job.status !== 'running') return;   // engine-unreachable already finished the job
+
+    // ── Local lyrics: Music Flamingo where Genius left none ──
+    // After every other lane, so it knows exactly which tracks Genius missed and
+    // runs them in ONE process (one ~9 GB model load) behind the caption batch.
+    // Reads the sidecar rather than Pass B's bookkeeping: lyrics already there
+    // (an earlier run, the user) are never replaced, and a track marked
+    // instrumental is left alone.
+    if (opts.localLyrics === true) {
+      const need = targets.filter(t => {
+        const meta = loadSidecarMetadata(t.audioPath);
+        return !(meta.lyrics ?? '').trim() && meta.is_instrumental !== 'true';
+      });
+      if (need.length > 0) {
+        job.phase = 'lyrics';
+        emitProgress(job);
+        emitLog(job, 'info', `Transcribing lyrics locally (Music Flamingo) for ${need.length} track(s) with none`);
+        const byPath = new Map(need.map(t => [t.audioPath, t]));
+        const got = await transcribeLyricsLocal(need.map(t => t.audioPath), {
+          model: 'flamingo',
+          signal: job.controller.signal,
+          log: (level, message) => emitLog(job, level, message),
+          onTrack: async (audioPath, lyrics) => {
+            const sample = byPath.get(audioPath);
+            if (!sample || isCancelled(job)) return;
+            await mergeIntoSidecar(sample, { lyrics }, 'fill_missing', true);
+            const prev = readLabel(ds.slug, sample.sampleId);
+            patchLabel(ds.slug, sample.sampleId, {
+              relPath: sample.relPath,
+              sources: { ...(prev?.sources ?? {}), lyrics: 'flamingo' },
+              lyricsError: null,
+            });
+            const fresh = refreshSample(ds, sample);
+            pushEvent(job, { type: 'sample', sampleId: sample.sampleId, status: fresh.labelStatus, sample: fresh });
+          },
+        });
+        emitLog(job, got.size === need.length ? 'info' : 'warn',
+          `Music Flamingo transcribed ${got.size}/${need.length} track(s)`);
+        if (isCancelled(job)) return;
+      }
+    }
 
     const finalSamples = await buildSamples(ds, { withDuration: false });
     refreshCounters(ds, finalSamples);
@@ -1315,8 +1358,9 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
     // Scoped to this job, i.e. one dataset. A bulk run interleaves captioning
     // with LM/DiT training per dataset, and holding the captioner resident while
     // a trainer wants the card is the wrong trade — the process exits here.
-    if (opts.provider === 'moss') {
+    if (isLocalCaptioner(opts.provider)) {
       await prepareMossBatch(targets.map(s => s.audioPath), {
+        model: opts.provider,
         wantMm3: opts.wantMm3 !== false,
         signal: job.controller.signal,
         log: (level, message) => emitLog(job, level, message),

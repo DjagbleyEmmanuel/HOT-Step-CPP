@@ -300,7 +300,7 @@ export type SampleLabelStatus =
   | 'processing'  // currently being labeled
   | 'error';      // last label attempt failed (see `error`)
 
-export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'llm' | 'tags' | 'filename' | 'user';
+export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'flamingo' | 'llm' | 'tags' | 'filename' | 'user';
 
 // ─── Dataset ──────────────────────────────────────────────────────────────
 export interface TrainingDatasetSummary {
@@ -471,6 +471,9 @@ export interface TrainingCapabilities {
    * and `missing` says which so the UI can tell the user the right thing.
    */
   moss: { available: boolean; missing: string };
+  /** Music Flamingo: the second local audio model (captions, and the lyric
+   *  transcriber behind LabelOptions.localLyrics). Same probe as `moss`. */
+  flamingo: { available: boolean; missing: string };
   llm: {
     configured: boolean;
     defaultProvider: string;
@@ -675,6 +678,10 @@ export interface LabelOptions {
   /** Where key comes from; sheetsage also saves the lead sheet beside the audio. Default sheetsage. */
   keySource?: 'sheetsage' | 'essentia';
   useGenius?: boolean;     // default false — canonical lyrics (needs token)
+  /** Transcribe lyrics locally with Music Flamingo for every target that still has
+   *  none after the Genius step (or all of them, without Genius). Section-tagged.
+   *  Default false. */
+  localLyrics?: boolean;
   useCaption?: boolean;    // default false — LLM caption+genre (audio-grounded on gemini)
   useUnderstand?: boolean; // default false — LEGACY /understand path (2026-07-27 pivot)
   mergePolicy?: MergePolicy;

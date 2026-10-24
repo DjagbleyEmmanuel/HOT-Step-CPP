@@ -43,12 +43,18 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
   const mossProvider = caps?.moss.available
     ? { id: 'moss', name: 'MOSS-Music 8B — local, hears the audio', available: true, models: [] as string[], defaultModel: '' }
     : null;
+  const flamingoProvider = caps?.flamingo?.available
+    ? { id: 'flamingo', name: 'Music Flamingo — local, hears the audio', available: true, models: [] as string[], defaultModel: '' }
+    : null;
   const providers = [
     ...(mossProvider ? [mossProvider] : []),
+    ...(flamingoProvider ? [flamingoProvider] : []),
     ...(caps?.llm.providers.filter(p => p.available) ?? []),
   ];
   const activeProvider = providers.find(p => p.id === (provider || caps?.llm.defaultProvider)) ?? providers[0];
-  const isMoss = activeProvider?.id === 'moss';
+  // "Moss" here means any local audio model: same card needs, no model list,
+  // no text-only modes.
+  const isMoss = activeProvider?.id === 'moss' || activeProvider?.id === 'flamingo';
 
   const scoped = selectedSampleIds.length > 0 ? { sampleIds: selectedSampleIds } : {};
 

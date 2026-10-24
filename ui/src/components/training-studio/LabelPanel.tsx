@@ -39,7 +39,10 @@ export const LabelPanel: React.FC = () => {
   // captioning outright — that hid the only offline option exactly when it was
   // the only one available.
   const mossOk = !!caps?.moss.available;
-  const captionOk = !!caps?.llm.configured || mossOk;
+  const flamingoOk = !!caps?.flamingo?.available;
+  const captionOk = !!caps?.llm.configured || mossOk || flamingoOk;
+  // The local default: MOSS first (the established captioner), else Flamingo.
+  const localDefault = mossOk ? 'moss' : flamingoOk ? 'flamingo' : '';
 
   const [scope, setScope] = useState<'unlabeled' | 'all' | 'selected'>('unlabeled');
   const [useEssentia, setUseEssentia] = useState(true);
@@ -51,6 +54,8 @@ export const LabelPanel: React.FC = () => {
   const [maxTempo, setMaxTempo] = useState('');
   const [useGenius, setUseGenius] = useState(true);
   const [useCaption, setUseCaption] = useState(true);
+  // Music Flamingo fills the lyrics Genius could not find (section-tagged).
+  const [localLyrics, setLocalLyrics] = useState(true);
   // Default to MOSS when present: it is local, free, and describes what it hears
   // rather than rewriting the local analysis. Cloud stays available via Enhance.
   const [captionProvider, setCaptionProvider] = useState('');
@@ -80,10 +85,13 @@ export const LabelPanel: React.FC = () => {
   const effectiveEssentia = useEssentia && essentiaOk;
   const effectiveGenius = useGenius && geniusOk;
   const effectiveCaption = useCaption && captionOk;
-  const anyStep = effectiveEssentia || effectiveGenius || effectiveCaption;
-  // What this run would need the engine for: MOSS captioning. (The legacy
-  // /understand step is not offered by this panel.)
-  const needsEngine = effectiveCaption && (captionProvider || (mossOk ? 'moss' : '')) === 'moss';
+  const effectiveLocalLyrics = localLyrics && flamingoOk;
+  const anyStep = effectiveEssentia || effectiveGenius || effectiveCaption || effectiveLocalLyrics;
+  // What this run would need the card for: local captioning (MOSS, Flamingo) or
+  // local lyric transcription. (The legacy /understand step is not offered here.)
+  const chosenProvider = captionProvider || localDefault;
+  const needsEngine = effectiveLocalLyrics
+    || (effectiveCaption && (chosenProvider === 'moss' || chosenProvider === 'flamingo'));
   const blockedByJob = trainerRunning ? needsEngine : jobRunning;
   const minBpm = minTempo ? Number(minTempo) : undefined;
   const maxBpm = maxTempo ? Number(maxTempo) : undefined;
@@ -106,11 +114,12 @@ export const LabelPanel: React.FC = () => {
           ...(maxTempo ? { maxTempo: Number(maxTempo) } : {}),
         } } : {}),
         useGenius: effectiveGenius,
+        localLyrics: effectiveLocalLyrics,
         useCaption: effectiveCaption,
         // Without this the server falls back to config.lireek.defaultProvider,
         // which is why labeling always went to Gemini even with MOSS installed.
         caption: {
-          provider: captionProvider || (mossOk ? 'moss' : undefined),
+          provider: captionProvider || localDefault || undefined,
           ...(captionModel ? { model: captionModel } : {}),
         },
         mergePolicy,
@@ -218,6 +227,21 @@ export const LabelPanel: React.FC = () => {
 
           <Toggle
             accent="amber"
+            checked={effectiveLocalLyrics}
+            disabled={!flamingoOk}
+            onChange={setLocalLyrics}
+            label={t('trainingStudio.label.localLyrics', 'Transcribe missing lyrics locally (Music Flamingo)')}
+            info={t('trainingStudio.label.localLyricsInfo', 'After Genius, any track that still has no lyrics is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Lyrics already in a sidecar and tracks marked instrumental are left alone. Runs on your GPU, about 5 seconds a track on a fast card.')}
+            defaultValue={true}
+          />
+          {!flamingoOk && caps?.flamingo?.missing && (
+            <div className="ml-6 text-[11px] text-zinc-500">
+              {t('trainingStudio.label.flamingoMissing', 'Music Flamingo (local) unavailable')}: {caps.flamingo.missing}
+            </div>
+          )}
+
+          <Toggle
+            accent="amber"
             checked={effectiveCaption}
             disabled={!captionOk}
             onChange={setUseCaption}
@@ -225,9 +249,9 @@ export const LabelPanel: React.FC = () => {
             info={t('trainingStudio.label.useCaptionInfo')}
             defaultValue={true}
           />
-          {effectiveCaption && (mossOk || caps?.llm.configured) && (() => {
+          {effectiveCaption && (mossOk || flamingoOk || caps?.llm.configured) && (() => {
             const cloud = caps?.llm.providers.filter(pr => pr.available) ?? [];
-            const sel = captionProvider || (mossOk ? 'moss' : caps?.llm.defaultProvider || '');
+            const sel = captionProvider || localDefault || caps?.llm.defaultProvider || '';
             const active = cloud.find(pr => pr.id === sel);
             return (
               <div className="ml-6 flex flex-wrap items-center gap-2">
@@ -250,6 +274,7 @@ export const LabelPanel: React.FC = () => {
                      Gemini and MOSS do. */
                   options={[
                     ...(mossOk ? [{ value: 'moss', label: 'MOSS — local, hears the audio' }] : []),
+                    ...(flamingoOk ? [{ value: 'flamingo', label: 'Music Flamingo — local, hears the audio' }] : []),
                     ...cloud.map(pr => ({
                       value: pr.id,
                       label: `${pr.name} (${pr.local ? 'local' : 'cloud'}, ${pr.id === 'gemini' ? 'hears the audio' : 'text only'})`,
@@ -310,7 +335,7 @@ export const LabelPanel: React.FC = () => {
         <button
           onClick={() => void handleStart()}
           disabled={blockedByJob || starting || !anyStep || invalidTempoBounds}
-          title={trainerRunning && needsEngine ? t('trainingStudio.label.mossBlocked', 'MOSS needs the engine, which the running training job owns. Pick a cloud captioner or wait.') : undefined}
+          title={trainerRunning && needsEngine ? t('trainingStudio.label.mossBlocked', 'Local captioning and lyric transcription need the card, which the running training job owns. Pick a cloud captioner, turn off local lyrics, or wait.') : undefined}
           className="self-start flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {starting ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}

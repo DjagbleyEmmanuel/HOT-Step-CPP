@@ -21,6 +21,7 @@ toolchains, see [building.md](building.md).
 | `engine/src/sa3-*.h` | Stable Audio 3: the DiT (`sa3-dit-ggml.h`), SAME autoencoder (`sa3-same-ggml.h`), T5Gemma text encoder (`sa3-t5gemma-enc.h`), the sampling loop behind `/sa3-refine` and `/sa3-synth` (`sa3-refine.h`), the checkpoint-preview resolver (`sa3-preview-resolver.h`) and the boot probe (`sa3-families.h`) |
 | `engine/src/train/` | Trainers and dataset preprocessors used by `ace-train` |
 | `engine/src/moss/` | MOSS-Music captioner used by `ace-caption` |
+| `engine/src/flamingo/` | Music Flamingo (AF-Whisper encoder, rotary time embedding, Qwen2-7B) used by `ace-caption --family flamingo` |
 | `engine/src/solvers/`, `schedulers/`, `guidance/` | Older C++ sampler registries. The live sampler resolves solvers, schedulers and guidance through the Lua plugin registry instead. Still in use: the `*-interface.h` types the Lua host passes (`SolverState` and the rest), `guidance/apg-core.h` for the native `apg()` bridge, and `scheduler_clamp()` from `schedulers/scheduler-registry.h` |
 | `engine/tools/` | One `.cpp` per binary, a few headers they share (`beat-this.h`, `midi-grid.h`, `monitor-chain.h` and others), Python converters (`convert-*.py`) and fixture scripts |
 | `engine/tests/` | Unit tests: the sources of the CMake test targets, and standalone files whose header gives the compile line |
@@ -39,7 +40,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-lm` | `tools/ace-lm.cpp` | ACE-Step 5 Hz LM from the command line: request JSON in, `request0.json`..`requestN-1.json` out |
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
-| `ace-caption` | `tools/ace-caption.cpp` | MOSS-Music captioning: audio in, prose caption, MM3-format caption or lyrics out |
+| `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption or section-tagged lyrics out. Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
 | `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |

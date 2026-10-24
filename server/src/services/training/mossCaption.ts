@@ -36,6 +36,39 @@ import { CAPTION_INSTRUCTIONS } from './captionPrompt.js';
 export type MossMode = 'prose' | 'mm3' | 'lyrics';
 
 /**
+ * The local audio models `ace-caption` runs. Both take the same modes, prompts and
+ * batching; the binary picks the family from the models folder. Music Flamingo is
+ * the stronger lyric transcriber by a wide margin (median WER 24% vs MOSS's 59% on
+ * a 17-track album test, with section tags on every track).
+ */
+export type LocalCaptioner = 'moss' | 'flamingo';
+
+export const LOCAL_CAPTIONER_NAMES: Record<LocalCaptioner, string> = {
+  moss: 'MOSS-Music-8B',
+  flamingo: 'Music Flamingo',
+};
+
+export function isLocalCaptioner(provider: string | undefined | null): provider is LocalCaptioner {
+  return provider === 'moss' || provider === 'flamingo';
+}
+
+/**
+ * Lyric transcription prompt for the local models. The exact wording the lyric
+ * bake-off measured (Music Flamingo, median WER 24% with section tags on every
+ * track); passed via `--prompt-file lyrics=` like the other modes.
+ */
+export const LYRICS_INSTRUCTIONS: string =
+  'Transcribe the complete lyrics of this song.\n\n'
+  + 'Format the output exactly like this:\n'
+  + '- Mark every section with a bracketed tag on its own line: [Intro], [Verse], [Pre-Chorus], '
+  + '[Chorus], [Bridge], [Breakdown], [Instrumental], [Outro].\n'
+  + '- Put the sung words underneath each tag, one line per sung line.\n'
+  + '- Use [Instrumental] for passages with no vocals.\n'
+  + '- Transcribe only what is actually sung. Do not invent lines, do not translate, and do not '
+  + 'add commentary, timestamps or explanations.\n\n'
+  + 'If the track has no vocals at all, reply with exactly: [Instrumental]';
+
+/**
  * The MM3 Structured Caption prompt.
  *
  * Starts as a copy of `PROMPT_MM3` in engine/tools/ace-caption.cpp and is
@@ -96,28 +129,31 @@ const BIN = process.platform === 'win32' ? '.exe' : '';
  * both should get the small one, and the resolution order here must not disagree
  * with the engine's or the UI would advertise a model the engine won't load.
  */
-export function resolveMossPaths(): { paths: MossPaths } | { missing: string } {
+export function resolveMossPaths(model: LocalCaptioner = 'moss'): { paths: MossPaths } | { missing: string } {
   const exe = path.join(path.dirname(config.aceServer.exe), `ace-caption${BIN}`);
   if (!fs.existsSync(exe)) return { missing: `ace-caption${BIN} not built` };
 
-  const modelsDir = path.join(config.aceServer.models, 'moss');
-  const lm = ['moss-lm-q8_0.gguf', 'moss-lm-f16.gguf']
+  // models/moss holds moss-*.gguf, models/flamingo holds flamingo-*.gguf.
+  const modelsDir = path.join(config.aceServer.models, model);
+  const lm = [`${model}-lm-q8_0.gguf`, `${model}-lm-f16.gguf`]
     .map(n => path.join(modelsDir, n))
     .find(p => fs.existsSync(p));
-  const audio = path.join(modelsDir, 'moss-aud-f16.gguf');
+  const audio = path.join(modelsDir, `${model}-aud-f16.gguf`);
 
-  if (!lm) return { missing: `no moss-lm-*.gguf in ${modelsDir}` };
-  if (!fs.existsSync(audio)) return { missing: `moss-aud-f16.gguf missing from ${modelsDir}` };
+  if (!lm) return { missing: `no ${model}-lm-*.gguf in ${modelsDir}` };
+  if (!fs.existsSync(audio)) return { missing: `${model}-aud-f16.gguf missing from ${modelsDir}` };
   return { paths: { exe, modelsDir, lm, audio } };
 }
 
-export function mossCaptionAvailable(): boolean {
-  return 'paths' in resolveMossPaths();
+export function mossCaptionAvailable(model: LocalCaptioner = 'moss'): boolean {
+  return 'paths' in resolveMossPaths(model);
 }
 
 // ── Running the model ────────────────────────────────────────────────────
 
 export interface MossRunOptions {
+  /** Which local model; default MOSS. */
+  model?: LocalCaptioner;
   modes: MossMode[];
   /** Per-mode prompt overrides. `prose` normally carries CAPTION_INSTRUCTIONS. */
   prompts?: Partial<Record<MossMode, string>>;
@@ -191,14 +227,16 @@ async function runMossCaptionInner(
   audioPath: string,
   opts: MossRunOptions,
 ): Promise<Partial<Record<MossMode, string>>> {
-  const resolved = resolveMossPaths();
-  if ('missing' in resolved) throw new Error(`MOSS captioning unavailable: ${resolved.missing}`);
+  const model = opts.model ?? 'moss';
+  const resolved = resolveMossPaths(model);
+  if ('missing' in resolved) throw new Error(`${LOCAL_CAPTIONER_NAMES[model]} unavailable: ${resolved.missing}`);
   const { exe, modelsDir } = resolved.paths;
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hs_moss_'));
   const outBase = path.join(work, 'out.txt');
   const args: string[] = [
     '--models', modelsDir,
+    '--family', model,
     '--src-audio', audioPath,
     '--mode', opts.modes.join(','),
     '-o', outBase,
@@ -234,7 +272,7 @@ async function runMossCaptionInner(
         });
     });
     const timing = /encode[^\n]*|\b\d+\.\d+\s*s\b/.exec(stderr);
-    if (timing) opts.log?.('info', `MOSS: ${timing[0].trim()}`);
+    if (timing) opts.log?.('info', `${LOCAL_CAPTIONER_NAMES[model]}: ${timing[0].trim()}`);
 
     const out: Partial<Record<MossMode, string>> = {};
     for (const mode of opts.modes) {
@@ -252,7 +290,7 @@ async function runMossCaptionInner(
     if (Object.keys(out).length === 0) {
       // Never fail silently. A zero-output run means the CLI contract moved, and
       // the caller must not mistake it for "the model had nothing to say".
-      opts.log?.('warn', `MOSS produced no output for modes: ${opts.modes.join(',')}`);
+      opts.log?.('warn', `${LOCAL_CAPTIONER_NAMES[model]} produced no output for modes: ${opts.modes.join(',')}`);
     }
     return out;
   } finally {
@@ -654,6 +692,7 @@ export function clearMossBatch(): void {
 export async function prepareMossBatch(
   audioPaths: string[],
   opts: {
+    model?: LocalCaptioner;
     wantMm3?: boolean; wantLyrics?: boolean; maxSeconds?: number;
     signal?: AbortSignal; log?: (level: 'info' | 'warn', message: string) => void;
   } = {},
@@ -665,10 +704,43 @@ export async function prepareMossBatch(
   if (opts.wantMm3) modes.push('mm3');
   if (opts.wantLyrics) modes.push('lyrics');
 
-  runMossBatch(audioPaths, {
-    modes, prompts: { prose: CAPTION_INSTRUCTIONS, mm3: MM3_INSTRUCTIONS },
+  void runMossBatch(audioPaths, {
+    model: opts.model, modes,
+    prompts: { prose: CAPTION_INSTRUCTIONS, mm3: MM3_INSTRUCTIONS, lyrics: LYRICS_INSTRUCTIONS },
     maxSeconds: opts.maxSeconds, signal: opts.signal, log: opts.log,
   });
+}
+
+/**
+ * Transcribe lyrics locally for `audioPaths` in one process (one model load) and
+ * wait for all of them. Returns audio path -> lyrics, with section tags. Tracks the
+ * model could not read are simply absent. Used as the fallback when Genius has no
+ * match, so it runs after the caption batch rather than alongside it.
+ */
+export async function transcribeLyricsLocal(
+  audioPaths: string[],
+  opts: {
+    model?: LocalCaptioner; maxSeconds?: number;
+    signal?: AbortSignal; log?: (level: 'info' | 'warn', message: string) => void;
+    /** Called as each track lands, so the caller can write it straight away. */
+    onTrack?: (audioPath: string, lyrics: string) => void | Promise<void>;
+  } = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (audioPaths.length === 0) return out;
+  const pending = new Map<string, Promise<Partial<Record<MossMode, string>> | undefined>>();
+  const done = runMossBatch(audioPaths, {
+    model: opts.model ?? 'flamingo', modes: ['lyrics'], prompts: { lyrics: LYRICS_INSTRUCTIONS },
+    maxSeconds: opts.maxSeconds, signal: opts.signal, log: opts.log,
+  }, pending);
+  await Promise.all(audioPaths.map(async p => {
+    const lyrics = (await pending.get(p))?.lyrics?.trim();
+    if (!lyrics) return;
+    out.set(p, lyrics);
+    await opts.onTrack?.(p, lyrics);
+  }));
+  await done;
+  return out;
 }
 
 /**
@@ -687,15 +759,21 @@ export async function prepareMossBatch(
  * dataset filenames collide across albums, and two tracks resolving to the same
  * base would silently overwrite one caption with another's.
  */
-function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
+function runMossBatch(
+  audioPaths: string[],
+  opts: MossRunOptions,
+  pending: Map<string, Promise<Partial<Record<MossMode, string>> | undefined>> = batchPending,
+): Promise<void> {
   const settlers = new Map<string, (v: Partial<Record<MossMode, string>> | undefined) => void>();
   for (const audioPath of audioPaths) {
-    batchPending.set(audioPath, new Promise(resolve => { settlers.set(audioPath, resolve); }));
+    pending.set(audioPath, new Promise(resolve => { settlers.set(audioPath, resolve); }));
   }
+  const model = opts.model ?? 'moss';
+  const name = LOCAL_CAPTIONER_NAMES[model];
 
   const done = serialised(async () => {
-    const resolved = resolveMossPaths();
-    if ('missing' in resolved) throw new Error(`MOSS captioning unavailable: ${resolved.missing}`);
+    const resolved = resolveMossPaths(model);
+    if ('missing' in resolved) throw new Error(`${name} unavailable: ${resolved.missing}`);
     const { exe, modelsDir } = resolved.paths;
 
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hs_mossb_'));
@@ -709,6 +787,7 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
 
       const args: string[] = [
         '--models', modelsDir,
+        '--family', model,
         '--src-list', path.join(work, 'list.txt'),
         '--mode', opts.modes.join(','),
         '--temperature', String(opts.temperature ?? MOSS_TEMPERATURE),
@@ -756,8 +835,9 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
             resolve();
           });
 
-        // `[MOSS] <mode>   -> <base> (N.Ns)`, one line per written file. A
-        // track is complete when all its requested modes have reported.
+        // `[MOSS] <mode>   -> <base> (N.Ns)` (or `[Flamingo] ...`), one line
+        // per written file. A track is complete when all its requested modes
+        // have reported.
         const reported = new Map<number, number>();
         let buffer = '';
         child.stderr?.setEncoding('utf8');
@@ -766,7 +846,7 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
           let nl: number;
           while ((nl = buffer.indexOf('\n')) >= 0) {
             const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
-            const m = /^\[MOSS\] \S+\s+-> (.+?) \(\d+(?:\.\d+)?s\)\s*$/.exec(line);
+            const m = /^\[(?:MOSS|Flamingo)\] \S+\s+-> (.+?) \(\d+(?:\.\d+)?s\)\s*$/.exec(line);
             if (!m) continue;
             const base = m[1].replace(/\.(?:prose|mm3|lyrics)\.txt$/, '').replace(/\.txt$/, '');
             const i = bases.indexOf(base);
@@ -779,7 +859,7 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
       });
 
       audioPaths.forEach((_, i) => settle(i));   // stragglers: read what exists
-      opts.log?.('info', `MOSS: batch of ${audioPaths.length} tracks complete`);
+      opts.log?.('info', `${name}: batch of ${audioPaths.length} tracks complete`);
     } finally {
       // Everything unsettled — spawn failure, abort, missing weights — falls
       // back to a per-track run rather than hanging its consumer.
@@ -788,9 +868,9 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
       try { fs.rmSync(work, { recursive: true, force: true }); } catch { /* tmp */ }
     }
   });
-  done.catch((err: any) => {
+  return done.catch((err: any) => {
     if ((err as NodeJS.ErrnoException)?.name === 'AbortError') return;
-    opts.log?.('warn', `MOSS batch failed (${String(err?.message || err).slice(0, 160)}) — falling back to per-track runs`);
+    opts.log?.('warn', `${name} batch failed (${String(err?.message || err).slice(0, 160)}) — falling back to per-track runs`);
   });
 }
 
@@ -813,6 +893,7 @@ export async function captionWithMoss(
   audioPath: string,
   facts: LocalFacts,
   opts: {
+    model?: LocalCaptioner;
     wantMm3?: boolean;
     wantLyrics?: boolean;
     maxSeconds?: number;
@@ -835,10 +916,11 @@ export async function captionWithMoss(
   const prefetched = pending ? await pending : undefined;
 
   const raw = prefetched ?? await runMossCaption(audioPath, {
+    model: opts.model,
     modes,
     // The AS1.5 prompt is passed by file rather than restated in C++ so the two
     // can't drift; it is the same string the cloud providers get.
-    prompts: { prose: CAPTION_INSTRUCTIONS, mm3: MM3_INSTRUCTIONS },
+    prompts: { prose: CAPTION_INSTRUCTIONS, mm3: MM3_INSTRUCTIONS, lyrics: LYRICS_INSTRUCTIONS },
     maxSeconds: opts.maxSeconds,
     signal: opts.signal,
     log: opts.log,

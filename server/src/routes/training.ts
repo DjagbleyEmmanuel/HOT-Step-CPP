@@ -95,7 +95,7 @@ import {
   scanPreview as scanPreviewFolder, ScanLimitError,
 } from '../services/training/datasetScan.js';
 import { AUDIO_EXTENSIONS, datasetDir, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
-import { resolveMossPaths } from '../services/training/mossCaption.js';
+import { isLocalCaptioner, LOCAL_CAPTIONER_NAMES, resolveMossPaths } from '../services/training/mossCaption.js';
 import { samplesMissingYue2Caption } from '../services/training/yue2CaptionJob.js';
 import { datasetTrackCaption, yue2DatasetCaptions } from '../services/training/yue2DatasetCaptions.js';
 import { bestScoredRung } from '../services/training/yue2BestRung.js';
@@ -296,6 +296,7 @@ router.get('/capabilities', async (_req: Request, res: Response) => {
     // Local audio captioning. Probed synchronously below — it is two fs.existsSync
     // calls, not a subprocess, so it cannot hang this endpoint.
     moss: { available: false, missing: '' },
+    flamingo: { available: false, missing: '' },
     preprocess: {
       available: false, binPath: '', ditModels: [], vaeModels: [], textEncoders: [],
       defaultDit: '', defaultVae: '', defaultTextEnc: '', modelsCachedAt: 0,
@@ -338,6 +339,11 @@ router.get('/capabilities', async (_req: Request, res: Response) => {
     if ('paths' in probe) caps.moss.available = true;
     else caps.moss.missing = probe.missing;
   } catch (err: any) { caps.moss.missing = String(err?.message || err).slice(0, 200); }
+  try {
+    const probe = resolveMossPaths('flamingo');
+    if ('paths' in probe) caps.flamingo.available = true;
+    else caps.flamingo.missing = probe.missing;
+  } catch (err: any) { caps.flamingo.missing = String(err?.message || err).slice(0, 200); }
 
   try {
     const providers = await listProviders();
@@ -1339,13 +1345,13 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
     try { essentiaTempoProfile(body.essentiaTempo); }
     catch (err) { res.status(400).json({ error: err instanceof Error ? err.message : String(err) }); return; }
     {
-      const needsEngine = body.useUnderstand === true
-        || (body.useCaption !== false && body.caption?.provider === 'moss');
+      const needsEngine = body.useUnderstand === true || body.localLyrics === true
+        || (body.useCaption !== false && isLocalCaptioner(body.caption?.provider));
       const blocker = labelBlockedBy(ds.id, needsEngine);
       if (blocker) {
         res.status(409).json({
           error: needsEngine && TRAINER_KINDS.has(blocker.kind)
-            ? 'MOSS and the /understand step need the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead.'
+            ? 'Local captioning and lyric transcription (MOSS, Music Flamingo) and the /understand step need the card, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead.'
             : 'A job is already running for this dataset',
         });
         return;
@@ -1383,15 +1389,16 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
       }
       useGenius = false;
     }
-    if (useCaption && (body.caption?.provider === 'moss')) {
-      // MOSS is a local binary, not a chat API — getProvider() throws on it, and
-      // its availability is "built + weights present", not "API key set". Handled
-      // before the LLM branch so labeling can run with no cloud credentials at
-      // all, which is the entire point of the local captioner.
-      const probe = resolveMossPaths();
+    if (useCaption && isLocalCaptioner(body.caption?.provider)) {
+      // MOSS and Music Flamingo are local binaries, not chat APIs — getProvider()
+      // throws on them, and availability is "built + weights present", not "API
+      // key set". Handled before the LLM branch so labeling can run with no cloud
+      // credentials at all, which is the entire point of the local captioners.
+      const local = body.caption!.provider as 'moss' | 'flamingo';
+      const probe = resolveMossPaths(local);
       if ('missing' in probe) {
         if (captionAsked) {
-          res.status(503).json({ error: `MOSS captioning is not available: ${probe.missing}` });
+          res.status(503).json({ error: `${LOCAL_CAPTIONER_NAMES[local]} captioning is not available: ${probe.missing}` });
           return;
         }
         useCaption = false;
@@ -1424,7 +1431,18 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
 
     // Checked AFTER the capability downgrades above, or a keyless machine would
     // pass this test on steps that are about to be switched off.
-    if (!useEssentia && !useUnderstand && !useGenius && !useCaption) {
+    // Local lyric transcription where Genius has none (Music Flamingo). Asked for
+    // but not installed is a refusal, like the other steps.
+    const localLyrics = body.localLyrics === true;
+    if (localLyrics) {
+      const probe = resolveMossPaths('flamingo');
+      if ('missing' in probe) {
+        res.status(503).json({ error: `Music Flamingo is not available for lyric transcription: ${probe.missing}` });
+        return;
+      }
+    }
+
+    if (!useEssentia && !useUnderstand && !useGenius && !useCaption && !localLyrics) {
       res.status(400).json({ error: 'No labeling steps enabled' });
       return;
     }
@@ -1532,11 +1550,11 @@ router.post('/datasets/:id/enhance/caption', async (req: Request, res: Response)
     const body = (req.body || {}) as CaptionOptions;
     const providerName = body.provider || config.lireek.defaultProvider;
     {
-      const blocker = labelBlockedBy(ds.id, providerName === 'moss');
+      const blocker = labelBlockedBy(ds.id, isLocalCaptioner(providerName));
       if (blocker) {
         res.status(409).json({
-          error: providerName === 'moss' && TRAINER_KINDS.has(blocker.kind)
-            ? 'MOSS needs the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead.'
+          error: isLocalCaptioner(providerName) && TRAINER_KINDS.has(blocker.kind)
+            ? `${LOCAL_CAPTIONER_NAMES[providerName]} needs the card, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead.`
             : 'A job is already running for this dataset',
         });
         return;
@@ -1546,10 +1564,10 @@ router.post('/datasets/:id/enhance/caption', async (req: Request, res: Response)
     // it must be admitted BEFORE getProvider(), which throws on an unknown id.
     // Its availability check is "binary built + weights on disk", and the failure
     // message has to say which, since neither is fixed in Settings → AI Services.
-    if (providerName === 'moss') {
-      const probe = resolveMossPaths();
+    if (isLocalCaptioner(providerName)) {
+      const probe = resolveMossPaths(providerName);
       if ('missing' in probe) {
-        res.status(503).json({ error: `MOSS captioning is not available: ${probe.missing}` });
+        res.status(503).json({ error: `${LOCAL_CAPTIONER_NAMES[providerName]} captioning is not available: ${probe.missing}` });
         return;
       }
     } else {
@@ -1601,8 +1619,8 @@ router.post('/datasets/:id/enhance/yue2-caption', async (req: Request, res: Resp
     }
     const body = (req.body || {}) as { sampleIds?: string[]; provider?: string; model?: string; temperature?: number };
     const providerName = body.provider || config.lireek.defaultProvider;
-    if (providerName === 'moss') {
-      res.status(400).json({ error: 'The YuE2 caption is a text rewrite of the existing label — pick a chat provider (Gemini, OpenAI, a local LLM); MOSS has no such mode.' });
+    if (isLocalCaptioner(providerName)) {
+      res.status(400).json({ error: 'The YuE2 caption is a text rewrite of the existing label — pick a chat provider (Gemini, OpenAI, a local LLM); the local audio models have no such mode.' });
       return;
     }
     const blocker = labelBlockedBy(ds.id, false);
@@ -1642,7 +1660,7 @@ router.post('/datasets/:id/enhance/yue2-caption', async (req: Request, res: Resp
 /** POST /datasets/:id/yue2-captions-missing — run before YuE2 training. A
  *  full audio re-caption (ACE caption + MM3 + YuE2 sidecars; lyrics and BPM
  *  left alone) of ONLY the tracks with no `.yue2.txt`, through the ordinary
- *  label job. Body: { provider: 'gemini' | 'moss', model?, checkOnly? }.
+ *  label job. Body: { provider: 'gemini' | 'moss' | 'flamingo', model?, checkOnly? }.
  *  { jobId: null, skipped } when every track already has one. */
 router.post('/datasets/:id/yue2-captions-missing', async (req: Request, res: Response) => {
   try {
@@ -1652,13 +1670,13 @@ router.post('/datasets/:id/yue2-captions-missing', async (req: Request, res: Res
     const missing = await samplesMissingYue2Caption(ds);
     if (b.checkOnly === true) { res.json({ missing: missing.length }); return; }
     if (!missing.length) { res.json({ jobId: null, skipped: 'Every track already has a YuE2 caption' }); return; }
-    const provider = b.provider === 'moss' ? 'moss' : 'gemini';
-    if (provider === 'moss') {
+    const provider = isLocalCaptioner(b.provider) ? b.provider : 'gemini';
+    if (isLocalCaptioner(provider)) {
       // MOSS writes the ACE and MM3 captions; the one-sentence YuE2 caption is
       // a text rewrite, which goes to the default chat provider.
       let chatOk = false;
-      try { chatOk = config.lireek.defaultProvider !== 'moss' && getProvider(config.lireek.defaultProvider).isAvailable(); } catch { /* stays false */ }
-      if (!chatOk) { res.status(400).json({ error: 'MOSS cannot write the YuE2 caption itself: it needs a chat provider (Gemini) configured in Settings → AI Services.' }); return; }
+      try { chatOk = !isLocalCaptioner(config.lireek.defaultProvider) && getProvider(config.lireek.defaultProvider).isAvailable(); } catch { /* stays false */ }
+      if (!chatOk) { res.status(400).json({ error: `${LOCAL_CAPTIONER_NAMES[provider]} cannot write the YuE2 caption itself: it needs a chat provider (Gemini) configured in Settings → AI Services.` }); return; }
     }
     const r = await fetch(`http://127.0.0.1:${config.server.port}/api/training/datasets/${encodeURIComponent(ds.id)}/label`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
