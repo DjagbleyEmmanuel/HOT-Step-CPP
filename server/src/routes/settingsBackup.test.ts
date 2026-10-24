@@ -87,6 +87,16 @@ test('settings backup validates, previews and atomically restores only the expor
       assert.equal(rows.getSetting('instagen_system_prompt'), lyricPreferences.instagen_system_prompt);
       assert.equal(rows.getSetting('prompt_new_local'), '');
     });
+    await t.test('export falls back to defaults for missing or stale stored settings, and the result re-imports', async () => {
+      const { downloadVersion, ...older } = appSettings;
+      for (const app of [{ ...appSettings, downloadVersion: '' }, { ...appSettings, downloadVersion: 'legacy', triggerPlacement: 7 }, older, null]) {
+        const res = await post('export', { app });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        assert.equal(res.body.settings.app.downloadVersion, 'mastered');
+        assert.equal((await post('preview', { backup: res.body })).status, 200);
+      }
+      assert.equal((await post('export', { app: { ...appSettings, downloadVersion: 'both' } })).body.settings.app.downloadVersion, 'both');
+    });
     await t.test('preview reports replacement counts without writing', async () => {
       rows.getOrCreateArtist('Current extra fixture');
       const result = await post('preview', { backup: file });

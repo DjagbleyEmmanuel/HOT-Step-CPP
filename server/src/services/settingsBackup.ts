@@ -28,6 +28,21 @@ const appSchema = z.object({
   discoKickExtract: z.boolean(), parallelWhisper: z.boolean(), parallelQualityEval: z.boolean(),
   parallelCoverArt: z.boolean(), generationTimeoutMinutes: z.number().positive(),
 }).strict();
+// Mirrors DEFAULT_SETTINGS in ui/src/components/settings/SettingsPanel.tsx.
+const appDefaults: z.infer<typeof appSchema> = {
+  coResident: false, cacheLmCodes: true, speculativeDecoding: true, downloadFormat: 'flac',
+  downloadMp3Bitrate: 192, downloadOpusBitrate: 192, downloadVersion: 'mastered', downloadIncludeLatent: false,
+  triggerUseFilename: false, triggerPlacement: 'prepend', discoKickExtract: false, parallelWhisper: false,
+  parallelQualityEval: false, parallelCoverArt: false, generationTimeoutMinutes: 30,
+};
+// Browser storage can hold missing keys (older installs) or stale values; export must not fail on them.
+function sanitizeApp(app: unknown) {
+  const stored = app && typeof app === 'object' ? app as Record<string, unknown> : {};
+  return Object.fromEntries(Object.entries(appSchema.shape).map(([key, field]) => {
+    const parsed = field.safeParse(stored[key]);
+    return [key, parsed.success ? parsed.data : appDefaults[key as keyof typeof appDefaults]];
+  }));
+}
 
 // The version fixes the portable columns; never accept table or column names from a file.
 export const backupTables = {
@@ -109,7 +124,7 @@ export function exportSettingsBackup(db: Database.Database, app: unknown): Setti
     const settings = Object.fromEntries((db.prepare(`SELECT key, value FROM settings WHERE ${LYRIC_SETTINGS_FILTER} ORDER BY key`)
       .all(...LYRIC_SETTINGS_PARAMS) as { key: string; value: string }[])
       .map(row => [row.key, row.value]));
-    return validateBackup({ version: 1, exportedAt: new Date().toISOString(), settings: { app, lyricStudio: settings }, lyricStudio });
+    return validateBackup({ version: 1, exportedAt: new Date().toISOString(), settings: { app: sanitizeApp(app), lyricStudio: settings }, lyricStudio });
   })();
 }
 
