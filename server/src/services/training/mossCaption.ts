@@ -32,7 +32,7 @@ import { execFile } from 'child_process';
 import { config, getFFmpegPath } from '../../config.js';
 import { CAPTION_INSTRUCTIONS } from './captionPrompt.js';
 import { normalizeYue2Caption } from '../lireek/prompts.js';
-import { looksLooped, normaliseLyricTags } from './lyricTags.js';
+import { normaliseLyricTags } from './lyricTags.js';
 
 /** Modes `ace-caption` can decode off a single encode. */
 export type MossMode = 'prose' | 'mm3' | 'lyrics' | 'yue2';
@@ -225,6 +225,26 @@ export function mossCaptionAvailable(model: LocalCaptioner = 'moss'): boolean {
 
 // ── Running the model ────────────────────────────────────────────────────
 
+/**
+ * Repetition penalty for redoing a lyric transcript that looped. Decoding runs with
+ * none (MOSS_REP_PENALTY, 1.0): on the 17-track album test that scored median WER
+ * 19.6% against 24.0% at 1.05, but looped on 3 tracks (one at 136% WER). ace-caption
+ * redoes just those, in-process and off the same prefill (--retry-loops), giving
+ * median 20.0% / mean 22.5% against 19.6% / 29.4% for one pass. Quantisation (q8_0
+ * vs f16), sampling (temperature 0.4/0.7) and penalty 1.02 were measured and did
+ * not help.
+ *
+ * In-process on purpose: a redo as a second ace-caption run queued behind the
+ * dataset's batch (one Flamingo process at a time, for VRAM), so four looped tracks
+ * stalled a label job's whole worker pool until the batch finished.
+ */
+const LYRICS_RETRY_REP_PENALTY = 1.05;
+
+function retryLoopArgs(model: LocalCaptioner, modes: MossMode[]): string[] {
+  return model === 'flamingo' && modes.includes('lyrics')
+    ? ['--retry-loops', String(LYRICS_RETRY_REP_PENALTY)] : [];
+}
+
 export interface MossRunOptions {
   /** Which local model; default MOSS. */
   model?: LocalCaptioner;
@@ -325,6 +345,7 @@ async function runMossCaptionInner(
   ];
   if (opts.maxTokens) args.push('--max-tokens', String(opts.maxTokens));
   if (opts.maxSeconds) args.push('--max-seconds', String(opts.maxSeconds));
+  args.push(...retryLoopArgs(model, opts.modes));
 
   // ffmpeg is only consulted for non-WAV/MP3 input, but passing our resolved
   // path means a portable release doesn't depend on ffmpeg being on PATH.
@@ -844,36 +865,19 @@ export function prepareLocalLyrics(
   }
 }
 
-/**
- * Repetition penalty for the redo of a transcript that looped. The first pass runs
- * with none (MOSS_REP_PENALTY, 1.0): on the 17-track album test that scored median
- * WER 19.6% against 24.0% at 1.05, but looped on 3 tracks (one at 136% WER). 1.05
- * fixes those, so it is used only where looksLooped fires: median 20.0%, mean 22.5%
- * against 19.6% / 29.4% for one pass. Quantisation (q8_0 vs f16), sampling
- * (temperature 0.4/0.7) and penalty 1.02 were measured too and did not help.
- */
-const LYRICS_RETRY_REP_PENALTY = 1.05;
-
 /** This track's local lyrics: from the prepared batch when there is one, else a
- *  single-track run, redone once with a light repetition penalty if it looped.
- *  `undefined` when the model returned nothing. */
+ *  single-track run. `undefined` when the model returned nothing. A looped
+ *  transcript is already redone inside ace-caption (--retry-loops). */
 export async function takeLocalLyrics(
   audioPath: string,
   opts: { signal?: AbortSignal; log?: (level: 'info' | 'warn', message: string) => void } = {},
 ): Promise<string | undefined> {
-  const run = async (repPenalty?: number) => (await runMossCaption(audioPath, {
-    model: 'flamingo', modes: ['lyrics'], prompts: { lyrics: LYRICS_INSTRUCTIONS },
-    repPenalty, signal: opts.signal, log: opts.log,
-  })).lyrics?.trim() || undefined;
-
   const pending = lyricsPending.get(audioPath);
   if (pending) lyricsPending.delete(audioPath);
-  let raw = (pending ? await pending : undefined) ?? await run();
-  if (raw && looksLooped(raw)) {
-    opts.log?.('info', 'lyric transcript looped; redoing it with a light repetition penalty');
-    const retry = await run(LYRICS_RETRY_REP_PENALTY);
-    if (retry && !looksLooped(retry)) raw = retry;
-  }
+  const raw = (pending ? await pending : undefined) ?? (await runMossCaption(audioPath, {
+    model: 'flamingo', modes: ['lyrics'], prompts: { lyrics: LYRICS_INSTRUCTIONS },
+    signal: opts.signal, log: opts.log,
+  })).lyrics?.trim();
   return raw ? normaliseLyricTags(raw) : undefined;
 }
 
@@ -939,6 +943,7 @@ function runMossBatch(
       ];
       if (opts.maxTokens) args.push('--max-tokens', String(opts.maxTokens));
       if (opts.maxSeconds) args.push('--max-seconds', String(opts.maxSeconds));
+      args.push(...retryLoopArgs(model, opts.modes));
       const ffmpeg = getFFmpegPath();
       if (ffmpeg) args.push('--ffmpeg', ffmpeg);
       for (const [mode, text] of Object.entries(opts.prompts ?? {})) {

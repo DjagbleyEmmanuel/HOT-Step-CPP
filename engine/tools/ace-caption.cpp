@@ -258,6 +258,58 @@ static double now_s() {
                std::chrono::steady_clock::now().time_since_epoch()).count() / 1e6;
 }
 
+// A lyric transcript stuck in a decode loop: one line 5+ times in a row, the same
+// trailing "(...)" on 5+ lines in a row (an invented backing vocal), or a phrase of
+// 3-13 words three times back to back within a line. Mirrors looksLooped in
+// server/src/services/training/lyricTags.ts.
+static bool lyrics_looped(const std::string & text) {
+    std::vector<std::string> lines;
+    {
+        std::istringstream ls(text);
+        std::string l;
+        while (std::getline(ls, l)) {
+            const size_t a = l.find_first_not_of(" \t\r");
+            const size_t b = l.find_last_not_of(" \t\r");
+            if (a != std::string::npos) lines.push_back(l.substr(a, b - a + 1));
+        }
+    }
+    auto lower = [](std::string s) {
+        for (char & c : s) c = (char) tolower((unsigned char) c);
+        return s;
+    };
+    auto tail = [&](const std::string & l) -> std::string {
+        if (l.empty() || l.back() != ')') return "";
+        const size_t open = l.rfind('(');
+        return (open == std::string::npos || l.size() - open < 8) ? "" : lower(l.substr(open));
+    };
+    int run = 1, tail_run = 1;
+    for (size_t i = 1; i < lines.size(); ++i) {
+        run = lower(lines[i]) == lower(lines[i - 1]) ? run + 1 : 1;
+        const std::string t = tail(lines[i]);
+        tail_run = !t.empty() && t == tail(lines[i - 1]) ? tail_run + 1 : 1;
+        if (run >= 5 || tail_run >= 5) return true;
+    }
+    for (const std::string & l : lines) {
+        std::vector<std::string> w;
+        std::string cur;
+        for (char c : l) {
+            if (isalnum((unsigned char) c) || c == '\'' || (unsigned char) c >= 0x80) cur += (char) tolower((unsigned char) c);
+            else if (!cur.empty()) { w.push_back(cur); cur.clear(); }
+        }
+        if (!cur.empty()) w.push_back(cur);
+        for (size_t L = 3; L <= 13; ++L) {
+            for (size_t i = 0; i + 3 * L <= w.size(); ++i) {
+                bool rep = true;
+                for (size_t k = 0; k < L && rep; ++k) {
+                    rep = w[i + k] == w[i + L + k] && w[i + k] == w[i + 2 * L + k];
+                }
+                if (rep) return true;
+            }
+        }
+    }
+    return false;
+}
+
 struct FlamingoRun {
     std::string models, lm_file, dump_encoder, dump_ids;
     std::vector<std::pair<std::string, std::string>> jobs;
@@ -270,6 +322,7 @@ struct FlamingoRun {
     int max_tokens = 2048;
     int top_k_debug = 0;
     int win_batch = 8;
+    float retry_loops = 0.0f;   // lyrics: redo a looped transcript at this repetition penalty
 };
 
 // Music Flamingo: one encode per track, then one prefill + greedy decode per mode.
@@ -420,14 +473,34 @@ static int run_flamingo(FlamingoRun & r) {
                 backend_release(bp.backend, bp.cpu_backend);
                 return 0;
             }
-            std::vector<int32_t> counts((size_t) lm.n_vocab, 0), gen;
-            r.sp.rng.seed(r.sp.seed);   // same seed, same text, every mode and track
-            for (int step = 0; ok && step < r.max_tokens; ++step) {
-                const int32_t next = moss::moss_sample(logits, counts, r.sp);
-                if (next == eos) break;
-                gen.push_back(next);
-                counts[(size_t) next]++;
-                ok = flamingo::eval(lm, kv, ev, { next }, {}, {}, bp.backend, &logits);
+            // One decode from the end of the prompt. A redo rewinds the cache to the
+            // prompt (the rows past it are simply overwritten) and starts again from
+            // the saved prefill logits: no second encode, prefill or model load.
+            const std::vector<float> prefill_logits = logits;
+            auto decode = [&](float rep_penalty) {
+                std::vector<int32_t> counts((size_t) lm.n_vocab, 0), out;
+                moss::SamplerParams sp = r.sp;
+                sp.repetition_penalty = rep_penalty;
+                sp.rng.seed(sp.seed);   // same seed, same text, every mode and track
+                kv.n_past = T;
+                logits = prefill_logits;
+                for (int step = 0; ok && step < r.max_tokens; ++step) {
+                    const int32_t next = moss::moss_sample(logits, counts, sp);
+                    if (next == eos) break;
+                    out.push_back(next);
+                    counts[(size_t) next]++;
+                    ok = flamingo::eval(lm, kv, ev, { next }, {}, {}, bp.backend, &logits);
+                }
+                return out;
+            };
+            std::vector<int32_t> gen = decode(r.sp.repetition_penalty);
+            // --retry-loops: lyrics decoded with no repetition penalty score best but
+            // loop on rare tracks; redo just those with a light penalty, in-process.
+            if (ok && r.retry_loops > 0.0f && mname == "lyrics" && lyrics_looped(detokenize(tok, gen))) {
+                fprintf(stderr, "[Flamingo] lyrics looped; redoing with repetition penalty %.2f\n",
+                        r.retry_loops);
+                std::vector<int32_t> redo = decode(r.retry_loops);
+                if (ok && !lyrics_looped(detokenize(tok, redo))) gen = std::move(redo);
             }
             ev.free();
             flamingo::kv_free(&kv);
@@ -457,6 +530,7 @@ int main(int argc, char ** argv) {
     bool max_seconds_set = false;
     bool max_tokens_set = false;
     int win_batch = 8;             // Flamingo: 30 s windows per encoder graph
+    float retry_loops = 0.0f;      // Flamingo lyrics: redo a looped transcript at this penalty
     std::vector<std::string> prompt_files;   // repeatable; see the per-mode note below
     int max_tokens = 1024;
     int top_k_debug = 0;
@@ -498,6 +572,7 @@ int main(int argc, char ** argv) {
         else if (a == "--max-tokens") { max_tokens = atoi(next("--max-tokens").c_str()); max_tokens_set = true; }
         else if (a == "--max-seconds") { max_seconds = atof(next("--max-seconds").c_str()); max_seconds_set = true; }
         else if (a == "--family") { family = next("--family"); }
+        else if (a == "--retry-loops") { retry_loops = (float) atof(next("--retry-loops").c_str()); }
         else if (a == "--hint") { hint = next("--hint"); }
         else if (a == "--window-batch") { win_batch = std::max(1, atoi(next("--window-batch").c_str())); }
         else if (a == "--encoder-window") { enc_window = atoi(next("--encoder-window").c_str()); }
@@ -518,7 +593,8 @@ int main(int argc, char ** argv) {
                     "       [--dump-ids <path>] [--dump-encoder <path>]   (parity debug)\n"
                     "       [--encoder-window FRAMES]   (0 = whole-track legacy encode)\n"
                     "       [--family moss|flamingo]   (default: by the files in --models)\n"
-                    "       [--window-batch N]   (Flamingo: 30 s windows per encoder pass, default 8)\n");
+                    "       [--window-batch N]   (Flamingo: 30 s windows per encoder pass, default 8)\n"
+                    "       [--retry-loops R]   (Flamingo lyrics: redo a looped transcript at repetition penalty R)\n");
             return 2;
         }
     }
@@ -715,6 +791,7 @@ int main(int argc, char ** argv) {
         fr.max_tokens = max_tokens;
         fr.top_k_debug = top_k_debug;
         fr.win_batch = win_batch;
+        fr.retry_loops = retry_loops;
         return run_flamingo(fr);
     }
     if (family != "moss") {
