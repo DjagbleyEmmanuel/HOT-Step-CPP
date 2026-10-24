@@ -39,12 +39,23 @@
 // together is far cheaper than three invocations. This is the shape the Training
 // Studio pipeline should use: dataset tracks want the AS1.5 caption AND the MM3
 // Structured Caption, and there is no reason to pay for the audio twice.
+//
+// ── Two model families ───────────────────────────────────────────────────────
+//
+// --family moss (MOSS-Music-8B) or --family flamingo (NVIDIA Music Flamingo,
+// src/flamingo/flamingo.h). Without the flag the family follows the files in
+// --models: flamingo-aud-f16.gguf means Flamingo, anything else means MOSS. Both
+// take the same modes, prompts, sampler flags and --src-list batching, so the
+// server only swaps the models folder. Flamingo is the stronger lyric transcriber
+// by a wide margin (median WER 26% vs 59% on a 17-track album test).
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -55,6 +66,7 @@
 #include "audio-resample.h"
 #include "backend.h"
 #include "bpe.h"
+#include "flamingo/flamingo.h"
 #include "moss/moss-encoder-graph.h"
 #include "moss/moss-lm-graph.h"
 #include "moss/moss-mel.h"
@@ -211,8 +223,236 @@ static std::string detokenize(const BPETokenizer & tok, const std::vector<int32_
     return out;
 }
 
+// One mode's text to stdout or its file. Several modes -> -o is a prefix and each
+// mode gets its own suffix (out.prose.txt, out.lyrics.txt, ...).
+static bool emit_mode(const char * tag, const std::string & out_file, size_t n_modes,
+                      const std::string & mname, const std::string & text, double secs) {
+    if (out_file.empty()) {
+        if (n_modes > 1) {
+            printf("===== %s =====\n", mname.c_str());
+        }
+        printf("%s\n", text.c_str());
+        return true;
+    }
+    std::string dst = out_file;
+    if (n_modes > 1) {
+        const size_t dot = out_file.find_last_of('.');
+        const std::string stem = (dot == std::string::npos) ? out_file : out_file.substr(0, dot);
+        const std::string ext = (dot == std::string::npos) ? ".txt" : out_file.substr(dot);
+        dst = stem + "." + mname + ext;
+    }
+    FILE * f = hs_fopen(dst, "wb");
+    if (!f) {
+        fprintf(stderr, "ace-caption: cannot write %s\n", dst.c_str());
+        return false;
+    }
+    fwrite(text.data(), 1, text.size(), f);
+    fputc('\n', f);
+    fclose(f);
+    fprintf(stderr, "[%s] %-7s -> %s (%.1fs)\n", tag, mname.c_str(), dst.c_str(), secs);
+    return true;
+}
+
+static double now_s() {
+    return (double) std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch()).count() / 1e6;
+}
+
+struct FlamingoRun {
+    std::string models, lm_file, dump_encoder, dump_ids;
+    std::vector<std::pair<std::string, std::string>> jobs;
+    std::vector<std::string> modes;
+    std::function<std::string(const std::string &)> prompt_for_mode;
+    std::function<bool(const std::string &, std::vector<float> &)> load_pcm;
+    moss::SamplerParams sp;
+    int max_tokens = 2048;
+    int top_k_debug = 0;
+    int win_batch = 8;
+};
+
+// Music Flamingo: one encode per track, then one prefill + greedy decode per mode.
+static int run_flamingo(FlamingoRun & r) {
+    const std::string sep =
+#ifdef _WIN32
+        "\\";
+#else
+        "/";
+#endif
+    BackendPair bp = backend_init("Flamingo");
+    if (!bp.backend) {
+        fprintf(stderr, "ace-caption: no backend\n");
+        return 1;
+    }
+    std::string lm_path = r.lm_file;
+    if (lm_path.empty()) {
+        lm_path = r.models + sep + "flamingo-lm-q8_0.gguf";
+        if (FILE * p = hs_fopen(lm_path, "rb")) {
+            fclose(p);
+        } else {
+            lm_path = r.models + sep + "flamingo-lm-f16.gguf";
+        }
+    }
+    const double t_load = now_s();
+    flamingo::AudioTower tower;
+    flamingo::LmModel lm;
+    BPETokenizer tok;
+    if (!flamingo::load_audio(&tower, (r.models + sep + "flamingo-aud-f16.gguf").c_str(), bp.backend) ||
+        !flamingo::load_lm(&lm, lm_path.c_str(), bp.backend) ||
+        !load_bpe_from_gguf(&tok, lm_path.c_str())) {
+        fprintf(stderr, "ace-caption: Flamingo model load failed (%s)\n", r.models.c_str());
+        flamingo::free_lm(&lm);
+        flamingo::free_audio(&tower);
+        backend_release(bp.backend, bp.cpu_backend);
+        return 1;
+    }
+    fprintf(stderr, "[Flamingo] loaded in %.1fs: LM %u layers, H %u, vocab %u\n",
+            now_s() - t_load, lm.n_layer, lm.n_embd, lm.n_vocab);
+
+    // The system turn is part of the model's chat template (typo included), and the
+    // audio goes BEFORE the user text: <|sound_bos|> <sound> x N <|sound_eos|> prompt.
+    static const char * SYSTEM =
+        "You are Music Flamingo, a multimodal assistant for language and music. On each turn "
+        "you receive an audio clip which contains music and optional text, you will receive at "
+        "least one or both; use your world knowledge and reasoning to help the user with any "
+        "task. Interpret the entirety of the content any input music--regardlenss of whether the "
+        "user calls it audio, music, or sound.";
+    const int32_t eos = 151645;   // <|im_end|>
+
+    flamingo::Eval ev;
+    int batch_rc = 0;
+    for (size_t ji = 0; ji < r.jobs.size(); ++ji) {
+        const std::string & src_file = r.jobs[ji].first;
+        const std::string & out_file = r.jobs[ji].second;
+        if (r.jobs.size() > 1) {
+            fprintf(stderr, "[Flamingo] (%zu/%zu) %s\n", ji + 1, r.jobs.size(), src_file.c_str());
+        }
+        std::vector<float> pcm;
+        if (!r.load_pcm(src_file, pcm)) {
+            batch_rc = 1;
+            continue;
+        }
+        const double t_enc = now_s();
+        std::vector<float> embeds;
+        int n_audio = 0;
+        if (!flamingo::encode_audio(tower, pcm, bp.backend, embeds, &n_audio, r.win_batch)) {
+            fprintf(stderr, "ace-caption: encode failed for %s\n", src_file.c_str());
+            batch_rc = 1;
+            continue;
+        }
+        fprintf(stderr, "[Flamingo] %.1f s audio -> %d audio tokens, encoded in %.2fs\n",
+                (double) pcm.size() / 16000.0, n_audio, now_s() - t_enc);
+        if (!r.dump_encoder.empty()) {
+            if (FILE * df = fopen(r.dump_encoder.c_str(), "wb")) {
+                fwrite(embeds.data(), sizeof(float), embeds.size(), df);
+                fclose(df);
+                fprintf(stderr, "[Flamingo] dumped audio embeds [%d,%u] -> %s\n", n_audio,
+                        lm.n_embd, r.dump_encoder.c_str());
+            }
+            r.dump_encoder.clear();
+        }
+
+        int rc = 0;
+        for (const std::string & mname : r.modes) {
+            const double t0 = now_s();
+            std::vector<int32_t> ids;
+            bool ok = push_special(tok, "<|im_start|>", ids);
+            push_text(tok, std::string("system\n") + SYSTEM, ids);
+            ok = ok && push_special(tok, "<|im_end|>", ids);
+            push_text(tok, "\n", ids);
+            ok = ok && push_special(tok, "<|im_start|>", ids);
+            push_text(tok, "user\n", ids);
+            ids.push_back((int32_t) tower.hp.audio_bos_id);
+            const size_t audio0 = ids.size();
+            ids.insert(ids.end(), (size_t) n_audio, (int32_t) tower.hp.audio_token_id);
+            ids.push_back((int32_t) tower.hp.audio_eos_id);
+            push_text(tok, r.prompt_for_mode(mname), ids);
+            ok = ok && push_special(tok, "<|im_end|>", ids);
+            push_text(tok, "\n", ids);
+            ok = ok && push_special(tok, "<|im_start|>", ids);
+            push_text(tok, "assistant\n", ids);
+            if (!ok) {
+                rc = 1;
+                break;
+            }
+            if (!r.dump_ids.empty()) {
+                if (FILE * df = fopen(r.dump_ids.c_str(), "w")) {
+                    for (int32_t id : ids) fprintf(df, "%d\n", (int) id);
+                    fclose(df);
+                }
+                r.dump_ids.clear();
+            }
+
+            const int64_t T = (int64_t) ids.size(), H = lm.n_embd;
+            std::vector<float> text_mask((size_t) T, 1.0f);
+            std::vector<float> audio_vals((size_t) (H * T), 0.0f);
+            for (int64_t i = 0; i < n_audio; ++i) {
+                text_mask[audio0 + (size_t) i] = 0.0f;
+                memcpy(&audio_vals[(audio0 + (size_t) i) * (size_t) H], &embeds[(size_t) (i * H)],
+                       (size_t) H * sizeof(float));
+            }
+            flamingo::Kv kv;
+            if (!flamingo::kv_init(&kv, lm, T + r.max_tokens + 8, bp.backend)) {
+                fprintf(stderr, "ace-caption: KV cache allocation failed (%lld positions)\n",
+                        (long long) (T + r.max_tokens + 8));
+                rc = 1;
+                break;
+            }
+            std::vector<float> logits;
+            ok = flamingo::eval(lm, kv, ev, ids, audio_vals, text_mask, bp.backend, &logits);
+            ev.free();   // the prefill graph is single-use; decode builds its own
+            const double t_prefill = now_s() - t0;
+            if (ok && r.top_k_debug > 0) {
+                std::vector<int> idx(logits.size());
+                for (size_t i = 0; i < idx.size(); ++i) idx[i] = (int) i;
+                const int n = std::min<int>(r.top_k_debug, (int) idx.size());
+                std::partial_sort(idx.begin(), idx.begin() + n, idx.end(),
+                                  [&](int a, int b) { return logits[(size_t) a] > logits[(size_t) b]; });
+                printf("TOPK %d\n", n);
+                for (int i = 0; i < n; ++i) {
+                    printf("%d\t%.6f\t%s\n", idx[(size_t) i], logits[(size_t) idx[(size_t) i]],
+                           detokenize(tok, { (int32_t) idx[(size_t) i] }).c_str());
+                }
+                flamingo::kv_free(&kv);
+                flamingo::free_lm(&lm);
+                flamingo::free_audio(&tower);
+                backend_release(bp.backend, bp.cpu_backend);
+                return 0;
+            }
+            std::vector<int32_t> counts((size_t) lm.n_vocab, 0), gen;
+            for (int step = 0; ok && step < r.max_tokens; ++step) {
+                const int32_t next = moss::moss_sample(logits, counts, r.sp);
+                if (next == eos) break;
+                gen.push_back(next);
+                counts[(size_t) next]++;
+                ok = flamingo::eval(lm, kv, ev, { next }, {}, {}, bp.backend, &logits);
+            }
+            ev.free();
+            flamingo::kv_free(&kv);
+            const double el = now_s() - t0;
+            fprintf(stderr, "[Flamingo] %s: prompt %lld tok (prefill %.2fs), %zu tok generated, "
+                    "%.1f tok/s\n", mname.c_str(), (long long) T, t_prefill, gen.size(),
+                    gen.size() / std::max(1e-6, el - t_prefill));
+            if (!ok || !emit_mode("Flamingo", out_file, r.modes.size(), mname, detokenize(tok, gen), el)) {
+                rc = 1;
+                break;
+            }
+        }
+        if (rc != 0) {
+            batch_rc = rc;
+        }
+    }
+    flamingo::free_lm(&lm);
+    flamingo::free_audio(&tower);
+    backend_release(bp.backend, bp.cpu_backend);
+    return batch_rc;
+}
+
 int main(int argc, char ** argv) {
     std::string models, lm_file, src, mode = "prose", prompt, out_path, ffmpeg, src_list;
+    std::string family;            // moss | flamingo; empty = by the files in --models
+    bool max_seconds_set = false;
+    bool max_tokens_set = false;
+    int win_batch = 8;             // Flamingo: 30 s windows per encoder graph
     std::vector<std::string> prompt_files;   // repeatable; see the per-mode note below
     int max_tokens = 1024;
     int top_k_debug = 0;
@@ -251,8 +491,10 @@ int main(int argc, char ** argv) {
         else if (a == "--top-k-debug") { top_k_debug = atoi(next("--top-k-debug").c_str()); }
         else if (a == "--dump-ids") { dump_ids = next("--dump-ids"); }
         else if (a == "--dump-encoder") { dump_encoder = next("--dump-encoder"); }
-        else if (a == "--max-tokens") { max_tokens = atoi(next("--max-tokens").c_str()); }
-        else if (a == "--max-seconds") { max_seconds = atof(next("--max-seconds").c_str()); }
+        else if (a == "--max-tokens") { max_tokens = atoi(next("--max-tokens").c_str()); max_tokens_set = true; }
+        else if (a == "--max-seconds") { max_seconds = atof(next("--max-seconds").c_str()); max_seconds_set = true; }
+        else if (a == "--family") { family = next("--family"); }
+        else if (a == "--window-batch") { win_batch = std::max(1, atoi(next("--window-batch").c_str())); }
         else if (a == "--encoder-window") { enc_window = atoi(next("--encoder-window").c_str()); }
         else if (a == "--temperature") { sp.temperature = (float) atof(next("--temperature").c_str()); }
         else if (a == "--rep-penalty") { sp.repetition_penalty = (float) atof(next("--rep-penalty").c_str()); }
@@ -266,7 +508,9 @@ int main(int argc, char ** argv) {
                     "       [-o <out.txt>] [--max-tokens N] [--max-seconds S]\n"
                     "       [--temperature T] [--rep-penalty R] [--freq-penalty F]\n"
                     "       [--dump-ids <path>] [--dump-encoder <path>]   (parity debug)\n"
-                    "       [--encoder-window FRAMES]   (0 = whole-track legacy encode)\n");
+                    "       [--encoder-window FRAMES]   (0 = whole-track legacy encode)\n"
+                    "       [--family moss|flamingo]   (default: by the files in --models)\n"
+                    "       [--window-batch N]   (Flamingo: 30 s windows per encoder pass, default 8)\n");
             return 2;
         }
     }
@@ -417,6 +661,38 @@ int main(int argc, char ** argv) {
         free(planar);
         return true;
     };
+
+    // ---- Music Flamingo ---------------------------------------------------
+    if (family.empty()) {
+        FILE * probe = hs_fopen(models + "/flamingo-aud-f16.gguf", "rb");
+        family = probe ? "flamingo" : "moss";
+        if (probe) fclose(probe);
+    }
+    if (family == "flamingo") {
+        // Flamingo takes up to 20 minutes natively and attention is flash, so the
+        // MOSS VRAM cap does not apply unless the caller set one.
+        if (!max_seconds_set) max_seconds = 1200.0;
+        // Full-song lyrics run past 1024 tokens; the reference generation_config uses 2048.
+        if (!max_tokens_set) max_tokens = 2048;
+        FlamingoRun fr;
+        fr.models = models;
+        fr.lm_file = lm_file;
+        fr.dump_encoder = dump_encoder;
+        fr.dump_ids = dump_ids;
+        fr.jobs = jobs;
+        fr.modes = modes;
+        fr.prompt_for_mode = prompt_for_mode;
+        fr.load_pcm = load_pcm;
+        fr.sp = sp;
+        fr.max_tokens = max_tokens;
+        fr.top_k_debug = top_k_debug;
+        fr.win_batch = win_batch;
+        return run_flamingo(fr);
+    }
+    if (family != "moss") {
+        fprintf(stderr, "ace-caption: unknown --family '%s' (moss or flamingo)\n", family.c_str());
+        return 2;
+    }
 
     // ---- models -----------------------------------------------------------
     const std::string sep =
