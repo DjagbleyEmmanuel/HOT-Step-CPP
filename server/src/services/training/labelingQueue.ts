@@ -47,8 +47,9 @@ import {
   prepareLocalLyrics, prepareMossBatch, takeLocalLyrics,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
+import { hasSectionTags, normaliseLyricTags, transferTags } from './lyricTags.js';
 import type {
-  BuildOptions, CaptionOptions, FieldSource, GeniusOptions, LabelOptions, MergePolicy,
+  BuildOptions, CaptionOptions, FieldSource, GeniusOptions, LabelOptions, MergePolicy, NormaliseLyricsOptions,
   TrainingDatasetRow, TrainingJobKind, TrainingJobStatus, TrainingJobSummary,
   TrainingSample, TrainingStreamEvent,
 } from './types.js';
@@ -1053,7 +1054,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
               if (!incoming.bpm && result.bpm != null) { incoming.bpm = String(Math.trunc(result.bpm)); sources.bpm = 'understand'; }
               if (!incoming.key && result.keyscale) { incoming.key = result.keyscale; sources.key = 'understand'; }
               if (result.caption) { incoming.caption = result.caption; sources.caption = 'understand'; }
-              if (result.lyrics) { incoming.lyrics = result.lyrics; sources.lyrics = 'understand'; }
+              if (result.lyrics) { incoming.lyrics = normaliseLyricTags(result.lyrics); sources.lyrics = 'understand'; }
               if (result.timesignature) { incoming.signature = result.timesignature; sources.signature = 'understand'; }
               if (!ds.defaultLanguage && result.vocalLanguage) { incoming.language = result.vocalLanguage; sources.language = 'understand'; }
               // audio_codes NEVER enters the sidecar — it goes here (D7).
@@ -1512,6 +1513,96 @@ async function runBuildJob(job: TrainingJob): Promise<void> {
 export function startLabelJob(datasetId: string, sampleIds: string[], opts: LabelOptions): TrainingJob {
   const job = createJob('label', datasetId, sampleIds, opts);
   enqueue(job, runLabelJob);
+  return job;
+}
+
+// ── Normalise lyrics job ─────────────────────────────────────────────────
+
+/**
+ * Rewrite existing sidecar lyrics onto the one tag vocabulary (lyricTags.ts),
+ * with a .bak of each file it changes. With `retag`, lyrics that carry no
+ * section tags at all get them from a Music Flamingo transcript of the audio,
+ * aligned word by word (the sidecar's words are kept, only tags are added).
+ */
+async function runNormaliseLyricsJob(job: TrainingJob): Promise<void> {
+  if (isCancelled(job)) return;
+  const ds = getDataset(job.datasetId);
+  if (!ds) { finishJob(job, 'failed', 'Dataset not found'); return; }
+  const opts = (job.opts || {}) as NormaliseLyricsOptions;
+
+  job.status = 'running';
+  job.startedAt = Date.now();
+  job.phase = 'normalise';
+  emitJob(job);
+
+  try {
+    const { targets } = await loadTargets(job, ds);
+    job.total = targets.length;
+    markPending(job, ds, targets);
+    const lyricsOf = (s: TrainingSample) => (loadSidecarMetadata(s.audioPath).lyrics ?? '').trim();
+    const retag = opts.retag === true
+      ? targets.filter(s => { const l = lyricsOf(s); return !!l && !hasSectionTags(l) && !s.isInstrumental; })
+      : [];
+    const retagPaths = new Set(retag.map(s => s.audioPath));
+    pushLog(`[Training] Normalise-lyrics job ${job.id} started — ${job.total} files, ${retag.length} without section tags`);
+    if (retag.length > 0) {
+      emitLog(job, 'info', `Recovering sections from audio (Music Flamingo) for ${retag.length} track(s) with no tags`);
+      prepareLocalLyrics(retag.map(s => s.audioPath), {
+        signal: job.controller.signal,
+        log: (level, message) => emitLog(job, level, message),
+      });
+    }
+    emitProgress(job);
+
+    let changed = 0, recovered = 0;
+    await runPooled(job, targets, 4, async (sample) => {
+      job.currentSampleId = sample.sampleId;
+      markProcessing(job, ds, sample);
+      try {
+        const before = lyricsOf(sample);
+        let next = before;
+        if (before && retagPaths.has(sample.audioPath)) {
+          const tagged = await takeLocalLyrics(sample.audioPath, {
+            signal: job.controller.signal,
+            log: (level, message) => emitLog(job, level, `${sample.filename}: ${message}`),
+          });
+          const withTags = tagged ? transferTags(before, tagged) : before;
+          if (withTags !== before) recovered++;
+          else emitLog(job, 'warn', `${sample.filename}: no sections recovered (the transcript did not line up with the lyrics)`);
+          next = withTags;
+        }
+        next = normaliseLyricTags(next);
+        if (next && next !== before) {
+          await mergeIntoSidecar(sample, { lyrics: next }, 'overwrite_lyrics', true);
+          changed++;
+        }
+        clearTransientStatus(job.datasetId, sample.sampleId);
+        const fresh = refreshSample(ds, sample);
+        pushEvent(job, { type: 'sample', sampleId: sample.sampleId, status: fresh.labelStatus, sample: fresh });
+        job.done++;
+      } catch (err: any) {
+        if (err instanceof AbortError || isCancelled(job)) return;
+        markError(job, ds, sample, err?.message || 'Lyrics normalisation failed');
+      }
+      emitProgress(job);
+    });
+
+    if (isCancelled(job)) return;
+    emitLog(job, 'info', `Normalised ${changed}/${targets.length} track(s)`
+      + (retag.length ? `; sections recovered for ${recovered}/${retag.length}` : ''));
+    refreshCounters(ds, await buildSamples(ds, { withDuration: false }));
+    finishJob(job, 'done');
+  } catch (err: any) {
+    if (isCancelled(job)) return;
+    finishJob(job, 'failed', err?.message || 'Lyrics normalisation failed');
+  } finally {
+    clearMossBatch();
+  }
+}
+
+export function startNormaliseLyricsJob(datasetId: string, sampleIds: string[], opts: NormaliseLyricsOptions): TrainingJob {
+  const job = createJob('normalise-lyrics', datasetId, sampleIds, opts);
+  enqueue(job, runNormaliseLyricsJob);
   return job;
 }
 

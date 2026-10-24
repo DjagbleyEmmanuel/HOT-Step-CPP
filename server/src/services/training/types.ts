@@ -31,7 +31,7 @@ export type MergePolicy =
   | 'overwrite_all';
 
 export type TrainingJobKind =
-  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'build'
+  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'normalise-lyrics' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit' | 'sa3-train'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3 (docs/plans/2026-08-20-mm3-training-server-design.md §2.1).
@@ -695,6 +695,13 @@ export interface LabelOptions {
    *  labelling. Set by the bulk pipeline, for which an already-labelled dataset
    *  is a completed stage rather than a failure. */
   allowEmpty?: boolean;
+}
+
+export interface NormaliseLyricsOptions {
+  sampleIds?: string[];
+  /** Untagged lyrics: recover sections from the audio (Music Flamingo transcript,
+   *  aligned word by word; the existing words are kept). Needs the GPU. */
+  retag?: boolean;
 }
 
 export interface GeniusOptions {

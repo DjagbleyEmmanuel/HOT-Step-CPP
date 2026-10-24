@@ -32,6 +32,7 @@ import { execFile } from 'child_process';
 import { config, getFFmpegPath } from '../../config.js';
 import { CAPTION_INSTRUCTIONS } from './captionPrompt.js';
 import { normalizeYue2Caption } from '../lireek/prompts.js';
+import { normaliseLyricTags } from './lyricTags.js';
 
 /** Modes `ace-caption` can decode off a single encode. */
 export type MossMode = 'prose' | 'mm3' | 'lyrics' | 'yue2';
@@ -853,13 +854,13 @@ export async function takeLocalLyrics(
   if (pending) {
     lyricsPending.delete(audioPath);
     const got = await pending;
-    if (got) return got;
+    if (got) return normaliseLyricTags(got);
   }
   const raw = await runMossCaption(audioPath, {
     model: 'flamingo', modes: ['lyrics'], prompts: { lyrics: LYRICS_INSTRUCTIONS },
     signal: opts.signal, log: opts.log,
   });
-  return raw.lyrics?.trim() || undefined;
+  return raw.lyrics?.trim() ? normaliseLyricTags(raw.lyrics) : undefined;
 }
 
 /** A track that no longer needs local lyrics (Genius found them). The batch

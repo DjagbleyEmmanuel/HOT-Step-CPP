@@ -219,7 +219,7 @@ import '../services/training/review/operations.js';
 import '../services/training/yue2PreparationOperations.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
-  BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,
+  BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize, NormaliseLyricsOptions,
   LyricStudioExportInput, Mm3PreviewOptions,
   PatchSampleInput, PipelineFolderSpec, PipelineLabelOptions, PipelineStage,
   PreprocessCompat, PreprocessDtype, PreprocessNormalize, PreprocessOptions,
@@ -1503,6 +1503,42 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
 });
 
 // ── Enhance jobs (§2.6) ──────────────────────────────────────────────────
+
+/** POST /datasets/:id/enhance/normalise-lyrics — every sidecar's lyrics onto the
+ *  one tag vocabulary (lyricTags.ts), .bak kept. Body: { sampleIds?, retag? }.
+ *  `retag` recovers sections for untagged lyrics from the audio (Music Flamingo). */
+router.post('/datasets/:id/enhance/normalise-lyrics', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const body = (req.body || {}) as NormaliseLyricsOptions;
+    const retag = body.retag === true;
+    const blocker = labelBlockedBy(ds.id, retag);
+    if (blocker) {
+      res.status(409).json({
+        error: retag && TRAINER_KINDS.has(blocker.kind)
+          ? 'Recovering sections from audio needs the card, which a training job owns. Run without it, or wait.'
+          : 'A job is already running for this dataset',
+      });
+      return;
+    }
+    if (retag) {
+      const probe = resolveMossPaths('flamingo');
+      if ('missing' in probe) {
+        res.status(503).json({ error: `Music Flamingo is not available to recover sections: ${probe.missing}` });
+        return;
+      }
+    }
+    const samples = await buildSamples(ds);
+    const targets = pickTargets(samples, body.sampleIds, 'all', s => !!s.lyrics.trim());
+    if (targets.length === 0) { res.status(400).json({ error: 'No lyrics to normalise' }); return; }
+    const job = queue.startNormaliseLyricsJob(ds.id, targets, { ...body, retag });
+    res.status(202).json({ jobId: job.id });
+  } catch (err: any) {
+    console.error(`[Training] Normalise-lyrics start failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/datasets/:id/enhance/genius', async (req: Request, res: Response) => {
   try {

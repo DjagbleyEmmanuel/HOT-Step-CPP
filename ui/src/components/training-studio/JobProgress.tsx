@@ -17,6 +17,7 @@ const PHASE_KEYS: Record<string, string> = {
   'waiting-for-engine': 'trainingStudio.job.phaseUnderstand',
   genius: 'trainingStudio.job.phaseGenius',
   lyrics: 'trainingStudio.job.phaseLyrics',
+  normalise: 'trainingStudio.job.phaseNormalise',
   llm: 'trainingStudio.job.phaseLlm',
   build: 'trainingStudio.job.phaseBuild',
   // yue2-stems. Without this the raw phase enum is interpolated into the

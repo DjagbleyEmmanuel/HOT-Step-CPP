@@ -14,7 +14,7 @@ import { execFile } from 'child_process';
 import { config, getFFmpegPath } from '../../config.js';
 import { searchSongLyrics } from '../lireek/geniusService.js';
 import { getProvider } from '../lireek/llm/registry.js';
-import { sanitizeHeaders } from './lyricsSanitizer.js';
+import { normaliseLyricTags } from './lyricTags.js';
 import { buildUserPrompt, captionProblem, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
 import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
@@ -182,7 +182,9 @@ export async function enhanceGenius(
   if (!hit || !hit.lyrics?.trim()) return null;
 
   let lyrics = cleanText(hit.lyrics, MAX_LYRICS_CHARS);
-  if (opts.sanitizeHeaders) lyrics = sanitizeHeaders(lyrics);
+  // Genius tags come in every dialect ([Verse 1: Name], speaker tags, "Chorus:",
+  // typos); map them onto the one vocabulary the rest of the app uses.
+  if (opts.sanitizeHeaders) lyrics = normaliseLyricTags(lyrics);
   if (!lyrics.trim()) return null;
 
   return { lyrics, source: 'genius', searched };

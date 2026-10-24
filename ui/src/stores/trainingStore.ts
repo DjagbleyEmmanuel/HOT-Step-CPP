@@ -25,6 +25,7 @@ import type {
   CaptionOptions,
   CreateDatasetInput,
   GeniusOptions,
+  NormaliseLyricsOptions,
   LabelOptions,
   PatchDatasetInput,
   PatchSampleInput,
@@ -368,6 +369,7 @@ interface TrainingState {
   setOpenSampleId(sampleId: string | null): void;
   startLabel(opts: LabelOptions): Promise<void>;
   startGenius(opts: GeniusOptions): Promise<void>;
+  startNormaliseLyrics(opts: NormaliseLyricsOptions): Promise<void>;
   startCaption(opts: CaptionOptions): Promise<void>;
   startYue2Caption(opts: { sampleIds?: string[]; provider?: string; model?: string }): Promise<void>;
   startBuild(outputPath?: string): Promise<void>;
@@ -790,6 +792,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   startLabel: async (opts) => { await startJob(set, get, (id, t) => trainingApi.startLabel(id, opts, t)); },
   startGenius: async (opts) => { await startJob(set, get, (id, t) => trainingApi.startGenius(id, opts, t)); },
+  startNormaliseLyrics: async (opts) => { await startJob(set, get, (id, t) => trainingApi.startNormaliseLyrics(id, opts, t)); },
   startCaption: async (opts) => { await startJob(set, get, (id, t) => trainingApi.startCaption(id, opts, t)); },
   startYue2Caption: async (opts) => { await startJob(set, get, (id, t) => trainingApi.startYue2Caption(id, opts, t)); },
   startBuild: async (outputPath) => { await startJob(set, get, (id, t) => trainingApi.startBuild(id, outputPath, t)); },

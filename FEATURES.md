@@ -361,7 +361,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | Feature | What it does |
 |---|---|
 | Dataset wizard | Scan a folder, set a trigger word and language, preview before creating. |
-| Labeling | Essentia BPM and key, Genius lyrics with local Music Flamingo transcription where Genius has none, and captions from local MOSS, local Music Flamingo or a cloud LLM. |
+| Labeling | Essentia BPM and key, Genius lyrics with local Music Flamingo transcription where Genius has none, section tags normalised to one unnumbered set (and recovered from the audio for untagged lyrics), and captions from local MOSS, local Music Flamingo or a cloud LLM. |
 | Local captioning | MOSS-Music-8B-Instruct and NVIDIA Music Flamingo in native GGML (`ace-caption`), in ACE-Step or MM3 caption formats, plus section-tagged lyric transcription. |
 | Review grid | Spreadsheet editing of every track with bulk actions and scoped re-labels. |
 | Dataset build | Writes a Side-Step-compatible `dataset.json` with trigger placement and genre ratio. |

@@ -88,7 +88,7 @@ export type MergePolicy =
   | 'overwrite_all';
 
 export type TrainingJobKind =
-  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'build'
+  | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'normalise-lyrics' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit' | 'sa3-train'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3. Both GPU-lane and engine-stopping — an MM3 training step
@@ -2206,6 +2206,13 @@ export interface LabelOptions {
   };
 }
 
+export interface NormaliseLyricsOptions {
+  sampleIds?: string[];
+  /** Untagged lyrics: recover sections from the audio (Music Flamingo transcript,
+   *  aligned word by word; the existing words are kept). Needs the GPU. */
+  retag?: boolean;
+}
+
 export interface GeniusOptions {
   sampleIds?: string[];
   mergePolicy?: MergePolicy;
@@ -2488,6 +2495,10 @@ export async function startLabel(id: string, opts: LabelOptions, reqOpts?: Train
 
 export async function startGenius(id: string, opts: GeniusOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
   return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/genius`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
+}
+
+export async function startNormaliseLyrics(id: string, opts: NormaliseLyricsOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
+  return request<{ jobId: string }>(`/datasets/${encodeURIComponent(id)}/enhance/normalise-lyrics`, { method: 'POST', ...jsonBody(opts) }, reqOpts);
 }
 
 export async function startCaption(id: string, opts: CaptionOptions, reqOpts?: TrainingTarget): Promise<{ jobId: string }> {
