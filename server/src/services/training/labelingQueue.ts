@@ -709,6 +709,13 @@ function hasCloudLane(opts: LabelOptions): boolean {
   return opts.useUnderstand === true || opts.useGenius === true || opts.useCaption === true;
 }
 
+/** Lead sheets from the key pass as they land: a file's promise settles when
+ *  its score is in, or when the pass is over without one. */
+interface SheetFeed {
+  scores: Map<string, string>;
+  ready(audioPath: string): Promise<void>;
+}
+
 interface PassAResult {
   duration: number;
   tags: { artist: string; title: string; album: string };
@@ -726,7 +733,7 @@ async function runPassA(
   opts: LabelOptions,
   policy: MergePolicy,
   results: Map<string, PassAResult>,
-  sheetScores: Map<string, string>,
+  sheets: SheetFeed,
 ): Promise<void> {
   // When a cloud lane runs concurrently it owns job.phase/currentSampleId
   // (that progress is what the user watches); the CPU lane reports per-sample only.
@@ -738,9 +745,28 @@ async function runPassA(
 
   const meta = await audioMeta.read(sample.audioPath);
 
-  // Essentia is deterministic — if we already analyzed this exact file
-  // (size+mtime unchanged since the cached run), reuse the raw result from the
-  // label store instead of re-running ffmpeg + Essentia on a re-label.
+  // beat_this tempo and SheetSage2 key are the defaults (HOTSTEP-730: they beat
+  // Essentia on 24 reference tracks); Essentia, then the file tags, fill in
+  // whatever they cannot answer.
+  const analyze = opts.useEssentia !== false;
+  const beatBpm = analyze && opts.tempoSource !== 'essentia'
+    ? await analyzeTempoWithBeatThis(sample.audioPath, job.controller.signal) : null;
+  const useSheet = analyze && opts.keySource !== 'essentia';
+  // The key pass runs beside this one; wait only for this file's lead sheet.
+  if (useSheet) await sheets.ready(sample.audioPath);
+  if (isCancelled(job)) return;
+  const sheetKey = useSheet ? abcKeyString(sheets.scores.get(sample.audioPath) || readAbcSidecar(sample.audioPath)) : '';
+  if (useSheet && beatBpm !== null) {
+    // The saved lead sheet carries the measured tempo, for covers and the rest.
+    const saved = readAbcSidecar(sample.audioPath);
+    const retimed = saved && withAbcTempo(saved, beatBpm);
+    // A score this job just transcribed has nothing worth a backup.
+    if (retimed && retimed !== saved) writeAbcSidecar(sample.audioPath, retimed, { keepBackups: !sheets.scores.has(sample.audioPath) });
+  }
+
+  // Essentia only answers what those two left open: its CPU pass is the
+  // slowest step on a big dataset. It is deterministic, so a result cached for
+  // this exact file (size+mtime unchanged) is reused instead of re-run.
   const cached = readLabel(ds.slug, sample.sampleId);
   const cacheFresh = (() => {
     if (!cached?.durationCache) return false;
@@ -752,7 +778,7 @@ async function runPassA(
       return false;
     }
   })();
-  const essentia = (opts.useEssentia !== false && essentiaAvailable())
+  const essentia = analyze && essentiaAvailable() && (beatBpm === null || !sheetKey)
     ? (cacheFresh && cached?.essentia
         ? cached.essentia
         : await analyzeWithEssentia(sample.audioPath, job.controller.signal, opts.essentiaTempo))
@@ -760,21 +786,6 @@ async function runPassA(
 
   const essentiaKey = essentia ? essentiaKeyString(essentia.key, essentia.scale) : '';
   const essentiaBpm = reconcileEssentiaBpm(essentia?.bpm ?? null, meta.bpm);
-  // beat_this tempo and SheetSage2 key are the defaults (HOTSTEP-730: they beat
-  // Essentia on 24 reference tracks); Essentia, then the file tags, fill in
-  // whatever they cannot answer.
-  const analyze = opts.useEssentia !== false;
-  const beatBpm = analyze && opts.tempoSource !== 'essentia'
-    ? await analyzeTempoWithBeatThis(sample.audioPath, job.controller.signal) : null;
-  const useSheet = analyze && opts.keySource !== 'essentia';
-  const sheetKey = useSheet ? abcKeyString(sheetScores.get(sample.audioPath) || readAbcSidecar(sample.audioPath)) : '';
-  if (useSheet && beatBpm !== null) {
-    // The saved lead sheet carries the measured tempo, for covers and the rest.
-    const saved = readAbcSidecar(sample.audioPath);
-    const retimed = saved && withAbcTempo(saved, beatBpm);
-    // A score this job just transcribed has nothing worth a backup.
-    if (retimed && retimed !== saved) writeAbcSidecar(sample.audioPath, retimed, { keepBackups: !sheetScores.has(sample.audioPath) });
-  }
   const bpmFromTag = essentiaBpm !== null && essentiaBpm === meta.bpm && essentiaBpm !== essentia?.bpm;
   const result: PassAResult = {
     duration: meta.duration,
@@ -798,8 +809,8 @@ async function runPassA(
   patchLabel(ds.slug, sample.sampleId, {
     relPath: sample.relPath,
     tags: result.tags,
-    essentia: essentia ?? null,
-    essentiaTempo: opts.essentiaTempo ?? null,
+    // A skipped Essentia run keeps its cached result for a later re-label.
+    ...(essentia ? { essentia, essentiaTempo: opts.essentiaTempo ?? null } : {}),
     durationCache: meta.duration > 0 ? { seconds: meta.duration, sizeBytes, mtimeMs } : null,
   });
 
@@ -871,13 +882,30 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
     emitProgress(job);
 
     // ── Key pass: SheetSage2 lead sheets for files that have none (GPU, one run) ──
-    // Before Pass A so the first sidecar write already carries the key.
-    const sheetScores = opts.useEssentia !== false && opts.keySource !== 'essentia'
-      ? await (await import('./yue2ArTrainRunner.js')).transcribeLabelSheets(job, targets.map(t => t.audioPath))
-      : new Map<string, string>();
-    if (isCancelled(job)) return;
-    job.phase = 'essentia';
-    emitProgress(job);
+    // Runs beside everything below; Pass A waits only for its own file's score.
+    const sheets: SheetFeed = { scores: new Map(), ready: () => Promise.resolve() };
+    const sheetLane = (async () => {
+      if (opts.useEssentia === false || opts.keySource === 'essentia') return;
+      const release = new Map<string, () => void>();
+      const ready = new Map<string, Promise<void>>();
+      for (const t of targets) {
+        // A file that already has a lead sheet is not transcribed again.
+        if (readAbcSidecar(t.audioPath)) continue;
+        ready.set(t.audioPath, new Promise<void>(r => release.set(t.audioPath, r)));
+      }
+      sheets.ready = (audioPath) => ready.get(audioPath) ?? Promise.resolve();
+      try {
+        const { transcribeLabelSheets } = await import('./yue2ArTrainRunner.js');
+        await transcribeLabelSheets(job, targets.map(t => t.audioPath), (audioPath, abc) => {
+          sheets.scores.set(audioPath, abc);
+          release.get(audioPath)?.();
+        });
+      } catch (err: any) {
+        emitLog(job, 'warn', `SheetSage2 key pass failed: ${err?.message || err}; using Essentia's key.`);
+      } finally {
+        for (const r of release.values()) r();
+      }
+    })();
 
     // ── Pass A: tags + beat_this/Essentia + key  ──
     // ── Pass B: Genius + LLM caption (network) ──
@@ -902,7 +930,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
         if (index >= targets.length) return;
         const sample = targets[index];
         try {
-          await runPassA(job, ds, sample, opts, policy, passA, sheetScores);
+          await runPassA(job, ds, sample, opts, policy, passA, sheets);
         } catch (err: any) {
           if (!isCancelled(job)) {
             markError(job, ds, sample, err?.message || 'Analysis failed');
@@ -928,6 +956,20 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
     //   → Genius lyrics → LLM caption+genre (audio-grounded on gemini).
     // All results accumulate into ONE sidecar write per sample.
     const cloudLane = hasCloudLane(opts);
+    // Genius needs only the file tags, so every lookup starts now (paced by its
+    // limiter) instead of queueing behind each file's analysis and caption.
+    const geniusHits = new Map<string, ReturnType<typeof enhanceGenius>>();
+    if (opts.useGenius === true) {
+      for (const t of targets) {
+        const hit = (async () => {
+          const m = await audioMeta.read(t.audioPath);
+          const tagged: TrainingSample = { ...t, tagArtist: m.artist || t.tagArtist, tagTitle: m.title || t.tagTitle, tagAlbum: m.album || t.tagAlbum };
+          return geniusLimiter.run(() => isCancelled(job) ? Promise.resolve(null) : enhanceGenius(tagged, ds, { sanitizeHeaders: true }));
+        })();
+        hit.catch(() => { /* surfaced when Pass B awaits it */ });
+        geniusHits.set(t.sampleId, hit);
+      }
+    }
     const passBLane = (async () => {
       if (!cloudLane) return;
       let engineFailures = 0;
@@ -1037,11 +1079,8 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
             job.phase = 'genius';
             emitProgress(job);
             try {
-              // The limiter supplies both the courtesy spacing and the in-flight
-              // cap, so there is no sleep after the call any more — pacing is on
-              // call STARTS, which is what a quota bucket actually counts.
-              const hit = await geniusLimiter.run(
-                () => enhanceGenius(enriched, ds, { sanitizeHeaders: true }));
+              // Started at job start (geniusHits); the limiter paces call starts.
+              const hit = await geniusHits.get(sample.sampleId)!;
               if (hit) {
                 incoming.lyrics = hit.lyrics;
                 sources.lyrics = 'genius';
@@ -1165,7 +1204,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
       await Promise.all(Array.from({ length: passBPool }, () => passBWorker()));
     })();
 
-    await Promise.all([passALane, passBLane]);
+    await Promise.all([sheetLane, passALane, passBLane]);
 
     if (isCancelled(job)) return;
     if (job.status !== 'running') return;   // engine-unreachable already finished the job

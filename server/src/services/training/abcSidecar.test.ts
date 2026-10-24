@@ -146,7 +146,12 @@ test('label key pass transcribes only files without a lead sheet and reads key a
       fs.writeFileSync(manifest, JSON.stringify(data));
       return state;
     }) as typeof runYue2AceTrain;
-    const scores = await transcribeLabelSheets(job, [saved, fresh, instrumental], { missingModels: () => [], run, exe: () => 'ace-train' });
+    const scores = new Map<string, string>();
+    await transcribeLabelSheets(job, [saved, fresh, instrumental], (audio, abc) => {
+      // Each score is saved before it is handed on.
+      if (audio === fresh) assert.equal(abcKeyString(readAbcSidecar(fresh)), 'F# Minor');
+      scores.set(audio, abc);
+    }, { missingModels: () => [], run, exe: () => 'ace-train' });
     assert.equal(abcKeyString(readAbcSidecar(fresh)), 'F# Minor');
     // An instrumental score has no sung bar, so it is not saved, but its key still counts.
     assert.equal(readAbcSidecar(instrumental), '');
