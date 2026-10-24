@@ -261,6 +261,8 @@ static double now_s() {
 struct FlamingoRun {
     std::string models, lm_file, dump_encoder, dump_ids;
     std::vector<std::pair<std::string, std::string>> jobs;
+    std::vector<std::string> hints;
+    std::function<std::string(const std::string &, const std::string &, const std::string &)> with_hint;
     std::vector<std::string> modes;
     std::function<std::string(const std::string &)> prompt_for_mode;
     std::function<bool(const std::string &, std::vector<float> &)> load_pcm;
@@ -365,7 +367,7 @@ static int run_flamingo(FlamingoRun & r) {
             const size_t audio0 = ids.size();
             ids.insert(ids.end(), (size_t) n_audio, (int32_t) tower.hp.audio_token_id);
             ids.push_back((int32_t) tower.hp.audio_eos_id);
-            push_text(tok, r.prompt_for_mode(mname), ids);
+            push_text(tok, r.with_hint(r.prompt_for_mode(mname), mname, r.hints[ji]), ids);
             ok = ok && push_special(tok, "<|im_end|>", ids);
             push_text(tok, "\n", ids);
             ok = ok && push_special(tok, "<|im_start|>", ids);
@@ -450,6 +452,7 @@ static int run_flamingo(FlamingoRun & r) {
 int main(int argc, char ** argv) {
     std::string models, lm_file, src, mode = "prose", prompt, out_path, ffmpeg, src_list;
     std::string family;            // moss | flamingo; empty = by the files in --models
+    std::string hint;              // appended to every non-lyrics prompt (see the work list)
     bool max_seconds_set = false;
     bool max_tokens_set = false;
     int win_batch = 8;             // Flamingo: 30 s windows per encoder graph
@@ -494,6 +497,7 @@ int main(int argc, char ** argv) {
         else if (a == "--max-tokens") { max_tokens = atoi(next("--max-tokens").c_str()); max_tokens_set = true; }
         else if (a == "--max-seconds") { max_seconds = atof(next("--max-seconds").c_str()); max_seconds_set = true; }
         else if (a == "--family") { family = next("--family"); }
+        else if (a == "--hint") { hint = next("--hint"); }
         else if (a == "--window-batch") { win_batch = std::max(1, atoi(next("--window-batch").c_str())); }
         else if (a == "--encoder-window") { enc_window = atoi(next("--encoder-window").c_str()); }
         else if (a == "--temperature") { sp.temperature = (float) atof(next("--temperature").c_str()); }
@@ -503,8 +507,9 @@ int main(int argc, char ** argv) {
             fprintf(stderr,
                     "usage: ace-caption --models <dir> --src-audio <file>\n"
                     "       [--lm <moss-lm-*.gguf>]   (any quantisation; default q8_0, then f16)\n"
-                    "       [--mode prose|mm3|lyrics[,...]] [--prompt \"...\"]\n"
-                    "       [--prompt-file [prose=|mm3=|lyrics=]<path>]   (repeatable)\n"
+                    "       [--mode prose|mm3|lyrics|yue2[,...]] [--prompt \"...\"]\n"
+                    "       [--prompt-file [prose=|mm3=|lyrics=|yue2=]<path>]   (repeatable)\n"
+                    "       [--hint \"...\"]   (appended to non-lyrics prompts; --src-list takes it as a 3rd column)\n"
                     "       [-o <out.txt>] [--max-tokens N] [--max-seconds S]\n"
                     "       [--temperature T] [--rep-penalty R] [--freq-penalty F]\n"
                     "       [--dump-ids <path>] [--dump-encoder <path>]   (parity debug)\n"
@@ -525,7 +530,15 @@ int main(int argc, char ** argv) {
     // The caller supplies the output base explicitly rather than it being derived
     // from the audio stem, because dataset filenames collide across albums and a
     // derived name would silently overwrite one track's caption with another's.
+    //
+    // An optional THIRD column is a per-track hint appended to every prompt except
+    // lyrics (--hint for a single file). The app passes the file's genre tag: on a
+    // dataset of lounge covers of rock songs, both models recognise the song and
+    // describe the ORIGINAL's genre ("garage punk", "synth-pop") unless told the
+    // file is tagged Lounge, after which they describe the piano and brushed drums
+    // they actually hear.
     std::vector<std::pair<std::string, std::string>> jobs;
+    std::vector<std::string> job_hints;
     if (!src_list.empty()) {
         std::string listing;
         if (!read_text_file(src_list, listing)) {
@@ -541,8 +554,13 @@ int main(int argc, char ** argv) {
             if (tab == std::string::npos) {
                 const size_t dot = line.find_last_of('.');
                 jobs.emplace_back(line, dot == std::string::npos ? line : line.substr(0, dot));
+                job_hints.emplace_back();
             } else {
-                jobs.emplace_back(line.substr(0, tab), line.substr(tab + 1));
+                const size_t tab2 = line.find('\t', tab + 1);
+                jobs.emplace_back(line.substr(0, tab), line.substr(tab + 1, tab2 == std::string::npos
+                                                                                ? std::string::npos
+                                                                                : tab2 - tab - 1));
+                job_hints.push_back(tab2 == std::string::npos ? std::string() : line.substr(tab2 + 1));
             }
         }
         if (jobs.empty()) {
@@ -551,7 +569,12 @@ int main(int argc, char ** argv) {
         }
     } else {
         jobs.emplace_back(src, out_path);
+        job_hints.push_back(hint);
     }
+    // Hints steer descriptions, never transcription.
+    auto with_hint = [](const std::string & p, const std::string & mode, const std::string & h) {
+        return (h.empty() || mode == "lyrics") ? p : p + "\n\n" + h;
+    };
 
     // --prompt / --prompt-file override every mode; otherwise each mode picks its
     // own built-in prompt. --modes takes a comma-separated list so all formats
@@ -570,7 +593,7 @@ int main(int argc, char ** argv) {
         // bare Windows path (`D:\x\p.txt`) still parses as the blanket form.
         const size_t eq = spec.find('=');
         const std::string head = eq == std::string::npos ? std::string() : spec.substr(0, eq);
-        const bool per_mode = head == "prose" || head == "mm3" || head == "lyrics";
+        const bool per_mode = head == "prose" || head == "mm3" || head == "lyrics" || head == "yue2";
         std::string text;
         if (!read_text_file(per_mode ? spec.substr(eq + 1) : spec, text)) {
             fprintf(stderr, "ace-caption: cannot read %s\n",
@@ -680,6 +703,8 @@ int main(int argc, char ** argv) {
         fr.dump_encoder = dump_encoder;
         fr.dump_ids = dump_ids;
         fr.jobs = jobs;
+        fr.hints = job_hints;
+        fr.with_hint = with_hint;
         fr.modes = modes;
         fr.prompt_for_mode = prompt_for_mode;
         fr.load_pcm = load_pcm;
@@ -1031,7 +1056,7 @@ int main(int argc, char ** argv) {
     int rc = 0;
     for (size_t mi = 0; mi < modes.size(); ++mi) {
         const std::string & mname = modes[mi];
-        const std::string p = prompt_for_mode(mname);   // handles both override forms
+        const std::string p = with_hint(prompt_for_mode(mname), mname, job_hints[ji]);
         std::string text;
         const double t0 = (double) clock() / CLOCKS_PER_SEC;
         if (!run_mode(p, text)) {
