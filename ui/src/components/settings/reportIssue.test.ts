@@ -78,8 +78,8 @@ import { modelLines } from './reportIssue';
 
 test('modelLines follows the engine: ACE-Step models for ace, catalogue for YuE2', () => {
   const ace = { ditModel: 'C:\\m\\acestep-dit.gguf', lmModel: 'lm.gguf', vaeModel: 'vae.gguf' };
-  const cat = { buckets: { lm: ['q8_0'], vae: ['standard'] }, defaults: { lm: 'q8_0', vae: 'standard', lmAdapterAr: 'D:\\a\\x_ar.safetensors', lmAdapterNar: '' } };
+  const cat = { buckets: { lm: ['q8_0'], vae: ['standard'] }, meta: { lm: { q8_0: { label: 'yue2-lm-q8_0.gguf' } } }, defaults: { lm: 'q8_0', vae: 'standard', lmAdapterAr: 'D:\\a\\x_ar.safetensors', lmAdapterNar: '' } };
   assert.deepEqual(modelLines('ace', ace, cat, '?').map(l => l[0]), ['DiT model', 'LM model', 'VAE model']);
-  assert.deepEqual(modelLines('yue2', ace, cat, '?'), [['lm model', 'q8_0'], ['vae model', 'standard'], ['AR LoRA', 'x_ar.safetensors']]);
+  assert.deepEqual(modelLines('yue2', ace, cat, '?'), [['lm model', 'yue2-lm-q8_0.gguf'], ['vae model', 'standard'], ['AR LoRA', 'x_ar.safetensors']]);
   assert.deepEqual(modelLines('yue2', ace, undefined, '?'), []);
 });

@@ -105,7 +105,7 @@ export function buildReport(parts: ReportParts, max = MAX_URL_LENGTH): { url: st
 export function modelLines(
   engine: string,
   ace: { ditModel?: unknown; lmModel?: unknown; vaeModel?: unknown },
-  catalogue: { buckets?: Record<string, unknown>; defaults?: Record<string, unknown> } | undefined,
+  catalogue: { buckets?: Record<string, unknown>; defaults?: Record<string, unknown>; meta?: Record<string, Record<string, { label?: string }>> } | undefined,
   unknown: string,
 ): Array<[string, string]> {
   const name = (v: unknown) => String(v || '').split(/[\\/]/).pop() || '';
@@ -113,7 +113,7 @@ export function modelLines(
     return [['DiT model', name(ace.ditModel) || unknown], ['LM model', name(ace.lmModel) || unknown], ['VAE model', name(ace.vaeModel) || unknown]];
   }
   const d = catalogue?.defaults ?? {};
-  const lines: Array<[string, string]> = Object.keys(catalogue?.buckets ?? {}).map(b => [`${b} model`, name(d[b]) || unknown]);
+  const lines: Array<[string, string]> = Object.keys(catalogue?.buckets ?? {}).map(b => [`${b} model`, name(catalogue?.meta?.[b]?.[String(d[b])]?.label) || name(d[b]) || unknown]);
   // YuE2 adapters: a half with no pick is simply not listed.
   for (const [label, key] of [['AR LoRA', 'lmAdapterAr'], ['NAR LoRA', 'lmAdapterNar']] as const) {
     if (name(d[key])) lines.push([label, name(d[key])]);
