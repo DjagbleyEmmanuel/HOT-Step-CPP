@@ -66,6 +66,18 @@ export function refreshYue2StagedSidecars(manifestPath: string): void {
   }
 }
 
+/** Staged name -> the ORIGINAL audio in the dataset folder, for a manifest whose
+ *  sources were staged by stageYue2Audio. Empty for a legacy cache (no map). */
+export function readYue2StagedSources(manifestPath: string): Map<string, string> {
+  const mapPath = path.join(path.dirname(path.resolve(manifestPath)), SOURCE_MAP);
+  const out = new Map<string, string>();
+  if (!fs.existsSync(mapPath)) return out;
+  for (const e of JSON.parse(fs.readFileSync(mapPath, 'utf8')) as StagedSource[]) {
+    if (e?.name && path.isAbsolute(e.source)) out.set(e.name, e.source);
+  }
+  return out;
+}
+
 /** Keep unique basenames; flatten colliding paths and protect sidecar stems too.
  * Reserve all potential sidecars, even absent ones: captions may be added later.
  * A hash resolves collisions with literal `__` names or flattened paths. */

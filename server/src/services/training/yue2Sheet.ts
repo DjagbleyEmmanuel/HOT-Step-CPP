@@ -33,6 +33,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { yue2ModelDir } from './yue2Train.js';
 import { readAbcSidecar, writeAbcSidecar } from './abcSidecar.js';
+import { readYue2StagedSources } from './yue2AudioStaging.js';
 
 interface SheetManifestSource { name?: unknown; source?: unknown; abc?: unknown; abc_error?: unknown }
 
@@ -42,18 +43,24 @@ function manifestSources(manifestPath: string): { manifest: Record<string, unkno
   return { manifest, sources: manifest.sources as SheetManifestSource[] };
 }
 
-function sourceAudio(row: SheetManifestSource): string | null {
+/** The audio a row's lead-sheet sidecar belongs beside: the ORIGINAL file in the
+ *  dataset folder. Preprocess stages every track into the cache's _staged_audio/
+ *  and points `source` there, so without the staging map the .abc files the
+ *  Label step saved were never found (a dataset with 125 of 130 sheets had all
+ *  130 re-transcribed) and new sheets landed beside the staged copies. */
+function sourceAudio(row: SheetManifestSource, staged: Map<string, string>): string | null {
   if (typeof row.source !== 'string' || typeof row.name !== 'string'
       || path.basename(row.source) !== row.name) return null;
-  return row.source;
+  return staged.get(row.name) ?? row.source;
 }
 
 /** Restore scores from the source folder before the transcriber selects rows. */
 export function seedAbcManifestFromSidecars(manifestPath: string): number {
   const { manifest, sources } = manifestSources(manifestPath);
+  const staged = readYue2StagedSources(manifestPath);
   let count = 0;
   for (const row of sources) {
-    const audio = sourceAudio(row);
+    const audio = sourceAudio(row, staged);
     if (!audio || (typeof row.abc === 'string' && row.abc.trim())) continue;
     const abc = readAbcSidecar(audio);
     if (!abc) continue;
@@ -74,9 +81,10 @@ export function seedAbcManifestFromSidecars(manifestPath: string): number {
 /** Copy successful manifest scores to permanent per-track sidecars. */
 export function saveAbcManifestSidecars(manifestPath: string): number {
   const { sources } = manifestSources(manifestPath);
+  const staged = readYue2StagedSources(manifestPath);
   let count = 0;
   for (const row of sources) {
-    const audio = sourceAudio(row);
+    const audio = sourceAudio(row, staged);
     if (audio && typeof row.abc === 'string' && row.abc.trim()
         && !(typeof row.abc_error === 'string' && row.abc_error.trim())) {
       if (writeAbcSidecar(audio, row.abc)) count++;

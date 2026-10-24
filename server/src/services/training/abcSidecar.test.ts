@@ -28,6 +28,34 @@ test('lead sheets survive manifest reset and seed the next stage by source name'
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a staged manifest (preprocess copies) seeds from and saves to the ORIGINAL audio folder', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abc-staged-'));
+  try {
+    // The dataset folder, with a sheet the Label step saved.
+    const original = path.join(root, 'dataset', 'track.mp3');
+    fs.mkdirSync(path.dirname(original), { recursive: true });
+    fs.writeFileSync(original, 'audio');
+    writeAbcSidecar(original, 'X:1\nK:G\nG');
+    // The YuE2 cache: a staged copy, the staging map, and a manifest pointing at the copy.
+    const cache = path.join(root, 'yue2-latents');
+    const staged = path.join(cache, '_staged_audio', 'track.mp3');
+    fs.mkdirSync(path.dirname(staged), { recursive: true });
+    fs.copyFileSync(original, staged);
+    fs.writeFileSync(path.join(cache, '_staged_audio.sources.json'),
+      JSON.stringify([{ name: 'track.mp3', source: original, relPath: 'track.mp3' }]));
+    const manifest = path.join(cache, 'yue2_preprocess.json');
+    fs.writeFileSync(manifest, JSON.stringify({ sources: [{ name: 'track.mp3', source: staged }] }));
+
+    assert.equal(seedAbcManifestFromSidecars(manifest), 1);
+    assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).sources[0].abc, 'X:1\nK:G\nG');
+
+    fs.writeFileSync(manifest, JSON.stringify({ sources: [{ name: 'track.mp3', source: staged, abc: 'X:1\nK:A\nA' }] }));
+    assert.equal(saveAbcManifestSidecars(manifest), 1);
+    assert.equal(readAbcSidecar(original), 'X:1\nK:A\nA');
+    assert.equal(readAbcSidecar(staged), '');   // never beside the copy
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('successful force result replaces the sidecar, while empty and error rows do not', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abc-sidecar-'));
   try {
