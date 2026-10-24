@@ -153,8 +153,10 @@ export interface Yue2BuildTake {
   cropOf?: string;
   /** The codec frame its audio file starts at (a take renders from a lead-in before its new part); missing: 0. */
   audioStart?: number;
-  /** Where the next take resumes when a crop cut into a section it composes again. */
+  /** Where the next take resumes when a crop cut into a section it composes again, or kept part of the one it ran on into. */
   resume?: number;
+  /** The source section id (or improv) its prompt ran on into after `to`; missing when it composed an ending. */
+  after?: string;
   /** Ids of the occurrences it composed, from..to. */
   occurrences: string[];
   /** The style prompt it was sent, adapter trigger included (older takes: missing). */

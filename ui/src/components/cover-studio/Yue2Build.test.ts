@@ -117,9 +117,10 @@ test('take crop: the in point only on a first-section take, a second clear of th
   const later = { ...first, from: 1, to: 1, prefix: 150, starts: [0, 150, 220] };
   assert.equal(moveCropEdge(later, none, 'in', 2).in, null);
   assert.equal(moveCropEdge(later, none, 'out', 1).out, 6.04);
-  // Inside the section it composed needs a choice; at or past the next section's start does not.
+  // Inside the section it composed, or inside the one it ran on into, needs a choice; at a section's start does not.
   assert.equal(cropNeedsMode(later, { ...none, out: 7 }), true);
   assert.equal(cropNeedsMode(later, { ...none, out: 8.8 }), false);
+  assert.equal(cropNeedsMode(later, { ...none, out: 9.2 }), true);
   assert.equal(cropNeedsMode(later, none), false);
 });
 

@@ -526,6 +526,11 @@ the top reads covering artist, then song, as the saved track is named.
    a section asks what the next take does: compose that section again from the
    cut, or move on to the next section there. While the song is still open and
    nothing follows, moving on means the next section you add starts at the cut.
+   While the song is still open, a take runs on a few seconds into the next
+   section in the score. An end inside that part asks the same question: keep
+   it up to the cut, so the next take carries that section on from there, or
+   drop it, so the next take starts that section afresh. Keeping it means the
+   next section you build must be that one; add it to the Song bar first.
    Choosing either keeps the take and cuts it at once; composing again also
    queues new takes from the cut, as many as the take count shows, with that
    take's caption.

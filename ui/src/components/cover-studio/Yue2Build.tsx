@@ -118,14 +118,15 @@ export function keepable(session: Yue2BuildSession, take: Yue2BuildTake): boolea
 export const takePrefix = (take: Yue2BuildTake) => take.prefix ?? take.starts[take.from] ?? 0;
 
 /** Where a cut at `frame` falls in `take` (as the server's cropPlan reads it): the occurrence,
- *  and whether it is inside it, so the user must say whether the next take composes it again. */
+ *  and whether it is inside it, so the user must say whether the next take composes it again.
+ *  Past `to` it is the section the take ran on into. */
 export function cropPoint(take: Yue2BuildTake, frame: number): { occurrence: number; inside: boolean } {
   let k = take.from;
   for (let i = take.from + 1; i <= Math.min(take.to + 1, take.starts.length - 1); i++) {
     const at = take.starts[i];
     if (at != null && at <= frame) k = i;
   }
-  return { occurrence: k, inside: k <= take.to && take.starts[k] !== frame };
+  return { occurrence: k, inside: take.starts[k] !== frame };
 }
 
 /** A crop set on a take before it is kept, in seconds on the song's clock. `in` (first-section takes only)
@@ -154,11 +155,10 @@ export function moveCropEdge(take: Yue2BuildTake, crop: TakeCrop, edge: 'in' | '
   return { ...crop, out: t >= end ? null : t, mode: null };
 }
 
-/** Whether a crop's out point falls inside a section the take composed, so it needs a mode before it can be kept. */
+/** Whether a crop's out point falls inside a section the take composed, or inside the one it ran on into,
+ *  so it needs a mode before it can be kept. */
 export function cropNeedsMode(take: Yue2BuildTake, crop: TakeCrop): boolean {
-  if (crop.out === null) return false;
-  const point = cropPoint(take, Math.round(crop.out * FPS));
-  return point.inside && point.occurrence <= take.to;
+  return crop.out !== null && cropPoint(take, Math.round(crop.out * FPS)).inside;
 }
 
 /** What 'advance' does for a cut inside `name`: move on to `following`, or, with nothing after it,
@@ -221,7 +221,8 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       let next = await yue2CoverApi.buildKeep(live!.id, live!.revision, take);
       if (crop?.out != null) next = await yue2CoverApi.buildCrop(next.id, next.revision, take, Math.round(crop.out * FPS), crop.mode ?? undefined);
       if (crop?.in != null) next = await yue2CoverApi.buildTrim(next.id, next.revision, take, crop.in);
-      if (count && kept && crop?.out != null && crop.mode === 'regenerate') next = await yue2CoverApi.buildGenerate(next.id, next.revision, kept.to, count, kept.caption || undefined);
+      // Not for a cut in the section the take ran on into: that section may not be planned yet.
+      if (count && kept && crop?.out != null && crop.mode === 'regenerate' && cropPoint(kept, Math.round(crop.out * FPS)).occurrence <= kept.to) next = await yue2CoverApi.buildGenerate(next.id, next.revision, kept.to, count, kept.caption || undefined);
       return next;
     }),
     /** Renders everything kept so far once, for Play build. */
@@ -547,20 +548,28 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
     const point = c.out !== null ? cropPoint(take, Math.round(c.out * FPS)) : null;
     const pointItem = point ? items[point.occurrence] : undefined;
     const following = point ? items[point.occurrence + 1] : undefined;
+    // A cut past `to` falls in the section the take ran on into, which may not be planned yet.
+    const runOn = !!point && point.occurrence > take.to;
+    const runOnName = take.after === 'improv' ? 'Improv' : s?.arrangement.sections.find(x => x.id === take.after)?.label
+      ?? (pointItem ? nameOf(pointItem) : 'the next section');
+    const pointName = runOn ? runOnName : pointItem ? nameOf(pointItem) : null;
     const button = 'rounded border border-zinc-300 dark:border-white/10 px-2 py-0.5 hover:border-cyan-500 disabled:opacity-40';
     return <div className="space-y-1 text-xs text-zinc-500">
       <div className="flex flex-wrap items-center gap-2">
         <span className="basis-full"><Scissors className="mr-1 inline w-3 h-3" />{cropped
-          ? `Keeps ${limits.inMax > 0 ? clock(c.in ?? 0) : 'it from the start'} to ${clock(c.out ?? limits.end)}${point && pointItem ? `, ending ${point.inside ? 'inside' : 'at the start of'} ${nameOf(pointItem)}` : ''}${c.in !== null ? '; the saved song fades in there' : ''}.`
+          ? `Keeps ${limits.inMax > 0 ? clock(c.in ?? 0) : 'it from the start'} to ${clock(c.out ?? limits.end)}${point && pointName ? `, ending ${point.inside ? 'inside' : 'at the start of'} ${pointName}` : ''}${c.in !== null ? '; the saved song fades in there' : ''}.`
           : 'Tap or drag the waveform to play from a point; End at playhead crops the take there.'}</span>
         {limits.inMax > 0 && <button type="button" className={button} disabled={head === null} onClick={() => set(moveCropEdge(take, c, 'in', head!))}>Start at playhead</button>}
         <button type="button" className={button} disabled={head === null} onClick={() => set(moveCropEdge(take, c, 'out', head!))}>End at playhead</button>
         {cropped && <button type="button" className={button} onClick={() => set(null)}>No crop</button>}
       </div>
-      {cropNeedsMode(take, c) && pointItem && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
+      {cropNeedsMode(take, c) && pointName && <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="What the next take does">
         <span>The next take:</span>
-        {([['regenerate', `composes ${nameOf(pointItem)} again from the cut`],
-          ['advance', advanceLabel(nameOf(pointItem), following ? nameOf(following) : null, finished)]] as const)
+        {(runOn
+          ? [['regenerate', `keeps this start of ${pointName}; the next take carries on from the cut`],
+            ['advance', `drops it; the next take starts ${pointName} afresh`]] as const
+          : [['regenerate', `composes ${pointName} again from the cut`],
+            ['advance', advanceLabel(pointName, following ? nameOf(following) : null, finished)]] as const)
           .map(([mode, text]) => <button type="button" key={mode} role="radio" aria-checked={c.mode === mode} onClick={() => (onMode ?? set)({ ...c, mode })}
             className={`rounded-lg border px-2 py-1 ${c.mode === mode ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
       </div>}

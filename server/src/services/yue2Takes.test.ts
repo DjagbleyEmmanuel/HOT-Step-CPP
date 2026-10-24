@@ -604,6 +604,25 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.deepEqual(getBuildSession(s.id, 'user').arrangement.plan[0].id, 'o4');
   });
 
+  await t.test('a crop that keeps the start of the run-on section carries on from the cut', async () => {
+    const { cropBuildTake } = await import('./yue2Takes.js');
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s1', 's2'], false);
+    const [open] = await take(s.id, 1, 1);
+    assert.equal(open.after, 's3', 'the chorus ran on into the outro');
+    keepBuildTake(s.id, 'user', open.id, 1);
+    const cut = open.starts[2]! + 10;
+    const kept = cropBuildTake(s.id, 'user', open.id, 1, cut, 'regenerate');
+    const spine = kept.takes.find(x => x.id === kept.kept.at(-1))!;
+    assert.deepEqual([spine.to, spine.resume], [1, cut]);
+    // Another section next would sing over the kept start of the outro.
+    let rev = editBuildPlan(s.id, 'user', 1, ['s0'], false).revision;
+    assert.throws(() => generateBuildTakes(s.id, 'user', 2, 1, rev), /carries on into outro/i);
+    rev = editBuildPlan(s.id, 'user', rev, ['s3'], true).revision;
+    await take(s.id, 2, rev);
+    assert.equal(requests.at(-1)!.codec_ids!.length, cut, 'the next take resumes at the cut');
+  });
+
   await t.test('a plan edit after a take leaves it keepable while its own sections are untouched', async () => {
     const s = start();
     editBuildPlan(s.id, 'user', 0, ['s0', 's1'], false);
@@ -855,6 +874,9 @@ test('crop plans: a cut on a frame inside the composed part, by occurrence', asy
   assert.deepEqual(cropPlan(take, 200, 'regenerate'), { to: 0, starts: [0, 150, null, null], resume: 200, prefix: 150 });
   // Past the next section's start: only Save song's tail changes.
   assert.deepEqual(cropPlan(take, 360, undefined), { to: 2, starts: [0, 150, 250, 330], resume: undefined, prefix: 150 });
+  // 'regenerate' there keeps the run-on up to the cut; the next take carries on from it.
+  assert.deepEqual(cropPlan(take, 360, 'regenerate'), { to: 2, starts: [0, 150, 250, 330], resume: 360, prefix: 150 });
+  assert.equal(cropPlan(take, 330, 'regenerate').resume, undefined, 'a cut at its start keeps none of it');
   // The last occurrence: moving on keeps it, cut short.
   assert.deepEqual(cropPlan({ ...take, to: 3 }, 360, 'advance').to, 3);
   assert.deepEqual(cropPlan({ ...take, to: 3 }, 360, 'advance').starts.length, 4);

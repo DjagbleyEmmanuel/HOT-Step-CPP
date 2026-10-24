@@ -36,7 +36,7 @@ import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import { blindYue2Schedule } from './backends/yue2/lyricSchedule.js';
 import {
-  BUILD_SESSION_VERSION, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
+  BUILD_SESSION_VERSION, IMPROV, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
   occurrenceLabel, planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
 } from './backends/yue2/coverArrangement.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
@@ -83,8 +83,13 @@ export interface Yue2Take {
   /** A crop (cropBuildTake): the take whose audio and codes it cuts short. */
   cropOf?: string;
   /** Where the next take resumes, when not at starts[to + 1]: a crop inside
-   *  an occurrence that the next take composes again. */
+   *  an occurrence that the next take composes again, or one that keeps part
+   *  of the section the take ran on into (`after`). */
   resume?: number;
+  /** The section its prompt ran on into after `to` (a source section id, or
+   *  improv): the planned one after it, else the lookahead. Missing when it
+   *  composed an ending, and on older takes. */
+  after?: string;
   /** The style prompt it was sent, adapter trigger included. Missing on older takes. */
   style?: string;
   /** Its own caption, as typed; missing when it used the session's. */
@@ -410,6 +415,13 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   if (start === null || start === undefined || sectionStart === null || sectionStart === undefined) {
     throw new TakesError('The kept take does not reach the next section. Undo the keep and try another take.');
   }
+  // A crop that kept the start of the section the spine ran on into resumes
+  // that audio, so the next occurrence must be that section.
+  const base = spine && stored.takes.find(t => t.id === spine.cropOf);
+  if (spine?.resume !== undefined && spine.after && base?.to === spine.to && stored.arrangement.plan[from]?.section !== spine.after) {
+    const label = spine.after === IMPROV ? 'Improv' : stored.arrangement.sections.find(s => s.id === spine.after)?.label ?? 'the section it ran on into';
+    throw new TakesError(`The kept take carries on into ${label}: put ${label} next, or crop the kept take again.`);
+  }
   const prefix = spine ? (JSON.parse(fs.readFileSync(codesFile(id, spine.id), 'utf8')) as number[]).slice(0, start) : [];
   const { request, lyrics, spans, clock } = arranged(stored, true);
   // prompt is the first caption field a render reads (generate.ts), so it wins.
@@ -419,6 +431,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   const length = clock[to + 1] - clock[from];
   const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
   const name = (i: number) => occurrenceLabel(stored.arrangement, i) ?? `#${i + 1}`;
+  const extra = lookaheadSection(stored.arrangement);
+  const after = last ? undefined : stored.arrangement.plan[to + 1]?.section ?? (extra === null ? undefined : stored.arrangement.sections[extra].id);
   // The audio renders from the lead-in a take plays from: the NAR and VAE skip
   // what is already kept, which is what made late sections slow.
   const renderFrom = start ? Math.max(0, start - LEAD_IN_S * YUE2_FPS) : 0;
@@ -501,7 +515,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
               const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)) - audioStart / YUE2_FPS, (ids.length - audioStart) / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, style: request.style, ...(own ? { caption: own } : {}), ...(audioStart ? { audioStart } : {}), ...identity });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, ...(after ? { after } : {}), style: request.style, ...(own ? { caption: own } : {}), ...(audioStart ? { audioStart } : {}), ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);
@@ -695,8 +709,9 @@ type CropMode = 'regenerate' | 'advance';
  *  take composed. Cut inside an occurrence, `mode` says whether the next take
  *  composes that occurrence again from the cut ('regenerate') or starts the
  *  one after it there ('advance'); refused without one. A cut at an
- *  occurrence's start, or past the next one's start (the overrun the next
- *  take would replace anyway), needs no choice. */
+ *  occurrence's start needs no choice. Past the next one's start (the part
+ *  the take ran on into) the next take replaces that part, unless 'regenerate'
+ *  keeps it up to the cut. */
 export function cropPlan(take: Pick<Yue2Take, 'from' | 'to' | 'frames' | 'starts' | 'prefix'>, frame: unknown, mode: unknown,
   label: (occurrence: number) => string = i => `section ${i + 1}`): { to: number; starts: Array<number | null>; resume?: number; prefix: number } {
   const prefix = take.prefix ?? take.starts[take.from] ?? 0;
@@ -715,7 +730,13 @@ export function cropPlan(take: Pick<Yue2Take, 'from' | 'to' | 'frames' | 'starts
     else if (mode === 'regenerate') resume = frame;
     else throw new TakesError(`The cut falls inside ${label(k)}: choose whether the next take composes it again or moves on.`);
   }
-  if (k > take.to) to = take.to;
+  // Past the next section's start, in the part the take ran on into: by
+  // default the next take composes that section from its start; 'regenerate'
+  // keeps it up to the cut and the next take carries on from there.
+  if (k > take.to) {
+    to = take.to;
+    if (mode === 'regenerate' && take.starts[k] !== frame) resume = frame;
+  }
   const starts = take.starts.map((s, i) => (i > to + 1 ? null : s));
   if (to === k && k + 1 < starts.length) starts[k + 1] = frame;
   return { to, starts, resume, prefix };
