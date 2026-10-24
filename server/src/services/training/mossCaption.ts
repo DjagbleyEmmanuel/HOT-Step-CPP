@@ -187,17 +187,6 @@ export function runMossCaption(
   return serialised(() => runMossCaptionInner(audioPath, opts));
 }
 
-/** ace-caption opens audio with a narrow fopen, which on Windows cannot reach a
- *  non-ASCII path (a `--src-list` entry is UTF-8): every such track came back
- *  with no caption. Hand it an ASCII-named copy in the work dir instead. */
-function mossSource(audioPath: string, work: string, stem: string): string {
-  if (!/[^\x00-\x7F]/.test(audioPath)) return audioPath;
-  const ext = path.extname(audioPath).toLowerCase();
-  const copy = path.join(work, `${stem}${/^[.a-z0-9]+$/.test(ext) ? ext : ''}`);
-  fs.copyFileSync(audioPath, copy);
-  return copy;
-}
-
 async function runMossCaptionInner(
   audioPath: string,
   opts: MossRunOptions,
@@ -210,7 +199,7 @@ async function runMossCaptionInner(
   const outBase = path.join(work, 'out.txt');
   const args: string[] = [
     '--models', modelsDir,
-    '--src-audio', mossSource(audioPath, work, 'src'),
+    '--src-audio', audioPath,
     '--mode', opts.modes.join(','),
     '-o', outBase,
     '--temperature', String(opts.temperature ?? MOSS_TEMPERATURE),
@@ -714,7 +703,7 @@ function runMossBatch(audioPaths: string[], opts: MossRunOptions): void {
     try {
       fs.writeFileSync(
         path.join(work, 'list.txt'),
-        audioPaths.map((p, i) => `${mossSource(p, work, `src${i}`)}\t${bases[i]}`).join('\n'),
+        audioPaths.map((p, i) => `${p}\t${bases[i]}`).join('\n'),
         'utf8',
       );
 

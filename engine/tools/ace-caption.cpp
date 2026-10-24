@@ -141,7 +141,7 @@ static bool transcode_to_wav16k(const std::string & ffmpeg, const std::string & 
     out_path = std::string(tmpl) + ".wav";
     const std::string cmd = "\"\"" + ffmpeg + "\" -y -loglevel error -i \"" + src +
                             "\" -ac 1 -ar 16000 -c:a pcm_s16le \"" + out_path + "\"\"";
-    const int rc = system(cmd.c_str());
+    const int rc = hs_system(cmd);
     if (rc != 0) {
         fprintf(stderr, "ace-caption: ffmpeg failed (%d) on %s\n", rc, src.c_str());
         return false;
@@ -150,7 +150,7 @@ static bool transcode_to_wav16k(const std::string & ffmpeg, const std::string & 
 }
 
 static bool read_text_file(const std::string & path, std::string & out) {
-    FILE * f = fopen(path.c_str(), "rb");
+    FILE * f = hs_fopen(path, "rb");
     if (!f) {
         return false;
     }
@@ -220,6 +220,15 @@ int main(int argc, char ** argv) {
     double max_seconds = 420.0;   // hard cap, see below
     int enc_window = 400;         // mel frames per encoder chunk; 0 = whole-track (see below)
     moss::SamplerParams sp;
+
+    // UTF-8 arguments, so a --src-audio path outside the ANSI codepage survives.
+    std::vector<std::string> args8 = hs_utf8_args(argc, argv);
+    std::vector<char *>      argv8;
+    for (auto & s : args8) {
+        argv8.push_back(&s[0]);
+    }
+    argc = (int) argv8.size();
+    argv = argv8.data();
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -777,7 +786,7 @@ int main(int argc, char ** argv) {
                                                                    : out_file.substr(dot);
                 dst = stem + "." + mname + ext;
             }
-            FILE * f = fopen(dst.c_str(), "wb");
+            FILE * f = hs_fopen(dst, "wb");
             if (!f) {
                 fprintf(stderr, "ace-caption: cannot write %s\n", dst.c_str());
                 rc = 1;
