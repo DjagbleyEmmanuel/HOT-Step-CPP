@@ -421,6 +421,7 @@ static int run_flamingo(FlamingoRun & r) {
                 return 0;
             }
             std::vector<int32_t> counts((size_t) lm.n_vocab, 0), gen;
+            r.sp.rng.seed(r.sp.seed);   // same seed, same text, every mode and track
             for (int step = 0; ok && step < r.max_tokens; ++step) {
                 const int32_t next = moss::moss_sample(logits, counts, r.sp);
                 if (next == eos) break;
@@ -501,6 +502,8 @@ int main(int argc, char ** argv) {
         else if (a == "--window-batch") { win_batch = std::max(1, atoi(next("--window-batch").c_str())); }
         else if (a == "--encoder-window") { enc_window = atoi(next("--encoder-window").c_str()); }
         else if (a == "--temperature") { sp.temperature = (float) atof(next("--temperature").c_str()); }
+        else if (a == "--top-p") { sp.top_p = (float) atof(next("--top-p").c_str()); }
+        else if (a == "--seed") { sp.seed = (uint32_t) strtoul(next("--seed").c_str(), nullptr, 10); }
         else if (a == "--rep-penalty") { sp.repetition_penalty = (float) atof(next("--rep-penalty").c_str()); }
         else if (a == "--freq-penalty") { sp.frequency_penalty = (float) atof(next("--freq-penalty").c_str()); }
         else {
@@ -511,7 +514,7 @@ int main(int argc, char ** argv) {
                     "       [--prompt-file [prose=|mm3=|lyrics=|yue2=]<path>]   (repeatable)\n"
                     "       [--hint \"...\"]   (appended to non-lyrics prompts; --src-list takes it as a 3rd column)\n"
                     "       [-o <out.txt>] [--max-tokens N] [--max-seconds S]\n"
-                    "       [--temperature T] [--rep-penalty R] [--freq-penalty F]\n"
+                    "       [--temperature T] [--top-p P] [--seed N] [--rep-penalty R] [--freq-penalty F]\n"
                     "       [--dump-ids <path>] [--dump-encoder <path>]   (parity debug)\n"
                     "       [--encoder-window FRAMES]   (0 = whole-track legacy encode)\n"
                     "       [--family moss|flamingo]   (default: by the files in --models)\n"
@@ -1030,6 +1033,7 @@ int main(int argc, char ** argv) {
 
     const int32_t eos = (int32_t) 151645;   // <|im_end|>
     std::vector<int32_t> counts((size_t) lm.hp.n_vocab, 0);
+    sp.rng.seed(sp.seed);
     std::vector<int32_t> gen;
     for (int step = 0; step < max_tokens; ++step) {
         const int32_t next = moss::moss_sample(logits, counts, sp);

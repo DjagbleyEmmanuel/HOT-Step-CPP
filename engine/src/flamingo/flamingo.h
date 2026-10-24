@@ -197,7 +197,10 @@ inline bool encode_windows(const AudioTower & m, const float * mel, int N, int L
     const AudioHParams & h = m.hp;
     const int64_t D = h.d_model, H = h.n_head, hd = D / H;
     const int64_t T = (int64_t) h.n_pos * 2;   // 3000 mel frames
-    const int64_t P = (Lv - 2) / 2 + 1;
+    // Python's floor division: a window with one valid frame pools to ZERO rows.
+    // C++ truncates (1-2)/2 to 0 and would give one row, reading past the window
+    // (a track a few ms over a multiple of 30 s crashed the whole batch).
+    const int64_t P = Lv >= 2 ? (Lv - 2) / 2 + 1 : 0;
     if (P <= 0) {
         *out_P = 0;
         return true;
