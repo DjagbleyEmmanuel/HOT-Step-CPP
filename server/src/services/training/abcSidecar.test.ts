@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { abcSidecarPath, readAbcSidecar, writeAbcSidecar } from './abcSidecar.js';
+import { abcKeyString, abcSidecarPath, readAbcSidecar, withAbcTempo, writeAbcSidecar } from './abcSidecar.js';
 import { seedAbcManifestFromSidecars, saveAbcManifestSidecars, buildYue2SheetArgs, readYue2CoverAbc } from './yue2Sheet.js';
-import { runYue2CoverSheetJob, runYue2SheetJob } from './yue2ArTrainRunner.js';
+import { runYue2CoverSheetJob, runYue2SheetJob, transcribeLabelSheets } from './yue2ArTrainRunner.js';
+import { jobsDir } from './paths.js';
 import { createJob } from './labelingQueue.js';
 import { runYue2AceTrain } from './yue2TrainRunner.js';
 import { writeWav } from '../generation/audioLevel.js';
@@ -125,4 +126,41 @@ test('dataset sheet job seeds saved rows, writes new scores and replaces them on
     assert.equal(retry.status, 'done');
     assert.equal(readAbcSidecar(first), 'X:1\nK:D\nD');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('label key pass transcribes only files without a lead sheet and reads key and tempo helpers', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'label-sheets-'));
+  const job = createJob('label', 'fixture', [], {});
+  try {
+    const saved = path.join(dir, 'saved.wav');
+    const fresh = path.join(dir, 'fresh.wav');
+    const instrumental = path.join(dir, 'instrumental.wav');
+    for (const f of [saved, fresh, instrumental]) fs.writeFileSync(f, 'audio');
+    writeAbcSidecar(saved, 'X:1\nQ:1/4=135\nV: Vocal\nK:Em\nV: Vocal\nE4|');
+    const run = (async (_job, _kind, args, _idleMs, _verify, _onLine, state) => {
+      const manifest = args[args.indexOf('--manifest') + 1];
+      const data = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      assert.deepEqual(data.sources.map((s: { name: string }) => s.name), ['fresh.wav', 'instrumental.wav']);
+      data.sources[0].abc = 'X:1\nQ:1/4=96\nV: Vocal\nK:F#m\nV: Vocal\nF4|';
+      data.sources[1].abc = 'X:1\nQ:1/4=120\nV: Vocal\nK:Bb\nV: Vocal\nZ4|';
+      fs.writeFileSync(manifest, JSON.stringify(data));
+      return state;
+    }) as typeof runYue2AceTrain;
+    const scores = await transcribeLabelSheets(job, [saved, fresh, instrumental], { missingModels: () => [], run, exe: () => 'ace-train' });
+    assert.equal(abcKeyString(readAbcSidecar(fresh)), 'F# Minor');
+    // An instrumental score has no sung bar, so it is not saved, but its key still counts.
+    assert.equal(readAbcSidecar(instrumental), '');
+    assert.equal(abcKeyString(scores.get(instrumental)!), 'Bb Major');
+    assert.equal(scores.has(saved), false);
+    assert.equal(withAbcTempo(readAbcSidecar(saved), 123.4), 'X:1\nQ:1/4=123\nV: Vocal\nK:Em\nV: Vocal\nE4|');
+    assert.equal(withAbcTempo('X:1\nK:C', 100), 'X:1\nK:C');
+    // The score's beat level wins: a double- or half-time measurement is folded onto it.
+    assert.equal(withAbcTempo('Q:1/4=80\nK:Bb', 157), 'Q:1/4=79\nK:Bb');
+    assert.equal(withAbcTempo('Q:1/4=183\nK:Eb', 88.5), 'Q:1/4=177\nK:Eb');
+    assert.equal(abcKeyString('X:1\nK:Dmaj'), 'D Major');
+    assert.equal(abcKeyString('X:1\nK:none'), '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(path.join(jobsDir(), job.id), { recursive: true, force: true });
+  }
 });

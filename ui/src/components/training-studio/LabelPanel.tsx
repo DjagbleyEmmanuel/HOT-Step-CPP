@@ -43,6 +43,10 @@ export const LabelPanel: React.FC = () => {
 
   const [scope, setScope] = useState<'unlabeled' | 'all' | 'selected'>('unlabeled');
   const [useEssentia, setUseEssentia] = useState(true);
+  // beat_this and SheetSage2 beat Essentia on tempo and key (HOTSTEP-730);
+  // Essentia stays as the fallback for anything they cannot answer.
+  const [tempoSource, setTempoSource] = useState<'beat_this' | 'essentia'>('beat_this');
+  const [keySource, setKeySource] = useState<'sheetsage' | 'essentia'>('sheetsage');
   const [minTempo, setMinTempo] = useState('');
   const [maxTempo, setMaxTempo] = useState('');
   const [useGenius, setUseGenius] = useState(true);
@@ -95,6 +99,8 @@ export const LabelPanel: React.FC = () => {
       await startLabel({
         ...(scope === 'selected' ? { sampleIds: Array.from(selectedSampleIds) } : { scope: scope === 'all' ? 'all' : 'unlabeled' }),
         useEssentia: effectiveEssentia,
+        tempoSource,
+        keySource,
         ...(minTempo || maxTempo ? { essentiaTempo: {
           ...(minTempo ? { minTempo: Number(minTempo) } : {}),
           ...(maxTempo ? { maxTempo: Number(maxTempo) } : {}),
@@ -165,6 +171,22 @@ export const LabelPanel: React.FC = () => {
           />
           {!essentiaOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.caps.essentiaMissing')}</div>
+          )}
+          {effectiveEssentia && (
+            <div className="ml-6 flex flex-wrap items-end gap-3">
+              <div className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.label.tempoSource')} info={t('trainingStudio.label.tempoSourceInfo')}
+                  className="text-[11px] text-zinc-500" />
+                <StyledSelect accent="amber" size="sm" className="w-auto" value={tempoSource} onChange={setTempoSource}
+                  options={[{ value: 'beat_this', label: 'beat_this' }, { value: 'essentia', label: 'Essentia' }]} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.label.keySource')} info={t('trainingStudio.label.keySourceInfo')}
+                  className="text-[11px] text-zinc-500" />
+                <StyledSelect accent="amber" size="sm" className="w-auto" value={keySource} onChange={setKeySource}
+                  options={[{ value: 'sheetsage', label: 'SheetSage2' }, { value: 'essentia', label: 'Essentia' }]} />
+              </div>
+            </div>
           )}
           {effectiveEssentia && (
             <div className="ml-6 flex flex-wrap items-end gap-2">

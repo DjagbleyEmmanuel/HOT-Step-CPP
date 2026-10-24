@@ -300,7 +300,7 @@ export type SampleLabelStatus =
   | 'processing'  // currently being labeled
   | 'error';      // last label attempt failed (see `error`)
 
-export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'genius' | 'llm' | 'tags' | 'filename' | 'user';
+export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'llm' | 'tags' | 'filename' | 'user';
 
 // ─── Dataset ──────────────────────────────────────────────────────────────
 export interface TrainingDatasetSummary {
@@ -668,8 +668,12 @@ export interface UnderstandOverrides {
 export interface LabelOptions {
   sampleIds?: string[];
   scope?: 'all' | 'unlabeled';
-  useEssentia?: boolean;   // default true  — local BPM/key
+  useEssentia?: boolean;   // default true  — local BPM/key (the analysis pass, whatever its sources)
   essentiaTempo?: { minTempo?: number; maxTempo?: number };
+  /** Where BPM comes from; the other source is the fallback. Default beat_this (HOTSTEP-730). */
+  tempoSource?: 'beat_this' | 'essentia';
+  /** Where key comes from; sheetsage also saves the lead sheet beside the audio. Default sheetsage. */
+  keySource?: 'sheetsage' | 'essentia';
   useGenius?: boolean;     // default false — canonical lyrics (needs token)
   useCaption?: boolean;    // default false — LLM caption+genre (audio-grounded on gemini)
   useUnderstand?: boolean; // default false — LEGACY /understand path (2026-07-27 pivot)

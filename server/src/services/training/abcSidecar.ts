@@ -14,6 +14,25 @@ export function readAbcSidecar(audioPath: string): string {
   catch { return ''; }
 }
 
+/** The score's opening key in the caption format (`K:F#m` → `F# Minor`), '' when unreadable. */
+export function abcKeyString(abc: string): string {
+  const m = abc.match(/^K:\s*([A-G][#b]?)(m|min|minor|maj|major)?\s*$/m);
+  if (!m) return '';
+  return `${m[1]} ${m[2] && !m[2].startsWith('maj') ? 'Minor' : 'Major'}`;
+}
+
+/** The score with its header tempo (`Q:1/4=N`) set to a measured `bpm`, at the
+ *  score's own beat level: a score written at 80 stays near 80 when the
+ *  measurement counts the same song at 157, or its notes would play twice as
+ *  fast. Unchanged when it has no tempo. */
+export function withAbcTempo(abc: string, bpm: number): string {
+  return abc.replace(/^(Q:\s*1\/4\s*=\s*)(\d+(?:\.\d+)?)/m, (_all, head: string, q: string) => {
+    const written = Number(q);
+    const near = [bpm / 2, bpm, bpm * 2].reduce((a, b) => Math.abs(Math.log(b / written)) < Math.abs(Math.log(a / written)) ? b : a);
+    return `${head}${Math.round(near)}`;
+  });
+}
+
 /** A failed or empty transcription never replaces a usable score. With
  *  `keepBackups` the score it replaces is kept (see backupPath), and no write
  *  happens without that copy. */

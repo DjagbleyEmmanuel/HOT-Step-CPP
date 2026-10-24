@@ -31,6 +31,8 @@ import {
   clearTransientStatus, clearTransientStatuses, patchLabel, readLabel, setTransientStatus,
 } from './labelStore.js';
 import { analyzeWithEssentia, essentiaAvailable, essentiaKeyString, reconcileEssentiaBpm } from './essentiaClient.js';
+import { analyzeTempoWithBeatThis } from './beatThisClient.js';
+import { abcKeyString, readAbcSidecar, withAbcTempo, writeAbcSidecar } from './abcSidecar.js';
 import { captionLimiter, essentiaLimiter, geniusLimiter } from './rateLimit.js';
 import { AbortError, runUnderstand } from './understandClient.js';
 import {
@@ -711,10 +713,10 @@ interface PassAResult {
   duration: number;
   tags: { artist: string; title: string; album: string };
   tagGenre: string;
-  tagBpm: number | null;
-  essentiaBpm: number | null;
-  bpmFromTag: boolean;
-  essentiaKey: string;
+  bpm: number | null;
+  bpmSource: FieldSource;
+  key: string;
+  keySource: FieldSource;
 }
 
 async function runPassA(
@@ -724,6 +726,7 @@ async function runPassA(
   opts: LabelOptions,
   policy: MergePolicy,
   results: Map<string, PassAResult>,
+  sheetScores: Map<string, string>,
 ): Promise<void> {
   // When a cloud lane runs concurrently it owns job.phase/currentSampleId
   // (that progress is what the user watches); the CPU lane reports per-sample only.
@@ -757,14 +760,30 @@ async function runPassA(
 
   const essentiaKey = essentia ? essentiaKeyString(essentia.key, essentia.scale) : '';
   const essentiaBpm = reconcileEssentiaBpm(essentia?.bpm ?? null, meta.bpm);
+  // beat_this tempo and SheetSage2 key are the defaults (HOTSTEP-730: they beat
+  // Essentia on 24 reference tracks); Essentia, then the file tags, fill in
+  // whatever they cannot answer.
+  const analyze = opts.useEssentia !== false;
+  const beatBpm = analyze && opts.tempoSource !== 'essentia'
+    ? await analyzeTempoWithBeatThis(sample.audioPath, job.controller.signal) : null;
+  const useSheet = analyze && opts.keySource !== 'essentia';
+  const sheetKey = useSheet ? abcKeyString(sheetScores.get(sample.audioPath) || readAbcSidecar(sample.audioPath)) : '';
+  if (useSheet && beatBpm !== null) {
+    // The saved lead sheet carries the measured tempo, for covers and the rest.
+    const saved = readAbcSidecar(sample.audioPath);
+    const retimed = saved && withAbcTempo(saved, beatBpm);
+    // A score this job just transcribed has nothing worth a backup.
+    if (retimed && retimed !== saved) writeAbcSidecar(sample.audioPath, retimed, { keepBackups: !sheetScores.has(sample.audioPath) });
+  }
+  const bpmFromTag = essentiaBpm !== null && essentiaBpm === meta.bpm && essentiaBpm !== essentia?.bpm;
   const result: PassAResult = {
     duration: meta.duration,
     tags: { artist: meta.artist, title: meta.title, album: meta.album },
     tagGenre: meta.genre,
-    tagBpm: meta.bpm,
-    essentiaBpm,
-    bpmFromTag: essentiaBpm !== null && essentiaBpm === meta.bpm && essentiaBpm !== essentia?.bpm,
-    essentiaKey,
+    bpm: beatBpm !== null ? Math.round(beatBpm) : essentiaBpm ?? meta.bpm,
+    bpmSource: beatBpm !== null ? 'beat_this' : essentiaBpm !== null && !bpmFromTag ? 'essentia' : 'tags',
+    key: sheetKey || essentiaKey,
+    keySource: sheetKey ? 'sheetsage' : 'essentia',
   };
   results.set(sample.sampleId, result);
 
@@ -787,9 +806,8 @@ async function runPassA(
   // Interim sidecar write — a cancelled job still leaves usable BPM/key data.
   const incoming: Record<string, string> = {};
   const sources: Record<string, FieldSource> = {};
-  if (result.essentiaBpm !== null) { incoming.bpm = String(result.essentiaBpm); sources.bpm = result.bpmFromTag ? 'tags' : 'essentia'; }
-  else if (result.tagBpm !== null) { incoming.bpm = String(result.tagBpm); sources.bpm = 'tags'; }
-  if (essentiaKey) { incoming.key = essentiaKey; sources.key = 'essentia'; }
+  if (result.bpm !== null) { incoming.bpm = String(result.bpm); sources.bpm = result.bpmSource; }
+  if (result.key) { incoming.key = result.key; sources.key = result.keySource; }
   if (meta.genre) { incoming.genre = meta.genre; sources.genre = 'tags'; }
   if (ds.defaultLanguage) { sources.language = 'user'; }
   if (meta.duration > 0) incoming.duration = meta.duration.toFixed(2);
@@ -852,7 +870,16 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
     emitLog(job, 'info', `Labeling ${job.total} file(s)`);
     emitProgress(job);
 
-    // ── Pass A: tags + Essentia (local CPU)  ──
+    // ── Key pass: SheetSage2 lead sheets for files that have none (GPU, one run) ──
+    // Before Pass A so the first sidecar write already carries the key.
+    const sheetScores = opts.useEssentia !== false && opts.keySource !== 'essentia'
+      ? await (await import('./yue2ArTrainRunner.js')).transcribeLabelSheets(job, targets.map(t => t.audioPath))
+      : new Map<string, string>();
+    if (isCancelled(job)) return;
+    job.phase = 'essentia';
+    emitProgress(job);
+
+    // ── Pass A: tags + beat_this/Essentia + key  ──
     // ── Pass B: Genius + LLM caption (network) ──
     // The two lanes run CONCURRENTLY — Essentia/ffmpeg never touch the network,
     // so Genius/caption start on file 1 as soon as its Pass A is done instead of
@@ -875,7 +902,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
         if (index >= targets.length) return;
         const sample = targets[index];
         try {
-          await runPassA(job, ds, sample, opts, policy, passA);
+          await runPassA(job, ds, sample, opts, policy, passA, sheetScores);
         } catch (err: any) {
           if (!isCancelled(job)) {
             markError(job, ds, sample, err?.message || 'Analysis failed');
@@ -946,10 +973,9 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
         // Persisted onto the label record below — see SampleLabelRecord.lyricsError.
         let lyricsError: string | null = null;
 
-        // Local results first — Essentia wins bpm/key (§4.8), tags win genre.
-        if (a?.essentiaBpm != null) { incoming.bpm = String(a.essentiaBpm); sources.bpm = a.bpmFromTag ? 'tags' : 'essentia'; }
-        else if (a?.tagBpm != null) { incoming.bpm = String(a.tagBpm); sources.bpm = 'tags'; }
-        if (a?.essentiaKey) { incoming.key = a.essentiaKey; sources.key = 'essentia'; }
+        // Local results first — the analysis pass wins bpm/key (§4.8), tags win genre.
+        if (a?.bpm != null) { incoming.bpm = String(a.bpm); sources.bpm = a.bpmSource; }
+        if (a?.key) { incoming.key = a.key; sources.key = a.keySource; }
         if (a?.tagGenre) { incoming.genre = a.tagGenre; sources.genre = 'tags'; }
         if (ds.defaultLanguage) sources.language = 'user';
         if (a && a.duration > 0) incoming.duration = a.duration.toFixed(2);

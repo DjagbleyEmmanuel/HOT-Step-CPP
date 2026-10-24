@@ -55,7 +55,7 @@ import {
 } from './yue2Tokenize.js';
 import {
   buildYue2SheetArgs, missingYue2SheetModels, readYue2AbcStatus,
-  writeYue2CoverSheetManifest, readYue2CoverAbc,
+  writeYue2CoverSheetManifest, readYue2CoverAbc, listYue2SheetSources, readYue2SheetSource,
   seedAbcManifestFromSidecars, saveAbcManifestSidecars,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
@@ -65,6 +65,9 @@ import {
 } from './yue2Align.js';
 import { log, numOr, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import { yue2SeparateDataset } from './yue2Stems.js';
+import { readAbcSidecar } from './abcSidecar.js';
+import { aceTrainExe } from './aceTrain.js';
+import { jobsDir } from './paths.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 
 // ── yue2-ar-train: stderr -> events ─────────────────────────────────────────
@@ -767,6 +770,49 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
     throw err;
   }
+}
+
+/** A label job's key pass: SheetSage2 lead sheets for the files that have no
+ *  .abc sidecar yet, in one engine run, saved next to the audio. Never fails
+ *  the label job: anything it cannot transcribe keeps Essentia's key. Returns
+ *  each transcribed file's score, including instrumentals whose score has no
+ *  sung bar and so is not saved as a sidecar. */
+export async function transcribeLabelSheets(job: TrainingJob, audioPaths: string[],
+  deps = { missingModels: missingYue2SheetModels, run: runYue2AceTrain, exe: aceTrainExe }): Promise<Map<string, string>> {
+  const scores = new Map<string, string>();
+  // The engine names a source by its basename, so two same-named files in
+  // different subfolders cannot share a manifest; the second keeps Essentia.
+  const byName = new Map<string, string>();
+  for (const p of audioPaths) if (!readAbcSidecar(p) && !byName.has(path.basename(p))) byName.set(path.basename(p), p);
+  if (!byName.size) return scores;
+  const missing = deps.missingModels();
+  if (missing.length || !deps.exe()) {
+    log(job, 'warn', `SheetSage2 key detection skipped (${missing.join(', ') || 'ace-train is not in this build'}); using Essentia's key.`);
+    return scores;
+  }
+  const dir = path.join(jobsDir(), job.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const manifest = path.join(dir, 'label-sheets.json');
+  fs.writeFileSync(manifest, JSON.stringify({ sources: [...byName].map(([name, source]) => ({ name, source })) }), 'utf8');
+  log(job, 'info', `Transcribing ${byName.size} file(s) with SheetSage2 for their key; each lead sheet is saved beside the audio.`);
+  const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
+  const { done, total, failed } = job;
+  try {
+    await deps.run(job, 'yue2-sheet', buildYue2SheetArgs({ manifest, only: '', force: false, fast: false, datasetSlug: '' }),
+      YUE2_IDLE_MS, () => null, (line, state) => relaySheetLine(job, line, state), st, undefined, false);
+  } catch (err) {
+    log(job, 'warn', `SheetSage2 stopped early (${err instanceof Error ? err.message : String(err)}); files it did not reach keep Essentia's key.`);
+  } finally {
+    // relaySheetLine counts sources; the label job counts files.
+    Object.assign(job, { done, total, failed });
+  }
+  for (const s of listYue2SheetSources(manifest)) {
+    const row = s.ok && !s.error ? readYue2SheetSource(manifest, s.name) : null;
+    const audio = byName.get(s.name);
+    if (row && audio) scores.set(audio, row.abc);
+  }
+  saveAbcManifestSidecars(manifest);
+  return scores;
 }
 
 // ── yue2-align ──────────────────────────────────────────────────────────────

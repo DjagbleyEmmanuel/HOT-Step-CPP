@@ -18,7 +18,7 @@ They are independent. You can train one, the other or both from the same dataset
 1. In the Dataset phase, create a new dataset from a folder of audio. The scanner accepts `.wav`, `.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a` and `.aac`, and can include sub-folders.
 2. Give it a trigger word. It is added to every caption so you can call the style up later. Pick something that is not an ordinary word.
 3. Set the lyric language yourself. It overrides the automatic guess on every file.
-4. Run Label. One pass per track detects BPM and key locally (Essentia), fetches lyrics from Genius if you have added a Genius token in Settings, and writes a caption and genre with an AI captioner.
+4. Run Label. One pass per track detects BPM and key locally, fetches lyrics from Genius if you have added a Genius token in Settings, and writes a caption and genre with an AI captioner. Tempo comes from beat_this and key from a SheetSage2 lead sheet by default, with Essentia as the fallback; **Tempo from** and **Key from** switch either one to Essentia. The lead sheet is saved beside each track as an `.abc` file, ready for YuE2 covers. Transcribing it is a GPU pass that can take a few minutes per track, so pick Essentia for a quick label.
 5. Check the labels in Review, then Build. Build writes `dataset.json` next to your audio.
 
 How many tracks: the app warns below 10 files, and 10 or more gives much better results. A single album is the usual unit.
