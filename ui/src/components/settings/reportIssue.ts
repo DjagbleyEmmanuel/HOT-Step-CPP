@@ -97,3 +97,26 @@ export function buildReport(parts: ReportParts, max = MAX_URL_LENGTH): { url: st
   }
   return { ...built, trimmed };
 }
+
+/** Model lines for the System section, following the active engine. ACE-Step
+ *  models are per-request settings; every other engine reports what it holds
+ *  loaded through its model catalogue (`defaults`), so no file names live here.
+ *  A model setting can be a file path; the report keeps the file name only. */
+export function modelLines(
+  engine: string,
+  ace: { ditModel?: unknown; lmModel?: unknown; vaeModel?: unknown },
+  catalogue: { buckets?: Record<string, unknown>; defaults?: Record<string, unknown> } | undefined,
+  unknown: string,
+): Array<[string, string]> {
+  const name = (v: unknown) => String(v || '').split(/[\\/]/).pop() || '';
+  if (engine === 'ace') {
+    return [['DiT model', name(ace.ditModel) || unknown], ['LM model', name(ace.lmModel) || unknown], ['VAE model', name(ace.vaeModel) || unknown]];
+  }
+  const d = catalogue?.defaults ?? {};
+  const lines: Array<[string, string]> = Object.keys(catalogue?.buckets ?? {}).map(b => [`${b} model`, name(d[b]) || unknown]);
+  // YuE2 adapters: a half with no pick is simply not listed.
+  for (const [label, key] of [['AR LoRA', 'lmAdapterAr'], ['NAR LoRA', 'lmAdapterNar']] as const) {
+    if (name(d[key])) lines.push([label, name(d[key])]);
+  }
+  return lines;
+}

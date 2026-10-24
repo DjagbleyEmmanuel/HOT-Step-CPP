@@ -3,16 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { gpusOptions, healthOptions, reportFailedJobOptions, reportLogsOptions } from '../../queries/shell-queue/settings';
 import { useBackendStore } from '../../stores/backendStore';
+import { backendModelsOptions } from '../../queries/global-models/options';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { ParamLabel } from '../shared/ParamLabel';
-import { buildReport, redact, renderBody, type LogSection } from './reportIssue';
+import { buildReport, modelLines, redact, renderBody, type LogSection } from './reportIssue';
 
 const osName = () => {
   const ua = navigator.userAgent;
   return /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'unknown';
 };
-// A model setting can be a file path; the copied text keeps the file name only.
-const baseName = (v: unknown) => String(v || '').split(/[\\/]/).pop() || '';
 const SHORT_TAIL = 60;
 
 export function ReportIssuePanel() {
@@ -23,6 +22,7 @@ export function ReportIssuePanel() {
   const failed = useQuery(reportFailedJobOptions()).data;
   const backendId = useBackendStore(s => s.activeBackendId);
   const { ditModel, lmModel, vaeModel } = useGlobalParamsStore(s => s) as Record<string, unknown>;
+  const catalogue = useQuery({ ...backendModelsOptions(backendId), enabled: !!backendId && backendId !== 'ace' }).data;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [copied, setCopied] = useState(false);
@@ -38,9 +38,7 @@ export function ReportIssuePanel() {
     ['GPU', gpus?.length ? gpus.map(g => `${g.name} (${Math.round(g.memoryMB / 1024)} GB)`).join(', ') : unknown],
     ['Compute backend', [health?.engine.backend, health?.engine.device].filter(Boolean).join(' / ') || unknown],
     ['Engine', backendId || unknown],
-    ['DiT model', baseName(ditModel) || unknown],
-    ['LM model', baseName(lmModel) || unknown],
-    ['VAE model', baseName(vaeModel) || unknown],
+    ...modelLines(backendId, { ditModel, lmModel, vaeModel }, catalogue, unknown),
   ].map(([k, v]) => `${k}: ${v}`).join('\n');
 
   // All log text is redacted here, once, before it can reach the preview, the link or the clipboard.
