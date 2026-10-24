@@ -18,10 +18,11 @@ import { sanitizeHeaders } from './lyricsSanitizer.js';
 import { buildUserPrompt, captionProblem, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
 import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
-  applyFactSubstitution, captionWithMoss, correctFactsInProse, isLocalCaptioner,
+  applyFactSubstitution, captionWithMoss, correctFactsInProse, genreHint, isLocalCaptioner,
   LOCAL_CAPTIONER_NAMES, MM3_INSTRUCTIONS, type LocalCaptioner,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
+import * as audioMeta from './audioMeta.js';
 import type { TrainingDatasetRow, TrainingSample } from './types.js';
 
 const MAX_CAPTION_CHARS = 4000;
@@ -278,6 +279,8 @@ async function captionWithMossProvider(
   opts: {
     model: LocalCaptioner;
     wantMm3?: boolean;
+    /** Also write <stem>.yue2.txt from the same encode (no chat provider). */
+    wantYue2?: boolean;
     signal?: AbortSignal;
     log?: (level: 'info' | 'warn', message: string) => void;
   },
@@ -294,9 +297,16 @@ async function captionWithMossProvider(
     observedCaption: sample.caption,
   };
 
+  // The file's OWN genre tag, not the sidecar's genre (an earlier caption run
+  // may have rewritten that): see genreHint for why the models need it.
+  let tagGenre = '';
+  try { tagGenre = (await audioMeta.read(sample.audioPath)).genre || ''; } catch { /* no tags */ }
   const result = await captionWithMoss(
     sample.audioPath, facts,
-    { model: opts.model, wantMm3: opts.wantMm3, signal: opts.signal, log: opts.log },
+    {
+      model: opts.model, wantMm3: opts.wantMm3, wantYue2: opts.wantYue2,
+      hint: genreHint(tagGenre), signal: opts.signal, log: opts.log,
+    },
   );
 
   const out: Record<string, string> = {};
@@ -317,6 +327,13 @@ async function captionWithMossProvider(
 
   if (result.mm3?.trim()) {
     writeMm3Sidecar(sample, result.mm3, opts.log);
+  }
+  if (opts.wantYue2) {
+    if (result.yue2?.trim()) {
+      opts.log?.('info', `wrote YuE2 planner caption locally (${writeYue2Sidecar(sample.audioPath, result.yue2)})`);
+    } else {
+      opts.log?.('warn', `${LOCAL_CAPTIONER_NAMES[opts.model]} returned no YuE2 caption — .yue2.txt not written`);
+    }
   }
 
   return out;
@@ -420,8 +437,13 @@ export async function enhanceCaption(
   // Local, audio-grounded path. Checked BEFORE getProvider because 'moss' is not
   // an LLM provider — it has no API key, no model list, and it listens.
   if (isLocalCaptioner(opts.provider)) {
-    const out = await captionWithMossProvider(sample, { ...opts, model: opts.provider });
-    if (opts.wantYue2 !== false) await writeYue2Alongside(sample, ds, out, opts);
+    // Fully local: the YuE2 sentence comes off the same encode. A chat provider
+    // is used for it only when the caller named one explicitly.
+    const viaChat = opts.wantYue2 !== false && !!opts.yue2Provider && !isLocalCaptioner(opts.yue2Provider);
+    const out = await captionWithMossProvider(sample, {
+      ...opts, model: opts.provider, wantYue2: opts.wantYue2 !== false && !viaChat,
+    });
+    if (viaChat) await writeYue2Alongside(sample, ds, out, opts);
     return out;
   }
 

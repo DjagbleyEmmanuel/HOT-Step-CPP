@@ -40,7 +40,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-lm` | `tools/ace-lm.cpp` | ACE-Step 5 Hz LM from the command line: request JSON in, `request0.json`..`requestN-1.json` out |
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
-| `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption or section-tagged lyrics out. Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
+| `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption, YuE2 fields or section-tagged lyrics out. `--hint` (or a third `--src-list` column) is appended to every non-lyrics prompt. Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
 | `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |

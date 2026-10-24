@@ -43,7 +43,8 @@ import * as audioMeta from './audioMeta.js';
 import { getDataset, updateCounters, updateDataset } from './datasetsRepo.js';
 import type { AceRequest } from '../aceClient.js';
 import {
-  arbitrateSidecarGenre, clearMossBatch, isLocalCaptioner, prepareMossBatch, transcribeLyricsLocal,
+  arbitrateSidecarGenre, clearMossBatch, dropLocalLyrics, genreHint, isLocalCaptioner,
+  prepareLocalLyrics, prepareMossBatch, takeLocalLyrics,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import type {
@@ -706,9 +707,22 @@ function markLabeled(
 
 // ── Label job (§4.7) ─────────────────────────────────────────────────────
 
+/** audio path -> genreHint(the file's own genre tag), for the local captioners. */
+async function tagGenreHints(samples: TrainingSample[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  await Promise.all(samples.map(async s => {
+    try {
+      const hint = genreHint((await audioMeta.read(s.audioPath)).genre);
+      if (hint) out.set(s.audioPath, hint);
+    } catch { /* no tags: no hint */ }
+  }));
+  return out;
+}
+
 /** Does this label job have a per-sample cloud/GPU lane after the CPU pass? */
 function hasCloudLane(opts: LabelOptions): boolean {
-  return opts.useUnderstand === true || opts.useGenius === true || opts.useCaption === true;
+  return opts.useUnderstand === true || opts.useGenius === true || opts.useCaption === true
+    || opts.localLyrics === true;
 }
 
 /** Lead sheets from the key pass as they land: a file's promise settles when
@@ -1103,6 +1117,41 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
             }
           }
 
+          // ── Step 2b: local lyrics where Genius left none (Music Flamingo) ──
+          // Per track, from a batch started at job start, so lyrics land as the
+          // job goes rather than after the whole dataset. Lyrics already in the
+          // sidecar (an earlier run, the user) and instrumental tracks are left
+          // alone. Before the caption step on purpose: the cloud caption prompt
+          // quotes the lyrics.
+          if (opts.localLyrics === true) {
+            const meta = loadSidecarMetadata(sample.audioPath);
+            const has = !!incoming.lyrics || !!(meta.lyrics ?? '').trim() || meta.is_instrumental === 'true';
+            if (has) {
+              dropLocalLyrics(sample.audioPath);
+            } else {
+              job.phase = 'lyrics';
+              emitProgress(job);
+              try {
+                const lyrics = await takeLocalLyrics(sample.audioPath, {
+                  signal: job.controller.signal,
+                  log: (level, message) => emitLog(job, level, `${sample.filename}: ${message}`),
+                });
+                if (lyrics) {
+                  incoming.lyrics = lyrics;
+                  sources.lyrics = 'flamingo';
+                  lyricsError = null;
+                  emitLog(job, 'info', `${sample.filename}: lyrics transcribed locally (Music Flamingo)`);
+                } else {
+                  failures.push('local lyrics: Music Flamingo returned nothing');
+                }
+              } catch (err: any) {
+                if (err instanceof AbortError || isCancelled(job)) return;
+                failures.push(`local lyrics: ${err?.message || 'failed'}`);
+                emitLog(job, 'warn', `${sample.filename}: local lyrics failed — ${err?.message || err}`);
+              }
+            }
+          }
+
           // ── Step 3: LLM caption + genre (hears the audio on gemini) ──
           // Genre is arbitrated, not merged: Pass A seeds the file's rip tag
           // into the sidecar before this step runs, so under every policy but
@@ -1195,10 +1244,26 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
       // progressively rather than all at once when the process exits.
       // Placed here, after passALane has already started, so Essentia (CPU) runs
       // concurrently with captioning (GPU) rather than queueing behind it.
-      if (opts.useCaption !== false && isLocalCaptioner(opts.caption?.provider)) {
+      const localModel = opts.useCaption !== false && isLocalCaptioner(opts.caption?.provider)
+        ? opts.caption!.provider as 'moss' | 'flamingo' : null;
+      if (localModel) {
         await prepareMossBatch(targets.map(t => t.audioPath), {
-          model: opts.caption!.provider as 'moss' | 'flamingo',
+          model: localModel,
           wantMm3: true,
+          // Same rule enhanceCaption applies: local unless a chat provider was named.
+          wantYue2: opts.caption?.wantYue2 !== false
+            && !(opts.caption?.yue2Provider && !isLocalCaptioner(opts.caption.yue2Provider)),
+          // One encode for captions AND lyrics when Flamingo does both.
+          wantLyrics: opts.localLyrics === true && localModel === 'flamingo',
+          hints: await tagGenreHints(targets),
+          signal: job.controller.signal,
+          log: (level, message) => emitLog(job, level, message),
+        });
+      }
+      if (opts.localLyrics === true) {
+        // Covers every track the caption batch did not (all of them, unless
+        // Flamingo is also the captioner). Genius hits are dropped per track.
+        prepareLocalLyrics(targets.map(t => t.audioPath), {
           signal: job.controller.signal,
           log: (level, message) => emitLog(job, level, message),
         });
@@ -1211,46 +1276,6 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
 
     if (isCancelled(job)) return;
     if (job.status !== 'running') return;   // engine-unreachable already finished the job
-
-    // ── Local lyrics: Music Flamingo where Genius left none ──
-    // After every other lane, so it knows exactly which tracks Genius missed and
-    // runs them in ONE process (one ~9 GB model load) behind the caption batch.
-    // Reads the sidecar rather than Pass B's bookkeeping: lyrics already there
-    // (an earlier run, the user) are never replaced, and a track marked
-    // instrumental is left alone.
-    if (opts.localLyrics === true) {
-      const need = targets.filter(t => {
-        const meta = loadSidecarMetadata(t.audioPath);
-        return !(meta.lyrics ?? '').trim() && meta.is_instrumental !== 'true';
-      });
-      if (need.length > 0) {
-        job.phase = 'lyrics';
-        emitProgress(job);
-        emitLog(job, 'info', `Transcribing lyrics locally (Music Flamingo) for ${need.length} track(s) with none`);
-        const byPath = new Map(need.map(t => [t.audioPath, t]));
-        const got = await transcribeLyricsLocal(need.map(t => t.audioPath), {
-          model: 'flamingo',
-          signal: job.controller.signal,
-          log: (level, message) => emitLog(job, level, message),
-          onTrack: async (audioPath, lyrics) => {
-            const sample = byPath.get(audioPath);
-            if (!sample || isCancelled(job)) return;
-            await mergeIntoSidecar(sample, { lyrics }, 'fill_missing', true);
-            const prev = readLabel(ds.slug, sample.sampleId);
-            patchLabel(ds.slug, sample.sampleId, {
-              relPath: sample.relPath,
-              sources: { ...(prev?.sources ?? {}), lyrics: 'flamingo' },
-              lyricsError: null,
-            });
-            const fresh = refreshSample(ds, sample);
-            pushEvent(job, { type: 'sample', sampleId: sample.sampleId, status: fresh.labelStatus, sample: fresh });
-          },
-        });
-        emitLog(job, got.size === need.length ? 'info' : 'warn',
-          `Music Flamingo transcribed ${got.size}/${need.length} track(s)`);
-        if (isCancelled(job)) return;
-      }
-    }
 
     const finalSamples = await buildSamples(ds, { withDuration: false });
     refreshCounters(ds, finalSamples);
@@ -1362,6 +1387,9 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
       await prepareMossBatch(targets.map(s => s.audioPath), {
         model: opts.provider,
         wantMm3: opts.wantMm3 !== false,
+        wantYue2: opts.wantYue2 !== false
+          && !(opts.yue2Provider && !isLocalCaptioner(opts.yue2Provider)),
+        hints: await tagGenreHints(targets),
         signal: job.controller.signal,
         log: (level, message) => emitLog(job, level, message),
       });
