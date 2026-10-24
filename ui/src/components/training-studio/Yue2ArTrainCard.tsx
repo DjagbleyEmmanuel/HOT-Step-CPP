@@ -459,8 +459,9 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
                 checked={form.force} onChange={v => set('force', v)}
                 defaultValue={base.force} onReset={() => reset('force')}
                 hint={t('trainingStudio.yue2ar.sheetForceHint',
-                  'Off, a source that already has abc or abc_error is skipped — which is what makes a '
-                  + 'resumed run cheap, since one transcription can run minutes.') as string} />
+                  'Off, lead sheets already beside the audio (the .abc files the Label step saves) or '
+                  + 'already in the cache are reused and only the missing ones are transcribed. On, every '
+                  + 'source is transcribed again and its .abc is replaced.') as string} />
               <CheckField className="col-span-2 md:col-span-1 self-end pb-1.5"
                 label={t('trainingStudio.yue2ar.sheetFast', 'Fast (less precise)')}
                 checked={form.fast} onChange={v => set('fast', v)}

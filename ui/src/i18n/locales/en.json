@@ -485,7 +485,7 @@
     "trainingStudio.yue2ar.sheetPreview": "Preview a lead sheet",
     "trainingStudio.yue2ar.sheetFastHint": "Skips the exact-load precision fix. Leave off unless you have measured that the default matters for your corpus.",
     "trainingStudio.yue2ar.sheetFast": "Fast (less precise)",
-    "trainingStudio.yue2ar.sheetForceHint": "Off, a source that already has abc or abc_error is skipped — which is what makes a resumed run cheap, since one transcription can run minutes.",
+    "trainingStudio.yue2ar.sheetForceHint": "Off, lead sheets already beside the audio (the .abc files the Label step saves) or already in the cache are reused and only the missing ones are transcribed. On, every source is transcribed again and its .abc is replaced.",
     "trainingStudio.yue2ar.sheetForce": "Re-transcribe cached sources",
     "trainingStudio.yue2ar.sheetNone": "No lead sheets cached yet.",
     "trainingStudio.yue2ar.sheetRepaired": "{{count}} repaired.",
