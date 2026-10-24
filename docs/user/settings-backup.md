@@ -14,6 +14,10 @@ In Settings, choose **Export JSON** in the backup panel. Your browser downloads 
 dated JSON file. This is a copy of the selected settings and data, rather than a
 copy of the whole database.
 
+If a saved application setting is missing or has an invalid value, for example from an
+older install, the export writes that setting's default instead of failing. Import stays
+strict and rejects a file with an invalid setting.
+
 ## Import
 
 1. Export your current data first if you want to keep it.
