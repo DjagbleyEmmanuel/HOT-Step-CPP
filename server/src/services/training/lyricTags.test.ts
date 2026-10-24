@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasSectionTags, normaliseLyricTags, transferTags } from './lyricTags.js';
+import { collapseLoops, hasSectionTags, looksLooped, normaliseLyricTags, transferTags } from './lyricTags.js';
 
 test('Lyric tags: Genius, Flamingo and transcriber dialects all land on the unnumbered vocabulary', () => {
   const input = [
@@ -22,6 +22,26 @@ test('Lyric tags: speaker tags, cues and junk drop; spoken and sung lines stay',
   assert.equal(normaliseLyricTags(input), [
     '[Verse]', 'Hello there', 'Sung line', '(It\'s the lost verse!)', 'A spectacle monopolized:', 'And good night.',
   ].join('\n'));
+});
+
+test('Lyric tags: a decode loop within a line keeps two copies; real repeats survive', () => {
+  assert.equal(
+    collapseLoops('Friss mich auf (She is the sun and the moon and the stars and the sun and the moon and the stars and the sun and the moon and the stars and the sun and the moon and the stars)'),
+    // The repeating unit is "and the sun ... stars", which starts at the second
+    // cycle: the first stays, then two copies.
+    'Friss mich auf (She is the sun and the moon and the stars and the sun and the moon and the stars and the sun and the moon and the stars)');
+  assert.equal(collapseLoops("She's my honey, she's my honey"), "She's my honey, she's my honey");
+  assert.equal(collapseLoops('la la la la la la'), 'la la la la la la');   // under 3-word phrases: left alone
+  assert.equal(normaliseLyricTags('[Chorus]\nI want it all, I want it all, I want it all, I want it all'),
+    '[Chorus]\nI want it all, I want it all');
+});
+
+test('Lyric tags: looksLooped catches repeated lines, looping phrases and a tacked-on parenthetical', () => {
+  assert.equal(looksLooped(Array(6).fill('(She is a whore)').join('\n')), true);
+  assert.equal(looksLooped(['A (my honey, my honey)', 'B (my honey, my honey)', 'C (my honey, my honey)',
+    'D (my honey, my honey)', 'E (my honey, my honey)'].join('\n')), true);
+  assert.equal(looksLooped('the sun and the moon, the sun and the moon, the sun and the moon'), true);
+  assert.equal(looksLooped('[Chorus]\nDö-dö-dö\nDö-dö-dö\nDö-dö-dö\nDö-dö-dö\n\n[Verse]\nWords'), false);
 });
 
 test('Lyric tags: [Hook] is the chorus, unless the track also has a chorus', () => {

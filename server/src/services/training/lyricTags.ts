@@ -136,10 +136,50 @@ export function normaliseLyricTags(lyrics: string): string {
       if (out.length && out[out.length - 1] !== '') out.push('');
       continue;
     }
-    out.push(text);
+    out.push(collapseLoops(text));
   }
   dropEmptyTag();   // a trailing empty tag
   return out.join('\n');
+}
+
+/**
+ * Cut a decode loop inside one line: a phrase of 3+ words repeated back to back
+ * more than twice keeps two copies. Flamingo with no repetition penalty (the
+ * app's setting, best median WER) loops on rare tracks: "and the sun and the
+ * moon and the stars" x7 took one track from 0.2 to 1.36 WER. A chorus sung
+ * twice on separate lines is untouched; this only looks within a line.
+ */
+export function collapseLoops(line: string): string {
+  // P sep P (sep P)+  ->  P sep P, for the SHORTEST phrase P of 3 to 13 words,
+  // repeated until nothing changes (a long loop can nest a shorter one).
+  const re = /(?<![\w'])((?:[\w'’-]+[\s,]+){2,12}?[\w'’-]+)([\s,.;!?]+)\1(?:[\s,.;!?]+\1)+(?![\w'])/gi;
+  let s = line;
+  for (let guard = 0; guard < 8; guard++) {
+    const next = s.replace(re, '$1$2$1');
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/**
+ * A transcript that fell into a decode loop: one line five or more times in a row,
+ * a phrase looping within a line, or the same parenthetical tacked onto five or
+ * more lines in a row (an invented backing vocal). The caller redoes the track
+ * with a light repetition penalty, which fixes these at the cost of a few WER
+ * points elsewhere — so it is a per-track fallback, not the default.
+ */
+export function looksLooped(lyrics: string): boolean {
+  const lines = String(lyrics ?? '').split(/\r\n|\r|\n/).map(l => l.trim()).filter(Boolean);
+  let run = 1, tailRun = 1;
+  for (let i = 1; i < lines.length; i++) {
+    run = lines[i].toLowerCase() === lines[i - 1].toLowerCase() ? run + 1 : 1;
+    const tail = (l: string) => /\([^()]{6,}\)\s*$/.exec(l)?.[0].toLowerCase() ?? null;
+    const t = tail(lines[i]);
+    tailRun = t && t === tail(lines[i - 1]) ? tailRun + 1 : 1;
+    if (run >= 5 || tailRun >= 5) return true;
+  }
+  return lines.some(l => collapseLoops(l) !== l);
 }
 
 /** True when the lyrics carry at least one recognisable section tag for SUNG

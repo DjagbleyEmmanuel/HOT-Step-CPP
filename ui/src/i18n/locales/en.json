@@ -1205,7 +1205,7 @@
     "trainingStudio.label.useGenius": "Fetch lyrics from Genius",
     "trainingStudio.label.useGeniusInfo": "Fetches each track's real lyrics from Genius by title and artist. Off: this pass is skipped and lyrics are left at whatever the dataset already has.",
     "trainingStudio.label.localLyrics": "Transcribe missing lyrics locally (Music Flamingo)",
-    "trainingStudio.label.localLyricsInfo": "After Genius, any track that still has no lyrics is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Lyrics already in a sidecar and tracks marked instrumental are left alone. Runs on your GPU, about 5 seconds a track on a fast card.",
+    "trainingStudio.label.localLyricsInfo": "Each track with no lyrics (after Genius, if that is on) is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Tracks marked instrumental are left alone, and so are lyrics already in a sidecar unless the merge policy overwrites lyrics, which re-transcribes them (the way to move a dataset off Genius). A transcript that loops is redone once with a light repetition penalty. Runs on your GPU, about 5 seconds a track on a fast card.",
     "trainingStudio.label.flamingoMissing": "Music Flamingo (local) unavailable",
     "trainingStudio.enhance.normaliseLyrics": "Normalise lyric tags",
     "trainingStudio.enhance.normaliseLyricsHint": "Rewrites every section tag to [Intro] [Verse] [Pre-Chorus] [Chorus] [Post-Chorus] [Bridge] [Breakdown] [Interlude] [Instrumental] [Outro], unnumbered. Speaker tags and stage directions go; the words stay. Each changed sidecar is backed up first.",

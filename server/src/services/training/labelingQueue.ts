@@ -1126,7 +1126,11 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
           // quotes the lyrics.
           if (opts.localLyrics === true) {
             const meta = loadSidecarMetadata(sample.audioPath);
-            const has = !!incoming.lyrics || !!(meta.lyrics ?? '').trim() || meta.is_instrumental === 'true';
+            // An overwrite policy re-transcribes lyrics already in the sidecar
+            // (how a dataset labelled from Genius moves to local lyrics).
+            const overwrite = policy === 'overwrite_lyrics' || policy === 'overwrite_all';
+            const has = !!incoming.lyrics || (!overwrite && !!(meta.lyrics ?? '').trim())
+              || meta.is_instrumental === 'true';
             if (has) {
               dropLocalLyrics(sample.audioPath);
             } else {

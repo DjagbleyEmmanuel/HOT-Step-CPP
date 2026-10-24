@@ -1369,7 +1369,9 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
     // and train-lm lmSize divergences: the form's numbers and this handler's
     // numbers are two different sets reached by two different callers.
     const useUnderstand = body.useUnderstand === true;
-    let useGenius = body.useGenius !== false;
+    // Genius is OFF unless asked for (2026-10-24): the scraper is fragile and
+    // lyrics come from the audio now (localLyrics, below, defaults on).
+    let useGenius = body.useGenius === true;
     let useCaption = body.useCaption !== false;
 
     // Capability handling has to distinguish ASKED-FOR from DEFAULTED-ON, now
@@ -1433,12 +1435,17 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
     // pass this test on steps that are about to be switched off.
     // Local lyric transcription where Genius has none (Music Flamingo). Asked for
     // but not installed is a refusal, like the other steps.
-    const localLyrics = body.localLyrics === true;
+    // Local lyrics default ON wherever Music Flamingo is installed; asked for
+    // explicitly but not installed is a refusal, defaulted-on is just skipped.
+    let localLyrics = body.localLyrics !== false;
     if (localLyrics) {
       const probe = resolveMossPaths('flamingo');
       if ('missing' in probe) {
-        res.status(503).json({ error: `Music Flamingo is not available for lyric transcription: ${probe.missing}` });
-        return;
+        if (body.localLyrics === true) {
+          res.status(503).json({ error: `Music Flamingo is not available for lyric transcription: ${probe.missing}` });
+          return;
+        }
+        localLyrics = false;
       }
     }
 
@@ -1492,6 +1499,7 @@ router.post('/datasets/:id/label', async (req: Request, res: Response) => {
       useUnderstand,
       useGenius,
       useCaption,
+      localLyrics,
       mergePolicy: body.mergePolicy || 'fill_missing',
     });
     repo.updateDataset(ds.id, { status: 'labeling' });

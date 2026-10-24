@@ -32,7 +32,7 @@ import { execFile } from 'child_process';
 import { config, getFFmpegPath } from '../../config.js';
 import { CAPTION_INSTRUCTIONS } from './captionPrompt.js';
 import { normalizeYue2Caption } from '../lireek/prompts.js';
-import { normaliseLyricTags } from './lyricTags.js';
+import { looksLooped, normaliseLyricTags } from './lyricTags.js';
 
 /** Modes `ace-caption` can decode off a single encode. */
 export type MossMode = 'prose' | 'mm3' | 'lyrics' | 'yue2';
@@ -844,23 +844,37 @@ export function prepareLocalLyrics(
   }
 }
 
+/**
+ * Repetition penalty for the redo of a transcript that looped. The first pass runs
+ * with none (MOSS_REP_PENALTY, 1.0): on the 17-track album test that scored median
+ * WER 19.6% against 24.0% at 1.05, but looped on 3 tracks (one at 136% WER). 1.05
+ * fixes those, so it is used only where looksLooped fires: median 20.0%, mean 22.5%
+ * against 19.6% / 29.4% for one pass. Quantisation (q8_0 vs f16), sampling
+ * (temperature 0.4/0.7) and penalty 1.02 were measured too and did not help.
+ */
+const LYRICS_RETRY_REP_PENALTY = 1.05;
+
 /** This track's local lyrics: from the prepared batch when there is one, else a
- *  single-track run. `undefined` when the model returned nothing. */
+ *  single-track run, redone once with a light repetition penalty if it looped.
+ *  `undefined` when the model returned nothing. */
 export async function takeLocalLyrics(
   audioPath: string,
   opts: { signal?: AbortSignal; log?: (level: 'info' | 'warn', message: string) => void } = {},
 ): Promise<string | undefined> {
-  const pending = lyricsPending.get(audioPath);
-  if (pending) {
-    lyricsPending.delete(audioPath);
-    const got = await pending;
-    if (got) return normaliseLyricTags(got);
-  }
-  const raw = await runMossCaption(audioPath, {
+  const run = async (repPenalty?: number) => (await runMossCaption(audioPath, {
     model: 'flamingo', modes: ['lyrics'], prompts: { lyrics: LYRICS_INSTRUCTIONS },
-    signal: opts.signal, log: opts.log,
-  });
-  return raw.lyrics?.trim() ? normaliseLyricTags(raw.lyrics) : undefined;
+    repPenalty, signal: opts.signal, log: opts.log,
+  })).lyrics?.trim() || undefined;
+
+  const pending = lyricsPending.get(audioPath);
+  if (pending) lyricsPending.delete(audioPath);
+  let raw = (pending ? await pending : undefined) ?? await run();
+  if (raw && looksLooped(raw)) {
+    opts.log?.('info', 'lyric transcript looped; redoing it with a light repetition penalty');
+    const retry = await run(LYRICS_RETRY_REP_PENALTY);
+    if (retry && !looksLooped(retry)) raw = retry;
+  }
+  return raw ? normaliseLyricTags(raw) : undefined;
 }
 
 /** A track that no longer needs local lyrics (Genius found them). The batch

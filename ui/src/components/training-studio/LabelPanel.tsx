@@ -52,7 +52,8 @@ export const LabelPanel: React.FC = () => {
   const [keySource, setKeySource] = useState<'sheetsage' | 'essentia'>('sheetsage');
   const [minTempo, setMinTempo] = useState('');
   const [maxTempo, setMaxTempo] = useState('');
-  const [useGenius, setUseGenius] = useState(true);
+  // Off by default (2026-10-24): lyrics come from the audio (local lyrics below).
+  const [useGenius, setUseGenius] = useState(false);
   const [useCaption, setUseCaption] = useState(true);
   // Music Flamingo fills the lyrics Genius could not find (section-tagged).
   const [localLyrics, setLocalLyrics] = useState(true);
@@ -219,7 +220,7 @@ export const LabelPanel: React.FC = () => {
             onChange={setUseGenius}
             label={t('trainingStudio.label.useGenius')}
             info={t('trainingStudio.label.useGeniusInfo')}
-            defaultValue={true}
+            defaultValue={false}
           />
           {!geniusOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.geniusMissing')}</div>
@@ -231,7 +232,7 @@ export const LabelPanel: React.FC = () => {
             disabled={!flamingoOk}
             onChange={setLocalLyrics}
             label={t('trainingStudio.label.localLyrics', 'Transcribe missing lyrics locally (Music Flamingo)')}
-            info={t('trainingStudio.label.localLyricsInfo', 'After Genius, any track that still has no lyrics is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Lyrics already in a sidecar and tracks marked instrumental are left alone. Runs on your GPU, about 5 seconds a track on a fast card.')}
+            info={t('trainingStudio.label.localLyricsInfo', 'Each track with no lyrics (after Genius, if that is on) is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Tracks marked instrumental are left alone, and so are lyrics already in a sidecar unless the merge policy overwrites lyrics, which re-transcribes them (the way to move a dataset off Genius). A transcript that loops is redone once with a light repetition penalty. Runs on your GPU, about 5 seconds a track on a fast card.')}
             defaultValue={true}
           />
           {!flamingoOk && caps?.flamingo?.missing && (

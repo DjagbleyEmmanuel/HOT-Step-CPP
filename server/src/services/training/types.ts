@@ -677,10 +677,11 @@ export interface LabelOptions {
   tempoSource?: 'beat_this' | 'essentia';
   /** Where key comes from; sheetsage also saves the lead sheet beside the audio. Default sheetsage. */
   keySource?: 'sheetsage' | 'essentia';
-  useGenius?: boolean;     // default false — canonical lyrics (needs token)
+  useGenius?: boolean;     // default false — Genius lyrics (needs token; scraper, fragile)
   /** Transcribe lyrics locally with Music Flamingo for every target that still has
-   *  none after the Genius step (or all of them, without Genius). Section-tagged.
-   *  Default false. */
+   *  none after the Genius step (or all of them, without Genius); under an
+   *  overwrite merge policy, existing lyrics are re-transcribed too.
+   *  Section-tagged. Default ON when Music Flamingo is installed. */
   localLyrics?: boolean;
   useCaption?: boolean;    // default false — LLM caption+genre (audio-grounded on gemini)
   useUnderstand?: boolean; // default false — LEGACY /understand path (2026-07-27 pivot)
