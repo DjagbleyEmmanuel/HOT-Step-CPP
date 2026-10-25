@@ -745,6 +745,11 @@ link_ggml_backends(ace-caption)
 # docs/plans/yue2/06-engine-port-plan.md milestone M0. Header-only loader
 # (no acestep-core dependency), same posture as moss-ggml-test.
 add_executable(yue2-probe tools/yue2-probe.cpp)
+# HeartMuLa's tokenizer probe reads a tensor-free GGUF and runs entirely on CPU.
+add_executable(heartmula-probe tools/heartmula-probe.cpp)
+target_link_libraries(heartmula-probe PRIVATE yyjson)
+link_ggml_backends(heartmula-probe)
+
 add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
 target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
 link_ggml_backends(yue2-vae-lifetime-test)
