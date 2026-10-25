@@ -4,7 +4,7 @@
 Requires numpy, torch and gguf==0.17.1. No model code is imported.
 Example:
   python engine/tools/convert-heartmula-lora.py --lora lora_r64_a64.pt --alpha 64 \
-      --base heartmula-3b-global-F16.gguf --out heartmula-lora-greenday-r64.gguf
+      --base heartmula-3b-global-F16.gguf --out heartmula-lora-r64.gguf
 
 The .pt carries no alpha, so --alpha is required (the run name says r64_a64). Rank
 comes from the factor shapes. --base is the global GGUF the adapter was trained on:
@@ -14,8 +14,9 @@ matching in/out widths (engine/docs/HEARTMULA_CONTRACT.md, "LoRA adapter").
 Source <proj>.lora_a.weight [rank, in] and .lora_b.weight [out, rank] become
 <base tensor name>.lora_a / .lora_b, F32 (the source is bf16, so this is exact), with
 no transpose. Only backbone q/k/v/output projections are accepted; anything else is
-refused. --negatives DIR also writes a wrong-variant and a wrong-target file there for
-the engine's rejection checks. Existing outputs are refused.
+refused. --negatives DIR also writes wrong-variant, wrong-fingerprint, wrong-component
+and wrong-target files there for the engine's rejection checks, plus a valid rank-1
+adapter (ok-rank1.gguf) that must load. Existing outputs are refused.
 """
 
 import argparse
@@ -155,6 +156,8 @@ def main():
         write(args.negatives / "bad-fingerprint.gguf", factors, rank, args.alpha, variant, "0" * 64, source)
         write(args.negatives / "bad-component.gguf", factors, rank, args.alpha, variant, fingerprint, source,
               component="global")
+        write(args.negatives / "ok-rank1.gguf", {k: (a[:1], b[:, :1]) for k, (a, b) in factors.items()}, 1, 1.0,
+              variant, fingerprint, source)
         extra = sorted(factors)[:-1] + ["backbone.layers.0.mlp.w1.weight"]
         write(args.negatives / "bad-target.gguf", {k: factors[k] for k in sorted(factors)[:-1]}, rank, args.alpha,
               variant, fingerprint, source, targets=extra)

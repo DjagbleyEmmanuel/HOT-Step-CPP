@@ -395,6 +395,14 @@ dimension order as usual. Applied at runtime as
 `W x + (alpha / rank) x adapter_scale x B (A x)`, over any base quant; the
 base weights are never modified.
 
+Tools. `engine/tools/convert-heartmula-lora.py --lora X.pt --alpha A --base <global GGUF> --out Y.gguf [--negatives DIR]`
+converts a torchtune LoRA state dict (alpha is not stored in the `.pt`, so it is required) and checks every
+target against the base file; `--negatives` also writes four refused files and a valid rank-1 file.
+`engine/tools/heartmula-adapter-reference.py` freezes adapter-on PyTorch codebook-0 logits. The parity gate is
+`heartmula-probe --lm FIXTURES --global G --local L --adapter Y.gguf --adapter-ref DIR [--negatives DIR]`
+(run it with `GGML_BACKEND=CPU` while the GPU slot is held elsewhere); it also checks strength 0 against the
+base bit for bit and that a switch, reload or new strength drops the built graphs and KV rows.
+
 ### Load-time checks
 
 The engine runs these at discovery (to fill `compatible`), at select-model and

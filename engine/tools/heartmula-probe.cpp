@@ -555,6 +555,12 @@ static int run_adapter(const std::string & fix, const std::string & variant, con
             check(!loaded && !err.empty() && !bad.loaded(), std::string("rejects ") + name);
         }
     }
+    if (!negatives.empty()) {  // rank 1 gives a 1-D A to ggml_n_dims; it is valid and must load
+        HeartMuLaAdapter one;
+        err.clear();
+        check(heartmula_adapter_load(&one, m, (negatives + "/ok-rank1.gguf").c_str(), &err) && one.rank == 1, "loads a valid rank-1 adapter");
+        heartmula_adapter_free(&one);
+    }
     {
         const std::string variant0 = m.variant, fp0 = m.base_fingerprint;  // identity is read before the file checks
         m.variant = variant0 == "3B" ? "3B-happy-new-year" : "3B";

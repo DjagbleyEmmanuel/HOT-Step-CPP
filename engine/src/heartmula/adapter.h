@@ -194,9 +194,10 @@ static bool heartmula_adapter_load(HeartMuLaAdapter * a, const HeartMuLaModel & 
             }
             const bool type_ok = (ta->type == GGML_TYPE_F32 || ta->type == GGML_TYPE_F16) &&
                                  (tb->type == GGML_TYPE_F32 || tb->type == GGML_TYPE_F16);
-            // ggml order: A [in, rank], B [rank, out]; the base weight is [in, out].
+            // ggml order: A [in, rank], B [rank, out]; the base weight is [in, out]. Rank 1 makes A
+            // a 1-D tensor to ggml_n_dims, so only the trailing dimensions are checked.
             if (!type_ok || ta->ne[0] != w[s]->ne[0] || ta->ne[1] != rank || tb->ne[0] != rank ||
-                tb->ne[1] != w[s]->ne[1] || ggml_n_dims(ta) != 2 || ggml_n_dims(tb) != 2) {
+                tb->ne[1] != w[s]->ne[1] || ta->ne[2] != 1 || ta->ne[3] != 1 || tb->ne[2] != 1 || tb->ne[3] != 1) {
                 done(false);
                 return bad("'" + name + "' factors do not fit the base weight at rank " + std::to_string(rank));
             }
