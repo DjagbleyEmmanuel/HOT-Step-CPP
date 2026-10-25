@@ -44,7 +44,8 @@
 //
 // key = first 16 hex of sha256("heartmula-prepare|v<VERSION>|<audio path>|<bytes>|
 //       <mtime s>|<encoder identity>"), encoder identity = each encoder file's
-//       name and size plus the RVQ codebook's sha256. Codes depend on nothing
+//       name and content sha256 plus the RVQ codebook's sha256 (hashing the
+//       pack costs a few seconds per run). Codes depend on nothing
 //       else, so a codes file named by its key is reused as-is (a cancelled run
 //       resumes for free) unless --force. Prompt ids are cheap and are rebuilt
 //       every run. HEARTMULA_PREPARE_VERSION bumps whenever the codes or the
@@ -67,7 +68,7 @@
 #include <filesystem>
 #include <set>
 
-#define HEARTMULA_PREPARE_VERSION 1
+#define HEARTMULA_PREPARE_VERSION 2
 #define HEARTMULA_PREPARE_MANIFEST "heartmula_prepare.json"
 
 struct HeartmulaPrepareArgs {
@@ -196,12 +197,12 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
     paths.rvq = rvq_file->path;
     std::string identity;
     for (const std::string * p : { &paths.muencoder, &paths.wavlm, &paths.whisper, &paths.query }) {
-        long long bytes = 0;
-        if (!pm_stat_file(*p, &bytes, nullptr)) {
-            fprintf(stderr, "heartmula-prepare: encoder file missing: %s (pass --encoder <dir>)\n", p->c_str());
+        yue2_aitk::sha256::digest digest;
+        if (!pm_file_exists(*p) || !yue2_aitk::sha256::file(fs::u8path(*p), digest)) {
+            fprintf(stderr, "heartmula-prepare: encoder file missing or unreadable: %s (pass --encoder <dir>)\n", p->c_str());
             return 1;
         }
-        identity += pm_basename(*p) + ":" + std::to_string(bytes) + "|";
+        identity += pm_basename(*p) + ":" + digest.hex() + "|";
     }
     identity += "rvq:" + rvq_file->rvq_sha256;
     const int64_t limit = heartmula_global_config().n_ctx;
