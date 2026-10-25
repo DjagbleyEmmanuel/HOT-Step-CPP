@@ -27,10 +27,11 @@ Companion documents (they own the detail, this page does not repeat it):
 | **P6** — composers + dedup | One key composer per entity, duplicate factories, doc-only sanctions | **Mostly done.** F4 #3–#11 and #13 closed; #12 key remains util-local; #14–#16 are documented sanctions |
 | **P7** — structural | Training SSE second owner, audio-queue executor state | **Deferred.** Needs an owner design before code |
 
-**Verification (2026-10-24):** P1–P3 exit criteria re-checked against the code.
-`tsc -b` clean; UI suite **372 pass / 2 pre-existing `.css` failures / 1 skip**;
-targeted ESLint found only pre-existing `no-explicit-any`/React-compiler
-findings in the touched files; `node tools/docs/check-docs.mjs` → `ok`.
+**Verification (2026-10-25):** P1–P3 exit criteria re-checked against the code.
+`tsc -b` clean; UI suite **424 pass / 0 fail / 1 skip**; whole-`src` ESLint
+reports only the pre-existing rule categories (819 findings, below the
+pre-migration 863 baseline); `npm run build` succeeds; `node
+tools/docs/check-docs.mjs` → `ok`.
 The last P3 stragglers were fixed in this pass: both `extract-kick` POSTs and
 the quit/restart calls in `App.tsx` now go through `apiClient` / `shutdownApi`,
 and `shutdownApi.quit` / `adapterApi.scan` are silent so their inline-error
@@ -121,27 +122,27 @@ Two write paths use it:
 mutation lifecycle; single-use commands stay inline as one `useMutation` per
 command.
 
-## Inventory (non-test grep, 2026-10-24)
+## Inventory (non-test grep, 2026-10-25)
 
 | API | Count | Note |
 |---|---|---|
-| `useQuery` | 118 sites / 78 files | Declarative reads — the norm |
+| `useQuery` | 128 sites / 81 files | Declarative reads — the norm |
 | `useQueries` | 3 sites / 3 files | Worker dispatch, worker list, curated profile |
-| `useMutation` | 108 calls / 42 files | Named writes carry a pending/error lifecycle |
+| `useMutation` | 115 calls / 44 files | Named writes carry a pending/error lifecycle |
 | `queryClient.fetchQuery` | 0 | Renamed by P1; ESLint guard prevents regressions |
 | `prefetchQuery` / `ensureQueryData` | 0 / 0 | Not used |
 | `getQueryData` | 1 (`queries/sseBridge.ts`) | Diff detection in the SSE bridge |
-| `setQueryData` | 18 calls / 10 files | SSE writes and deliberate in-place patches |
-| `useQueryClient` | 45 calls / 43 files | Mostly to invoke `queryManager` |
+| `setQueryData` | 19 calls / 11 files | SSE writes and deliberate in-place patches |
+| `useQueryClient` | 48 calls / 46 files | Mostly to invoke `queryManager` |
 | `invalidateQueries` | only `queries/invalidation.ts` | One owner by construction |
 
 **Query consistency:** every `useQuery` goes through an options factory,
-including the 53 sites that spread one into an object for a local override
+including the 68 sites that spread one into an object for a local override
 (`enabled`, `retry`, `refetchInterval`). The sole inline `queryKey` is the
 sanctioned SSE cache slot in `useDownloadStream.ts` (F4#14). No component
 builds a key or fetcher inline.
 
-**Mutation consistency:** all 108 sites are `useMutation` with a service or
+**Mutation consistency:** all 115 sites are `useMutation` with a service or
 transport call in `mutationFn`. Pending state derives from `isPending` rather
 than hand-rolled booleans. Long-lived job/stream flows stay imperative by
 design — see the consistency follow-up. Invalidation APIs split between
@@ -249,8 +250,9 @@ Exit: draft-safety tests green and the SettingsPanel manifest row updated.
 - `utils/yue2CaptionSource.ts` builds its key inline with `serverKey(...)`.
   Single caller; error is surfaced. Accept as util-local or move to a factory
   when the area next changes.
-- F4#14/#15/#16 are documented sanctions, not code work: SSE cache slot,
-  queryable POST, side-effect-only query subscriptions.
+- F4#14–#17 are documented sanctions, not code work: SSE cache slot,
+  queryable POST, side-effect-only query subscriptions, and the module-local
+  SA3 status factory.
 
 ### P7 — deferred structural work
 
@@ -297,7 +299,7 @@ the open handler), not a `useQuery`.
 | **F1** — `fetchQuery` deprecated, 73 sites | Renamed to `queryClient.query()`; ESLint `no-restricted-syntax` rule added. Replacement is behavior-identical (`query()` builds the query, fetches only when stale, forces `retry: false`) |
 | **F2** — writes had no mutation lifecycle | All component writes converted; store writes standardized on `writeAndInvalidate`; `runCommand` deleted in favour of `trainingWritePlan` |
 | **F3** — reads/timers bypassing the cache | Upload blocks collapsed onto `useUpload`; polls moved to `refetchInterval`/`pollWhile`; post-process status is a query; preview/scan converted. P7 rows remain |
-| **F4** — anti-pattern ledger | #1–#6, #8–#11, #13 closed. #7 closed (services call the shared factories). #12 key is util-local (error surfaced). #14/#15/#16 are documented sanctions |
+| **F4** — anti-pattern ledger | #1–#6, #8–#11, #13 closed. #7 closed (services call the shared factories). #12 key is util-local (error surfaced). #14/#15/#16/#17 are documented sanctions |
 | **F5** — no global HTTP error handling | Axios transport + one response interceptor; GET silent, `IGNORED_URL_PATTERNS`, silent escape, abort handling, status-mapped i18n copy |
 
 ### F4 references
@@ -308,6 +310,7 @@ the open handler), not a `useQuery`.
 | 14 | `components/model-manager/useDownloadStream.ts` | Sanctioned: disabled query as an SSE cache slot |
 | 15 | `services/yue2CoverApi.ts` queryable POST | Sanctioned: idempotent, body in key; bounded key cardinality is a watch item |
 | 16 | `BackendToggle.tsx`, `MonitorBar.tsx` | Sanctioned: side-effect-only subscriptions; lifetime tied to mount |
+| 17 | `Sa3TrainCard.tsx` `sa3StatusOptions` | Sanctioned: module-local status factory (single file, three uses) until SA3 moves into `queries/training-data` |
 
 ## Verification
 
@@ -328,7 +331,7 @@ grep -rn "new FormData(" src/services --include="*.ts"                          
 grep -rn "queryKey:" src/components --include="*.tsx" | grep -v "Options()"                # only the F4#14 SSE slot
 ```
 
-Expected UI suite: 372 pass, 2 pre-existing `.css` import failures, 1 skip.
+Expected UI suite: 424 pass, 0 fail, 1 skip.
 
 ## Cross-references
 

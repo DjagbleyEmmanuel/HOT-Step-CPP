@@ -52,15 +52,15 @@ helpers and (occasionally) hooks:
 
 | API | Calls / files | Notes |
 |---|---|---|
-| `useQuery` | **118** calls in **78** files | The established read mechanism. Most declare `{ ...factoryOptions(), enabled }` inline in components. |
+| `useQuery` | **128** calls in **81** files | The established read mechanism. Most declare `{ ...factoryOptions(), enabled }` inline in components. |
 | `useQueries` | **3** | `CuratedProfileModal`, `WorkersPanel`, `TrainingWorkerBar`. |
-| `useMutation` | **108** calls in **42** files | Writes with a visible pending/error lifecycle. |
+| `useMutation` | **115** calls in **44** files | Writes with a visible pending/error lifecycle. |
 | `queryClient.query(...)` | **66** | Imperative one-shot reads / form seeding / store and service reads. No `fetchQuery` remains (ESLint guard in `ui/eslint.config.js`). |
-| `useQueryClient()` | **45** files | Mostly to call `queryManager` invalidation helpers. |
-| `setQueryData` | **18** | In-place patches and SSE updates. |
+| `useQueryClient()` | **46** files | Mostly to call `queryManager` invalidation helpers. |
+| `setQueryData` | **19** | In-place patches and SSE updates. |
 | `invalidateQueries` | **1 call site** | `queries/invalidation.ts` only; other grep hits are comments. |
-| `queryOptions(...)` | **~90** | Area slices plus the generic `localOptions`/`snapshotOptions` helpers. |
-| Query-layer tests | **13** files | Keys, contract, SSE bridge, each area, training hooks. |
+| `queryOptions(...)` | **95** | Area slices plus the generic `localOptions`/`snapshotOptions` helpers. |
+| Query-layer tests | **14** files | Keys, contract, SSE bridge, each area, training hooks. |
 
 ---
 

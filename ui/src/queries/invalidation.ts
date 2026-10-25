@@ -10,7 +10,7 @@
 // P2 shape: the groups wrap today's per-area key lists; when P6 folds each
 // entity into its own composer folder, a group closes over that composer and
 // the old list/helper is deleted. Parameterized invalidations (a write knows
-// its worker/id) call `keys`/`filter` with the captured scope — the manager
+// its worker/id) call `invalidate`/`filter` with the captured scope — the manager
 // still owns the actual invalidateQueries call.
 
 import type { InvalidateQueryFilters, QueryClient, QueryKey } from '@tanstack/react-query';

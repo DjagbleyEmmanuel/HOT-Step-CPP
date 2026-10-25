@@ -38,8 +38,6 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
   const [result, setResult] = React.useState<Yue2CoverDriftResult | null>(
     (session?.metricVersion === 5 ? session : undefined) ?? saved ?? null);
 
-  if (!params.yue2Cover || !params.yue2Abc) return null;
-
   const skipped = (section: Yue2CoverDriftResult['sections'][number]) =>
     section.unscoredReason === 'no_vocal_note' || section.unscoredReason === 'no_matching_lyric_tag';
   const skippedCount = result?.sections.filter(skipped).length ?? 0;
@@ -52,6 +50,10 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
     },
   });
   const error = measureError?.message ?? '';
+
+  // Hook order must not depend on the song's params: a generation finishing
+  // while this card is mounted can flip these on the same instance.
+  if (!params.yue2Cover || !params.yue2Abc) return null;
 
   return <section className="space-y-2 rounded-xl border border-zinc-200 dark:border-white/10 p-3 text-xs">
     <div className="flex items-center justify-between gap-2">
