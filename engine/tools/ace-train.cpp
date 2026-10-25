@@ -65,6 +65,7 @@
 #include "train/preprocess-run.h"  // pulls in st-write.h + preprocess-io.h
 #include "train/spike-run.h"       // Phase-0 training spike (evidence code)
 #include "train/sa3-train-run.h"   // Stable Audio 3 DoRA-rows trainer
+#include "train/heartmula-prepare.h"  // HeartMuLa: audio + text -> codes + prompt ids
 
 #include <cstdarg>
 #include <cstdio>
@@ -387,6 +388,14 @@ static void print_usage(void) {
             "                [--bwd outprod] restore the slow CPU mul_mat backward (510x slower)\n"
             "                [--tf32 on|off] default off\n"
             "                Writes <out>/mm3_lora.safetensors; load with MM3_ADAPTER=<path>.\n"
+            "  heartmula-prepare  Sample list (audio, tags, lyrics) -> HeartCodec codes and\n"
+            "                prompt ids, the cache the HeartMuLa trainer reads.\n"
+            "                --dataset <json>  [{id, audio, tags, lyrics}] or {samples: [...]}\n"
+            "                --out <dir>       holds codes/ and heartmula_prepare.json\n"
+            "                --models <dir>    tokenizer and RVQ, as inference finds them\n"
+            "                [--encoder <dir>] HeartCodec encoder pack; default <models>/heartmula\n"
+            "                [--ffmpeg <path>] decodes non-WAV audio; default ffmpeg on PATH\n"
+            "                [--force]         re-encode samples whose codes are cached\n"
             "  yue2-preprocess  Folder of audio -> cached YuE2 VAE latents + the manifest\n"
             "                yue2-nar-train reads. Encodes each source ONCE (posterior mean,\n"
             "                [64, frames] f32 channel-major) and cuts fixed clips out of the\n"
@@ -4750,6 +4759,38 @@ static int cmd_yue2_nar_train(int argc, char ** argv) {
     return yue2_nar_train_run(a);
 }
 
+// ─── heartmula-prepare ──────────────────────────────────────────────────────
+//
+// Sample list -> HeartCodec codes + prompt ids (train/heartmula-prepare.h).
+// TF32 off first, before any CUDA context: the driver reads it at creation.
+static int cmd_heartmula_prepare(int argc, char ** argv) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+#endif
+    HeartmulaPrepareArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--dataset")) a.dataset     = next("--dataset");
+        else if (!strcmp(argv[i], "--out"))     a.out_dir     = next("--out");
+        else if (!strcmp(argv[i], "--models"))  a.models_dir  = next("--models");
+        else if (!strcmp(argv[i], "--encoder")) a.encoder_dir = next("--encoder");
+        else if (!strcmp(argv[i], "--ffmpeg"))  a.ffmpeg      = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--force"))   a.force       = true;
+        else { fprintf(stderr, "ace-train heartmula-prepare: unknown option %s\n", argv[i]); return 2; }
+    }
+    try {
+        return heartmula_prepare_run(a);
+    } catch (const std::exception & e) {
+        fprintf(stderr, "heartmula-prepare: %s\n", e.what());
+        return 1;
+    }
+}
+
 // ─── yue2-preprocess ────────────────────────────────────────────────────────
 //
 // Folder of audio -> cached YuE2 VAE latents + yue2_preprocess.json, the
@@ -6634,6 +6675,9 @@ static int ace_train_main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "sa3-train") || !strcmp(argv[1], "sa3-train-check")) {
         return cmd_sa3_train(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "heartmula-prepare")) {
+        return cmd_heartmula_prepare(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-preprocess")) {
         return cmd_yue2_preprocess(argc - 1, argv + 1);
