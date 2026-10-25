@@ -418,8 +418,9 @@ routes and generation UI are still being implemented; a backend entry does not
 mean the native renderer is available yet.
 
 HeartMuLa accepts style tags and lyrics and produces 48 kHz stereo audio. Duration
-is an upper bound from 1 to 240 seconds, default 120. Audio EOS can end a song
-earlier. Each request produces one song. A seed can be a safe non-negative integer
+is an upper bound from 1 to 240 seconds, default 120 when omitted. Create's Auto
+duration uses the 240-second ceiling. Audio EOS can end a song earlier.
+Each request produces one song. A seed can be a safe non-negative integer
 or an exact uint64 decimal string.
 
 Global LM, local decoder, codec flow and scalar decoder quants can be selected

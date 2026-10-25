@@ -44,7 +44,9 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
   const noiseSeed = seed(params.heartmulaNoiseSeed, 'noise seed');
   return {
     ...pick, tags, lyrics,
-    duration_s: number(params.duration, 'duration', 120, 1, 240),
+    // Create's Auto duration uses -1. Let audio EOS end the song within
+    // HeartMuLa's maximum duration, while an omitted duration keeps 120 s.
+    duration_s: number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
     ...(!params.randomSeed && mainSeed !== undefined ? { seed: mainSeed } : {}),
     ...(noiseSeed === undefined ? {} : { noise_seed: noiseSeed }),
     temperature: number(params.heartmulaTemperature, 'temperature', 1, Number.MIN_VALUE, 4),

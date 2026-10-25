@@ -81,10 +81,17 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       assert.equal(catalogue.buckets.muencoder, undefined, 'generation never requires encoder models');
       await heartmulaBackend.selectModel({variant: '3B', global: 'Q8_0', local: 'Q4_K_M', flow: 'Q8_0', scalar_decoder: 'F16', lmAdapter: adapter});
       setActiveBackendId('heartmula');
-      const raw = {caption: 'ambient, piano', lyrics: '[verse]\\nfixture', duration: 240,
+      const raw = {caption: 'ambient, piano', lyrics: '[verse]\\nfixture', duration: -1,
         seed: '18446744073709551615', heartmulaNoiseSeed: 17, heartmulaAdapterStrength: 0,
         postProcessingEnabled: false};
       const envelope = buildEnvelope(raw, 'fixture-user', 'fixture-job', Date.now());
+      assert.equal(envelope.submission.duration, -1, 'retain the app Auto sentinel in the submission');
+      assert.equal(envelope.common.duration, 240, 'Auto uses the maximum ceiling');
+      assert.equal(envelope.options.heartmula.duration_s, 240);
+      assert.equal(heartmulaBackend.resolveRequest({...raw, duration: undefined}).common.duration, 120);
+      for (const duration of [1, 120, 240]) {
+        assert.equal(heartmulaBackend.resolveRequest({...raw, duration}).options.duration_s, duration);
+      }
       await heartmulaBackend.selectModel({global: 'F16', lmAdapter: ''});
       setActiveBackendId('ace');
       assert.equal(envelope.backendId, 'heartmula');
@@ -95,7 +102,7 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       assert.equal(heartmulaBackend.resolveRequest(raw).models.local, 'Q4_K_M');
       rejectPick = false;
       for (const bad of [
-        {caption: ''}, {tags: []}, {lyrics: 123}, {duration: 241}, {duration: 0}, {duration: NaN},
+        {caption: ''}, {tags: []}, {lyrics: 123}, {duration: 241}, {duration: 0}, {duration: -2}, {duration: '-1'}, {duration: NaN},
         {seed: -1}, {seed: Number.MAX_SAFE_INTEGER + 1}, {seed: '18446744073709551616'},
         {heartmulaNoiseSeed: -2}, {heartmulaTopK: 1.2}, {heartmulaTemperature: 0},
         {heartmulaCfgScale: 11}, {heartmulaCodecSteps: 101}, {heartmulaCodecGuidance: 0},
