@@ -757,6 +757,10 @@ link_ggml_backends(heartcodec-probe)
 add_executable(heartmula-generate tools/heartmula-generate.cpp)
 target_link_libraries(heartmula-generate PRIVATE yyjson)
 link_ggml_backends(heartmula-generate)
+# HeartMuLa imatrix collection and held-out quant scoring (tools/heartmula-quant-ladder.mjs).
+add_executable(heartmula-quant tools/heartmula-quant.cpp)
+target_link_libraries(heartmula-quant PRIVATE yyjson)
+link_ggml_backends(heartmula-quant)
 # HeartCodec encoder (waveform to RVQ codes) parity probe and round trip.
 add_executable(heartcodec-encode-probe tools/heartcodec-encode-probe.cpp)
 target_link_libraries(heartcodec-encode-probe PRIVATE yyjson)
