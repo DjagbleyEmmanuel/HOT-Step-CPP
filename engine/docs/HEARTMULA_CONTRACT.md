@@ -152,8 +152,10 @@ unloads that component; the next warm or synth loads the new one. Response: the
 `selected`, `requested` and `adapter` blocks of `props`.
 
 Errors: 400 malformed value (`bad_request`), 404 no such variant or type
-(`not_found`), 409 files that exist but do not fit together (`incompatible`,
-message names the two files and the check that failed), 503 while a job is
+(`not_found`), 409 `incompatible` for files that exist but fail a
+[load-time check](#load-time-checks), for example an LM pair whose
+`rvq_sha256` differs from the RVQ file (the message names the two files and
+the check), 503 while a job is
 loading or running HeartMuLa weights (`busy`). The busy case matches YuE2:
 callers retry, or put the pick on the synth request instead.
 
@@ -403,7 +405,11 @@ again when a job loads, since files can change on disk in between:
 2. Global and local have the same `heartmula.variant` and
    `heartmula.base_fingerprint`. Mixed quants are fine; mixed variants are not.
 3. Each LM file's `heartmula.dependencies.tokenizer` equals the tokenizer's
-   `heartmula.tokenizer.source_sha256` (compared as parsed JSON objects).
+   `heartmula.tokenizer.source_sha256` (compared as parsed JSON objects), and
+   both global and local have `rvq_sha256` equal to the sha256 of the RVQ file
+   present. The LM's audio codes index that codebook, so an LM pair converted
+   against a different RVQ would decode to the wrong audio even when the codec
+   pack is consistent with itself.
 4. Flow, scalar decoder and every encoder-pack file have `rvq_sha256` equal to
    the sha256 of the RVQ file present. Flow and scalar decoder have the same
    `heartmula.base_fingerprint`.
