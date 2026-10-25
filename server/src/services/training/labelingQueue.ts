@@ -410,6 +410,8 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
     case 'yue2-joint-train': // explicit AITK joint AR+NAR trainer
     case 'yue2-base-loss':   // forward-only base planner + decoder over every song
+    case 'heartmula-prepare': // HeartCodec encoder pack, whole-card
+    case 'heartmula-train':  // backbone LoRA through a frozen 3B base
       return 'gpu';
     case 'yue2-prepare-aitk': // native cache import; CPU-only, never stops ace-server
       return 'net';
@@ -1786,6 +1788,26 @@ export function startYue2TrainJob(datasetId: string, opts: unknown): TrainingJob
   enqueue(job, async (j) => {
     const { runYue2TrainJob } = await import('./yue2TrainRunner.js');
     await runYue2TrainJob(j);
+  });
+  return job;
+}
+
+/** HeartMuLa audio -> HeartCodec codes + prompt ids (heartmulaRunner.ts). */
+export function startHeartmulaPrepareJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('heartmula-prepare', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runHeartmulaPrepareJob } = await import('./heartmulaRunner.js');
+    await runHeartmulaPrepareJob(j);
+  });
+  return job;
+}
+
+/** HeartMuLa backbone LoRA training; new run or resume (heartmulaRunner.ts). */
+export function startHeartmulaTrainJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('heartmula-train', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runHeartmulaTrainJob } = await import('./heartmulaRunner.js');
+    await runHeartmulaTrainJob(j);
   });
   return job;
 }

@@ -16,11 +16,7 @@
 //   POST /datasets/:id/heartmula-previews/render  <- HeartmulaPreviewRenderRequest, -> HeartmulaPreviewListResponse
 //   GET  /datasets/:id/heartmula-previews/audio?run=&file= -> audio bytes
 
-/**
- * Training target id. Not yet a member of TRAINING_TARGET_IDS in ./training.ts:
- * widening that union breaks the exhaustive Record<TrainingTargetId, ...> maps
- * in the UI registry, so slice 5 adds it together with those entries.
- */
+/** Training target id; a member of TRAINING_TARGET_IDS in ./training.ts. */
 export const HEARTMULA_TARGET_ID = 'heartmula' as const;
 export type HeartmulaTargetId = typeof HEARTMULA_TARGET_ID;
 
@@ -49,13 +45,13 @@ export interface HeartmulaRecipe {
   checkpointEvery: number;
 }
 
-/** r64/alpha64 as decided. The other numbers follow the Python oracle run until slice 1 pins them. */
+/** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
 export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   rank: 64,
   alpha: 64,
   learningRate: 1e-4,
   steps: 480,
-  gradAccum: 1,
+  gradAccum: 4,
   seed: 0,
   checkpointEvery: 100,
 };
@@ -110,6 +106,23 @@ export interface HeartmulaPreviewSettings {
   codecSteps: number;
   codecGuidance: number;
 }
+
+/**
+ * Fixed preview fixture. Placeholder conditioning until the acceptance
+ * tester's neutral pick replaces it; sampler values are the generation defaults.
+ */
+export const HEARTMULA_PREVIEW_DEFAULTS: HeartmulaPreviewSettings = {
+  everySteps: 100,
+  tags: 'pop, piano, warm, gentle',
+  lyrics: '[verse]\nSoft light on the window\nMorning comes slow\n[chorus]\nHold on, we are moving\nSlowly, we go',
+  seconds: 30,
+  seed: 42,
+  temperature: 1,
+  topk: 50,
+  cfgScale: 1.5,
+  codecSteps: 10,
+  codecGuidance: 1.25,
+};
 
 export interface HeartmulaTrainRequest {
   /** Adapter name; omitted = the dataset slug. */
@@ -176,8 +189,33 @@ export interface HeartmulaAdapterAsset {
   run: HeartmulaRunId | null;
 }
 
+/** Whether training can start here, and what is missing when it cannot. */
+export interface HeartmulaReadiness {
+  /** CUDA build, ace-train present and every model file installed. */
+  available: boolean;
+  backend: string;
+  /** Base-model files that are not installed. */
+  missingModels: string[];
+  /** The HeartCodec encoder pack is not installed (Prepare needs it). */
+  encoderMissing: boolean;
+}
+
+/** One run for the run picker. */
+export interface HeartmulaRunSummary {
+  run: HeartmulaRunId;
+  adapterName: string;
+  recipe: HeartmulaRecipe;
+  state: HeartmulaRunState;
+  step: number;
+  /** True when a checkpoint exists and the run has not published. */
+  resumable: boolean;
+  published: string | null;
+}
+
 /** Everything the status route returns for one dataset; every flag is a verified fact. */
 export interface HeartmulaStatusResponse {
+  ready: HeartmulaReadiness;
+  runs: HeartmulaRunSummary[];
   base: HeartmulaBase;
   prepare: HeartmulaPrepareStatus;
   /** The active or newest run, null when the dataset has none. */
@@ -186,6 +224,14 @@ export interface HeartmulaStatusResponse {
   /** Recipe the next run uses when the request omits keys. */
   defaults: HeartmulaRecipe;
   previewDefaults: HeartmulaPreviewSettings;
+}
+
+/** The HeartMuLa block of the dataset asset chips; every flag is a verified fact. */
+export interface HeartmulaDatasetAssets {
+  /** True only when the prepare cache validates against the dataset. */
+  prepared: boolean;
+  preparedSamples: number;
+  adapter: HeartmulaAdapterAsset | null;
 }
 
 // ── Checkpoint previews ──────────────────────────────────────────────────

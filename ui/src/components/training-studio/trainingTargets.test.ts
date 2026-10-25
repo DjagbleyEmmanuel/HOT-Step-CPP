@@ -102,3 +102,16 @@ test('flipping the override from ACE to SA3 moves a user off Preprocess and Moni
   assert.equal(resolvePhase(before, 'train'), 'train');
   assert.equal(resolvePhase(before, 'dataset'), 'dataset');
 });
+
+test('HeartMuLa trains under its own target: Prepare, Train, Review, no ACE stages', () => {
+  const hm = TRAINING_TARGETS.heartmula;
+  assert.deepEqual(hm.phases, ['dataset', 'preprocess', 'train', 'review']);
+  assert.equal(hm.phaseLabels.preprocess?.fallback, 'Prepare');
+  assert.deepEqual(hm.prepareStages.map(s => s.id), ['codes']);
+  assert.equal(hm.previewSource, 'heartmula-previews');
+  assert.equal(targetForJobKind('heartmula-prepare'), 'heartmula');
+  assert.equal(targetForJobKind('heartmula-train'), 'heartmula');
+  assert.equal(targetForBackend('heartmula'), 'heartmula');
+  assert.equal(resolveTrainingTarget({ override: 'ace', activeBackendId: 'ace', runningJobKind: 'heartmula-train' }), 'heartmula');
+  assert.equal(resolvePhase('heartmula', 'optimise'), 'train');
+});

@@ -21,6 +21,8 @@ import path from 'path';
 import { createHash } from 'node:crypto';
 import { config } from '../../config.js';
 import type { Sa3DatasetAssets } from '../../contracts/training.js';
+import type { HeartmulaDatasetAssets } from '../../contracts/heartmulaTraining.js';
+import { readHeartmulaDatasetAssets } from './heartmulaStatus.js';
 import * as audioMeta from './audioMeta.js';
 import { latestRunDir, lmSizeFromSlug, sa3RunsRoot, validateSa3Export } from './adapterLayout.js';
 import { SA3_AUDIO } from './sa3Stems.js';
@@ -302,8 +304,8 @@ export function readDatasetAssets(
     yue2ArAdapter: TrainingAdapterHit | null;
     yue2Joint?: { dir: string; trainedAt: string } | null;
   },
-): DatasetAssets & { sa3: Sa3DatasetAssets } {
-  const assets: DatasetAssets & { sa3: Sa3DatasetAssets } = {
+): DatasetAssets & { sa3: Sa3DatasetAssets; heartmula: HeartmulaDatasetAssets } {
+  const assets: DatasetAssets & { sa3: Sa3DatasetAssets; heartmula: HeartmulaDatasetAssets } = {
     labeled: ds.labeledCount > 0,
     built: ds.status === 'built' || !!ds.builtAt,
     tensorVariants: 0,
@@ -315,6 +317,7 @@ export function readDatasetAssets(
     mm3: { codesReady: false, codesCount: 0, lmAdapter: null },
     yue2: { latentsReady: false, clips: 0, codesReady: false, cursorReady: false, narAdapter: null, arAdapter: null },
     sa3: readSa3DatasetAssets(ds),
+    heartmula: readHeartmulaDatasetAssets(ds),
   };
 
   // A row that says 'built' but whose dataset.json has since been deleted is

@@ -12,8 +12,8 @@
 //   POST /datasets/:id/sa3-previews/render          <- Sa3PreviewRenderRequest, -> Sa3PreviewListResponse
 //   GET  /datasets/:id/sa3-previews/audio?run=&file= -> audio bytes
 
-/** The four things Training Studio can train for. Matches the backend registry ids. */
-export const TRAINING_TARGET_IDS = ['ace', 'yue2', 'minimax-m3', 'sa3'] as const;
+/** The things Training Studio can train for. Matches the backend registry ids. */
+export const TRAINING_TARGET_IDS = ['ace', 'yue2', 'minimax-m3', 'sa3', 'heartmula'] as const;
 export type TrainingTargetId = typeof TRAINING_TARGET_IDS[number];
 
 /** `<adapterName>/<timestamp>`, the id `POST /sa3-train` already takes as `resumeRun`. */

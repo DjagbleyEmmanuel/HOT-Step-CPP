@@ -24,6 +24,9 @@
 // cancelled request must never be mistaken for cancelling a server job.
 import { apiClient, type ReadOptions } from './httpClient';
 import type { Sa3DatasetAssets } from '../../../server/src/contracts/training';
+import type {
+  HeartmulaCheckpointNowRequest, HeartmulaDatasetAssets, HeartmulaPrepareRequest, HeartmulaStatusResponse, HeartmulaTrainRequest,
+} from '../../../server/src/contracts/heartmulaTraining';
 
 export interface TrainingTarget { worker?: string | null }
 export interface TrainingReadOptions extends TrainingTarget, ReadOptions {}
@@ -81,6 +84,25 @@ export function startSa3Training(id: string, opts: StartSa3TrainingRequest, targ
   return request(`/datasets/${encodeURIComponent(id)}/sa3-train`, { method: 'POST', ...jsonBody(opts) }, target);
 }
 
+// ── HeartMuLa backbone LoRA (contracts/heartmulaTraining.ts) ──────────────
+
+export function getHeartmulaStatus(id: string, opts?: TrainingReadOptions): Promise<HeartmulaStatusResponse> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-status`, undefined, opts);
+}
+
+export function startHeartmulaPrepare(id: string, opts: HeartmulaPrepareRequest = {}, target?: TrainingTarget): Promise<{ jobId: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-prepare`, { method: 'POST', ...jsonBody(opts) }, target);
+}
+
+export function startHeartmulaTraining(id: string, opts: HeartmulaTrainRequest, target?: TrainingTarget): Promise<{ jobId: string; run: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-train`, { method: 'POST', ...jsonBody(opts) }, target);
+}
+
+/** Checkpoint now and stop; the run stays resumable. */
+export function requestHeartmulaCheckpoint(id: string, body: HeartmulaCheckpointNowRequest, target?: TrainingTarget): Promise<{ ok: boolean }> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-checkpoint`, { method: 'POST', ...jsonBody(body) }, target);
+}
+
 export type MergePolicy =
   | 'fill_missing'        // default: only write fields currently empty
   | 'overwrite_caption'
@@ -90,6 +112,8 @@ export type MergePolicy =
 export type TrainingJobKind =
   | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'normalise-lyrics' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit' | 'sa3-train'
+  // HeartMuLa backbone LoRA; both GPU-lane and engine-stopping.
+  | 'heartmula-prepare' | 'heartmula-train'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3. Both GPU-lane and engine-stopping — an MM3 training step
   // peaks at 31.7 GB of a 32 GB card.
@@ -1450,7 +1474,9 @@ export interface TrainingAdapterHit {
 export interface DatasetAssets {
   /** Verified SA3 preparation, cache, snapshots and publication. */
   sa3?: Sa3DatasetAssets;
-  labeled: boolean;           // at least one caption — shared across backends
+  /** Verified HeartMuLa prepare cache and published adapter. */
+  heartmula?: HeartmulaDatasetAssets;
+  labeled: boolean;          // at least one caption — shared across backends
   built: boolean;             // dataset.json written — shared across backends
   tensorVariants: number;     // preprocessed variant dirs
   tensorVariantKey: string;   // newest variant, '' when none

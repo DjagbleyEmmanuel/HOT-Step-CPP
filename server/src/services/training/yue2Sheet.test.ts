@@ -6,7 +6,7 @@ import test from 'node:test';
 import { runYue2CoverSheetJob } from './yue2ArTrainRunner.js';
 import { createJob, type TrainingJob } from './labelingQueue.js';
 import { gpuLaneOwner, runOnGpuLane } from '../generation/gpuLane.js';
-import { type RelayState, type Yue2Kind, runYue2AceTrain } from './yue2TrainRunner.js';
+import { type RelayState, runYue2AceTrain } from './yue2TrainRunner.js';
 import {
   buildYue2SheetArgs, readYue2CoverAbc, writeYue2CoverSheetManifest,
   type ResolvedYue2SheetOptions,
@@ -83,7 +83,7 @@ function mockCoverRun(action: (call: number, stopEngine: boolean, args: string[]
   onLine: (line: string, st: RelayState) => void, st: RelayState) => Promise<void>): CoverRun {
   let calls = 0;
   return async <S extends RelayState>(
-    _job: TrainingJob, _kind: Yue2Kind, args: string[], _idleMs: number,
+    _job: TrainingJob, _kind: string, args: string[], _idleMs: number,
     _verify: () => string | null, onLine: (line: string, st: S) => void,
     st: S, _env?: NodeJS.ProcessEnv, stopEngine = true,
   ): Promise<S> => {

@@ -119,6 +119,31 @@ export const yue2Readiness: Ready = assets => ({
   trained: !!assets?.yue2?.narAdapter || !!assets?.yue2?.arAdapter,
 });
 
+export const heartmulaChips: Chips = (assets, { t, formatWhen }) => {
+  const hm = assets.heartmula;
+  return [
+    {
+      id: 'codes',
+      on: !!hm?.prepared,
+      label: t('trainingStudio.assets.heartmulaCodes'),
+      suffix: hm && hm.preparedSamples > 0 ? String(hm.preparedSamples) : '',
+      title: hm?.prepared
+        ? t('trainingStudio.assets.heartmulaCodesOn', { count: hm.preparedSamples })
+        : t('trainingStudio.assets.heartmulaCodesOff'),
+    },
+    {
+      id: 'adapter',
+      on: !!hm?.adapter,
+      label: t('trainingStudio.assets.heartmulaAdapter'),
+      title: hm?.adapter
+        ? t('trainingStudio.assets.heartmulaAdapterOn', { name: hm.adapter.name, when: formatWhen(hm.adapter.trainedAt) || '—' })
+        : t('trainingStudio.assets.heartmulaAdapterOff'),
+    },
+  ];
+};
+
+export const heartmulaReadiness: Ready = assets => ({ prepared: !!assets?.heartmula?.prepared, trained: !!assets?.heartmula?.adapter });
+
 export const sa3Chips: Chips = (assets, { t, formatWhen }) => {
   const sa3 = sa3Assets(assets);
   return [

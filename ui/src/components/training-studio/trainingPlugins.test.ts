@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DatasetAssets } from '../../services/trainingApi';
 
-import { aceChips, mm3Chips, sa3Chips, sa3Readiness, yue2Chips } from './plugins/chips';
+import { aceChips, heartmulaChips, heartmulaReadiness, mm3Chips, sa3Chips, sa3Readiness, yue2Chips } from './plugins/chips';
 
-const CHIPS = { ace: aceChips, 'minimax-m3': mm3Chips, yue2: yue2Chips, sa3: sa3Chips };
+const CHIPS = { ace: aceChips, 'minimax-m3': mm3Chips, yue2: yue2Chips, sa3: sa3Chips, heartmula: heartmulaChips };
 
 // Echo keys so the matrix pins which chip, state and tooltip each backend shows.
 const ctx = { t: (key: string, o?: Record<string, unknown>) => o ? `${key}${JSON.stringify(o)}` : key, formatWhen: (iso: string) => iso };
@@ -37,4 +37,12 @@ test('SA3 chips report verified assets only', () => {
   assert.deepEqual(summary('sa3', { ...base, sa3 } as DatasetAssets), ['audio:1:12', 'encoded:0', 'snapshots:1:2', 'adapter:1']);
   const r = sa3Readiness({ ...base, sa3 } as DatasetAssets);
   assert.deepEqual(r, { prepared: false, trained: true });
+});
+
+test('HeartMuLa chips report the verified prepare cache and published adapter', () => {
+  assert.deepEqual(summary('heartmula', base), ['codes:0', 'adapter:0']);
+  const heartmula = { prepared: true, preparedSamples: 8, adapter: { name: 'x', trainedAt: 'T5', run: null } };
+  assert.deepEqual(summary('heartmula', { ...base, heartmula } as DatasetAssets), ['codes:1:8', 'adapter:1']);
+  assert.deepEqual(heartmulaReadiness({ ...base, heartmula } as DatasetAssets), { prepared: true, trained: true });
+  assert.deepEqual(heartmulaReadiness(undefined), { prepared: false, trained: false });
 });

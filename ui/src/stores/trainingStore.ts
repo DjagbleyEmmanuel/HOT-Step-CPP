@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import * as trainingApi from '../services/trainingApi';
+import type { HeartmulaPrepareRequest, HeartmulaTrainRequest } from '../../../server/src/contracts/heartmulaTraining';
 import * as preparationApi from '../services/trainingPreparationApi';
 import type { Yue2PreparationPayload } from '../services/trainingPreparationApi';
 import { snapshotFor, type TrainingWorkerRef } from '../services/trainingOperations';
@@ -379,6 +380,12 @@ interface TrainingState {
   loadTrainLmStatus(q?: { variantKey?: string; adapterName?: string; lmSize?: LmSize }): Promise<void>;
   startTrainLm(opts: TrainLmOptions): Promise<void>;
   startSa3Train(opts: trainingApi.StartSa3TrainingRequest): Promise<void>;
+  /** HeartMuLa: audio -> HeartCodec codes + prompt ids. */
+  startHeartmulaPrepare(opts?: HeartmulaPrepareRequest): Promise<void>;
+  /** HeartMuLa: a new backbone-LoRA run, or `resumeRun` to continue one. */
+  startHeartmulaTrain(opts: HeartmulaTrainRequest): Promise<void>;
+  /** HeartMuLa: checkpoint the running trainer and stop; the run stays resumable. */
+  requestHeartmulaCheckpoint(run: string): Promise<void>;
   /** MiniMax-Music3: audio -> RVQ codes. */
   startMm3Codes(opts?: { launder?: boolean }): Promise<void>;
   /** MiniMax-Music3: codes + captions -> an LM LoRA. */
@@ -863,6 +870,23 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }));
   },
 
+  startHeartmulaPrepare: async (opts) => {
+    await startJob(set, get, (id, target) => trainingApi.startHeartmulaPrepare(id, opts, target));
+  },
+
+  startHeartmulaTrain: async (opts) => {
+    await startJob(set, get, (id, target) => trainingApi.startHeartmulaTraining(id, opts, target), () => ({
+      ...blankTrainSeries(), trainMaxEpochs: 0, trainTargetLoss: 0,
+    }));
+  },
+
+  requestHeartmulaCheckpoint: async (run) => {
+    const { trainingWorker: worker, selectedDatasetId: id } = get();
+    if (!id) return;
+    try { await trainingApi.requestHeartmulaCheckpoint(id, { run }, { worker }); }
+    catch (err) { if (isCurrent(get, worker, id)) set({ error: errMessage(err) }); }
+  },
+
   startMm3Codes: async (opts?: { launder?: boolean }) => {
     await startJob(set, get, (id, t) => trainingApi.startMm3Codes(id, opts?.launder ? { launder: true } : {}, t));
   },
@@ -1215,7 +1239,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // yue2-ar-train's relay parses a different log line into the same
         // vocabulary (services/training/yue2ArTrainRunner.ts), so it too draws
         // on the shared chart.
-        if (chartKind === 'train-lm' || chartKind === 'train-dit' || chartKind === 'sa3-train' || chartKind === 'mm3-train-lm'
+        if (chartKind === 'train-lm' || chartKind === 'train-dit' || chartKind === 'sa3-train' || chartKind === 'heartmula-train' || chartKind === 'mm3-train-lm'
           || chartKind === 'yue2-nar-train' || chartKind === 'yue2-ar-train') {
           if (ev.metric === 'data' && typeof ev.stepsPerEpoch === 'number' && ev.stepsPerEpoch > 0) {
             set({ trainStepsPerEpoch: ev.stepsPerEpoch });
@@ -1588,6 +1612,10 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   // run usually leaves one on disk, so this refresh matters on every terminal
   // status, not just 'done'.
   if (get().activeJob?.kind === 'train-dit') void get().loadTrainDitStatus();
+  // The published HeartMuLa adapter appears in the generation picker.
+  if (get().activeJob?.kind === 'heartmula-train' && get().trainingWorker === null) {
+    void queryManager.keys(queryClient, resourceKey('global-models/backend-models'));
+  }
   if (get().activeJob?.kind === 'sa3-train' && get().trainingWorker === null) {
     void queryManager.keys(queryClient, resourceKey('global-models/sa3-adapters'));
   }

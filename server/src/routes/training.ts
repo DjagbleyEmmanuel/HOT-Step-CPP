@@ -108,6 +108,11 @@ import {
   resumePipeline, startPipeline,
 } from '../services/training/pipelineRunner.js';
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
+import { heartmulaReadiness, heartmulaStatus } from '../services/training/heartmulaStatus.js';
+import { heartmulaPrepareStatus } from '../services/training/heartmulaPrepare.js';
+import { missingEncoderMessage } from '../services/training/heartmulaTrain.js';
+import { resolveHeartmulaRun } from '../services/training/heartmulaRuns.js';
+import { requestHeartmulaCheckpoint, type HeartmulaTrainJobOpts } from '../services/training/heartmulaRunner.js';
 import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
@@ -6033,6 +6038,78 @@ router.post('/datasets/:id/sa3-train', (req: Request, res: Response) => {
     const job = queue.startSa3TrainJob(ds.id, opts);
     res.status(202).json({ jobId: job.id, job: queue.toSummary(job) });
   } catch (err: any) { res.status(400).json({ error: err.message }); }
+});
+
+// ── HeartMuLa backbone LoRA (contracts/heartmulaTraining.ts) ─────────────
+// No ACE preprocessing anywhere on this path: prepare encodes with the
+// HeartCodec encoder pack and the trainer reads that cache. Previews are the
+// preview slice's routes.
+
+router.get('/datasets/:id/heartmula-status', async (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try { res.json(await heartmulaStatus(ds)); } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/** Shared admission for the two HeartMuLa starts; returns an error text, or null when the job may start. */
+function heartmulaBlocked(ds: TrainingDatasetRow, needEncoder: boolean): string | null {
+  if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) return 'A job or pipeline is queued or running for this dataset.';
+  const ready = heartmulaReadiness();
+  if (ready.backend !== 'cuda') return `HeartMuLa training needs a CUDA engine build (this one is ${ready.backend}).`;
+  if (!aceTrainExe()) return 'ace-train was not found next to ace-server — rebuild the engine';
+  if (ready.missingModels.length) return `HeartMuLa models are missing: ${ready.missingModels.join(', ')}`;
+  if (needEncoder && ready.encoderMissing) return missingEncoderMessage();
+  return null;
+}
+
+router.post('/datasets/:id/heartmula-prepare', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {}) as Record<string, unknown>;
+  if (Object.keys(body).some(k => k !== 'force') || (body.force !== undefined && typeof body.force !== 'boolean')) {
+    res.status(400).json({ error: 'Options are { force?: boolean }' }); return;
+  }
+  const blocked = heartmulaBlocked(ds, true);
+  if (blocked) { res.status(409).json({ error: blocked }); return; }
+  const job = queue.startHeartmulaPrepareJob(ds.id, { force: body.force === true });
+  res.status(202).json({ jobId: job.id, job: queue.toSummary(job) });
+});
+
+router.post('/datasets/:id/heartmula-train', async (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    res.status(400).json({ error: 'HeartMuLa options must be an object' }); return;
+  }
+  try {
+    const blocked = heartmulaBlocked(ds, false);
+    if (blocked) { res.status(409).json({ error: blocked }); return; }
+    // The cache must match the sources now: training on a stale one would silently use old audio or text.
+    const prepare = heartmulaPrepareStatus(ds, await buildSamples(ds));
+    if (!prepare.cacheValid) {
+      res.status(400).json({ error: prepare.preparedSamples
+        ? `The HeartMuLa prepare cache is out of date (${prepare.staleSamples} sample(s) changed) — run Prepare again`
+        : 'Dataset has no prepared HeartMuLa data — run Prepare first' });
+      return;
+    }
+    const run = resolveHeartmulaRun(ds, req.body as Record<string, unknown>);
+    const job = queue.startHeartmulaTrainJob(ds.id, { runId: run.id, runDir: run.dir, record: run.record, resume: run.resume });
+    res.status(202).json({ jobId: job.id, run: run.id, job: queue.toSummary(job) });
+  } catch (err: any) { res.status(400).json({ error: err.message }); }
+});
+
+/** Body: { run }. Checkpoint now and stop; the run stays resumable. */
+router.post('/datasets/:id/heartmula-checkpoint', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  const run = (req.body as { run?: unknown } | undefined)?.run;
+  const job = queue.activeJobForDataset(ds.id);
+  if (typeof run !== 'string' || !job || job.kind !== 'heartmula-train'
+    || (job.opts as HeartmulaTrainJobOpts).runId !== run) {
+    res.status(404).json({ error: 'That HeartMuLa run is not training' }); return;
+  }
+  if (!requestHeartmulaCheckpoint(job)) { res.status(409).json({ error: 'The trainer is still loading; try again once it reports its first step' }); return; }
+  res.status(202).json({ ok: true });
 });
 
 router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {

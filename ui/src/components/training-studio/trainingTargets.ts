@@ -37,6 +37,7 @@ export function targetForJobKind(kind: TrainingJobKind | null | undefined): Trai
   if (kind === 'preprocess' || kind === 'train-lm' || kind === 'train-dit') return 'ace';
   if (kind.startsWith('mm3-')) return 'minimax-m3';
   if (kind.startsWith('yue2-')) return 'yue2';
+  if (kind.startsWith('heartmula-')) return 'heartmula';
   return null;
 }
 
@@ -68,6 +69,7 @@ const PREPARE_LABEL = { key: 'trainingStudio.phase.prepare', fallback: 'Prepare'
 const CODES_LABEL = { key: 'trainingStudio.mm3.phaseCodes', fallback: 'Codes' };
 
 const ACE_PHASES: readonly TrainingPhase[] = ['dataset', 'preprocess', 'train', 'monitor'];
+const HEARTMULA_PHASES: readonly TrainingPhase[] = ['dataset', 'preprocess', 'train', 'review'];
 
 export const TRAINING_TARGETS: Record<TrainingTargetId, TrainingTargetSpec> = {
   ace: {
@@ -110,6 +112,18 @@ export const TRAINING_TARGETS: Record<TrainingTargetId, TrainingTargetSpec> = {
     ],
     recipeFields: [{ stage: 'nar', family: 'yue2-nar' }, { stage: 'ar', family: 'yue2-ar' }, { stage: 'joint', family: 'yue2-joint' }],
     previewSource: 'yue2-ladder',
+  },
+  // HeartMuLa: Prepare encodes audio to HeartCodec codes (no ACE tensors, latents or FSQ); Review is the checkpoint previews.
+  heartmula: {
+    id: 'heartmula',
+    phases: HEARTMULA_PHASES,
+    reachablePhases: HEARTMULA_PHASES,
+    phaseLabels: { preprocess: PREPARE_LABEL },
+    prepareStages: [stage('codes', 'trainingStudio.heartmula.stageCodes', 'HeartCodec codes')],
+    trainStages: [stage('lora', 'trainingStudio.heartmula.stageTrain', 'Backbone LoRA')],
+    // The recipe is the status route's `defaults`, as SA3's is.
+    recipeFields: [],
+    previewSource: 'heartmula-previews',
   },
   // No Preprocess tab: the trainer prepares audio and encodes inside the Train page.
   sa3: {
