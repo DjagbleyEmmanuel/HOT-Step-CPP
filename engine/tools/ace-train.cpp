@@ -66,6 +66,7 @@
 #include "train/spike-run.h"       // Phase-0 training spike (evidence code)
 #include "train/sa3-train-run.h"   // Stable Audio 3 DoRA-rows trainer
 #include "train/heartmula-prepare.h"  // HeartMuLa: audio + text -> codes + prompt ids
+#include "train/heartmula-train-run.h"  // HeartMuLa backbone LoRA trainer
 
 #include <cstdarg>
 #include <cstdio>
@@ -396,6 +397,18 @@ static void print_usage(void) {
             "                [--encoder <dir>] HeartCodec encoder pack; default <models>/heartmula\n"
             "                [--ffmpeg <path>] decodes non-WAV audio; default ffmpeg on PATH\n"
             "                [--force]         re-encode samples whose codes are cached\n"
+            "  heartmula-train  HeartMuLa backbone LoRA (global q/k/v/o) on a heartmula-prepare\n"
+            "                cache. Contract: engine/docs/HEARTMULA_TRAINING_CONTRACT.md.\n"
+            "                --data <dir>      the heartmula-prepare --out directory\n"
+            "                --out <dir>       state, adapters/step-N.gguf, control/\n"
+            "                --models <dir> [--variant 3B] [--type F16], or --global/--local <gguf>\n"
+            "                [--steps 480] [--rank 64] [--alpha 64] [--lr 1e-4] [--weight-decay 0.01]\n"
+            "                [--grad-accum 4] [--seed 0] [--max-frames 0] [--max-grad-norm 0]\n"
+            "                [--save-every 100] [--stop-after N] [--resume] [--name <adapter>]\n"
+            "                [--weights f16|bf16] [--local-chunk 0 = auto]\n"
+            "                control/checkpoint-now: checkpoint after this step, exit 3;\n"
+            "                control/cancel: stop now, exit 4. stdout: HMTRAIN {json} events.\n"
+            "                [--selftest <fixture dir>] check contract section 5 against the oracle\n"
             "  yue2-preprocess  Folder of audio -> cached YuE2 VAE latents + the manifest\n"
             "                yue2-nar-train reads. Encodes each source ONCE (posterior mean,\n"
             "                [64, frames] f32 channel-major) and cuts fixed clips out of the\n"
@@ -4791,6 +4804,62 @@ static int cmd_heartmula_prepare(int argc, char ** argv) {
     }
 }
 
+// ─── heartmula-train ────────────────────────────────────────────────────────
+//
+// HeartMuLa backbone LoRA (train/heartmula-train-run.h). TF32 off and the
+// mul_mat backward arm on before any CUDA context or graph: the frozen weights
+// are F16/BF16 and the default arm emits an OUT_PROD CUDA refuses for F16
+// (contract section 6.2, G1).
+static int cmd_heartmula_train(int argc, char ** argv) {
+#ifdef _WIN32
+    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+    _putenv("GGML_BACKWARD_MM=1");
+#else
+    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+    setenv("GGML_BACKWARD_MM", "1", 1);
+#endif
+    HeartmulaTrainArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        const char * o = argv[i];
+        if      (!strcmp(o, "--data"))          a.data_dir    = next(o);
+        else if (!strcmp(o, "--out"))           a.out_dir     = next(o);
+        else if (!strcmp(o, "--models"))        a.models_dir  = next(o);
+        else if (!strcmp(o, "--variant"))       a.variant     = next(o);
+        else if (!strcmp(o, "--type"))          a.type        = next(o);
+        else if (!strcmp(o, "--global"))        a.global_path = next(o);
+        else if (!strcmp(o, "--local"))         a.local_path  = next(o);
+        else if (!strcmp(o, "--name"))          a.name        = next(o);
+        else if (!strcmp(o, "--selftest"))      a.selftest    = next(o);
+        else if (!strcmp(o, "--weights"))       a.weights     = next(o);
+        else if (!strcmp(o, "--steps"))         a.steps       = atoll(next(o));
+        else if (!strcmp(o, "--rank"))          a.rank        = atoi(next(o));
+        else if (!strcmp(o, "--alpha"))         a.alpha       = (float) atof(next(o));
+        else if (!strcmp(o, "--lr"))            a.lr          = (float) atof(next(o));
+        else if (!strcmp(o, "--weight-decay"))  a.wd          = (float) atof(next(o));
+        else if (!strcmp(o, "--grad-accum"))    a.accum       = atoi(next(o));
+        else if (!strcmp(o, "--seed"))          a.seed        = strtoull(next(o), nullptr, 10);
+        else if (!strcmp(o, "--max-frames"))    a.max_frames  = atoll(next(o));
+        else if (!strcmp(o, "--max-grad-norm")) a.clip        = (float) atof(next(o));
+        else if (!strcmp(o, "--save-every"))    a.save_every  = atoi(next(o));
+        else if (!strcmp(o, "--stop-after"))    a.stop_after  = atoll(next(o));
+        else if (!strcmp(o, "--local-chunk"))   a.local_chunk = atoll(next(o));
+        else if (!strcmp(o, "--lora-dropout"))  a.dropout     = (float) atof(next(o));
+        else if (!strcmp(o, "--resume"))        a.resume      = true;
+        else { fprintf(stderr, "ace-train heartmula-train: unknown option %s\n", o); return 2; }
+    }
+    ggml_time_init();
+    try {
+        return heartmula_train_run(a);
+    } catch (const std::exception & e) {
+        fprintf(stderr, "heartmula-train: %s\n", e.what());
+        return 1;
+    }
+}
+
 // ─── yue2-preprocess ────────────────────────────────────────────────────────
 //
 // Folder of audio -> cached YuE2 VAE latents + yue2_preprocess.json, the
@@ -6678,6 +6747,9 @@ static int ace_train_main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "heartmula-prepare")) {
         return cmd_heartmula_prepare(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "heartmula-train")) {
+        return cmd_heartmula_train(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "yue2-preprocess")) {
         return cmd_yue2_preprocess(argc - 1, argv + 1);

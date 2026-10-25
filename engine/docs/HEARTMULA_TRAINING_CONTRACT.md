@@ -6,8 +6,10 @@ and the Python numbers it has to beat. The native prepare and trainer build
 against this page; where an implementation has to differ, change this page in
 the same commit.
 
-Status: specification and oracle only. `engine/tools/heartmula-train-reference.py`
-produces the fixtures and the baseline below. No native trainer exists yet.
+Status: `engine/tools/heartmula-train-reference.py` produces the fixtures and
+the baseline below. The native trainer is `ace-train heartmula-train`
+(`engine/src/train/heartmula-train-*.h`); its `--selftest <fixture dir>`
+checks section 5 against the fixture set.
 
 Python is an offline oracle. Nothing here runs Python at training time.
 
@@ -166,8 +168,13 @@ reference; native must give zero there too (B = 0 makes dL/dA vanish).
 
 - **Replay (exact maths):** start from `lora/init/A_*` and `lora/perturbed/B_*`,
   feed `fp32/adamw/step{1,2,3}/grad/*` as the gradients. Factors after steps 1
-  and 3 and both moments after step 3 within relative L2 1e-5. This checks the
-  optimizer alone, with no model in the loop.
+  and 3 and the first moment after step 3 within relative L2 1e-5; the second
+  moment within 3e-5. This checks the optimizer alone, with no model in the
+  loop. The second moment has its own bound because ggml's AdamW kernel forms
+  1 - beta2 in F32 (1.0f - 0.999f = 0.0010000467) where torch passes 0.001, a
+  4.7e-5 relative difference in every increment. A numpy replay of the fixture
+  gradients gives 1.29e-5 with the kernel's constant and 4.6e-8 with torch's;
+  native measures 1.29e-5. The factors stay within 1e-7.
 - **End to end:** three steps of two micro-batches from the same start.
   Micro-losses within 1e-2 absolute of `fp32/adamw/micro_losses`. The update
   (step-3 factors minus start) has cosine at least 0.98 and relative L2 at
