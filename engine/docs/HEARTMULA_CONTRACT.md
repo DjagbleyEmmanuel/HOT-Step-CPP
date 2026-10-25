@@ -397,6 +397,20 @@ and id keys are fixed:
 file it was made from). `heartmula.tensor_manifest` then describes the F16
 source, not this file.
 
+The LM ladder is built per part (global and local separately) from the F16 pair
+by `tools/heartmula-quant-ladder.mjs build`: Q8_0 down to IQ1_S plus MXFP4 and
+NVFP4, every rung with that variant's imatrix, named
+`heartmula-<variant>-<part>-<LEVEL>.gguf` (the level is the last dash segment,
+so there is no `-imat` twin; `quantize.imatrix*` records it). Collect the
+imatrix with `heartmula-quant --mode collect` on the F16 pair, score a rung with
+`--mode ref` / `--mode eval`, both documented in `engine/tools/heartmula-quant.cpp`.
+`quantize` leaves the 1-D norms, `unconditional_text_embedding` and `muq_linear`
+alone, floors the embeddings, `codebook0_head`, `audio_head.*` and `projection` at
+the embedding type, and bumps `mlp.w2` (and `attn.output_proj` in the L levels).
+Codec files get Q8_0 on the 2-D `.weight` matrices only (the flow transformer);
+the scalar decoder and RVQ have none, so they stay F16 and F32. The ladder
+manifest, not the GGUF, holds the source and imatrix SHA-256.
+
 ### LoRA adapter (`heartmula-lora`)
 
 | Key | Value |

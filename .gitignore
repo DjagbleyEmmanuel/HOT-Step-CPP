@@ -85,6 +85,7 @@ tools/codegraph/node_modules/
 !tools/listening-save.mjs
 !tools/listening-save.test.mjs
 !tools/engine-smoke.mjs
+!tools/heartmula-quant-ladder.mjs
 !tools/sa3-training-reference.py
 !tools/sa3-training-block-fixture.py
 !tools/sa3-training-step-fixture.py
