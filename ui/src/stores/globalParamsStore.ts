@@ -741,6 +741,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   getGlobalParams: (overrides?: Record<string, any>): Partial<GenerationParams> => {
     const s = overrides ? { ...get(), ...overrides } : get();
     const settings: AppSettings = readKey('ace-settings', DEFAULT_SETTINGS);
+    const backendState = useBackendStore.getState();
+    const heartmulaModels = backendState.activeBackendId === 'heartmula'
+      ? backendState.models.heartmula?.defaults : undefined;
 
     // Effective adapter stack: the multi-adapter list when in Advanced mode,
     // otherwise the single `adapter` folded into a one-element stack. `primary`
@@ -811,6 +814,17 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       // object literal, so a backend can never shadow a core field by picking a
       // colliding key.
       ...(s.backendParams || {}),
+      ...(backendState.activeBackendId === 'heartmula' ? { backendOverride: 'heartmula' } : {}),
+      // Freeze component choices with queued requests, including an explicit
+      // empty adapter so a later selection cannot change a base-model job.
+      ...(heartmulaModels ? {
+        heartmulaVariant: String(heartmulaModels.variant ?? ''),
+        heartmulaGlobalModel: String(heartmulaModels.global ?? ''),
+        heartmulaLocalModel: String(heartmulaModels.local ?? ''),
+        heartmulaFlowModel: String(heartmulaModels.flow ?? ''),
+        heartmulaScalarDecoderModel: String(heartmulaModels.scalar_decoder ?? ''),
+        heartmulaAdapter: String(heartmulaModels.lmAdapter ?? ''),
+      } : {}),
       // Multi-backend: which engine backend this request targets. Read directly
       // from backendStore (not a globalParamsStore field) so it's always the
       // live active id; defaults to 'ace' for installs with no second backend
@@ -870,7 +884,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       inferMethod: s.inferMethod, scheduler: s.scheduler, guidanceMode: s.guidanceMode,
       seed: s.seed, randomSeed: s.randomSeed,
       lmSeed: s.lmSeed, lmSeedFollowsDit: s.lmSeedFollowsDit,
-      batchSize: s.batchSize,
+      batchSize: Math.min(s.batchSize, backendState.capabilities[backendState.activeBackendId]?.core.batch.max ?? s.batchSize),
       storkSubsteps: (s.inferMethod === 'stork2' || s.inferMethod === 'stork4') ? s.storkSubsteps : undefined,
       beatStability: s.inferMethod === 'jkass_fast' ? s.beatStability : undefined,
       frequencyDamping: s.inferMethod === 'jkass_fast' ? s.frequencyDamping : undefined,

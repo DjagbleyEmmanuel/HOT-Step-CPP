@@ -451,7 +451,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // YuE2 hides auto-expand, the LoRA trigger and Beat I/O (its adapters
   // carry their trigger), so stored values must not ride along unseen.
   const yue2Ui = activeBackendId === YUE2_BACKEND_ID;
-  const compose = yue2Ui
+  const compose = yue2Ui || activeBackendId === 'heartmula'
     ? { autoExpand: false, loraTrigger: '', beatIntro: false, introBars }
     : { autoExpand, loraTrigger, beatIntro, introBars };
 
@@ -467,7 +467,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     const params = createContentParams({
       caption, lyrics, negativePrompt, instrumental, loraTrigger: compose.loraTrigger, beatIntro: compose.beatIntro, introBars,
       title, artist, subject, bpm, keyScale, timeSignature, duration, vocalLanguage, sourceLatentUrl,
-    }, { mm3Mode, yue2Active: activeBackendId === YUE2_BACKEND_ID, resolvedCaption, resolvedLyrics });
+    }, { mm3Mode, yue2Active: activeBackendId === YUE2_BACKEND_ID,
+      durationMax: useBackendStore.getState().capabilities[activeBackendId]?.core.duration.max,
+      resolvedCaption, resolvedLyrics });
     // A pasted lead sheet (#181) is the score; previewing would plan a new one
     // and throw it away.
     if (yue2Mode && yue2PreviewScore && !yue2AbcSupplied) {

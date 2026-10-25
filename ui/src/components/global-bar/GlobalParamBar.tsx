@@ -20,6 +20,7 @@ import { BackendModelsDropdown, BackendModelsBadge } from './BackendModelsDropdo
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
 import { Mm3LmAdapterDropdown, Mm3LmAdapterBadge } from './Mm3LmAdapterDropdown';
 import { Yue2LmAdapterDropdown, Yue2LmAdapterBadge } from './Yue2LmAdapterDropdown';
+import { HeartmulaAdapterDropdown, HeartmulaAdapterBadge } from './HeartmulaAdapterDropdown';
 import { GenerationDropdown, GenerationBadge } from './GenerationDropdown';
 import { BackendGenerationDropdown, BackendGenerationBadge } from './BackendGenerationDropdown';
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
@@ -182,6 +183,7 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
   // id (plan §2 principle 2).
   const lmAdaptersAreEngineState = lmAdaptersSupported
     && capabilities.features.lmAdapterSelectable === true;
+  const heartmulaAdapters = lmAdaptersAreEngineState && activeBackendId === 'heartmula';
   // Post-processing is NOT all-or-nothing. The VST chain, reference mastering
   // and StableStep read the sample rate from the audio rather than assuming
   // ACE's 48 kHz, so they work for any backend; only PP-VAE re-encode and
@@ -361,7 +363,7 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
             onOpen={() => handleOpen('models')}
             onClose={() => handleClose('models')}
           >
-            {useBackendModelPicker ? <BackendModelsDropdown /> : <ModelsDropdown />}
+            {useBackendModelPicker ? <BackendModelsDropdown key={activeBackendId} /> : <ModelsDropdown />}
           </BarSection>
           </DiscoPulseWrapper>
           )}
@@ -375,6 +377,7 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
             label={t('globalBar.adapters')}
             icon={<Plug size={14} />}
             badge={adaptersSupported ? <AdaptersBadge />
+                 : heartmulaAdapters ? <HeartmulaAdapterBadge />
                  : lmAdaptersAreEngineState ? <Yue2LmAdapterBadge />
                  : lmAdaptersSupported ? <Mm3LmAdapterBadge />
                  : <UnsupportedBadge />}
@@ -385,6 +388,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
           >
             {adaptersSupported
               ? <AdaptersDropdown />
+              : heartmulaAdapters
+              ? <HeartmulaAdapterDropdown />
               : lmAdaptersAreEngineState
               ? <Yue2LmAdapterDropdown />
               : lmAdaptersSupported
@@ -567,13 +572,14 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
                   isOpen={sheetOpenSection === 'models'}
                   onToggle={() => toggleSheetSection('models')}
                 >
-                  {useBackendModelPicker ? <BackendModelsDropdown /> : <ModelsDropdown />}
+                  {useBackendModelPicker ? <BackendModelsDropdown key={activeBackendId} /> : <ModelsDropdown />}
                 </SheetSection>
               )}
               <SheetSection
                 label={t('globalBar.adapters')}
                 icon={<Plug size={14} />}
                 badge={adaptersSupported ? <AdaptersBadge />
+                     : heartmulaAdapters ? <HeartmulaAdapterBadge />
                      : lmAdaptersAreEngineState ? <Yue2LmAdapterBadge />
                      : lmAdaptersSupported ? <Mm3LmAdapterBadge />
                      : <UnsupportedBadge />}
@@ -583,6 +589,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
               >
                 {adaptersSupported
                   ? <AdaptersDropdown />
+                  : heartmulaAdapters
+                  ? <HeartmulaAdapterDropdown />
                   : lmAdaptersAreEngineState
                   ? <Yue2LmAdapterDropdown />
                   : lmAdaptersSupported

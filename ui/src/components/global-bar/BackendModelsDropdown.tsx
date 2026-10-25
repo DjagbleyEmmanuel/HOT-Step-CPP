@@ -16,6 +16,8 @@ import { backendModelsOptions } from '../../queries/global-models/options';
 // here hardcodes a bucket name beyond a label lookup with a sane fallback.
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ParamLabel } from '../shared/ParamLabel';
 import { Download } from 'lucide-react';
 import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
@@ -37,6 +39,11 @@ const BUCKET_LABELS: Record<string, string> = {
   voc: 'Vocoder',
   vae: 'VAE Decoder',
   embedding: 'Text Encoder',
+  variant: 'Model variant',
+  global: 'Global language model',
+  local: 'Local decoder',
+  flow: 'Codec flow model',
+  scalar_decoder: 'Waveform decoder',
 };
 
 function formatBytes(bytes?: number): string {
@@ -45,6 +52,7 @@ function formatBytes(bytes?: number): string {
 }
 
 export const BackendModelsDropdown: React.FC = () => {
+  const { t } = useTranslation();
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const { data: catalogue } = useQuery(backendModelsOptions(activeBackendId));
   const selectModels = useBackendStore(s => s.selectModels);
@@ -117,12 +125,11 @@ export const BackendModelsDropdown: React.FC = () => {
         const meta = catalogue.meta?.[bucket] ?? {};
         return (
           <div key={bucket}>
-            <label
-              htmlFor={`backend-model-${bucket}`}
-              className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5"
-            >
-              {BUCKET_LABELS[bucket] ?? bucket}
-            </label>
+            <ParamLabel
+              label={t(`globalBar.modelBucket.${bucket}`, BUCKET_LABELS[bucket] ?? bucket)}
+              info={t('globalBar.modelBucketInfo', 'Selects the weights for this component. Different quantizations trade memory use for precision. Incompatible files cannot be selected.')}
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+              rootClassName="block mb-1.5" />
             <ModelSelect
               id={`backend-model-${bucket}`}
               value={current}
