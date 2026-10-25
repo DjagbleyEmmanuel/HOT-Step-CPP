@@ -177,8 +177,10 @@ inline EncodeResult encode(const EncoderPaths & paths, ggml_backend_t backend, c
             packed.insert(packed.end(), codes.begin(), codes.end());
         }
         r.seconds["query"] = since(t0);
-        // The first `frames` [frame][8] rows, transposed to [8][frames].
-        require(int64_t(packed.size() / 8) >= r.frames, "fewer codes than frames");
+        // The first `frames` [frame][8] rows, transposed to [8][frames]. heartlib's
+        // [:output_frames] slice clamps: a length of exactly N chunks asks for one
+        // frame more than N * 372 exist.
+        r.frames = std::min(r.frames, int64_t(packed.size() / 8));
         r.codes.resize(size_t(8 * r.frames));
         for (int64_t t = 0; t < r.frames; ++t) for (int q = 0; q < 8; ++q)
             r.codes[size_t(q * r.frames + t)] = packed[size_t(t * 8 + q)];

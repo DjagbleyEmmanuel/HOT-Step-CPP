@@ -159,7 +159,10 @@ int main(int argc, char ** argv) {
             if (chunk != 0) return;
             for (size_t c = 0; c < cases.size(); ++c) {
                 const fs::path file = fs::path(cases[c].first) / (stage + ".npy");
-                if (!fs::exists(file)) return;
+                if (!fs::exists(file)) {  // e.g. per-channel wavlm/whisper: the fixtures hold them unpooled
+                    if (ch <= 0) std::cout << "skip    " << stage << " (no fixture in " << cases[c].first << ")" << std::endl;
+                    return;
+                }
                 Npy ref(file);
                 auto r = ref.values<float>();
                 const size_t rows = ch < 0 ? 1 : size_t(ref.shape.at(0)), per = r.size() / rows;
