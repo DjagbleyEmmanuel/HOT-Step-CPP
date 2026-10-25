@@ -143,8 +143,7 @@ int main(int argc, char ** argv) {
                    (unsigned long long) a.reserve, (unsigned long long) a.weights, (unsigned long long) a.kv,
                    (long long) a.positions, a.ok ? "admitted" : "refused");
         }
-        printf("resident after run: lm %llu codec %llu bytes\n", (unsigned long long) rt.lm_bytes,
-               (unsigned long long) rt.codec_bytes);
+        printf("resident after run: %llu bytes\n", (unsigned long long) heartmula_resident_bytes(rt));
         if (!ok) {
             fprintf(stderr, "FATAL: %s: %s\n", res.error_code.c_str(), res.error.c_str());
             rc = res.error_code == "cancelled" ? 3 : 1;

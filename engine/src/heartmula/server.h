@@ -115,7 +115,7 @@ static void hm_publish() {
     g_hm.resident[HM_GLOBAL] = g_hm.resident[HM_LOCAL] = lm;
     g_hm.resident[HM_FLOW] = g_hm.resident[HM_SCALAR] = g_hm.resident[HM_RVQ] = codec;
     g_hm.resident[HM_TOKENIZER] = g_hm.tok != nullptr;
-    g_hm.resident_bytes         = g_hm_rt.lm_bytes + g_hm_rt.codec_bytes;
+    g_hm.resident_bytes         = heartmula_resident_bytes(g_hm_rt);
     g_hm.adapter_loaded         = g_hm_rt.adapter.loaded() ? g_hm_rt.adapter.path : "";
 }
 
@@ -225,12 +225,8 @@ static void heartmula_handle_props(const httplib::Request &, httplib::Response &
     yyjson_mut_obj_add_bool(doc, root, "encode_ready", false);
     yyjson_mut_val * v = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "vram", v);
-    size_t free_b = 0, total_b = 0;
-    if (ggml_backend_dev_t dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)) {
-        ggml_backend_dev_memory(dev, &free_b, &total_b);
-    }
     yyjson_mut_obj_add_uint(doc, v, "resident_bytes", g_hm.resident_bytes);
-    yyjson_mut_obj_add_uint(doc, v, "free_bytes", free_b);
+    yyjson_mut_obj_add_uint(doc, v, "free_bytes", heartmula_device_free(g_hm_rt));
     yyjson_mut_obj_add_uint(doc, v, "reserve_bytes", heartmula_reserve_bytes());
     yyjson_mut_val * errs = yyjson_mut_arr(doc);
     yyjson_mut_obj_add_val(doc, root, "errors", errs);
@@ -287,10 +283,11 @@ static void hm_drop_stale() {
         std::lock_guard<std::mutex> lock(g_hm.mtx);
         ok = hm_synth_ready_locked(&r, &err);
     }
-    if (!ok || g_hm_rt.lm_key != r.file[HM_GLOBAL].path + "|" + r.file[HM_LOCAL].path) heartmula_free_lm(&g_hm_rt);
-    if (!ok || g_hm_rt.codec_key != r.file[HM_RVQ].path + "|" + r.file[HM_FLOW].path + "|" + r.file[HM_SCALAR].path) {
-        heartmula_free_codec(&g_hm_rt);
+    if (ok) {
+        std::lock_guard<std::mutex> lock(g_hm.mtx);
+        r.adapter = g_hm.requested.adapter;  // synth_ready resolves without it
     }
+    heartmula_drop_stale(&g_hm_rt, ok ? &r : nullptr);
     hm_publish();
 }
 
@@ -363,6 +360,7 @@ static void heartmula_handle_warm(const httplib::Request &, httplib::Response & 
         }
     }
     heartmula_ensure_backend(&g_hm_rt);
+    heartmula_drop_stale(&g_hm_rt, &r);
     const uint64_t need = heartmula_lm_need(g_hm_rt, r);
     if (!g_keep_loaded && need) heartmula_free_codec(&g_hm_rt);
     const HeartMuLaAdmission a = heartmula_admit(g_hm_rt, "lm", need, 0, 0, true, hm_reclaim_hooks());
@@ -379,7 +377,7 @@ static void heartmula_handle_warm(const httplib::Request &, httplib::Response & 
     }
     char buf[160];
     snprintf(buf, sizeof(buf), "{\"loaded\":true,\"already_loaded\":%s,\"resident_bytes\":%llu,\"load_ms\":%.0f}",
-             need ? "false" : "true", (unsigned long long) (g_hm_rt.lm_bytes + g_hm_rt.codec_bytes),
+             need ? "false" : "true", (unsigned long long) heartmula_resident_bytes(g_hm_rt),
              heartmula_pipeline_detail::ms_since(t0));
     res.set_content(buf, "application/json");
 }

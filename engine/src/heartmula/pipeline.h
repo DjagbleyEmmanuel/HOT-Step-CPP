@@ -596,10 +596,48 @@ struct HeartMuLaHooks {
     std::function<void()>                                    reclaim;      // evict it
 };
 
+// Physical free VRAM. Under Windows WDDM, cudaMemGetInfo counts other processes'
+// idle VRAM as free (WDDM pages it out to system memory on demand): measured 24 GB
+// "free" with 31.6 of 32 GB in use. NVML reports what nvidia-smi does, so an
+// admitted load never relies on that spill; ggml's figure is the fallback.
+// NVML ABI mirror and loader as in train/gpu-mem.h (which needs the trainer's
+// lm-common.h, so it is not included here). Device 0; false when NVML is absent.
+static bool heartmula_nvml_free(uint64_t * out) {
+#ifdef _WIN32
+    struct Mem { unsigned long long total, free, used; };
+    HMODULE lib = LoadLibraryA("nvml.dll");
+    if (!lib) lib = LoadLibraryA("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
+    if (!lib) return false;
+    auto f_init = (int (*)(void)) (void *) GetProcAddress(lib, "nvmlInit_v2");
+    auto f_down = (int (*)(void)) (void *) GetProcAddress(lib, "nvmlShutdown");
+    auto f_hand = (int (*)(unsigned int, void **)) (void *) GetProcAddress(lib, "nvmlDeviceGetHandleByIndex_v2");
+    auto f_mem  = (int (*)(void *, Mem *)) (void *) GetProcAddress(lib, "nvmlDeviceGetMemoryInfo");
+    bool ok = false;
+    if (f_init && f_hand && f_mem && f_init() == 0) {
+        void * dev = nullptr;
+        Mem    m   = { 0, 0, 0 };
+        if (f_hand(0, &dev) == 0 && dev && f_mem(dev, &m) == 0 && m.total > 0) {
+            *out = m.free;
+            ok   = true;
+        }
+        if (f_down) f_down();
+    }
+    FreeLibrary(lib);
+    return ok;
+#else
+    (void) out;
+    return false;
+#endif
+}
+
 static uint64_t heartmula_device_free(const HeartMuLaRuntime & rt) {
-    size_t free_b = 0, total_b = 0;
-    if (ggml_backend_dev_t dev = ggml_backend_get_device(rt.bp.backend)) ggml_backend_dev_memory(dev, &free_b, &total_b);
-    return free_b;
+    uint64_t free_b = 0;
+    if (heartmula_nvml_free(&free_b)) return free_b;
+    size_t f = 0, t = 0;
+    if (ggml_backend_dev_t dev = rt.bp.backend ? ggml_backend_get_device(rt.bp.backend) : nullptr) {
+        ggml_backend_dev_memory(dev, &f, &t);
+    }
+    return f;
 }
 
 // Note C. Reclaims from other backends only when that is what makes it fit.
@@ -620,8 +658,8 @@ static HeartMuLaAdmission heartmula_admit(const HeartMuLaRuntime & rt, const cha
         hooks.reclaim();
         a.reclaimed = true;
     }
-    fprintf(stderr, "[HeartMuLa] admission %s: need %.2f GB (weights %.2f, kv %.2f, reserve %.2f), free %.2f GB, reclaimable %.2f GB -> %s\n",
-            phase, a.need / 1e9, weights / 1e9, kv / 1e9, a.reserve / 1e9, a.free / 1e9, a.reclaimable / 1e9,
+    fprintf(stderr, "[HeartMuLa] admission %s: need %.2f GiB (weights %.2f, kv %.2f, reserve %.2f), free %.2f GiB, reclaimable %.2f GiB -> %s\n",
+            phase, a.need / 1073741824.0, weights / 1073741824.0, kv / 1073741824.0, a.reserve / 1073741824.0, a.free / 1073741824.0, a.reclaimable / 1073741824.0,
             !a.ok ? "refused" : a.reclaimed ? "admitted after reclaiming" : "admitted");
     return a;
 }
@@ -652,6 +690,21 @@ static uint64_t heartmula_lm_need(const HeartMuLaRuntime & rt, const HeartMuLaRe
 static uint64_t heartmula_codec_need(const HeartMuLaRuntime & rt, const HeartMuLaResolved & p) {
     const std::string key = p.file[HM_RVQ].path + "|" + p.file[HM_FLOW].path + "|" + p.file[HM_SCALAR].path;
     return rt.codec_key == key ? 0 : p.file[HM_RVQ].gpu_bytes + p.file[HM_FLOW].gpu_bytes + p.file[HM_SCALAR].gpu_bytes;
+}
+
+// Free whatever the pick no longer names (LM pair, adapter, codec set), so admission
+// measures their VRAM as free instead of charging the replacement on top of them.
+static void heartmula_drop_stale(HeartMuLaRuntime * rt, const HeartMuLaResolved * p) {
+    if (rt->lm.loaded && (!p || rt->lm_key != p->file[HM_GLOBAL].path + "|" + p->file[HM_LOCAL].path)) {
+        heartmula_free_lm(rt);
+    }
+    if (rt->adapter.loaded() && (!p || rt->adapter.path != p->adapter)) heartmula_adapter_free(&rt->adapter);
+    const std::string codec = p ? p->file[HM_RVQ].path + "|" + p->file[HM_FLOW].path + "|" + p->file[HM_SCALAR].path : "";
+    if (!rt->codec_key.empty() && rt->codec_key != codec) heartmula_free_codec(rt);
+}
+
+static uint64_t heartmula_resident_bytes(const HeartMuLaRuntime & rt) {
+    return rt.lm_bytes + rt.codec_bytes + (rt.adapter.wctx.buffer ? ggml_backend_buffer_get_size(rt.adapter.wctx.buffer) : 0);
 }
 
 // ── Generate ────────────────────────────────────────────────────────────────
@@ -721,6 +774,7 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
         return finish(e.find("alloc") != std::string::npos ? "vram_alloc_failed" : "load_failed", e);
     };
     heartmula_ensure_backend(rt);
+    heartmula_drop_stale(rt, &p);
     std::string err;
     const int   B = req.cfg_scale != 1.0f ? 2 : 1;
 

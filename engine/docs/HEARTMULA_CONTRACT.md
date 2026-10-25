@@ -317,7 +317,11 @@ phase, CUDA context included. On a GPU the codec keeps linear matrices in their
 stored type (F16 or a quant); norms, tables and convolution kernels are widened
 to F32.
 
-`free_bytes` in `props` is 0 until some backend has initialised the device.
+`free` and `free_bytes` come from NVML (what nvidia-smi reports) when the driver
+provides it. On Windows, `cudaMemGetInfo` counts other processes' idle VRAM as
+free because WDDM can page it out to system memory, which is the spill admission
+exists to prevent. Without NVML, the ggml figure is used, and `free_bytes` is 0
+until a HeartMuLa job or warm has initialised the device.
 
 If `need > free`, nothing is evicted and nothing is loaded, and the job fails
 with status `failed`:
