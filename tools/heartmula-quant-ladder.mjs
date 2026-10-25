@@ -33,10 +33,12 @@ const opt = (name, dflt) => { const i = rest.indexOf(name); return i >= 0 ? rest
 // The existing ladder (engine/quantize.sh), minus the F16 source.
 const ALL = ['Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S', 'Q3_K_L', 'Q3_K_M', 'Q3_K_S', 'Q2_K',
   'IQ4_XS', 'IQ3_XXS', 'IQ2_XS', 'IQ2_XXS', 'IQ1_M', 'IQ1_S', 'MXFP4', 'NVFP4'];
-const levels = (opt('--levels') ?? ALL.join(',')).split(',');
-const parts = (opt('--parts') ?? 'global,local').split(',');
+const uniq = (list) => [...new Set(list)];
+const levels = uniq((opt('--levels') ?? ALL.join(',')).split(','));
+const parts = uniq((opt('--parts') ?? 'global,local').split(','));
 const models = opt('--models');
-const variant_list = (opt('--variant') ?? '').split(',').filter(Boolean);
+// Variants differing only in case name the same files, so keep the first spelling of each.
+const variant_list = (opt('--variant') ?? '').split(',').filter((x, i, a) => x && a.findIndex((y) => y.toLowerCase() === x.toLowerCase()) === i);
 const variant = variant_list[0];
 if (!['build', 'eval'].includes(cmd) || !models || !variant) {
   console.error(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 20).join('\n').replace(/^\/\/ ?/gm, ''));
@@ -57,7 +59,8 @@ if (cmd === 'build') {
   // quantize is single-threaded (one ggml_quantize_chunk call per tensor, no thread flag), about 1.5 cores
   // per run, so the speed-up is all in running many at once. Each job reads its own F16 source (6.5 GB for a
   // global part), so --jobs is bounded by RAM before it is by cores.
-  const jobs = Math.max(1, Number(opt('--jobs', 6)));
+  const jobs = Number(opt('--jobs', 6));
+  if (!Number.isInteger(jobs) || jobs < 1) { console.error(`--jobs must be a positive integer, got ${opt('--jobs')}`); process.exit(2); }
   const outDir = opt('--out-dir', dir); // measure into a scratch folder without touching the live quants
   mkdirSync(outDir, { recursive: true });
   const outName = (v, part, level) => join(outDir, `heartmula-${v}-${part}-${level}.gguf`);
