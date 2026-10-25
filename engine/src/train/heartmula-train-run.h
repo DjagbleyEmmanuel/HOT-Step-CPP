@@ -357,6 +357,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     id.rank = a.rank, id.accum = a.accum, id.bf16 = a.weights == "bf16";
     id.alpha = a.alpha, id.lr = a.lr, id.wd = a.wd, id.beta1 = a.beta1, id.beta2 = a.beta2, id.eps = a.eps, id.clip = a.clip;
     id.seed = a.seed, id.data = data.fingerprint, id.max_frames = a.max_frames, id.base_fingerprint = R.m.base_fingerprint;
+    id.weights = hmt_weights_id(a.global_path) + "|" + hmt_weights_id(a.local_path);
     const uint64_t ident = hmt_identity_hash(id);
     HmtCounters    cnt;
     if (a.resume) {

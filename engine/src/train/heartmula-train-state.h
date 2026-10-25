@@ -365,7 +365,32 @@ struct HmtIdentity {
     uint64_t seed = 0, data = 0;
     int64_t  max_frames = 0;
     std::string base_fingerprint;
+    std::string weights;  // hmt_weights_id of the global and local GGUFs actually loaded
 };
+
+// What the frozen weights are, beyond base_fingerprint (which F16 and every quant
+// of one base share): file size plus each tensor's name, type and shape. Telling
+// F16 from Q8_0, or two different quant recipes, needs no 7 GB content hash.
+static std::string hmt_weights_id(const std::string & path) {
+    ggml_context * meta = nullptr;
+    gguf_context * g    = gguf_init_from_file(path.c_str(), { true, &meta });
+    if (!g) return "unreadable:" + path;
+    std::error_code ec;
+    uint64_t h = hmt_fnv(1469598103934665603ull, nullptr, 0);
+    const uint64_t bytes = (uint64_t) std::filesystem::file_size(std::filesystem::u8path(path), ec);
+    h = hmt_fnv(h, &bytes, sizeof(bytes));
+    for (int64_t i = 0; i < gguf_get_n_tensors(g); i++) {
+        const ggml_tensor * t = ggml_get_tensor(meta, gguf_get_tensor_name(g, i));
+        h = hmt_fnv(h, t->name, strlen(t->name));
+        h = hmt_fnv(h, &t->type, sizeof(t->type));
+        h = hmt_fnv(h, t->ne, sizeof(t->ne));
+    }
+    gguf_free(g);
+    ggml_free(meta);
+    char b[24];
+    snprintf(b, sizeof(b), "%016llx", (unsigned long long) h);
+    return b;
+}
 
 static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     uint64_t h = 1469598103934665603ull;
@@ -376,6 +401,7 @@ static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     h = hmt_fnv(h, &id.seed, sizeof(id.seed));
     h = hmt_fnv(h, &id.data, sizeof(id.data));
     h = hmt_fnv(h, &id.max_frames, sizeof(id.max_frames));
+    h = hmt_fnv(h, id.weights.data(), id.weights.size());
     return hmt_fnv(h, id.base_fingerprint.data(), id.base_fingerprint.size());
 }
 
@@ -415,8 +441,15 @@ static bool hmt_state_save(const std::string & path, uint64_t ident, const HmtCo
     ok = ok && hmt_put(f, (uint32_t) 0xD09EF00Du);
     if (fclose(f) != 0) ok = false;
     if (!ok) { hs_remove(tmp); *err = "write failed (disk full?): " + tmp; return false; }
-    hs_remove(path);
-    if (hs_rename(tmp, path) != 0) { *err = "cannot rename " + tmp + " into place"; return false; }
+    // Replace in one step (MoveFileExW REPLACE_EXISTING on Windows, rename(2) elsewhere): the old
+    // checkpoint stays whole until the new one is in place, and stays put if the replace fails.
+    std::error_code ec;
+    std::filesystem::rename(std::filesystem::u8path(tmp), std::filesystem::u8path(path), ec);
+    if (ec) {
+        hs_remove(tmp);
+        *err = "cannot replace " + path + " (" + ec.message() + "); the previous checkpoint is unchanged";
+        return false;
+    }
     return true;
 }
 
