@@ -1,5 +1,12 @@
 # Adapters
 
+HeartMuLa's integration backend scans GGUF LM LoRAs in
+`<adapters>/heartmula-lm-adapters/`, including up to two levels of subfolders.
+It accepts one adapter per generation, with a strength from 0 to 2. The default
+is 1; zero requests base logits. Safetensors exports need conversion before use.
+The engine validates the adapter against the selected LM variant and component
+fingerprints. See [HeartMuLa](backends.md#heartmula) for the integration status.
+
 Adapters are small weight files, LoRA or LoKr, that pull a base model toward a style, a
 voice or a production habit without replacing the model. You train them in the
 [Training Studio](studios/training-studio.md) or get them elsewhere, then load one or

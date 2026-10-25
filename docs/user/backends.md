@@ -1,7 +1,8 @@
 # Generation backends
 
-HOT-Step CPP runs four music models, which the app calls backends: ACE-Step 1.5,
-MiniMax-Music3, YuE2 and Stable Audio 3. All four run inside the same C++/GGML engine
+HOT-Step CPP registers five music models, which the app calls backends: ACE-Step 1.5,
+MiniMax-Music3, YuE2, Stable Audio 3 and HeartMuLa. HeartMuLa is registered for
+integration testing; its native engine routes are still pending. Backends run inside the same C++/GGML engine
 process, so switching between them changes which model's weights are loaded, not which
 program is running. Each one turns a text description into stereo audio, but they
 build it differently, accept different inputs, and work with different parts of the app.
@@ -409,6 +410,48 @@ controls the UI shows for it. "?" means not yet confirmed.
 
 <!-- TODO(verify): typical VRAM per backend at the recommended pack. The only figure in the code is "XL Turbo needs about 12 GB" (model-registry.json, XL Quality pack). -->
 <!-- TODO(verify): typical wall-clock time per song per backend, on a named GPU, at default settings. -->
+
+## HeartMuLa
+
+The HeartMuLa server backend is registered for integration testing. Its engine
+routes and generation UI are still being implemented; a backend entry does not
+mean the native renderer is available yet.
+
+HeartMuLa accepts style tags and lyrics and produces 48 kHz stereo audio. Duration
+is an upper bound from 1 to 240 seconds, default 120. Audio EOS can end a song
+earlier. Each request produces one song. A seed can be a safe non-negative integer
+or an exact uint64 decimal string.
+
+Global LM, local decoder, codec flow and scalar decoder quants can be selected
+independently, along with the LM variant. Tokenizer and RVQ files are also required;
+codec encoder files are not needed for generation. The engine checks component
+compatibility and available VRAM before loading weights. A refusal preserves the
+requested settings and reports the required and available memory.
+
+One GGUF LM LoRA can be selected, with strength from 0 to 2. Put converted adapters
+under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Safetensors
+training exports must be converted before runtime use. Queued jobs retain their
+component and adapter choices when the picker changes or another backend is selected.
+
+| Capability | HeartMuLa |
+|---|---|
+| Text to music and lyrics | Yes, once native engine routes land |
+| Duration | Model-ended, requested ceiling up to 240 s |
+| Songs per request | 1 |
+| Independent component quants | Global, local, flow, scalar decoder |
+| Generation adapters | One GGUF LM LoRA, strength 0 to 2 |
+| Post-processing | Shared chain, including VST, mastering and StableStep |
+| PP-VAE, Spectral Lifter, shared Lua sampler plugins | No |
+| Covers, repaint, streaming, training, lyric alignment | No |
+| Output | 48 kHz stereo |
+
+The server maps `heartmulaTags` or the shared caption to `tags`. Optional request
+fields are `heartmulaTemperature`, `heartmulaTopK`, `heartmulaCfgScale`,
+`heartmulaCodecSteps`, `heartmulaCodecGuidance`, `heartmulaNoiseSeed` and
+`heartmulaAdapterStrength`. Per-request model overrides are `heartmulaVariant`,
+`heartmulaGlobalModel`, `heartmulaLocalModel`, `heartmulaFlowModel`,
+`heartmulaScalarDecoderModel` and `heartmulaAdapter`. Engine request fields and
+validation bounds are defined in the [engine contract](../../engine/docs/HEARTMULA_CONTRACT.md).
 
 ## Related
 
