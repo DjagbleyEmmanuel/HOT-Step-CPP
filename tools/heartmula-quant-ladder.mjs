@@ -50,27 +50,41 @@ if (cmd === 'build') {
   const imdir = opt('--imatrix');
   const exe = opt('--quantize') ?? ['engine/build/Release/quantize.exe', 'engine/build/quantize'].map((p) => join(root, p)).find(existsSync);
   if (!imdir || !exe) { console.error('build needs --imatrix <dir> and a quantize binary (--quantize)'); process.exit(2); }
-  const manifest = { variant, quantize: exe, rungs: [] };
+  const mpath = join(dir, `heartmula-${v}-quant-manifest.json`);
+  const readManifest = () => { try { return JSON.parse(readFileSync(mpath, 'utf8')); } catch { return { variant, rungs: [] }; } };
+  // Merge one rung into the file as soon as it is final, so parallel workers and reruns keep each other's entries.
+  const record = (rung) => {
+    const m = readManifest();
+    m.variant = variant;
+    m.quantize = exe;
+    m.rungs = m.rungs.filter((r) => !(r.part === rung.part && r.level === rung.level)).concat(rung);
+    writeFileSync(mpath, JSON.stringify(m, null, 1));
+  };
   for (const part of parts) {
     const src = name(part, 'F16');
     const im = join(imdir, `heartmula-${v}-${part}.imatrix.gguf`);
     for (const f of [src, im]) if (!existsSync(f)) { console.error(`missing ${f}`); process.exit(1); }
-    // quantize does not write the heartmula.quant.* hashes yet, so the manifest carries them.
+    // quantize does not embed hashes, so the manifest carries them; an output is reused only when
+    // its recorded source, imatrix and output hashes all match the files on disk now.
     const source_sha256 = await sha(src), imatrix_sha256 = await sha(im);
-    manifest.rungs.push({ part, level: 'F16', bytes: statSync(src).size, source_sha256 });
+    record({ part, level: 'F16', bytes: statSync(src).size, source_sha256 });
     for (const level of levels) {
       const out = name(part, level);
-      if (!existsSync(out)) {
+      const old = readManifest().rungs.find((r) => r.part === part && r.level === level);
+      const reusable = existsSync(out) && old && old.source_sha256 === source_sha256 && old.imatrix_sha256 === imatrix_sha256
+        && old.bytes === statSync(out).size && old.output_sha256 === await sha(out);
+      if (reusable) console.log(`${part} ${level}: kept ${mb(out)} MB (hashes match)`);
+      else {
+        if (existsSync(out)) console.log(`${part} ${level}: stale or unrecorded, rebuilding`);
         const t0 = Date.now();
         const r = spawnSync(exe, [src, `${out}.partial`, level, '--imatrix', im], { stdio: ['ignore', 'ignore', 'inherit'] });
-        if (r.status !== 0) { console.error(`FAILED ${part} ${level} (exit ${r.status})`); process.exit(1); }
+        if (r.error || r.status !== 0) { console.error(`FAILED ${part} ${level} (${r.error ?? 'exit ' + r.status})`); process.exit(1); }
         renameSync(`${out}.partial`, out);
         console.log(`${part} ${level}: ${mb(out)} MB in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
-      } else console.log(`${part} ${level}: kept ${mb(out)} MB`);
-      manifest.rungs.push({ part, level, bytes: statSync(out).size, imatrix: im, imatrix_sha256 });
+      }
+      record({ part, level, bytes: statSync(out).size, source_sha256, imatrix: im, imatrix_sha256, output_sha256: reusable ? old.output_sha256 : await sha(out) });
     }
   }
-  writeFileSync(join(dir, `heartmula-${v}-quant-manifest.json`), JSON.stringify(manifest, null, 1));
 } else {
   const exe = opt('--exe') ?? ['engine/build/Release/heartmula-quant.exe', 'engine/build/heartmula-quant'].map((p) => join(root, p)).find(existsSync);
   const refDir = opt('--ref-dir');

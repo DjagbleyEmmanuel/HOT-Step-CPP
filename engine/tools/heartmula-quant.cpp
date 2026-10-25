@@ -184,7 +184,7 @@ static bool run_prompt(HeartMuLaRuntime * rt, const HeartMuLaTokenizer & tok, co
         pos.resize((size_t) n);
         for (int64_t i = 0; i < n; i++) pos[(size_t) i] = start + i;
         const bool last = start + n == T;
-        if (collect) heartmula_imatrix_arm_global(bp, &g);
+        if (collect && !heartmula_imatrix_arm_global(rt->lm, &g, pos.data(), n, &err)) return done(false);
         if (!heartmula_lm_step(rt->lm, &g, prompt.data() + start, pos.data(), n,
                                muq >= start && muq < start + n ? muq - start : -1, last ? hidden.data() : nullptr,
                                last ? c0.data() : nullptr, &err)) {
@@ -216,7 +216,7 @@ static bool run_prompt(HeartMuLaRuntime * rt, const HeartMuLaTokenizer & tok, co
                 in.mask[q] = true;
             }
             const int64_t position = T + f - 1;
-            if (collect) heartmula_imatrix_arm_global(bp, &g);
+            if (collect && !heartmula_imatrix_arm_global(rt->lm, &g, &position, 1, &err)) return done(false);
             if (!heartmula_lm_step(rt->lm, &g, &in, &position, 1, -1, hidden.data(), c0.data(), &err)) return done(false);
         }
         int32_t codes[HEARTMULA_CODEBOOKS];

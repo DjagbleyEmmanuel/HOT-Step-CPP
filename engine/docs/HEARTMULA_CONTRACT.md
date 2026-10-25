@@ -392,10 +392,11 @@ and id keys are fixed:
 
 ### Quantised files
 
-`quantize` keeps every `heartmula.*` key and adds `heartmula.quant.imatrix_sha256`
-(empty when no imatrix was used) and `heartmula.quant.source_sha256` (the F16
-file it was made from). `heartmula.tensor_manifest` then describes the F16
-source, not this file.
+`quantize` keeps every `heartmula.*` key and adds `quantize.imatrix`,
+`quantize.imatrix_file` and `quantize.imatrix_chunks` when an imatrix was used.
+It does not embed hashes: the ladder manifest (below) holds the SHA-256 of the
+F16 source, the imatrix and each output. `heartmula.tensor_manifest` describes
+the F16 source, not this file.
 
 The LM ladder is built per part (global and local separately) from the F16 pair
 by `tools/heartmula-quant-ladder.mjs build`: Q8_0 down to IQ1_S plus MXFP4 and

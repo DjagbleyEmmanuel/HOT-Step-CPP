@@ -344,13 +344,29 @@ static void heartmula_imatrix_arm_slot(HeartMuLaSlot * s, const BackendPair & bp
     heartmula_imatrix_hook(s->sched);
 }
 
-// Before every global step / local frame: the slot graphs and schedulers can be
-// rebuilt between calls (KV growth, adapter change), so re-arm rather than once.
-static void heartmula_imatrix_arm_global(const BackendPair & bp, HeartMuLaLmGraph * g) {
-    heartmula_imatrix_arm_slot(&g->prefill, bp);
-    heartmula_imatrix_arm_slot(&g->decode, bp);
+// heartmula_lm_step frees and rebuilds a slot (scheduler included) whenever its T or n_kv
+// changes, so the callback must go on AFTER the build and BEFORE the compute. Build the
+// slot here with the same test lm_step applies, then arm it; lm_step then finds the graph
+// ready and keeps the scheduler. Call with the arguments you pass to lm_step.
+static bool heartmula_imatrix_arm_global(const HeartMuLaModel & m, HeartMuLaLmGraph * g, const int64_t * positions,
+                                         int64_t T, std::string * err) {
+    heartmula_lm_sync_adapter(g);
+    int64_t hi = 0;
+    for (int64_t i = 0; i < T; i++) {
+        hi = std::max(hi, positions[i] + 1);
+    }
+    const int64_t   n_kv = std::min(heartmula_bucket(hi), g->n_ctx);
+    HeartMuLaSlot * s    = T > 1 ? &g->prefill : &g->decode;
+    if (!s->graph || s->T != T || s->n_kv != n_kv) {
+        if (!heartmula_lm_build(m, g, s, T, n_kv, err)) {
+            return false;
+        }
+    }
+    heartmula_imatrix_arm_slot(s, m.bp);
+    return true;
 }
 
+// The local slots are built once by heartmula_local_prepare and never rebuilt.
 static void heartmula_imatrix_arm_local(const BackendPair & bp, HeartMuLaLocalGraph * g) {
     for (int i = 1; i < HEARTMULA_CODEBOOKS; i++) {
         heartmula_imatrix_arm_slot(&g->slot[i], bp);
