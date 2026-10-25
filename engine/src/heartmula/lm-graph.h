@@ -31,7 +31,14 @@
 // E. F32 ACTIVATIONS, FLASH ATTENTION ON GPU (head dim 128). The local decoder's
 //    head dim 384 has no flash kernel, so it always takes the manual path.
 //    HEARTMULA_NO_FLASH=1 forces manual attention here too, for parity debugging.
+//
+// F. OPTIONAL RUNTIME LORA (adapter.h) ON THE BACKBONE q/k/v/output PROJECTIONS ONLY.
+//    The graphs are built with the adapter's factors in them, so graphs and KV rows
+//    are keyed on (adapter id, scale): a switch, a reload or a new scale drops both
+//    (heartmula_lm_sync_adapter) and the caller must prefill again. Scale 0 or no
+//    adapter builds the base graph node for node.
 
+#include "heartmula/adapter.h"
 #include "heartmula/model.h"
 
 #include "ggml.h"
@@ -72,15 +79,16 @@ static ggml_tensor * heartmula_attn_manual(ggml_context * ctx, ggml_tensor * q, 
 // before this layer's cache read (a view carries no dependency on the write).
 static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const HeartMuLaStack & s,
                                      const HeartMuLaLayer & w, ggml_tensor * h, ggml_tensor * pos, ggml_tensor * mask,
-                                     ggml_tensor * rows, ggml_tensor * kc, ggml_tensor * vc, int64_t n_kv, bool flash) {
+                                     ggml_tensor * rows, ggml_tensor * kc, ggml_tensor * vc, int64_t n_kv, bool flash,
+                                     const QwLoraLayer * lora = nullptr) {
     const HeartMuLaLmConfig & c   = s.cfg;
     const int64_t             D   = c.head_dim;
     const int64_t             T   = h->ne[1];
     const int64_t             B   = h->ne[2];
     ggml_tensor *             n   = heartmula_rms(ctx, h, w.sa_norm, c.rms_eps);
-    ggml_tensor *             q   = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.q, n), D, c.n_head, T, B);
-    ggml_tensor *             k   = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.k, n), D, c.n_head_kv, T, B);
-    ggml_tensor *             v   = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.v, n), D, c.n_head_kv, T, B);
+    ggml_tensor *             q   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.q, qwen3_lora_slot(lora, QW_LORA_Q), n), D, c.n_head, T, B);
+    ggml_tensor *             k   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.k, qwen3_lora_slot(lora, QW_LORA_K), n), D, c.n_head_kv, T, B);
+    ggml_tensor *             v   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.v, qwen3_lora_slot(lora, QW_LORA_V), n), D, c.n_head_kv, T, B);
     q = heartmula_rope(ctx, q, pos, s);
     k = heartmula_rope(ctx, k, pos, s);
 
@@ -99,7 +107,7 @@ static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const
         attn = heartmula_attn_manual(ctx, q4, kw, vw, mask, scale);
     }
     attn = ggml_reshape_3d(ctx, attn, D * c.n_head, T, B);
-    h    = ggml_add(ctx, h, ggml_mul_mat(ctx, w.o, attn));
+    h    = ggml_add(ctx, h, qwen3_linear_lora(ctx, w.o, qwen3_lora_slot(lora, QW_LORA_O), attn));
 
     ggml_tensor * n2   = heartmula_rms(ctx, h, w.mlp_norm, c.rms_eps);
     ggml_tensor * gate = ggml_silu(ctx, ggml_mul_mat(ctx, w.w1, n2));
@@ -190,6 +198,12 @@ struct HeartMuLaLmGraph {
     int64_t                    n_ctx = 0;
     std::vector<uint8_t>       valid;  // KV rows written so far (mask source, note C)
 
+    // Note F. The binding is set by the caller; the key is what the graphs and KV rows were made with.
+    const HeartMuLaAdapter * adapter       = nullptr;
+    float                    adapter_scale = 1.0f;
+    uint64_t                 key_id        = 0;  // 0 = base graph
+    float                    key_scale     = 0.0f;
+
     HeartMuLaSlot prefill;
     HeartMuLaSlot decode;
 
@@ -229,8 +243,12 @@ static bool heartmula_lm_reserve(const HeartMuLaModel & m, HeartMuLaLmGraph * g,
         return false;
     }
     if (g->n_ctx < want || g->B != cfg_rows) {
+        const HeartMuLaAdapter * adapter = g->adapter;
+        const float              scale   = g->adapter_scale;
         heartmula_lm_free(g);
-        g->B = cfg_rows;
+        g->adapter       = adapter;
+        g->adapter_scale = scale;
+        g->B             = cfg_rows;
         const char * nf = std::getenv("HEARTMULA_NO_FLASH");
         g->flash        = m.bp.has_gpu && !HOT_STEP_FA_DISABLED && !(nf && nf[0] && nf[0] != '0');
         ggml_init_params ip = { (size_t) (2 * c.n_layer) * ggml_tensor_overhead() + 1024, nullptr, true };
@@ -258,6 +276,31 @@ static bool heartmula_lm_reserve(const HeartMuLaModel & m, HeartMuLaLmGraph * g,
     return true;
 }
 
+// Bind an adapter (nullptr = base) and a scale. The graphs follow on the next step.
+static void heartmula_lm_set_adapter(HeartMuLaLmGraph * g, const HeartMuLaAdapter * adapter, float scale) {
+    g->adapter       = adapter;
+    g->adapter_scale = scale;
+}
+
+// Make the graphs and KV rows match the live binding (note F). Reads the adapter's id
+// every time, so a reload of the same struct counts as a new adapter.
+static void heartmula_lm_sync_adapter(HeartMuLaLmGraph * g) {
+    const bool     on  = g->adapter && g->adapter->loaded() && g->adapter_scale != 0.0f;
+    const uint64_t id  = on ? g->adapter->id : 0;
+    const float    sc  = on ? g->adapter_scale : 0.0f;
+    if (id == g->key_id && sc == g->key_scale) {
+        return;
+    }
+    heartmula_slot_free(&g->prefill);
+    heartmula_slot_free(&g->decode);
+    std::fill(g->valid.begin(), g->valid.end(), (uint8_t) 0);
+    if (g->kv_buf) {
+        ggml_backend_buffer_clear(g->kv_buf, 0);
+    }
+    g->key_id    = id;
+    g->key_scale = sc;
+}
+
 static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, HeartMuLaSlot * s, int64_t T,
                                int64_t n_kv, std::string * err) {
     heartmula_slot_free(s);
@@ -266,7 +309,26 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
     const int64_t          B  = g->B;
     const int64_t          N  = T * B;
     ggml_cgraph *          gf = nullptr;
-    ggml_context *         ctx = heartmula_slot_begin(s, m.bp, &gf);
+
+    // Note F: the factors, scaled by alpha / rank x the dial, for the live key only.
+    std::vector<QwLoraLayer> lora;
+    if (g->key_id) {
+        const HeartMuLaAdapter * ad = g->adapter;
+        if (!ad || ad->id != g->key_id || ad->variant != m.variant || ad->base_fingerprint != m.base_fingerprint ||
+            ad->layers.size() != (size_t) st.cfg.n_layer) {
+            if (err) {
+                *err = "HeartMuLa adapter does not belong to the loaded model";
+            }
+            return false;
+        }
+        lora = ad->layers;
+        for (auto & layer : lora) {
+            for (auto & p : layer.p) {
+                p.scale *= g->key_scale;
+            }
+        }
+    }
+    ggml_context * ctx = heartmula_slot_begin(s, m.bp, &gf);
 
     s->in_text  = heartmula_input(ctx, GGML_TYPE_I32, N, 1, 1, "hm_text");
     s->in_audio = heartmula_input(ctx, GGML_TYPE_I32, HEARTMULA_CODEBOOKS * N, 1, 1, "hm_audio");
@@ -292,7 +354,7 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
 
     for (int i = 0; i < st.cfg.n_layer; i++) {
         h = heartmula_block(ctx, gf, st, st.layers[(size_t) i], h, s->in_pos, s->in_mask, s->in_rows, g->kv_k[i],
-                            g->kv_v[i], n_kv, g->flash);
+                            g->kv_v[i], n_kv, g->flash, lora.empty() ? nullptr : &lora[(size_t) i]);
     }
     ggml_tensor * last = ggml_view_3d(ctx, h, H, 1, B, h->nb[1], h->nb[2], (size_t) (T - 1) * h->nb[1]);
     s->out_hidden      = heartmula_rms(ctx, ggml_cont(ctx, last), st.norm, st.cfg.rms_eps);
@@ -318,6 +380,7 @@ struct HeartMuLaPosition {
 static bool heartmula_lm_step(const HeartMuLaModel & m, HeartMuLaLmGraph * g, const HeartMuLaPosition * in,
                               const int64_t * positions, int64_t T, int64_t muq_at, float * out_hidden,
                               float * out_logits, std::string * err) {
+    heartmula_lm_sync_adapter(g);
     const int64_t B = g->B;
     int64_t       hi = 0;
     for (int64_t i = 0; i < T; i++) {

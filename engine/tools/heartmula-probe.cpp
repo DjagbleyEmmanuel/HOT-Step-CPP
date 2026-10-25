@@ -432,9 +432,155 @@ static int run_lm(const std::string & fix, const std::string & variant, const st
     return ok ? 0 : 1;
 }
 
+// ── --adapter: runtime LoRA parity (heartmula-adapter-reference.py) and cache rules ──
+
+static int run_adapter(const std::string & fix, const std::string & variant, const std::string & gpath,
+                       const std::string & lpath, const std::string & adapter_path, const std::string & ref,
+                       const std::string & negatives) {
+    const int64_t     V = HEARTMULA_AUDIO_VOCAB;
+    const std::string base = fix + "/lm/" + variant;
+    HeartMuLaModel    m;
+    std::string       err;
+    if (!heartmula_model_load(&m, gpath.c_str(), lpath.c_str(), &err)) { throw std::runtime_error(err); }
+    const Npy tokens = read_npy(base + "/f16/frame0/input_tokens.npy"), mask = read_npy(base + "/f16/frame0/input_mask.npy"),
+              muq = read_npy(base + "/f16/prompt/muq_idx.npy");
+    const int64_t T = tokens.shape[1];
+    std::vector<HeartMuLaPosition> prompt((size_t) T);
+    for (int64_t i = 0; i < T; i++) {
+        for (int c = 0; c < HEARTMULA_COLUMNS; c++) {
+            prompt[(size_t) i].id[c]   = (int32_t) tokens.v[(size_t) (i * HEARTMULA_COLUMNS + c)];
+            prompt[(size_t) i].mask[c] = mask.v[(size_t) (i * HEARTMULA_COLUMNS + c)] != 0;
+        }
+    }
+    HeartMuLaPosition step;
+    {
+        const Npy ft = read_npy(base + "/f16/frame1/input_tokens.npy"), fm = read_npy(base + "/f16/frame1/input_mask.npy");
+        for (int c = 0; c < HEARTMULA_COLUMNS; c++) { step.id[c] = (int32_t) ft.v[(size_t) c]; step.mask[c] = fm.v[(size_t) c] != 0; }
+    }
+    const int64_t step_pos = (int64_t) read_npy(base + "/f16/frame1/input_pos.npy").v[0];
+
+    HeartMuLaLmGraph g;
+    int              fail = 0;
+    const auto       check = [&](bool ok, const std::string & what) {
+        printf("  %-62s %s\n", what.c_str(), ok ? "PASS" : "FAIL");
+        fail += !ok;
+    };
+    // Prefill then one cached decode step; the logits are the two rows' codebook-0 values.
+    const auto run = [&](std::vector<float> * l0, std::vector<float> * l1) {
+        std::vector<float> hidden((size_t) (2 * m.global.cfg.n_embd));
+        l0->assign((size_t) (2 * V), 0.0f);
+        l1->assign((size_t) (2 * V), 0.0f);
+        if (!heartmula_lm_reserve(m, &g, 2, T + 8, &err) ||
+            !heartmula_lm_prefill(m, &g, prompt.data(), T, (int64_t) muq.v[0], hidden.data(), l0->data(), &err) ||
+            !heartmula_lm_step(m, &g, &step, &step_pos, 1, -1, hidden.data(), l1->data(), &err)) {
+            throw std::runtime_error(err);
+        }
+    };
+    const auto same = [](const std::vector<float> & a, const std::vector<float> & b) {
+        return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+    };
+
+    HeartMuLaAdapter ad;
+    if (!heartmula_adapter_load(&ad, m, adapter_path.c_str(), &err)) { throw std::runtime_error(err); }
+    printf("adapter %s: rank %d alpha %.1f id %llu, %s over %s\n", adapter_path.c_str(), ad.rank, ad.alpha,
+           (unsigned long long) ad.id, ad.variant.c_str(), m.variant.c_str());
+    std::vector<float> b0, b1, a0, a1, z0, z1, r0, r1, w0, w1;
+    run(&b0, &b1);  // no adapter bound
+
+    heartmula_lm_set_adapter(&g, &ad, 0.0f);
+    run(&z0, &z1);
+    check(same(z0, b0) && same(z1, b1), "strength 0 logits are bitwise the base logits");
+
+    heartmula_lm_set_adapter(&g, &ad, 1.0f);
+    run(&a0, &a1);
+    heartmula_lm_set_adapter(&g, &ad, 0.0f);
+    run(&w0, &w1);
+    check(same(w0, b0) && same(w1, b1), "adapter on, then strength 0: graphs and KV rebuilt, base logits");
+    heartmula_lm_set_adapter(&g, nullptr, 1.0f);
+    run(&w0, &w1);
+    check(same(w0, b0) && same(w1, b1), "adapter detached: base logits");
+
+    // A switch mid-sequence drops the KV rows and the built graphs; nothing is reused.
+    heartmula_lm_set_adapter(&g, &ad, 1.0f);
+    run(&r0, &r1);
+    check(same(r0, a0) && same(r1, a1), "re-attached at strength 1: same logits as the first run");
+    heartmula_lm_set_adapter(&g, &ad, 0.5f);
+    heartmula_lm_sync_adapter(&g);
+    size_t rows = 0;
+    for (uint8_t v : g.valid) { rows += v; }
+    check(rows == 0 && !g.prefill.graph && !g.decode.graph, "strength change drops KV rows and built graphs");
+    heartmula_lm_set_adapter(&g, &ad, 1.0f);
+    const uint64_t old_id = ad.id;
+    if (!heartmula_adapter_load(&ad, m, adapter_path.c_str(), &err)) { throw std::runtime_error(err); }
+    run(&r0, &r1);
+    check(ad.id != old_id && same(r0, a0) && same(r1, a1), "reload takes a new id, graphs rebuilt, same logits");
+
+    // Parity: torch FP32 is truth, torch F16 drift sets the tolerance (as run_lm does).
+    const Npy t32[2] = { read_npy(ref + "/fp32/frame0_c0.npy"), read_npy(ref + "/fp32/frame1_c0.npy") };
+    const Npy t16[2] = { read_npy(ref + "/f16/frame0_c0.npy"), read_npy(ref + "/f16/frame1_c0.npy") };
+    const Npy tb[2]  = { read_npy(base + "/fp32/frame0/c0/raw.npy"), read_npy(base + "/fp32/frame1/c0/raw.npy") };
+    const std::vector<float> * ours[2] = { &a0, &a1 };
+    double worst = 0;
+    for (int f = 0; f < 2; f++) {
+        const float * got    = ours[f]->data();
+        const Diff    d_ours = diff(got, t32[f].v.data(), 2 * V);
+        const auto    h16    = as_f32(t16[f]);
+        const Diff    drift  = diff(h16.data(), t32[f].v.data(), 2 * V);
+        const auto    b32    = as_f32(tb[f]);
+        const Diff    effect = diff(b32.data(), t32[f].v.data(), 2 * V);  // what the adapter changes
+        bool argmax_ok = true;
+        for (int r = 0; r < 2; r++) {
+            const double * w  = t32[f].v.data() + r * V;
+            const int64_t  a  = argmax(w, V);
+            double         m2 = -INFINITY;
+            for (int64_t i = 0; i < V; i++) { if (i != a) { m2 = std::max(m2, w[i]); } }
+            argmax_ok &= argmax(got + r * V, V) == a || w[a] - m2 <= 2.0 * drift.max_abs;
+        }
+        const double ratio = d_ours.rel_l2 / std::max(drift.rel_l2, 1e-12);
+        const bool   ok    = argmax_ok && ratio <= 2.0 && d_ours.max_abs <= 2.0 * std::max(drift.max_abs, 1e-3);
+        worst = std::max(worst, ratio);
+        printf("  frame %d c0 vs torch fp32: max %.4f rel %.2e | torch f16: max %.4f rel %.2e | ratio %.2f | adapter "
+               "effect rel %.2e\n", f, d_ours.max_abs, d_ours.rel_l2, drift.max_abs, drift.rel_l2, ratio, effect.rel_l2);
+        check(ok && effect.rel_l2 > 20.0 * d_ours.rel_l2,
+              f == 0 ? "adapter-on prefill logits match PyTorch" : "adapter-on cached decode logits match PyTorch");
+    }
+
+    // Wrong files are refused with a reason; the good file is refused over a different model.
+    if (!negatives.empty()) {
+        for (const char * name : { "bad-variant", "bad-fingerprint", "bad-component", "bad-target" }) {
+            HeartMuLaAdapter bad;
+            err.clear();
+            const bool loaded = heartmula_adapter_load(&bad, m, (negatives + "/" + name + ".gguf").c_str(), &err);
+            printf("    %s: %s\n", name, err.c_str());
+            check(!loaded && !err.empty() && !bad.loaded(), std::string("rejects ") + name);
+        }
+    }
+    {
+        const std::string variant0 = m.variant, fp0 = m.base_fingerprint;  // identity is read before the file checks
+        m.variant = variant0 == "3B" ? "3B-happy-new-year" : "3B";
+        HeartMuLaAdapter bad;
+        err.clear();
+        check(!heartmula_adapter_load(&bad, m, adapter_path.c_str(), &err) && err.find("variant") != std::string::npos,
+              "rejects the adapter over the other LM variant");
+        m.variant          = variant0;
+        m.base_fingerprint = std::string(64, '0');
+        err.clear();
+        check(!heartmula_adapter_load(&bad, m, adapter_path.c_str(), &err) && err.find("fingerprint") != std::string::npos,
+              "rejects the adapter over a different base fingerprint");
+        m.base_fingerprint = fp0;
+    }
+    heartmula_adapter_free(&ad);
+    heartmula_lm_free(&g);
+    heartmula_model_free(&m);
+    printf("ADAPTER PARITY %s: backbone q/k/v/output LoRA, variant %s, worst rel-L2 ratio to torch F16 drift %.2f\n",
+           fail ? "FAIL" : "PASS", variant.c_str(), worst);
+    return fail ? 1 : 0;
+}
+
 int main(int argc, char ** argv) {
     try {
-        std::string path, mode = "raw", text, fixtures, tiny, lm, variant = "3B", global_path, local_path;
+        std::string path, mode = "raw", text, fixtures, tiny, lm, variant = "3B", global_path, local_path,
+                    adapter, adapter_ref, negatives;
         int64_t chunk = HEARTMULA_PREFILL_CHUNK;
         int repeat_frames = 0;
         bool stdin_mode = false, have_text = false, action = false, add_bos = true;
@@ -456,6 +602,9 @@ int main(int argc, char ** argv) {
             else if (arg == "--variant") { variant = value(); }
             else if (arg == "--global") { global_path = value(); }
             else if (arg == "--local") { local_path = value(); }
+            else if (arg == "--adapter") { adapter = value(); }
+            else if (arg == "--adapter-ref") { adapter_ref = value(); }
+            else if (arg == "--negatives") { negatives = value(); }
             else if (arg == "--chunk") { chunk = std::stoll(value()); }
             else if (arg == "--repeat") { repeat_frames = std::stoi(value()); }
             else if (arg == "--help") {
@@ -465,6 +614,8 @@ int main(int argc, char ** argv) {
                              "heartmula-probe --tiny DIR   (heartmula-tiny-fixtures.py output)\n"
                              "heartmula-probe --lm FIXTURES --global G.gguf --local L.gguf [--variant 3B]\n"
                              "    [--tokenizer FILE] [--chunk N] [--repeat FRAMES]\n"
+                             "heartmula-probe --lm FIXTURES --global G.gguf --local L.gguf --adapter A.gguf\n"
+                             "    --adapter-ref DIR [--negatives DIR]   (heartmula-adapter-reference.py output)\n"
                              "--stdin reads JSON lines with text, mode and add_special_tokens.\n";
                 return 0;
             } else { throw std::runtime_error("unknown option: " + arg); }
@@ -473,6 +624,10 @@ int main(int argc, char ** argv) {
         if (!lm.empty()) {
             if (global_path.empty() || local_path.empty() || chunk < 1) {
                 throw std::runtime_error("--lm needs --global and --local");
+            }
+            if (!adapter.empty()) {
+                if (adapter_ref.empty()) { throw std::runtime_error("--adapter needs --adapter-ref"); }
+                return run_adapter(lm, variant, global_path, local_path, adapter, adapter_ref, negatives);
             }
             return run_lm(lm, variant, global_path, local_path, path, chunk, repeat_frames);
         }
