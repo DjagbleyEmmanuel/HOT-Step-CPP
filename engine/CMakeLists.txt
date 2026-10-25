@@ -757,6 +757,10 @@ link_ggml_backends(heartcodec-probe)
 add_executable(heartmula-generate tools/heartmula-generate.cpp)
 target_link_libraries(heartmula-generate PRIVATE yyjson)
 link_ggml_backends(heartmula-generate)
+# HeartCodec encoder (waveform to RVQ codes) parity probe and round trip.
+add_executable(heartcodec-encode-probe tools/heartcodec-encode-probe.cpp)
+target_link_libraries(heartcodec-encode-probe PRIVATE yyjson)
+link_ggml_backends(heartcodec-encode-probe)
 
 add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
 target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
