@@ -104,7 +104,7 @@ Location (RobWorkPC, not in the repository; 2.29 GiB, 164 arrays):
 | Fixture set | `M:\heartmula-train-fixtures\hm776-v2\` | manifest `92167955ff3078e981251b120ee19967de6b5288f050fd4d88403627ae79955c` |
 | Input clip A | `M:\heartmula-train-fixtures\inputs\clip-a.pt` | `92626bfb8c84cc3a4273d62cd059e054faa32c8f04865b6d2295047ecf6cb7d7` |
 | Input clip B | `M:\heartmula-train-fixtures\inputs\clip-b.pt` | `54269b0bb0f82822eef216e594401c97b6d9b425f2b3d5c835e1640faecc4b91` |
-| Script at the run | `engine/tools/heartmula-train-reference.py` | `031b8bd939bb84d4003e334843999291c0538ff5bafb60ed969219b46b377851` |
+| Script at the run | `engine/tools/heartmula-train-reference.py` | `031b8bd939bb84d4003e334843999291c0538ff5bafb60ed969219b46b377851` with CRLF line ends, as run; the committed LF blob is `c91e3cf1f2b99dcdff35734db2c4ea052f94708c8c9a8ea11abe2817922f2e67` |
 | Base checkpoint | HeartMuLa-oss-3B, HF revision `d12ac79c6b3387d5c9eee456323495d8f08bb09d` | per shard in the manifest |
 
 `fixture-manifest.json` records every array's file, shape, dtype, bytes and
