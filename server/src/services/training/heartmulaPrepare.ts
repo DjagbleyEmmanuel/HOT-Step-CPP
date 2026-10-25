@@ -59,12 +59,40 @@ export function readHeartmulaManifest(slug: string): Manifest | null {
   } catch { return null; }
 }
 
-function sourceMatches(row: ManifestRow, input: HeartmulaSampleInput | undefined): boolean {
-  if (!input || input.tags !== row.tags || input.lyrics !== row.lyrics) return false;
+/** A sample's source as the stale check sees it: audio size and whole-second mtime, tags and lyrics. */
+type Fingerprint = Pick<ManifestRow, 'audio_bytes' | 'audio_mtime_s' | 'tags' | 'lyrics'>;
+
+function fingerprint(input: HeartmulaSampleInput): Fingerprint | null {
   try {
     const st = fs.statSync(input.audio);
-    return st.size === row.audio_bytes && Math.floor(st.mtimeMs / 1000) === row.audio_mtime_s;
-  } catch { return false; }
+    return { audio_bytes: st.size, audio_mtime_s: Math.floor(st.mtimeMs / 1000), tags: input.tags, lyrics: input.lyrics };
+  } catch { return null; }
+}
+
+const sameSource = (a: Fingerprint | null, b: Fingerprint | undefined): boolean =>
+  !!a && !!b && a.audio_bytes === b.audio_bytes && a.audio_mtime_s === b.audio_mtime_s && a.tags === b.tags && a.lyrics === b.lyrics;
+
+const SKIPPED_FILE = 'skipped-sources.json';
+
+/**
+ * Record the sources of the samples the last prepare skipped, so a corrected
+ * sample reads as stale instead of staying hidden behind its skip. The runner
+ * calls this after a successful prepare.
+ */
+export function writeSkippedFingerprints(ds: Pick<TrainingDatasetRow, 'slug' | 'customTag'>, samples: TrainingSample[]): void {
+  const m = readHeartmulaManifest(ds.slug);
+  if (!m) return;
+  const skipped = new Set((m.skipped ?? []).map(s => s.id));
+  const out: Record<string, Fingerprint> = {};
+  for (const s of trainableSamples(samples)) {
+    const fp = skipped.has(s.sampleId) ? fingerprint(heartmulaSampleInput(ds, s)) : null;
+    if (fp) out[s.sampleId] = fp;
+  }
+  fs.writeFileSync(path.join(heartmulaPrepareDir(ds.slug), SKIPPED_FILE), JSON.stringify(out), 'utf8');
+}
+
+function readSkippedFingerprints(slug: string): Record<string, Fingerprint> {
+  try { return JSON.parse(fs.readFileSync(path.join(heartmulaPrepareDir(slug), SKIPPED_FILE), 'utf8')); } catch { return {}; }
 }
 
 /**
@@ -77,15 +105,22 @@ export function heartmulaPrepareStatus(ds: TrainingDatasetRow, samples: Training
   const m = readHeartmulaManifest(ds.slug);
   if (!m) return { cacheValid: false, cacheVersion: null, preparedSamples: 0, staleSamples: 0, skipped: [], contextLimit: null, preparedAt: null };
   const live = new Map(trainableSamples(samples).map(s => [s.sampleId, heartmulaSampleInput(ds, s)]));
-  const stale = m.samples.filter(r => !sourceMatches(r, live.get(r.id))).length;
+  const stale = m.samples.filter(r => {
+    const input = live.get(r.id);
+    return !sameSource(input ? fingerprint(input) : null, r);
+  }).length;
   const skippedIds = new Set((m.skipped ?? []).map(s => s.id));
   const unseen = [...live.keys()].filter(id => !m.samples.some(r => r.id === id) && !skippedIds.has(id)).length;
+  // A skipped sample is fine while its source is what was skipped. One with no
+  // record (a cache from before records existed) counts as changed, conservatively.
+  const recorded = readSkippedFingerprints(ds.slug);
+  const changedSkips = [...skippedIds].filter(id => live.has(id) && !sameSource(fingerprint(live.get(id)!), recorded[id])).length;
   const skipped: HeartmulaSkippedSample[] = (m.skipped ?? []).map(s => ({
     sampleId: s.id, reason: (SKIP_REASONS.includes(s.reason) ? s.reason : 'invalid') as HeartmulaSkipReason, detail: s.detail,
   }));
   return {
-    cacheValid: m.samples.length > 0 && stale === 0 && unseen === 0,
-    cacheVersion: m.version, preparedSamples: m.samples.length, staleSamples: stale + unseen, skipped,
+    cacheValid: m.samples.length > 0 && stale === 0 && unseen === 0 && changedSkips === 0,
+    cacheVersion: m.version, preparedSamples: m.samples.length, staleSamples: stale + unseen + changedSkips, skipped,
     contextLimit: m.context_limit ?? null, preparedAt: m.created_at ?? null,
   };
 }

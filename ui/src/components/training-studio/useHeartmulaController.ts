@@ -52,6 +52,7 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
   const blocked = ready && !ready.available
     ? ready.backend !== 'cuda'
       ? t('trainingStudio.heartmula.needsCuda', 'HeartMuLa training needs a CUDA engine build.')
+      : ready.deviceProblem ? ready.deviceProblem
       : ready.missingModels.length
         ? t('trainingStudio.heartmula.missingModels', 'HeartMuLa models are missing: {{files}}.', { files: ready.missingModels.join(', ') })
         : t('trainingStudio.heartmula.noTrainer', 'ace-train was not found next to the engine. Rebuild the engine.')

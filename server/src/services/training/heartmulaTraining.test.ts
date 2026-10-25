@@ -121,3 +121,46 @@ test('prepare status: stale when audio or text changed, valid otherwise', () => 
   assert.equal(added.cacheValid, false);
   assert.equal(added.staleSamples, 1);
 });
+
+test('prepare status: correcting a skipped sample reads as stale, an untouched skip does not', () => {
+  const audio = path.join(root, 'long.wav');
+  fs.writeFileSync(audio, 'abcdefgh');
+  const sample = {
+    sampleId: 's9', audioPath: audio, caption: 'rock', genre: '', lyrics: 'a very long song', isInstrumental: false,
+    customTag: '', excluded: false, fileMissing: false,
+  } as never;
+  const dir = path.join(root, 'training', 'datasets', 'demo2', 'heartmula', 'prepare');
+  fs.mkdirSync(dir, { recursive: true });
+  const other = path.join(root, 'ok.wav');
+  fs.writeFileSync(other, 'zz');
+  const ds2 = { id: 'ds2', slug: 'demo2', customTag: '' } as never;
+  const okSample = { ...(sample as object), sampleId: 's1', audioPath: other, lyrics: 'ok' } as never;
+  const okInput = prep.heartmulaSampleInput(ds2, okSample);
+  const ost = fs.statSync(other);
+  fs.writeFileSync(path.join(dir, 'heartmula_prepare.json'), JSON.stringify({
+    version: 1, skipped: [{ id: 's9', reason: 'over-context', detail: 'long' }],
+    samples: [{ id: 's1', audio: other, audio_bytes: ost.size, audio_mtime_s: Math.floor(ost.mtimeMs / 1000), tags: okInput.tags, lyrics: okInput.lyrics }],
+  }));
+  // A cache with no skip record is treated as changed.
+  assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, false);
+  prep.writeSkippedFingerprints(ds2, [okSample, sample]);
+  assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, true);
+  // The user shortens the lyrics: the skipped sample is stale and Train must wait for Prepare.
+  const fixed = prep.heartmulaPrepareStatus(ds2, [okSample, { ...(sample as object), lyrics: 'short' } as never]);
+  assert.equal(fixed.cacheValid, false);
+  assert.equal(fixed.staleSamples, 1);
+  fs.writeFileSync(audio, 'different audio bytes');
+  assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, false);
+});
+
+test('device gate: refuses a small, absent or unidentifiable selected GPU', async () => {
+  const { heartmulaDeviceProblem } = await import('./heartmulaStatus.js');
+  const gpu = (index: number, memoryMB: number) => ({ index, uuid: `GPU-${index}`, name: 'g', memoryMB });
+  assert.equal(heartmulaDeviceProblem([gpu(0, 24 * 1024)]), null);
+  assert.match(heartmulaDeviceProblem([gpu(0, 8 * 1024)]) ?? '', /needs at least 20 GB/);
+  assert.match(heartmulaDeviceProblem([]) ?? '', /could not be identified/);
+  const two = [gpu(0, 24 * 1024), gpu(1, 8 * 1024)];
+  assert.equal(heartmulaDeviceProblem(two), null); // auto picks the larger card
+  config.aceServer.cudaVisibleDevices = 'GPU-1';
+  try { assert.match(heartmulaDeviceProblem(two) ?? '', /needs at least 20 GB/); } finally { config.aceServer.cudaVisibleDevices = ''; }
+});

@@ -6057,6 +6057,7 @@ function heartmulaBlocked(ds: TrainingDatasetRow, needEncoder: boolean): string 
   const ready = heartmulaReadiness();
   if (ready.backend !== 'cuda') return `HeartMuLa training needs a CUDA engine build (this one is ${ready.backend}).`;
   if (!aceTrainExe()) return 'ace-train was not found next to ace-server — rebuild the engine';
+  if (ready.deviceProblem) return ready.deviceProblem;
   if (ready.missingModels.length) return `HeartMuLa models are missing: ${ready.missingModels.join(', ')}`;
   if (needEncoder && ready.encoderMissing) return missingEncoderMessage();
   return null;

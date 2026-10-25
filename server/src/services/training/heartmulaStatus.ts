@@ -8,6 +8,7 @@ import {
   type HeartmulaDatasetAssets, type HeartmulaReadiness, type HeartmulaStatusResponse,
 } from '../../contracts/heartmulaTraining.js';
 import { aceTrainExe, engineGpuBackend } from './aceTrain.js';
+import { listGpusSync, selectedGpuMemoryMB, type NvidiaGpu } from '../gpuDevices.js';
 import { buildSamples } from './datasetScan.js';
 import { activeJobForDataset } from './labelingQueue.js';
 import { findHeartmulaEncoderDir, missingHeartmulaModels } from './heartmulaTrain.js';
@@ -18,13 +19,30 @@ import {
 import type { HeartmulaTrainJobOpts } from './heartmulaRunner.js';
 import type { TrainingDatasetRow } from './types.js';
 
-/** CUDA only for now: the trainer is validated on CUDA, other backends are not offered. */
-export function heartmulaReadiness(): HeartmulaReadiness {
+/** The 3B trainer's measured peak is about 18 GiB allocated; below this a step cannot fit. */
+export const HEARTMULA_MIN_VRAM_MB = 20 * 1024;
+
+/**
+ * Why the card training would run on cannot train, or null. Gated per device:
+ * the selected GPU (Settings, else the only one) must be known and have enough
+ * memory. An unidentified card is refused rather than trusted.
+ */
+export function heartmulaDeviceProblem(gpus: NvidiaGpu[] = listGpusSync()): string | null {
+  let mb: number | null;
+  try { mb = selectedGpuMemoryMB(undefined, gpus); } catch (err: any) { return err.message; }
+  if (mb === null) return 'The selected GPU could not be identified, so HeartMuLa training cannot check that it fits.';
+  return mb >= HEARTMULA_MIN_VRAM_MB ? null
+    : `The selected GPU has ${Math.round(mb / 1024)} GB; HeartMuLa training needs at least ${HEARTMULA_MIN_VRAM_MB / 1024} GB.`;
+}
+
+/** CUDA builds on a big enough card only: the trainer is validated nowhere else. */
+export function heartmulaReadiness(gpus?: NvidiaGpu[]): HeartmulaReadiness {
   const backend = engineGpuBackend();
   const missingModels = missingHeartmulaModels();
+  const deviceProblem = backend === 'cuda' ? heartmulaDeviceProblem(gpus) : null;
   return {
-    available: backend === 'cuda' && missingModels.length === 0 && !!aceTrainExe(),
-    backend, missingModels, encoderMissing: findHeartmulaEncoderDir() === null,
+    available: backend === 'cuda' && deviceProblem === null && missingModels.length === 0 && !!aceTrainExe(),
+    backend, missingModels, deviceProblem, encoderMissing: findHeartmulaEncoderDir() === null,
   };
 }
 

@@ -196,6 +196,8 @@ export interface HeartmulaReadiness {
   backend: string;
   /** Base-model files that are not installed. */
   missingModels: string[];
+  /** Why the selected GPU cannot train, null when it can. */
+  deviceProblem: string | null;
   /** The HeartCodec encoder pack is not installed (Prepare needs it). */
   encoderMissing: boolean;
 }

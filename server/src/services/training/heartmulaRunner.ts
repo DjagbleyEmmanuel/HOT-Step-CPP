@@ -18,7 +18,7 @@ import { buildSamples } from './datasetScan.js';
 import {
   buildHeartmulaPrepareArgs, buildHeartmulaTrainArgs, findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels,
 } from './heartmulaTrain.js';
-import { HEARTMULA_PREPARE_MANIFEST, writeHeartmulaSamples } from './heartmulaPrepare.js';
+import { HEARTMULA_PREPARE_MANIFEST, writeHeartmulaSamples, writeSkippedFingerprints } from './heartmulaPrepare.js';
 import {
   appendLoss, blankStatus, heartmulaAdapterFile, heartmulaPrepareDir, publishHeartmulaAdapter,
   readStoredStatus, saveHeartmulaRunRecord, writeStoredStatus, type HeartmulaRunRecord,
@@ -71,7 +71,10 @@ export async function runHeartmulaPrepareJob(job: TrainingJob): Promise<void> {
       }
       if ((m = RE_FATAL.exec(line))) state.fatalMessage ||= m[1];
     }, st);
-    if (!isCancelled(job)) finishJob(job, 'done');
+    if (!isCancelled(job)) {
+      writeSkippedFingerprints(ds, samples);
+      finishJob(job, 'done');
+    }
   } catch (err: any) {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
   }
