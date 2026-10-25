@@ -111,7 +111,7 @@ inline std::vector<float> flow_velocity(const Weights & w, ggml_backend_t backen
                                        const std::vector<float> & timesteps) {
     const int64_t batch = int64_t(timesteps.size());
     require(frames > 0 && batch > 0 && input.size() == size_t(batch * frames * 1024), "invalid flow input shape");
-    Graph g(backend);
+    Graph g(backend, 8192);  // 30 blocks of ~60 nodes plus projections
     std::vector<int32_t> pos(size_t(frames), 0);
     for (int64_t i = 0; i < frames; ++i) pos[size_t(i)] = int32_t(i);
     auto positions = g.input(GGML_TYPE_I32, {frames}, pos.data());
@@ -140,7 +140,7 @@ inline std::vector<float> solve_euler(const Velocity & velocity, const std::vect
     float t = 0, dt = 1.0f / float(steps);
     const int batch = guidance > 1 ? 2 : 1;
     for (int s = 1; s <= steps; ++s) {
-        require(!cancelled || !cancelled(), "cancelled");
+        check_cancel(cancelled);
         for (int64_t i = 0; i < overlap * 256; ++i)
             x[size_t(i)] = (1.0f - (1.0f - 1e-6f) * t) * noise[size_t(i)] + t * context[size_t(i)];
         std::vector<float> input(size_t(batch * frames * 1024), 0);
@@ -171,7 +171,7 @@ inline std::vector<float> solve_euler(const Velocity & velocity, const std::vect
 inline std::vector<float> condition(const Weights & flow, ggml_backend_t backend,
                                     const std::vector<float> & rvq, int64_t frames) {
     require(frames > 0 && rvq.size() == size_t(frames * 512), "invalid RVQ feature shape");
-    Graph g(backend);
+    Graph g(backend, 64);
     auto x = g.input(GGML_TYPE_F32, {512, frames}, rvq.data());
     auto projected = g.run(linear(g.ctx, flow, "flow_matching.cond_feature_emb", x));
     std::vector<float> out(size_t(frames * 2 * 512));

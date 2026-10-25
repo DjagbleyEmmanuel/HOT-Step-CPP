@@ -10,12 +10,11 @@ inline ggml_tensor * scalar_conv(ggml_context * c, const Weights & w, const std:
     return conv(c, w, p, x, causal ? 0 : pad / 2, dilation);
 }
 
+// relu(x) - slope * relu(-x), with the slope read in-graph (no host sync).
 inline ggml_tensor * prelu(ggml_context * c, const Weights & w, const std::string & p, ggml_tensor * x) {
     auto weight = w.get(p + ".weight");
-    require(ggml_nelements(weight) == 1, p + ": expected scalar PReLU");
-    float slope;
-    ggml_backend_tensor_get(weight, &slope, 0, sizeof(slope));
-    return ggml_leaky_relu(c, x, slope, false);
+    require(ggml_nelements(weight) == 1 && weight->type == GGML_TYPE_F32, p + ": expected scalar F32 PReLU");
+    return ggml_sub(c, ggml_relu(c, x), ggml_mul(c, ggml_relu(c, ggml_neg(c, x)), weight));
 }
 
 inline ggml_tensor * scalar_graph(Graph & g, const Weights & w, ggml_tensor * input) {
@@ -55,25 +54,38 @@ inline ggml_tensor * scalar_graph(Graph & g, const Weights & w, ggml_tensor * in
     return scalar_conv(c, w, p + "7", x);
 }
 
+// Time chunks bound the im2col workspace (3.1 GiB for a whole 744-frame chunk on
+// CUDA, about 1 GiB at 186). Only decoder.0 looks ahead (3 frames, symmetric
+// padding); everything after it is causal, and the receptive field is about 50
+// latent frames (36 of them from block 1's dilated units at 5 samples a frame).
+// With 64 frames of left context and 3 of right, each kept sample sees exactly
+// the inputs the whole-sequence graph gives it.
+constexpr int64_t scalar_chunk_frames = 186, scalar_left_context = 64, scalar_right_context = 3;
+
 // Input is the flow's [time,256], split into two independent 128-wide channels.
 // Output is planar stereo [2,time*1920] at 48 kHz.
 inline std::vector<float> scalar_decode(const Weights & w, ggml_backend_t backend,
                                         const std::vector<float> & latent, int64_t frames,
-                                        const Cancel & cancelled = {}) {
-    require(frames > 0 && latent.size() == size_t(frames * 256), "invalid scalar latent shape");
+                                        const Cancel & cancelled = {}, int64_t chunk = scalar_chunk_frames) {
+    require(frames > 0 && latent.size() == size_t(frames * 256) && chunk > 0, "invalid scalar latent shape");
     std::vector<float> result;
     for (int ch = 0; ch < 2; ++ch) {
-        require(!cancelled || !cancelled(), "cancelled");
-        std::vector<float> planar(size_t(frames * 128));
-        for (int d = 0; d < 128; ++d) for (int64_t t = 0; t < frames; ++t) {
-            // torch.round uses ties-to-even, including negative half-integers.
-            planar[size_t(d * frames + t)] = std::nearbyint(9.0f * latent[size_t(t * 256 + ch * 128 + d)]) / 9.0f;
+        for (int64_t s = 0; s < frames; s += chunk) {
+            check_cancel(cancelled);
+            const int64_t e = std::min(frames, s + chunk);
+            const int64_t a = std::max<int64_t>(0, s - scalar_left_context);
+            const int64_t b = std::min(frames, e + scalar_right_context), n = b - a;
+            std::vector<float> planar(size_t(n * 128));
+            for (int d = 0; d < 128; ++d) for (int64_t t = 0; t < n; ++t) {
+                // torch.round uses ties-to-even, including negative half-integers.
+                planar[size_t(d * n + t)] = std::nearbyint(9.0f * latent[size_t((a + t) * 256 + ch * 128 + d)]) / 9.0f;
+            }
+            Graph g(backend, 4096);  // 25 residual units of ~31 nodes plus up-convs
+            auto input = g.input(GGML_TYPE_F32, {n, 128}, planar.data());
+            auto piece = g.run(scalar_graph(g, w, input));
+            require(piece.size() == size_t(n * 1920), "unexpected scalar waveform length");
+            result.insert(result.end(), piece.begin() + (s - a) * 1920, piece.begin() + (e - a) * 1920);
         }
-        Graph g(backend);
-        auto input = g.input(GGML_TYPE_F32, {frames, 128}, planar.data());
-        auto channel = g.run(scalar_graph(g, w, input));
-        require(channel.size() == size_t(frames * 1920), "unexpected scalar waveform length");
-        result.insert(result.end(), channel.begin(), channel.end());
     }
     return result;
 }

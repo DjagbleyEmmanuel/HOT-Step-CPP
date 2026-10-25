@@ -504,6 +504,11 @@ static const char * job_status_str(int s) {
 // Checked by verify-hooks.ps1.
 #include "yue2/yue2-server.h"
 
+// HOT-STEP: HeartMuLa backend (engine/src/heartmula/). Same posture as yue2-server.h:
+// it needs the job system above, and reclaims idle MM3/YuE2 weights through their
+// unload handlers, so it comes after both. Call site: heartmula_register_routes().
+#include "heartmula/server.h"
+
 // log capture: intercept stderr via pipe, forward to terminal + ring buffer.
 // SSE clients connect to /logs and receive lines in real time.
 #define LOG_RING_BITS 9
@@ -3476,6 +3481,10 @@ int main(int argc, char ** argv) {
     // routes above for progress/result/cancel — no /yue2/job route exists).
     // No-op (routes report available:false) when no YuE2 weights are present.
     yue2_register_routes(svr, models_dir);
+
+    // HOT-STEP: HeartMuLa backend, /heartmula/* (engine/docs/HEARTMULA_CONTRACT.md).
+    // Progress, result and cancel ride the shared /job routes like YuE2.
+    heartmula_register_routes(svr, models_dir);
 
     // HOT-STEP: GET /vram — GPU memory usage (CUDA only)
     svr.Get("/vram", [](const httplib::Request &, httplib::Response & res) {

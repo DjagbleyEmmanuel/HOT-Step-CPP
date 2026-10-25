@@ -1,5 +1,6 @@
 // Fixed-input HeartCodec parity on the GGML CPU backend. No Python runtime.
 #include "heartmula/codec-decode.h"
+#include "backend.h"
 
 #include <chrono>
 #include <cstring>
@@ -155,7 +156,7 @@ static void self_test() {
     require(refused, "empty code rejection");
     refused = false;
     try { solve_euler(constant, noise, context, mu, 3, 0, 10, 1, [] { return true; }); }
-    catch (const std::runtime_error &) { refused = true; }
+    catch (const Cancelled &) { refused = true; }
     require(refused, "cancellation");
     refused = false;
     try { pad_codes(std::vector<int64_t>(8, 8192), 1); }
@@ -176,8 +177,8 @@ int main(int argc, char ** argv) {
             std::cout << "heartcodec-probe --self-test\n"
                          "heartcodec-probe --mode rvq|velocity|latent|scalar|decode --models DIR --fixtures CASE\n"
                          "  [--index N] [--out DIR] [--trace DIR] [--threads N] [--backend-dir DIR]\n"
-                         "  [--atol NUMBER] [--rtol NUMBER]\n"
-                         "CPU only. CASE contains S1-style NPY intermediates and codes.\n"
+                         "  [--atol NUMBER] [--rtol NUMBER] [--device gpu]\n"
+                         "CPU unless --device gpu. CASE contains S1-style NPY intermediates and codes.\n"
                          "--out writes NPY and float32 48 kHz stereo WAV for scalar/decode.\n"
                          "--trace writes and checks every RVQ, velocity, latent and scalar output during decode.\n"
                          "Output directories must be outside CASE.\n";
@@ -238,6 +239,11 @@ int main(int argc, char ** argv) {
         int threads = args.count("--threads") ? std::stoi(args.at("--threads")) : 8;
         require(threads > 0 && threads <= 256, "invalid thread count");
         if (set_threads) set_threads(backend, threads);
+        // --device gpu: the engine's shared best device instead, for GPU codec parity.
+        if (args.count("--device") && args.at("--device") == "gpu") {
+            backend = backend_init("HeartCodec").backend;
+            require(ggml_backend_dev_type(ggml_backend_get_device(backend)) != GGML_BACKEND_DEVICE_TYPE_CPU, "no GPU backend");
+        }
         std::cout << "backend=" << ggml_backend_name(backend) << " threads=" << threads << std::endl;
         Weights rvq, flow, scalar;
         if (mode == "rvq" || mode == "latent" || mode == "decode") rvq.load((models / "heartcodec-rvq-F32.gguf").string(), "rvq", backend);

@@ -84,7 +84,7 @@ inline std::vector<float> decode(const Weights & rvq, const Weights & flow, cons
         return v;
     };
     for (int n = 0; n < chunks; ++n) {
-        require(!cancelled || !cancelled(), "cancelled");
+        check_cancel(cancelled);
         if (progress) progress(n, chunks);
         std::vector<int64_t> chunk(size_t(8 * chunk_codes));
         for (int q = 0; q < 8; ++q)

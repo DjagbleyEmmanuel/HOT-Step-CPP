@@ -6,7 +6,11 @@ carries. The server backend and UI build against this page while the engine is
 ported; the engine slices implement it. Where an implementation has to differ,
 change this page in the same commit.
 
-Status: contract only. No route below exists yet.
+Status: implemented by `engine/src/heartmula/pipeline.h` (catalogue, checks,
+admission, generation) and `engine/src/heartmula/server.h` (routes), except
+`POST /heartmula/encode` and `POST /heartmula/imatrix`, which answer 501 until
+their slices land. `engine/tools/heartmula-generate.cpp` runs the same pipeline
+from the command line; `tools/engine-smoke.mjs` uses it for its HeartMuLa case.
 
 ## Model
 
@@ -301,9 +305,19 @@ Before each phase loads anything, admission computes:
   resident weights of other backends (the ACE store, idle MM3/YuE2/SA3 weights).
   Nothing with work in flight is evicted; the YuE2 render lane is drained first.
 
-`reserve_bytes` covers scratch and activations. Its default comes from the
-measurement in the native pipeline slice and is reported in `props`;
-`HEARTMULA_VRAM_RESERVE_MB` overrides it.
+`reserve_bytes` covers scratch and activations. The default, 1536 MiB, is
+reported in `props`; `HEARTMULA_VRAM_RESERVE_MB` overrides it. Measured on CUDA
+with F16 files: the largest graph buffers are 208 MiB for a 512-position
+prefill chunk, 194 MiB for a flow step and about 1.1 GiB for a scalar-decoder
+time chunk (186 latent frames plus 67 of context; the whole 744-frame chunk
+needed 3.1 GiB). Both chunk sizes are fixed, so the reserve does not grow with
+the song. A 240 s request with F16 files peaked at 9.0 GB above the idle
+baseline in the LM phase (weights 7.5 GiB, KV 0.71 GiB) and 5.0 GB in the codec
+phase, CUDA context included. On a GPU the codec keeps linear matrices in their
+stored type (F16 or a quant); norms, tables and convolution kernels are widened
+to F32.
+
+`free_bytes` in `props` is 0 until some backend has initialised the device.
 
 If `need > free`, nothing is evicted and nothing is loaded, and the job fails
 with status `failed`:

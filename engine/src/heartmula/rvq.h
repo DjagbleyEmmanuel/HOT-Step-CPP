@@ -23,6 +23,22 @@ inline void require(bool ok, const std::string & message) {
     if (!ok) throw std::runtime_error("HeartCodec: " + message);
 }
 
+// Thrown at every cancel point, so callers catch it by type.
+struct Cancelled : std::runtime_error {
+    Cancelled() : std::runtime_error("HeartCodec: cancelled") {}
+};
+
+inline void check_cancel(const std::function<bool()> & cancelled) {
+    if (cancelled && cancelled()) throw Cancelled();
+}
+
+// Whether Weights::load keeps a tensor in its stored type (else F32).
+inline bool keep_native(const std::string & role, const ggml_tensor * t, bool gpu) {
+    const std::string name = ggml_get_name(t);
+    const bool matrix = ggml_n_dims(t) == 2 && name.size() > 7 && name.compare(name.size() - 7, 7, ".weight") == 0;
+    return role != "rvq" && matrix && (gpu || ggml_is_quantized(t->type));
+}
+
 struct Weights {
     WeightCtx storage{};
     std::map<std::string, ggml_tensor *> tensors;
@@ -94,13 +110,20 @@ struct Weights {
         array("upsample_factors", {5, 4, 4, 4, 3}); array("upsample_kernel_sizes", {10, 8, 8, 8, 6});
         int64_t count = gguf_get_n_tensors(file.gguf);
         wctx_init(&storage, int(count));
-        // F32 execution of rounded F16 weights is the S1 parity baseline.
-        // Avoid F16 activation rounding in the CPU GEMM and im2col kernels.
+        // F32 execution of rounded F16 weights is the S1 parity baseline on
+        // CPU: it avoids F16 activation rounding in the CPU GEMM and im2col
+        // kernels. On a GPU, linear matrices keep their stored type (F16 or a
+        // quant) so the flow fits its F16/Q8_0 budget; conv kernels, norms and
+        // tables are small and stay F32 everywhere.
+        auto device = ggml_backend_get_device(backend);
+        const bool gpu = device && ggml_backend_dev_type(device) != GGML_BACKEND_DEVICE_TYPE_CPU;
         for (int64_t i = 0; i < count; ++i) {
             const char * name = gguf_get_tensor_name(file.gguf, i);
             ggml_tensor * src = ggml_get_tensor(file.meta, name);
             require(role != "rvq" || src->type == GGML_TYPE_F32, path + ": RVQ state must remain F32");
-            if (src->type == GGML_TYPE_F16) {
+            if (keep_native(role, src, gpu)) {
+                tensors[name] = gf_load_tensor(&storage, file, name);
+            } else if (src->type == GGML_TYPE_F16) {
                 auto dst = ggml_new_tensor(storage.ctx, GGML_TYPE_F32, ggml_n_dims(src), src->ne);
                 ggml_set_name(dst, name);
                 auto data = std::make_unique<float[]>(size_t(ggml_nelements(src)));
@@ -133,8 +156,8 @@ struct Graph {
     ggml_gallocr_t alloc = nullptr;
     ggml_backend_t backend;
     std::vector<std::pair<ggml_tensor *, std::vector<uint8_t>>> inputs;
-    explicit Graph(ggml_backend_t b) : backend(b) {
-        constexpr size_t nodes = 16384;
+    // `nodes` bounds both the graph and its context; size it per graph.
+    Graph(ggml_backend_t b, size_t nodes) : backend(b) {
         ctx = ggml_init({nodes * ggml_tensor_overhead() + ggml_graph_overhead_custom(nodes, false), nullptr, true});
         require(ctx != nullptr, "graph allocation failed");
         graph = ggml_new_graph_custom(ctx, nodes, false);
@@ -174,7 +197,7 @@ inline ggml_tensor * linear(ggml_context * c, const Weights & w, const std::stri
 inline std::vector<float> rvq_decode(const Weights & w, ggml_backend_t backend,
                                      const std::vector<int64_t> & codes, int64_t frames) {
     require(frames > 0 && codes.size() == size_t(frames * 8), "expected [8,frames] codes");
-    Graph g(backend);
+    Graph g(backend, 64);
     ggml_tensor * sum = nullptr;
     for (int q = 0; q < 8; ++q) {
         std::vector<int32_t> ids(size_t(frames), 0);

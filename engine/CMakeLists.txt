@@ -753,6 +753,10 @@ link_ggml_backends(heartmula-probe)
 add_executable(heartcodec-probe tools/heartcodec-probe.cpp)
 target_link_libraries(heartcodec-probe PRIVATE yyjson)
 link_ggml_backends(heartcodec-probe)
+# HeartMuLa text to music through heartmula/pipeline.h; the smoke test's HeartMuLa case.
+add_executable(heartmula-generate tools/heartmula-generate.cpp)
+target_link_libraries(heartmula-generate PRIVATE yyjson)
+link_ggml_backends(heartmula-generate)
 
 add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
 target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
