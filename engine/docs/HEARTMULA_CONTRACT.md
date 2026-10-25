@@ -317,11 +317,13 @@ phase, CUDA context included. On a GPU the codec keeps linear matrices in their
 stored type (F16 or a quant); norms, tables and convolution kernels are widened
 to F32.
 
-`free` and `free_bytes` come from NVML (what nvidia-smi reports) when the driver
-provides it. On Windows, `cudaMemGetInfo` counts other processes' idle VRAM as
+`free` and `free_bytes` are measured on the device HeartMuLa runs on. An NVIDIA
+GPU is matched to NVML by its PCI bus id and gets NVML's figure (what nvidia-smi
+reports). On Windows, `cudaMemGetInfo` counts other processes' idle VRAM as
 free because WDDM can page it out to system memory, which is the spill admission
-exists to prevent. Without NVML, the ggml figure is used, and `free_bytes` is 0
-until a HeartMuLa job or warm has initialised the device.
+exists to prevent. The CPU backend, other GPUs and machines without NVML use the
+ggml figure. `free_bytes` is 0 until a HeartMuLa job or warm has initialised
+the device.
 
 If `need > free`, nothing is evicted and nothing is loaded, and the job fails
 with status `failed`:

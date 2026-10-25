@@ -47,6 +47,7 @@ struct HeartMuLaServer {
     std::string        tok_path;
     bool               resident[HM_TOKENIZER + 1] = {};
     std::string        adapter_loaded;
+    ggml_backend_dev_t device = nullptr;  // published by the worker; registry-owned
     uint64_t           resident_bytes = 0;
     std::map<std::string, std::shared_ptr<HeartMuLaJobInfo>> jobs;
     std::deque<std::string>                                  job_order;
@@ -117,6 +118,7 @@ static void hm_publish() {
     g_hm.resident[HM_TOKENIZER] = g_hm.tok != nullptr;
     g_hm.resident_bytes         = heartmula_resident_bytes(g_hm_rt);
     g_hm.adapter_loaded         = g_hm_rt.adapter.loaded() ? g_hm_rt.adapter.path : "";
+    if (g_hm_rt.bp_ref) g_hm.device = ggml_backend_get_device(g_hm_rt.bp.backend);
 }
 
 // Idle VRAM other backends hold, and its eviction (contract "Residency and VRAM
@@ -226,7 +228,7 @@ static void heartmula_handle_props(const httplib::Request &, httplib::Response &
     yyjson_mut_val * v = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "vram", v);
     yyjson_mut_obj_add_uint(doc, v, "resident_bytes", g_hm.resident_bytes);
-    yyjson_mut_obj_add_uint(doc, v, "free_bytes", heartmula_device_free(g_hm_rt));
+    yyjson_mut_obj_add_uint(doc, v, "free_bytes", heartmula_device_free(g_hm.device));
     yyjson_mut_obj_add_uint(doc, v, "reserve_bytes", heartmula_reserve_bytes());
     yyjson_mut_val * errs = yyjson_mut_arr(doc);
     yyjson_mut_obj_add_val(doc, root, "errors", errs);

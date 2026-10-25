@@ -601,8 +601,10 @@ struct HeartMuLaHooks {
 // "free" with 31.6 of 32 GB in use. NVML reports what nvidia-smi does, so an
 // admitted load never relies on that spill; ggml's figure is the fallback.
 // NVML ABI mirror and loader as in train/gpu-mem.h (which needs the trainer's
-// lm-common.h, so it is not included here). Device 0; false when NVML is absent.
-static bool heartmula_nvml_free(uint64_t * out) {
+// lm-common.h, so it is not included here). The device is found by PCI bus id,
+// because NVML's index order need not match CUDA's. False when NVML is absent or
+// has no device at that address.
+static bool heartmula_nvml_free(const char * pci_bus_id, uint64_t * out) {
 #ifdef _WIN32
     struct Mem { unsigned long long total, free, used; };
     HMODULE lib = LoadLibraryA("nvml.dll");
@@ -610,13 +612,13 @@ static bool heartmula_nvml_free(uint64_t * out) {
     if (!lib) return false;
     auto f_init = (int (*)(void)) (void *) GetProcAddress(lib, "nvmlInit_v2");
     auto f_down = (int (*)(void)) (void *) GetProcAddress(lib, "nvmlShutdown");
-    auto f_hand = (int (*)(unsigned int, void **)) (void *) GetProcAddress(lib, "nvmlDeviceGetHandleByIndex_v2");
+    auto f_hand = (int (*)(const char *, void **)) (void *) GetProcAddress(lib, "nvmlDeviceGetHandleByPciBusId_v2");
     auto f_mem  = (int (*)(void *, Mem *)) (void *) GetProcAddress(lib, "nvmlDeviceGetMemoryInfo");
     bool ok = false;
     if (f_init && f_hand && f_mem && f_init() == 0) {
         void * dev = nullptr;
         Mem    m   = { 0, 0, 0 };
-        if (f_hand(0, &dev) == 0 && dev && f_mem(dev, &m) == 0 && m.total > 0) {
+        if (f_hand(pci_bus_id, &dev) == 0 && dev && f_mem(dev, &m) == 0 && m.total > 0) {
             *out = m.free;
             ok   = true;
         }
@@ -625,19 +627,31 @@ static bool heartmula_nvml_free(uint64_t * out) {
     FreeLibrary(lib);
     return ok;
 #else
+    (void) pci_bus_id;
     (void) out;
     return false;
 #endif
 }
 
-static uint64_t heartmula_device_free(const HeartMuLaRuntime & rt) {
-    uint64_t free_b = 0;
-    if (heartmula_nvml_free(&free_b)) return free_b;
-    size_t f = 0, t = 0;
-    if (ggml_backend_dev_t dev = rt.bp.backend ? ggml_backend_get_device(rt.bp.backend) : nullptr) {
-        ggml_backend_dev_memory(dev, &f, &t);
+// Free memory on the device a backend runs on. A GPU with a PCI address NVML
+// knows gets NVML's figure; CPU and every other device get ggml's. The device
+// handle belongs to the ggml registry and outlives any backend on it, so the
+// HTTP threads may query a handle the worker published.
+static uint64_t heartmula_device_free(ggml_backend_dev_t dev) {
+    if (!dev) return 0;
+    ggml_backend_dev_props props = {};
+    ggml_backend_dev_get_props(dev, &props);
+    uint64_t nvml = 0;
+    if (props.type != GGML_BACKEND_DEVICE_TYPE_CPU && props.device_id && heartmula_nvml_free(props.device_id, &nvml)) {
+        return nvml;
     }
+    size_t f = 0, t = 0;
+    ggml_backend_dev_memory(dev, &f, &t);
     return f;
+}
+
+static uint64_t heartmula_device_free(const HeartMuLaRuntime & rt) {
+    return heartmula_device_free(rt.bp.backend ? ggml_backend_get_device(rt.bp.backend) : nullptr);
 }
 
 // Note C. Reclaims from other backends only when that is what makes it fit.
