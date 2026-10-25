@@ -103,6 +103,12 @@ export interface HeartmulaPreviewSettings {
   /** Seconds of audio per render (v1 default 30). */
   seconds: number;
   seed: number;
+  /** Sampler, same keys and meaning as the HeartMuLa engine request. */
+  temperature: number;
+  topk: number;
+  cfgScale: number;
+  codecSteps: number;
+  codecGuidance: number;
 }
 
 export interface HeartmulaTrainRequest {
@@ -194,8 +200,8 @@ export interface HeartmulaPreviewRecord {
   kind: HeartmulaPreviewKind;
   /** Completed training step the snapshot was taken at; 0 for 'base'. */
   step: number;
-  seed: number;
-  seconds: number;
+  /** The resolved settings this take was rendered with (conditioning, seed, sampler). Per take: a retry with overrides can differ from its neighbours. */
+  settings: HeartmulaPreviewSettings;
   status: HeartmulaPreviewStatus;
   /** Server-validated URL under the audio route; null until `status` is 'done'. */
   audioUrl: string | null;
@@ -207,6 +213,7 @@ export interface HeartmulaPreviewRecord {
 export interface HeartmulaPreviewListResponse {
   /** Echo of the resolved run, or null when the dataset has none. */
   run: HeartmulaRunId | null;
+  /** The run's current defaults for new takes; each record carries its own resolved `settings`. */
   settings: HeartmulaPreviewSettings;
   previews: HeartmulaPreviewRecord[];
 }
