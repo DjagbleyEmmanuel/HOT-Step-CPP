@@ -33,7 +33,7 @@ export interface TrainingRecipeSpec {
 }
 
 /** Where a backend's checkpoint previews come from. */
-export type TrainingPreviewSource = 'none' | 'yue2-ladder' | 'mm3-records' | 'sa3-previews';
+export type TrainingPreviewSource = 'none' | 'yue2-ladder' | 'mm3-records' | 'sa3-previews' | 'heartmula-previews';
 
 export interface TrainingPhaseLabel {
   key: string;

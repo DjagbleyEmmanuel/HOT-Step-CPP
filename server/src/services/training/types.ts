@@ -33,6 +33,8 @@ export type MergePolicy =
 export type TrainingJobKind =
   | 'label' | 'enhance-genius' | 'enhance-caption' | 'enhance-yue2-caption' | 'normalise-lyrics' | 'build'
   | 'preprocess' | 'train-lm' | 'train-dit' | 'sa3-train'
+  // HeartMuLa backbone LoRA (contracts/heartmulaTraining.ts); GPU-lane.
+  | 'heartmula-prepare' | 'heartmula-train'
   | 'audition' | 'lm-calibrate' | 'dit-calibrate'
   // MiniMax-Music3 (docs/plans/2026-08-20-mm3-training-server-design.md §2.1).
   // Both are GPU-lane and both stop the engine: an MM3 training step peaks at
