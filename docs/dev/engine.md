@@ -824,3 +824,23 @@ Engine hand-offs carry its `[Check Batch0]`, `stages:` and `wav:` lines and the
 ## Release data paths
 
 Release engine executables and shipped plugins remain app-owned. The server passes the data folder plugin overlay through `--user-plugins` and supplies absolute model and tool paths. Downloaded runtime libraries live under `<data folder>/tools/runtime`. See [Data folder and upgrades](../user/data-folder.md).
+
+## HeartCodec CPU parity probe
+
+`heartcodec-probe` (`engine/tools/heartcodec-probe.cpp`) checks the HeartCodec
+RVQ, flow transformer and Euler solver, scalar decoder, and assembled 48 kHz
+stereo waveform against fixed-input NPY reference fixtures. It loads only the
+GGML CPU backend. F16 model weights execute in F32 to match the reference
+baseline; the shared RVQ remains F32. This probe does not add an app backend.
+
+The decoder uses 372-code chunks, a 320-code hop, 104 latent frames of context
+and a stereo crossfade. Short inputs repeat before decoding and trim to exactly
+3840 samples per input code. Supplied noise makes cross-runtime parity possible
+without requiring identical random generators.
+
+Run `heartcodec-probe --self-test` for geometry, overlap, CFG, cancellation and
+input guards. For numerical checks, use `--mode rvq`, `velocity`, `latent`,
+`scalar` or `decode` with `--models <component-directory>` and
+`--fixtures <case-directory>`. `--trace <output-directory>` saves and compares
+each intermediate during decode. See the CLI reference in
+[ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md).

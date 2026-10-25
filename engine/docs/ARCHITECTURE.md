@@ -1225,3 +1225,33 @@ fattn-train-test --backend cuda
 fattn-train-test --backend vulkan --prec f32
 fattn-train-test --bench
 ```
+
+## HeartCodec parity probe
+
+The standalone `heartcodec-probe` uses the GGML CPU backend and S1-style NPY
+fixtures. It accepts F16/F32 codec components, with F32 execution of the rounded
+F16 weights. Q8 codec loading and GPU execution are not part of this probe.
+
+```text
+heartcodec-probe --self-test
+heartcodec-probe --mode rvq|velocity|latent|scalar|decode --models DIR --fixtures CASE
+  [--index N] [--out DIR] [--trace DIR] [--threads N] [--backend-dir DIR]
+  [--atol NUMBER] [--rtol NUMBER]
+```
+
+`--index` selects an intermediate, default 0. `--threads` defaults to 8.
+`--backend-dir` defaults to the executable's directory. `--out` writes NPY
+results and, for scalar/decode, a float32 48 kHz stereo WAV. `--trace` writes
+and checks RVQ vectors, every flow velocity, solved latents and scalar outputs
+during full decode. Both output directories must be outside the reference case.
+C- and Fortran-order little-endian float32, int32 and int64 fixtures are accepted.
+
+Both maximum absolute error and relative L2 must pass. Component defaults are
+0.001 and 0.0001. Full waveform defaults are 0.01 and 0.002, below one tenth of
+the reference's measured multi-chunk F32-to-F16 waveform drift. Isolated scalar
+checks retain the component bounds; scalar outputs from integrated native
+latents use waveform bounds because the round-to-ninth quantizer is discontinuous.
+The final comparison can be tightened with `--atol` and `--rtol`. Exit 0 means
+parity passed, 1 means a comparison failed, and 2 means invalid input or a load
+error. Codec dependencies, configuration hashes and supported geometry are
+validated before execution.

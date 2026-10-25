@@ -749,6 +749,10 @@ add_executable(yue2-probe tools/yue2-probe.cpp)
 add_executable(heartmula-probe tools/heartmula-probe.cpp)
 target_link_libraries(heartmula-probe PRIVATE yyjson)
 link_ggml_backends(heartmula-probe)
+# HeartCodec decode parity probe (RVQ, flow, scalar decoder) against S1's fixtures.
+add_executable(heartcodec-probe tools/heartcodec-probe.cpp)
+target_link_libraries(heartcodec-probe PRIVATE yyjson)
+link_ggml_backends(heartcodec-probe)
 
 add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
 target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
