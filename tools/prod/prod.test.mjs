@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertIdle, assertScratchEnv, inside, parseOptions } from './promote.mjs';
 import { maintenanceHandler } from './runtime.mjs';
-import { resolveSharedData, readDevData } from './data-mode.mjs';
+import { resolveSharedData, readDevData, validateSharedConfig } from './data-mode.mjs';
 
 test('mode selection refuses ambiguous, missing and misspelled options', () => {
   for (const args of [['--scratch', 'root', '--data-root', 'root'], ['--data-root'],
@@ -36,6 +36,11 @@ test('shared paths come from the dev pointer and env overrides, without creating
     assert.equal(selected.library, path.join(root, 'library'));
     assert.equal(selected.training, path.join(root, 'library/training'));
     assert.equal(selected.adapters, adapters);
+    const privateProfile = path.join(fixture, 'prod-profile');
+    fs.mkdirSync(privateProfile);
+    const config = { devCheckout: checkout, devProfile: profile, data: { ...selected, profile: privateProfile } };
+    assert.doesNotThrow(() => validateSharedConfig(config));
+    assert.throws(() => validateSharedConfig({ ...config, data: { ...config.data, adapters: root } }), /adapters changed/);
     assert.throws(() => resolveSharedData('relative', report), /absolute/);
     for (const changed of [{ root: fixture }, { pendingMove: {} }, { pointerError: 'bad JSON' }, { source: 'fallback' }, { children: null }]) {
       assert.throws(() => resolveSharedData(root, { ...report, ...changed }), /dev pointer/);

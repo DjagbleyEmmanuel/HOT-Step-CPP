@@ -583,8 +583,9 @@ node tools/prod/promote.mjs --start
 
 Shared mode reads dev's own read-only data-path resolver, including its
 checkout-specific pointer and `settings/.env` overrides. The requested root
-must match that pointer. Production uses the same profile, library, training,
-adapters and models paths without copying them. This includes adapters on a
+must match that pointer. Production's private profile points at that same root,
+with the same library, training, adapters and models paths without copying
+them. This includes adapters on a
 separate drive when configured in dev. All selected directories must already
 exist. A pending move, unreadable pointer, root mismatch or missing directory
 refuses promotion. The resolved paths print before preparation and startup.
@@ -594,8 +595,8 @@ Promote again after changing dev's data paths.
 For a stand-in validation, `--dev-profile <absolute-profile-directory>` selects
 an isolated dev profile whose checkout-specific pointer names the stand-in
 root. Use it only with `--data-root`. This does not edit the normal dev pointer.
-Promotion writes only the production checkout's pointer in the selected
-profile. Do not hand-edit the live server's pointer to switch modes. Use a
+Promotion writes only the production checkout's private profile pointer.
+Do not hand-edit the live server's pointer to switch modes. Use a
 new promotion with `--scratch` to return to isolation.
 
 Stop both copies before an incompatible migration. Shared mode opens the same
@@ -641,8 +642,9 @@ failed clones are retained for inspection; no automatic recursive cleanup
 runs. Review these folders before removing them.
 
 The launcher pins ports and the selected write paths in the process environment.
-This takes precedence over data-root `settings/.env` values. Scratch mode uses
-a private profile; shared mode uses the selected dev profile.
+This takes precedence over data-root `settings/.env` values. Both modes use
+private production profiles. This also avoids the server guard against
+multiple checkout pointers to one root inside a single profile.
 Other writable path overrides in the scratch `.env` must resolve inside that
 scratch root. Generated relative paths are accepted on subsequent promotions.
 Do not launch this clone with `LAUNCH.bat` or its in-app updater: use promotion

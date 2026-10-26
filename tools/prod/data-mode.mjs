@@ -39,7 +39,9 @@ export function readDevData(profile, checkout = source) {
 
 // Called before the launcher starts Node, including recorded-artifact restarts.
 export function validateSharedConfig(config) {
-  const current = resolveSharedData(config.data.root, readDevData(config.data.profile, config.devCheckout));
+  const current = resolveSharedData(config.data.root, readDevData(config.devProfile, config.devCheckout));
+  current.profile = config.data.profile;
+  requireDirectories({ profile: current.profile });
   for (const key of Object.keys(current)) {
     if (current[key] !== config.data[key]) throw new Error(`Shared ${key} changed. Promote again to select the new paths.`);
   }

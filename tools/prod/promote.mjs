@@ -176,8 +176,11 @@ async function main(args) {
   const mode = sharedArg ? 'shared' : 'scratch';
   const scratch = scratchArg ? path.resolve(scratchArg) : null;
   let data;
+  let devProfile;
   if (mode === 'shared') {
     data = resolveSharedData(sharedArg, readDevData(option('--dev-profile')));
+    devProfile = data.profile;
+    data.profile = path.join(prod, '.prod/profile');
   } else {
     if (!path.isAbsolute(scratchArg)) throw new Error('An absolute --scratch data root is required.');
     // Scratch validation only authorizes disposable roots in this checkout.
@@ -214,11 +217,11 @@ async function main(args) {
     npm(path.join(stage, part), 'run', 'build');
   }
   const engine = copyEngine(stage, commit);
-  const config = { commit, mode, data, devCheckout: source, scratch, token: crypto.randomBytes(32).toString('hex'), models: data.models, ports: { server: 3101, engine: 8186 } };
+  const config = { commit, mode, data, devCheckout: source, devProfile, scratch, token: crypto.randomBytes(32).toString('hex'), models: data.models, ports: { server: 3101, engine: 8186 } };
   writeJson(path.join(stage, '.prod/config.json'), config);
   writeJson(path.join(stage, '.prod/artifact.json'), { commit, preparedAt: new Date().toISOString(), engine });
   fs.writeFileSync(path.join(stage, '.env'), 'SERVER_PORT=3101\nACESTEPCPP_PORT=8186\nACESTEPCPP_HOST=127.0.0.1\nACESTEPCPP_MODELS="N:\\HOT-Step Data\\models"\n');
-  if (mode === 'scratch') pointer(path.join(stage, '.prod/scratch-profile'), prod, scratch);
+  pointer(path.join(stage, mode === 'shared' ? '.prod/profile' : '.prod/scratch-profile'), prod, data.root);
   if (!fs.existsSync(path.join(stage, 'ui/dist/index.html')) || !fs.existsSync(path.join(stage, 'server/dist/index.js'))) throw new Error('Missing built UI or server.');
   // Recheck after preparation. A failed build leaves the live clone untouched.
   if (existing && ownedServer(prod)) {
@@ -231,7 +234,6 @@ async function main(args) {
   try {
     if (existing) fs.renameSync(prod, previous);
     fs.renameSync(stage, prod); installed = true;
-    if (mode === 'shared') pointer(data.profile, prod, data.root);
     await start(prod, commit);
     console.log(`PROMOTE PASS ${commit}\nArtifact: ${path.join(prod, '.prod/artifact.json')}\nPrevious clone retained: ${existing ? previous : 'none'}\nStop: node tools/prod/promote.mjs --stop`);
   } catch (error) {
