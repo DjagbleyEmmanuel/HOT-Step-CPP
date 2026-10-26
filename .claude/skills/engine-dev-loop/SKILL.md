@@ -65,19 +65,16 @@ Windows PowerShell 5; this repo's convention is `;`).
 5. **`dev-rebuild.bat` does NOT restart the app, and exit 0 does not prove it ran.**
    It checks `build.cmd`'s exit code: a failed build prints `[dev-rebuild] BUILD FAILED -
    the binaries on disk are STALE.` and exits 1 (dev-rebuild.bat:52-60). A good build prints
-   "Done. Start the app with LAUNCH.bat to pick up changes." But `cmd.exe /c` can return 0
+   "Done. Start the app with dev.bat to pick up changes." But `cmd.exe /c` can return 0
    having run nothing (AGENTS.md), so check the output for its first line,
    `[dev-rebuild] Requesting graceful shutdown...`, and the exe timestamp. Then relaunch
-   with `dev.bat` (detached) and check `http://localhost:3000`. The script's message names
-   `LAUNCH.bat`, which is the end-user prod path, not the one agents use.
+   with `dev.bat` (detached) and check `http://localhost:3000`.
 
 ## Procedure 1 — Standard rebuild after a C++ edit
 
 ```powershell
 # 1. Rebuild (shuts down app gracefully, waits for ace-server to die, builds):
-#    Meant for an interactive console. From an agent tool call or any piped/redirected
-#    shell its wait loop cannot sleep (see the warning below); run the three phases
-#    manually instead.
+#    Its PowerShell wait loop also works with redirected stdin.
 & "D:\Ace-Step-Latest\hot-step-cpp\dev-rebuild.bat"
 
 # 2. VERIFY the build yourself. A failed build ends with "[dev-rebuild] BUILD FAILED" and
@@ -95,8 +92,7 @@ cd D:\Ace-Step-Latest\hot-step-cpp; pwsh -NoProfile -File tools\detach.ps1 dev.b
 Note: dev-rebuild's shutdown also kills the Vite dev server on port 3000
 (`killVite()`, `server/src/routes/shutdown.ts:59-87`; only when `dev.bat` set `HOT_STEP_DEV`,
 and only a pid that really is a Node process running Vite), so in dev mode you must restart
-with `dev.bat`, not just relaunch the engine — despite the script's final message naming
-only LAUNCH.bat.
+with `dev.bat`, not just relaunch the engine.
 
 ### What dev-rebuild.bat actually does (`dev-rebuild.bat:1-60`)
 
@@ -105,16 +101,17 @@ only LAUNCH.bat.
    `tools\mcp-lyricstudio\work-run.ps1`, reserving `app-server`, `gpu` and `engine-build`.
    Otherwise it goes straight to the steps below. (AGENTS.md: the work channel is used only
    when the user explicitly asks for it.)
-1. `curl -s -X POST http://localhost:3001/api/shutdown` — asks the **Node** server to shut
-   everything down gracefully (errors suppressed, so it's safe when the app isn't running).
-   The shutdown route (`stopEverything()`, `server/src/routes/shutdown.ts:131-150`) stops
-   the audio queue and any training children, stops ace-server through `stopAceServer()`
-   (which cancels the respawn before it tree-kills the child, then waits up to 15 s for it
-   to exit), kills Vite, and finally the Node server's own process tree via a detached
-   killer — so nothing survives to respawn ace-server.
-2. Polls `tasklist` for `ace-server.exe` once per second. At 10 retries it force-kills
-   (`taskkill /F /IM ace-server.exe /T`); at 15 retries it aborts with
-   `FATAL: could not stop ace-server` and exit code 1.
+1. Resolve `SERVER_PORT` from the active `.env` using the read-only data-path resolver,
+   with the inherited environment taking precedence and 3001 as the default. A pending
+   data move, unreadable pointer, invalid port or missing resolver dependencies aborts.
+   POST `/api/shutdown` to that port with a 10-second request timeout. This asks the Node
+   server to stop its children and respawn logic before exiting.
+2. Poll `Get-CimInstance Win32_Process` for `ace-server.exe` whose `ExecutablePath`
+   starts with this checkout's absolute directory plus a trailing separator. Other
+   checkouts, including siblings with the same name prefix, are excluded. Sleep with
+   `Start-Sleep`; after 10 seconds stop only those PIDs, and abort after 15 seconds if
+   any remain. `update.bat` uses the same filter. `update.sh` resolves each candidate's
+   executable via `/proc/<pid>/exe` on Linux or `lsof -d txt` on macOS before killing it.
 3. Once ace-server is gone: `call "%~dp0engine\build.cmd"`.
 4. Checks the build's exit code: on failure prints `BUILD FAILED - the binaries on disk are
    STALE.` and exits 1; otherwise prints "Done." **No restart either way.**
@@ -130,46 +127,25 @@ There is also `POST /api/restart` (`shutdown.ts:166-184`), which writes a
 `server/restart-loop.cmd` loop on. That is for in-app restarts only — it does not rebuild
 anything.
 
-### dev-rebuild.bat cannot wait from a non-interactive shell (agents: read this)
+### Inspecting the shutdown scope without stopping the app
 
-`dev-rebuild.bat` uses `timeout /t 1 /nobreak` in its wait loop (step 2 above). `timeout`
-requires a real console: with stdin redirected to the null device, which is every agent
-tool call, every piped invocation and every CI-style run, it fails immediately with
-`ERROR: Input redirection is not supported, exiting the process immediately.` (checked
-2026-10-23). The loop then spins without sleeping: the force-kill meant for the 10-second
-mark comes after ten quick polls, and the abort after fifteen. When ace-server is already
-gone at the first poll, the loop is skipped and the build runs normally.
-
-An agent run on 2026-08-21, with an earlier untracked copy of the script, came back with
-exit 0 in 2 seconds while `ace-server.exe` kept a five-hour-old timestamp: nothing had been
-built, and the app was still running.
-<!-- TODO(verify): the cause of the 2026-08-21 no-op is unconfirmed. The script echoes
-"[dev-rebuild] Requesting graceful shutdown..." before its wait loop, so a run that printed
-nothing points at cmd.exe never running it (AGENTS.md, NoDefaultCurrentDirectoryInExePath)
-rather than at timeout. -->
-
-Run the three phases yourself instead. This is the same sequence the script performs, and
-it is safe for the reason Procedure 1 explains — Node initiates the kill, so no respawn:
+The rebuild script uses PowerShell `Start-Sleep`, so its wait loop works in agent
+shells with redirected stdin. Run `dev-rebuild.bat` for the full shutdown and build
+sequence. To inspect its engine scope without stopping anything:
 
 ```powershell
-# 1. graceful shutdown (Node kills ace-server, Vite, then itself)
-try { Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/shutdown" -TimeoutSec 10 | Out-Null } catch {}
-
-# 2. wait for the binary lock to actually clear — never skip this, it is what
-#    prevents LNK1104 and the respawn loop
-$n=0; while ((Get-Process ace-server -ErrorAction SilentlyContinue) -and $n -lt 20) { Start-Sleep -Seconds 1; $n++ }
-if (Get-Process ace-server -ErrorAction SilentlyContinue) { Stop-Process -Name ace-server -Force; Start-Sleep -Seconds 2 }
-
-# 3. build (absolute path, per AGENTS.md), then VERIFY (see Procedure 1 step 2)
-& cmd.exe /c "D:\Ace-Step-Latest\hot-step-cpp\engine\build.cmd"; "build exit $LASTEXITCODE"
-Get-Item "D:\Ace-Step-Latest\hot-step-cpp\engine\build\Release\ace-server.exe" | Select-Object LastWriteTime
+$checkout = (Resolve-Path 'D:\Ace-Step-Latest\hot-step-cpp').Path.TrimEnd('\') + '\'
+function OwnEngine {
+    Get-CimInstance Win32_Process -Filter "Name = 'ace-server.exe'" |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($checkout, [StringComparison]::OrdinalIgnoreCase) }
+}
+OwnEngine | Select-Object ProcessId, ExecutablePath
+# Only after graceful shutdown, if a checkout-owned engine remains locked:
+# OwnEngine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-`build.cmd` now returns the build's exit code, so a nonzero `$LASTEXITCODE` is a real
-failure; zero still needs the positive signals. Its output shows
-`=== HOT-Step Hook Verification ===` before compiling, and `ace-server.vcxproj ->` is
-printed only on a successful link, a positive signal rather than the absence of a negative
-one.
+Never stop an engine by process name. Another checkout may be serving a separate
+instance on different ports. A path that cannot be inspected is excluded.
 
 ### Errors in a header you never edited = broken literal in the file included *before* it
 
@@ -438,8 +414,8 @@ check if the server seems to run old code.
 | Node runs an old binary despite a successful build | Stale flat `engine/ace-server.exe` shadowing `build/Release/` (config.ts:133-139), or `ACESTEPCPP_EXE` set in `.env` | Delete the flat exe / unset the override |
 | Header edit seemingly ignored | Stale .obj | Procedure 2 (surgical delete of `acestep-core.dir` + `acestep-core.lib`) |
 | `dev-rebuild.bat` says `BUILD FAILED - the binaries on disk are STALE.` | The compile or link failed (or the hook check stopped it) | Scroll up for the first `error C` / `LNK` / `[FAIL]` line; the old exe is still the one on disk |
-| `dev-rebuild.bat` exits 0 in ~2 s, prints nothing, app still running | The script never ran (AGENTS.md: `cmd.exe /c` can exit 0 having run nothing) | Run it by absolute path, or run the 3 phases manually (Procedure 1, "cannot wait from a non-interactive shell") |
-| `ERROR: Input redirection is not supported` repeated, force-kill message after a second or two | Non-interactive shell: `timeout` cannot sleep, so the wait loop spins | Run the 3 phases manually (Procedure 1, "cannot wait from a non-interactive shell") |
+| `dev-rebuild.bat` exits 0 in ~2 s, prints nothing, app still running | The script never ran (AGENTS.md: `cmd.exe /c` can exit 0 having run nothing) | Run it by absolute path and verify its first output line (Procedure 1) |
+| `ERROR: Input redirection is not supported` in an older rebuild script | Its `timeout` wait requires a console | Use the current script, which waits with PowerShell `Start-Sleep` |
 | Compile errors in a header you never touched | Unterminated string/comment in the file included *before* it — usually a `\n` written as a real newline by a heredoc | `sed -n 'A,Bp' <the file you edited> \| cat -A`; use the Edit tool for C++ with escapes |
 | Vite dead after rebuild in dev mode | dev-rebuild's shutdown kills Vite on port 3000 too (`killVite()`, `shutdown.ts:59-87`) | Restart with `dev.bat`, not LAUNCH.bat |
 | Node server won't start / weird npm dep errors after an otherwise-good build | Wrong Node version or native addon ABI mismatch — **Node 20 to 24 LTS; 24 recommended** (`engines` enforces `<25`) | `node --version`; install dependencies for that Node version, don't touch the engine or build cache |

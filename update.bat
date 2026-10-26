@@ -163,39 +163,20 @@ if exist "engine\ggml-pre-fork-overlay.ps1" (
     )
 )
 
-REM Shut down running server (if any) to avoid file locks
+REM Shut down only this checkout's server and engine.
 echo   Checking for running server...
-curl -s -o nul -w "%%{http_code}" http://localhost:3001/api/status >"%TEMP%\hotstep_status.txt" 2>nul
-set /p STATUS_CODE=<"%TEMP%\hotstep_status.txt"
-del "%TEMP%\hotstep_status.txt" 2>nul
-
-if "%STATUS_CODE%"=="200" (
-    echo   Server is running — requesting graceful shutdown...
-    curl -s -X POST http://localhost:3001/api/shutdown >nul 2>&1
-
-    REM Wait for ace-server to exit
-    set /A retries=0
-    :shutdown_wait
-    tasklist /FI "IMAGENAME eq ace-server.exe" 2>nul | find /I "ace-server.exe" >nul
-    if %errorlevel% neq 0 goto :shutdown_done
-    timeout /t 1 /nobreak >nul
-    set /A retries+=1
-    if !retries! GEQ 10 (
-        echo   Force-killing ace-server after 10s timeout...
-        taskkill /F /IM ace-server.exe /T >nul 2>&1
-        timeout /t 2 /nobreak >nul
-    )
-    if !retries! GEQ 15 (
-        echo   WARNING: Could not stop ace-server. Build may fail with file locks.
-        goto :shutdown_done
-    )
-    goto :shutdown_wait
-
-    :shutdown_done
-    echo   Server stopped.
-) else (
-    echo   No running server detected.
+REM Read the same active .env as the server, including a moved data folder.
+set "HOTSTEP_SHUTDOWN_PORT="
+pushd "%HOTSTEP_REPO_DIR%server" || goto :fail
+for /f "delims=" %%p in ('node --import tsx --input-type=module -e "import fs from 'node:fs'; import {parse} from 'dotenv'; import {locateData} from './src/dataroot/locate.ts'; const r=locateData(); if(r.pendingMove || r.pointerError) process.exit(1); const f=r.children.envFile; const e=fs.existsSync(f)?parse(fs.readFileSync(f)):{}; const p=Number(process.env.SERVER_PORT ?? e.SERVER_PORT ?? 3001); if(Number.isInteger(p)===false||p<1||p>65535) process.exit(1); console.log(p);"') do set "HOTSTEP_SHUTDOWN_PORT=%%p"
+popd
+if not defined HOTSTEP_SHUTDOWN_PORT (
+    echo ERROR: could not resolve this checkout's server port.
+    goto :fail
 )
+REM A trailing directory separator excludes sibling checkouts with a shared prefix.
+powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $root=[IO.Path]::GetFullPath($env:HOTSTEP_REPO_DIR).TrimEnd('\')+'\'; function OwnEngine { Get-CimInstance Win32_Process -Filter \"Name = 'ace-server.exe'\" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) } }; try { Invoke-RestMethod -Method Post -Uri ('http://localhost:'+$env:HOTSTEP_SHUTDOWN_PORT+'/api/shutdown') -TimeoutSec 10 | Out-Null } catch {}; for($n=0; $n -lt 15; $n++) { if(-not (OwnEngine)) { exit 0 }; if($n -eq 10) { OwnEngine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }; Start-Sleep -Seconds 1 }; if(OwnEngine) { Write-Error 'Could not stop this checkout''s ace-server'; exit 1 }"
+if errorlevel 1 goto :fail
 
 REM ── Phase 2: Code sync ─────────────────────────────────────────────
 echo.
