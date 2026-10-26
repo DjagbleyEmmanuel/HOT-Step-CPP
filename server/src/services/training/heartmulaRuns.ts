@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../../config.js';
 import { datasetDir, slugify } from './paths.js';
 import { newRunDir } from './adapterLayout.js';
-import { resolveHeartmulaRecipe } from './heartmulaTrain.js';
+import { resolveHeartmulaPreviewSettings, resolveHeartmulaRecipe } from './heartmulaTrain.js';
 import type {
   HeartmulaAdapterAsset, HeartmulaLossPoint, HeartmulaRecipe, HeartmulaRunId, HeartmulaRunState, HeartmulaRunStatus,
 } from '../../contracts/heartmulaTraining.js';
@@ -38,7 +38,7 @@ export interface HeartmulaRunRecord {
   recipe: HeartmulaRecipe;
   /** ISO time the run was created. */
   createdAt: string;
-  /** Checkpoint-preview settings the run started with; read by the preview slice. */
+  /** Resolved checkpoint-preview settings the run started with (HeartmulaPreviewSettings); absent on runs made before previews. */
   preview?: unknown;
   /** Published adapter, relative to the adapter root; set once the run finished. */
   published?: string;
@@ -131,7 +131,8 @@ export function resolveHeartmulaRun(
   const adapterName = body.adapterName === undefined ? ds.slug : body.adapterName;
   if (typeof adapterName !== 'string' || !HEARTMULA_ADAPTER_NAME.test(adapterName)) throw new Error('adapterName must match [A-Za-z0-9_-]{1,64}');
   const recipe = resolveHeartmulaRecipe(given);
-  const run = createHeartmulaRun(ds.id, ds.slug, adapterName, recipe, body.preview);
+  // Validated now, so a bad fixture refuses the start instead of failing a render hours in.
+  const run = createHeartmulaRun(ds.id, ds.slug, adapterName, recipe, resolveHeartmulaPreviewSettings(body.preview));
   return { ...run, resume: false };
 }
 

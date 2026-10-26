@@ -256,7 +256,7 @@ export const TrainingStudio: React.FC = () => {
         ) : phase === 'refine' ? (
           <RefinePanel />
         ) : phase === 'review' ? (
-          <ReviewPanel />
+          plugin.renderReview ? <TrainPanel target={target} section="review" /> : <ReviewPanel />
         ) : (
           <MonitorPanel />
         )}

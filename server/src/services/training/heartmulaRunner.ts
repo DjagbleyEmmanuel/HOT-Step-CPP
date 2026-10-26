@@ -7,8 +7,12 @@
 // engine/docs/HEARTMULA_TRAINING_CONTRACT.md), and exit codes carry meaning:
 // 0 done, 3 paused at a checkpoint, 4 cancelled, anything else a failure.
 //
-// Previews are not here: checkpoint previews are orchestrated by the preview
-// slice on top of --stop-after / --resume.
+// Checkpoint previews are segments: the trainer runs with --stop-after to the
+// next preview step (exit 3), the engine comes back up, heartmulaPreview renders
+// the saved adapter and unloads, and the next segment resumes. The base model
+// is rendered once before the first segment, the final adapter after the last,
+// even when that step is off the cadence. A user's checkpoint-now ends the run
+// as paused instead (checkpoint reason 'now'), never as a preview pause.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,12 +21,17 @@ import { getDataset } from './datasetsRepo.js';
 import { buildSamples } from './datasetScan.js';
 import {
   buildHeartmulaPrepareArgs, buildHeartmulaTrainArgs, findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels,
+  resolveHeartmulaPreviewSettings,
 } from './heartmulaTrain.js';
 import { HEARTMULA_PREPARE_MANIFEST, snapshotSources, writeHeartmulaSamples, writeSkippedFingerprints } from './heartmulaPrepare.js';
 import {
-  appendLoss, blankStatus, heartmulaAdapterFile, heartmulaPrepareDir, publishHeartmulaAdapter,
+  appendLoss, blankStatus, heartmulaAdapterFile, heartmulaCheckpointSteps, heartmulaPrepareDir, publishHeartmulaAdapter,
   readStoredStatus, saveHeartmulaRunRecord, writeStoredStatus, type HeartmulaRunRecord,
 } from './heartmulaRuns.js';
+import {
+  heartmulaPreviewDone, heartmulaPreviewKind, renderHeartmulaPreview, setHeartmulaPreviewPauseMs,
+} from './heartmulaPreview.js';
+import { HEARTMULA_PREVIEW_DEFAULTS, type HeartmulaPreviewSettings } from '../../contracts/heartmulaTraining.js';
 import type { HeartmulaRecipe, HeartmulaRunState } from '../../contracts/heartmulaTraining.js';
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import {
@@ -93,8 +102,13 @@ export interface HeartmulaTrainJobOpts {
 interface HmState extends RelayState {
   started: boolean;
   checkpointStep: number | null;
+  /** Why the newest checkpoint was written: every | now | stop | final. */
+  checkpointReason: string;
   stepMsSum: number;
   stepMsCount: number;
+  /** When the trainer paused for a preview, and the take it paused for (set once that take has a record). */
+  pauseT0: number;
+  pausePreview?: string;
 }
 
 /** Jobs whose trainer has printed `start`; control files before that are deleted by the engine. */
@@ -135,6 +149,16 @@ function relayTrainLine(job: TrainingJob, opts: HeartmulaTrainJobOpts, line: str
       setStatus(opts, { state: 'running', step: Number(ev.step) || 0, totalSteps: st.totalSteps, startedAt: cur.startedAt ?? Date.now() });
       pushEvent(job, { type: 'metric', metric: 'data', ts: Date.now(), samples: Number(ev.samples) || undefined, totalSteps: st.totalSteps });
       log(job, 'info', `Training ${ev.samples ?? '?'} sample(s), ${st.totalSteps} steps.`);
+      if (ev.alloc_mib !== undefined || ev.attention) {
+        log(job, 'info', `Trainer: ${ev.attention ?? '?'} attention, ${ev.alloc_mib !== undefined ? `${Math.round(Number(ev.alloc_mib))} MiB allocated` : 'memory not reported'}.`);
+      }
+      if (st.pausePreview) {
+        // Training is back: the whole pause (engine up, render, engine down, model reload) is what the preview cost.
+        const pauseMs = Date.now() - st.pauseT0;
+        setHeartmulaPreviewPauseMs(opts.runDir, st.pausePreview, pauseMs);
+        log(job, 'info', `That preview paused training for ${(pauseMs / 1000).toFixed(1)} s.`);
+        st.pausePreview = undefined;
+      }
       break;
     case 'step': {
       const step = Number(ev.step), loss = Number(ev.loss), ms = Number(ev.ms_step);
@@ -158,6 +182,8 @@ function relayTrainLine(job: TrainingJob, opts: HeartmulaTrainJobOpts, line: str
       break;
     case 'checkpoint':
       st.checkpointStep = Number(ev.step);
+      st.checkpointReason = String(ev.reason ?? '');
+      if (st.checkpointReason === 'stop') st.pauseT0 = Date.now();
       setStatus(opts, { checkpointStep: st.checkpointStep });
       pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step: st.checkpointStep, loss: st.lastLoss });
       log(job, 'info', `Checkpoint at step ${ev.step} (${ev.reason}).`);
@@ -171,14 +197,28 @@ function relayTrainLine(job: TrainingJob, opts: HeartmulaTrainJobOpts, line: str
   }
 }
 
+/** The run's preview fixture; a run made before previews existed has none, which means off. */
+function previewOf(record: HeartmulaRunRecord): HeartmulaPreviewSettings {
+  try { return resolveHeartmulaPreviewSettings(record.preview, { ...HEARTMULA_PREVIEW_DEFAULTS, everySteps: 0 }); }
+  catch { return { ...HEARTMULA_PREVIEW_DEFAULTS, everySteps: 0 }; }
+}
+
+/** The next step a preview pause is due at, after `from`; 0 when the run finishes first. */
+export function nextPreviewStep(from: number, every: number, total: number): number {
+  if (every <= 0) return 0;
+  const next = (Math.floor(from / every) + 1) * every;
+  return next < total ? next : 0;
+}
+
 export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as HeartmulaTrainJobOpts | undefined;
   if (!opts?.runDir || !opts.record) { finishJob(job, 'failed', 'heartmula-train job is missing its run'); return; }
   const recipe: HeartmulaRecipe = opts.record.recipe;
+  const preview = previewOf(opts.record);
   const state = (s: HeartmulaRunState, extra: Partial<ReturnType<typeof blankStatus>> = {}) => setStatus(opts, { state: s, ...extra });
   const st: HmState = {
     fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: recipe.steps, started: false,
-    checkpointStep: null, stepMsSum: 0, stepMsCount: 0,
+    checkpointStep: null, checkpointReason: '', stepMsSum: 0, stepMsCount: 0, pauseT0: 0,
   };
   job.total = recipe.steps; job.done = 0; job.cleanupPending = true;
   // Cancel is graceful once the trainer is up: control/cancel, then a bounded kill.
@@ -188,6 +228,20 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
     try { touch(path.join(opts.runDir, 'control', 'cancel')); } catch { killJobChild(job); return; }
     cancelTimer ??= setTimeout(() => killJobChild(job), 30_000);
   };
+
+  /** One take. A failed render is logged and training goes on (the checkpoints are what matters); a dirty engine throws. */
+  const takePreview = async (step: number): Promise<string> => {
+    const kind = heartmulaPreviewKind(step, recipe.steps);
+    state('previewing'); job.phase = 'preview'; emitProgress(job);
+    log(job, 'info', `Rendering the ${kind === 'base' ? 'base model' : kind === 'final' ? 'final adapter' : `step ${step}`} preview (${preview.seconds} s).`);
+    const take = await renderHeartmulaPreview({
+      runDir: opts.runDir, runId: opts.runId, step, kind, settings: preview, signal: job.controller.signal,
+    });
+    if (take.status === 'done') log(job, 'info', `Preview rendered in ${((take.renderMs ?? 0) / 1000).toFixed(1)} s.`);
+    else if (take.status === 'failed') log(job, 'warn', `Preview at step ${step} failed; training goes on: ${take.error}`);
+    return take.id;
+  };
+
   try {
     const missing = missingHeartmulaModels();
     if (missing.length) throw new Error(`HeartMuLa models are missing: ${missing.join(', ')}`);
@@ -196,30 +250,54 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
       throw new Error('The HeartMuLa prepare cache is gone — run Prepare again');
     }
     state('queued');
-    const args = buildHeartmulaTrainArgs({
-      dataDir, runDir: opts.runDir, modelsDir: config.aceServer.models, recipe, name: opts.record.adapterName, resume: opts.resume,
-    });
-    log(job, 'info', `${opts.resume ? 'Resuming' : 'Starting'}: ${recipe.steps} steps at rank ${recipe.rank}/alpha ${recipe.alpha}.`);
-    await runYue2AceTrain(job, 'heartmula-train', args, YUE2_IDLE_MS, () => null,
-      (line, s) => relayTrainLine(job, opts, line, s), st, undefined, true, [0, 3]);
+    log(job, 'info', `${opts.resume ? 'Resuming' : 'Starting'}: ${recipe.steps} steps at rank ${recipe.rank}/alpha ${recipe.alpha}`
+      + `${preview.everySteps > 0 ? `, a ${preview.seconds} s preview every ${preview.everySteps} steps` : ', no checkpoint previews'}.`);
 
-    if (isCancelled(job)) { state('cancelled'); return; }
-    if (st.exitCode === 3) {
-      // Paused at a checkpoint by checkpoint-now: resumable, not finished.
-      state('cancelled', { checkpointStep: st.checkpointStep ?? readStoredStatus(opts.runDir)?.checkpointStep ?? null });
-      log(job, 'info', `Paused at step ${st.lastStep}. Resume the run to continue.`);
-      job.phase = 'paused';
-      finishJob(job, 'done');
-      return;
+    let resume = opts.resume;
+    for (;;) {
+      // The trainer resumes from its newest checkpoint, whatever the last step event said.
+      const from = resume ? Math.max(0, ...heartmulaCheckpointSteps(opts.runDir)) : 0;
+      if (preview.everySteps > 0 && !isCancelled(job)) {
+        // Owed takes: the base model before anything trained, and a cadence step a pause or crash cut short.
+        const owed = from === 0 || (from < recipe.steps && from % preview.everySteps === 0) ? from : -1;
+        if (owed >= 0 && !heartmulaPreviewDone(opts.runDir, owed)) {
+          const id = await takePreview(owed);
+          if (owed > 0) st.pausePreview = id;  // the base take precedes the first start; only a mid-run pause has a cost
+        }
+      }
+      if (isCancelled(job)) { state('cancelled'); return; }
+      const stopAfter = nextPreviewStep(from, preview.everySteps, recipe.steps);
+      const args = buildHeartmulaTrainArgs({
+        dataDir, runDir: opts.runDir, modelsDir: config.aceServer.models, recipe, name: opts.record.adapterName, resume, stopAfter,
+      });
+      st.checkpointReason = ''; st.exitCode = undefined; st.started = false;
+      await runYue2AceTrain(job, 'heartmula-train', args, YUE2_IDLE_MS, () => null,
+        (line, s) => relayTrainLine(job, opts, line, s), st, undefined, true, [0, 3]);
+
+      if (isCancelled(job)) { state('cancelled'); return; }
+      if (st.exitCode === 3) {
+        if (stopAfter && st.checkpointReason === 'stop' && st.checkpointStep === stopAfter) { resume = true; continue; }
+        // Paused at a checkpoint by checkpoint-now: resumable, not finished.
+        state('cancelled', { checkpointStep: st.checkpointStep ?? readStoredStatus(opts.runDir)?.checkpointStep ?? null });
+        log(job, 'info', `Paused at step ${st.lastStep}. Resume the run to continue.`);
+        job.phase = 'paused';
+        finishJob(job, 'done');
+        return;
+      }
+      break;
     }
+
     // Exit 0 is finished; a resume of a finished run prints no steps, so fall back to the stored one.
     const finalStep = st.lastStep || readStoredStatus(opts.runDir)?.step || recipe.steps;
     const final = heartmulaAdapterFile(opts.runDir, finalStep);
     if (!fs.existsSync(final)) throw new Error('The trainer finished but wrote no adapter');
     const published = publishHeartmulaAdapter(final, `${opts.record.adapterName}-${path.basename(opts.runDir)}`);
     saveHeartmulaRunRecord(opts.runDir, { ...opts.record, published });
-    state('done', { step: finalStep, adapterFile: published, error: null });
     log(job, 'info', `Published HeartMuLa adapter: ${published}`);
+    // The final take is owed even off the cadence. The adapter is already published, so a failed render loses nothing.
+    if (preview.everySteps > 0 && !heartmulaPreviewDone(opts.runDir, finalStep)) await takePreview(finalStep);
+    if (isCancelled(job)) { state('cancelled', { step: finalStep, adapterFile: published }); return; }
+    state('done', { step: finalStep, adapterFile: published, error: null });
     finishJob(job, 'done');
   } catch (err: any) {
     const message = err?.message || String(err);

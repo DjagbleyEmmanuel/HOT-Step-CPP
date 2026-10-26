@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import {
-  HEARTMULA_RECIPE_DEFAULTS, type HeartmulaRecipe,
+  HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS, type HeartmulaPreviewSettings, type HeartmulaRecipe,
 } from '../../contracts/heartmulaTraining.js';
 
 export const HEARTMULA_RECIPE_KEYS = Object.keys(HEARTMULA_RECIPE_DEFAULTS) as (keyof HeartmulaRecipe)[];
@@ -86,6 +86,52 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
     if (!Number.isFinite(n) || n <= 0 || n > (key === 'learningRate' ? 1 : 1024)) throw new Error(`${key} is out of range`);
     r[key] = n;
   }
+  if (src.loraDropout !== undefined) {
+    const n = Number(src.loraDropout);
+    if (!Number.isFinite(n) || n < 0 || n >= 1) throw new Error('loraDropout must be at least 0 and below 1');
+    r.loraDropout = n;
+  }
+  return r;
+}
+
+const PREVIEW_KEYS = Object.keys(HEARTMULA_PREVIEW_DEFAULTS);
+
+function num(v: unknown, key: string, min: number, max: number, integer: boolean): number {
+  const n = Number(v);
+  if (typeof v === 'boolean' || v === null || !Number.isFinite(n) || n < min || n > max || (integer && !Number.isSafeInteger(n))) {
+    throw new Error(`preview ${key} must be ${integer ? 'a whole number' : 'a number'} from ${min} to ${max}`);
+  }
+  return n;
+}
+
+/**
+ * Preview settings over `base`; unknown keys and out-of-range values throw.
+ * Ranges are the engine request's (mapHeartmulaRequest), so a saved fixture
+ * can never be refused at render time.
+ */
+export function resolveHeartmulaPreviewSettings(
+  input: unknown, base: HeartmulaPreviewSettings = HEARTMULA_PREVIEW_DEFAULTS,
+): HeartmulaPreviewSettings {
+  if (input === undefined) return base;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('preview settings must be an object');
+  const src = input as Record<string, unknown>;
+  for (const key of Object.keys(src)) if (!PREVIEW_KEYS.includes(key)) throw new Error(`Unsupported HeartMuLa preview option: ${key}`);
+  const r: HeartmulaPreviewSettings = { ...base };
+  for (const key of ['tags', 'lyrics'] as const) {
+    if (src[key] === undefined) continue;
+    const limit = key === 'tags' ? 4096 : 32768;
+    if (typeof src[key] !== 'string' || Buffer.byteLength(src[key]) > limit) throw new Error(`preview ${key} must be text of at most ${limit} bytes`);
+    r[key] = src[key];
+  }
+  if (!r.tags.trim()) throw new Error('preview tags must not be empty');
+  if (src.everySteps !== undefined) r.everySteps = num(src.everySteps, 'everySteps', 0, 100_000, true);
+  if (src.seconds !== undefined) r.seconds = num(src.seconds, 'seconds', 5, 240, true);
+  if (src.seed !== undefined) r.seed = num(src.seed, 'seed', 0, 0xffffffff, true);
+  if (src.temperature !== undefined) r.temperature = num(src.temperature, 'temperature', Number.MIN_VALUE, 4, false);
+  if (src.topk !== undefined) r.topk = num(src.topk, 'topk', 1, 8197, true);
+  if (src.cfgScale !== undefined) r.cfgScale = num(src.cfgScale, 'cfgScale', 1, 10, false);
+  if (src.codecSteps !== undefined) r.codecSteps = num(src.codecSteps, 'codecSteps', 1, 100, true);
+  if (src.codecGuidance !== undefined) r.codecGuidance = num(src.codecGuidance, 'codecGuidance', 1, 10, false);
   return r;
 }
 
@@ -100,10 +146,15 @@ export function buildHeartmulaPrepareArgs(o: {
 
 export function buildHeartmulaTrainArgs(o: {
   dataDir: string; runDir: string; modelsDir: string; recipe: HeartmulaRecipe; name: string; resume: boolean;
+  /** Pause at this step with a checkpoint (exit 3); a preview segment ends here. */
+  stopAfter?: number;
 }): string[] {
   const r = o.recipe;
   return ['heartmula-train', '--data', o.dataDir, '--out', o.runDir, '--models', o.modelsDir,
     '--steps', String(r.steps), '--rank', String(r.rank), '--alpha', String(r.alpha), '--lr', String(r.learningRate),
     '--grad-accum', String(r.gradAccum), '--seed', String(r.seed), '--save-every', String(r.checkpointEvery),
-    '--name', o.name, ...(o.resume ? ['--resume'] : [])];
+    // auto picks the fastest attention the card has and keeps as many blocks un-recomputed as the free VRAM allows,
+    // so the same run fits a small card and is quick on a big one. Losses are identical in every mode.
+    '--attn', 'auto', '--keep-layers', 'auto', '--lora-dropout', String(r.loraDropout ?? 0),
+    '--name', o.name, ...(o.stopAfter ? ['--stop-after', String(o.stopAfter)] : []), ...(o.resume ? ['--resume'] : [])];
 }

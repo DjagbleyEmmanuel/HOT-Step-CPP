@@ -19,8 +19,17 @@ import {
 import type { HeartmulaTrainJobOpts } from './heartmulaRunner.js';
 import type { TrainingDatasetRow } from './types.js';
 
-/** The 3B trainer's measured peak is about 18 GiB allocated; below this a step cannot fit. */
-export const HEARTMULA_MIN_VRAM_MB = 20 * 1024;
+/**
+ * The smallest card the trainer is expected to fit on. The trainer's own peak
+ * allocation is 10.41 GiB with every block recomputed (`--keep-layers -1`, the
+ * smallest mode) and 15.36 GiB with none (the default on a big card), measured
+ * on clip B at rank 64 (engine/docs/HEARTMULA_TRAINING_CONTRACT.md section 8.1).
+ * `--keep-layers auto` picks the largest mode that fits the free VRAM, so the
+ * floor is the smallest mode plus 1.5 GiB for the CUDA context and fragmentation;
+ * a card near it trains slower, not worse. LoRA dropout adds 1.3 GiB, which the
+ * trainer's own admission check rejects if it does not fit.
+ */
+export const HEARTMULA_MIN_VRAM_MB = Math.ceil((10.41 + 1.5) * 1024);
 
 /**
  * Why the card training would run on cannot train, or null. Gated per device:
@@ -32,7 +41,7 @@ export function heartmulaDeviceProblem(gpus: NvidiaGpu[] = listGpusSync()): stri
   try { mb = selectedGpuMemoryMB(undefined, gpus); } catch (err: any) { return err.message; }
   if (mb === null) return 'The selected GPU could not be identified, so HeartMuLa training cannot check that it fits.';
   return mb >= HEARTMULA_MIN_VRAM_MB ? null
-    : `The selected GPU has ${Math.round(mb / 1024)} GB; HeartMuLa training needs at least ${HEARTMULA_MIN_VRAM_MB / 1024} GB.`;
+    : `The selected GPU has ${(mb / 1024).toFixed(1)} GB; HeartMuLa training needs at least ${(HEARTMULA_MIN_VRAM_MB / 1024).toFixed(1)} GB.`;
 }
 
 /** CUDA builds on a big enough card only: the trainer is validated nowhere else. */

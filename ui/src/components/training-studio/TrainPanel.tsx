@@ -31,6 +31,13 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: Training
   // ACE owns its status-dependent gates, including the initial dataset picker.
   if (target === 'ace') return <>{plugin.renderTrain?.({ datasetId: detail?.id ?? '', slug: detail?.slug ?? '', trigger: detail?.customTag || '', section })}</>;
 
+  // Review is the plug-in's own page (HeartMuLa's checkpoint previews); it sits here for the job stream above.
+  if (section === 'review' && plugin.renderReview) {
+    return detail
+      ? <div className="flex flex-col gap-4">{plugin.renderReview({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}</div>
+      : <p className="text-xs text-zinc-500">{t('trainingStudio.heartmula.reviewPickDataset', 'Open a dataset to review its checkpoint previews.')}</p>;
+  }
+
   const header = (
     <>
     <div className="flex items-start gap-3">

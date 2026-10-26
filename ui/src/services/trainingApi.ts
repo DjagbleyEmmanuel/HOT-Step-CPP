@@ -25,7 +25,8 @@
 import { apiClient, type ReadOptions } from './httpClient';
 import type { Sa3DatasetAssets } from '../../../server/src/contracts/training';
 import type {
-  HeartmulaCheckpointNowRequest, HeartmulaDatasetAssets, HeartmulaPrepareRequest, HeartmulaStatusResponse, HeartmulaTrainRequest,
+  HeartmulaCheckpointNowRequest, HeartmulaDatasetAssets, HeartmulaPrepareRequest, HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest,
+  HeartmulaStatusResponse, HeartmulaTrainRequest,
 } from '../../../server/src/contracts/heartmulaTraining';
 
 export interface TrainingTarget { worker?: string | null }
@@ -101,6 +102,16 @@ export function startHeartmulaTraining(id: string, opts: HeartmulaTrainRequest, 
 /** Checkpoint now and stop; the run stays resumable. */
 export function requestHeartmulaCheckpoint(id: string, body: HeartmulaCheckpointNowRequest, target?: TrainingTarget): Promise<{ ok: boolean }> {
   return request(`/datasets/${encodeURIComponent(id)}/heartmula-checkpoint`, { method: 'POST', ...jsonBody(body) }, target);
+}
+
+/** Takes of one run (the newest run when `run` is omitted). Audio is played from each take's server-validated `audioUrl`. */
+export function getHeartmulaPreviews(id: string, run: string, opts?: TrainingReadOptions): Promise<HeartmulaPreviewListResponse> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-previews?run=${encodeURIComponent(run)}`, undefined, opts);
+}
+
+/** Render, or retry, one take at the base (step 0) or a saved checkpoint. Resolves with the refreshed list. */
+export function renderHeartmulaPreview(id: string, body: HeartmulaPreviewRenderRequest, target?: TrainingTarget): Promise<HeartmulaPreviewListResponse> {
+  return request(`/datasets/${encodeURIComponent(id)}/heartmula-previews/render`, { method: 'POST', ...jsonBody(body) }, target);
 }
 
 export type MergePolicy =

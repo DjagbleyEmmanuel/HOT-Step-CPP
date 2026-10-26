@@ -430,8 +430,9 @@ compatibility and available VRAM before loading weights. A refusal preserves the
 requested settings and reports the required and available memory.
 
 One GGUF LM LoRA can be selected, with strength from 0 to 2. Put converted adapters
-under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Safetensors
-training exports must be converted before runtime use. Queued jobs retain their
+under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Training Studio
+trains and publishes GGUF adapters there directly, see [HeartMuLa training](training/heartmula.md);
+Safetensors training exports from other tools must be converted before runtime use. Queued jobs retain their
 component and adapter choices when the picker changes or another backend is selected.
 
 | Capability | HeartMuLa |

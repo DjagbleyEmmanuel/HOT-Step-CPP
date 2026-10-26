@@ -535,6 +535,44 @@ for the API, preparation and integrated checker, and the
 [CLI reference](../../engine/docs/ARCHITECTURE.md#stable-audio-3-training-cli)
 for standalone arguments.
 
+## HeartMuLa training
+
+`ace-train heartmula-prepare` and `ace-train heartmula-train` train a rank-64 LoRA
+on the 28 backbone attention blocks of HeartMuLa 3B, with the local decoder, the
+embeddings and the codec frozen. The spec, the loss definition, the tolerances and
+the measured numbers are in
+[HEARTMULA_TRAINING_CONTRACT.md](../../engine/docs/HEARTMULA_TRAINING_CONTRACT.md);
+the code is `engine/src/train/heartmula-prepare.h` and
+`engine/src/train/heartmula-train-{graph,run,state}.h`. The CLI contract, the
+`HMTRAIN {json}` event stream and the exit codes (0 finished, 3 paused at a
+checkpoint, 4 cancelled) are the header of `heartmula-train-run.h`.
+
+`engine/tools/heartmula-train-reference.py` is the offline oracle. It is not part
+of the app and nothing runs it at training time. It writes the hashed fixtures
+(prompts, codes, logits, losses, gradients, AdamW steps) that `ace-train
+heartmula-train --selftest <fixture dir>` checks against, and the Python step-time
+and memory baseline the native trainer is compared with. Fixtures are large and live
+outside the repo; the contract lists their paths and SHA-256 hashes.
+
+Defaults the server passes: `--attn auto` takes the first of BF16 flash attention,
+TF32 flash attention and exact attention that the device supports. `--keep-layers
+auto` keeps the largest number of top blocks (28, 24, ... 0) that fits the free
+VRAM without recomputing them, else recomputes every block. Losses are bit-identical
+in every mode. `--lora-dropout` defaults to 0 (0.05 costs 8% step time and 1.3 GiB).
+Contract section 8.1 has the per-setting table; on an RTX 5090 the default step on a
+84.7-second clip, four micro-batches, takes 908 ms against the Python recipe's
+1336 ms.
+
+The converter `engine/tools/convert-heartmula.py --only encoder` builds the four
+HeartCodec encoder files Prepare needs. Besides `HeartCodec-oss` and
+`HeartCodec-oss-encoder` under `--src`, it also reads the root `tokenizer.json` and
+`gen_config.json` (their hashes go into the manifest), so those two files must sit
+next to the two HeartCodec directories. The resulting `heartcodec-rvq-F32.gguf` must
+be byte-identical to the installed one.
+
+The server side (runner, previews, routes) is in
+[training internals](training-internals.md#heartmula-backbone-lora-training).
+
 ## Stable Audio 3 sampling
 
 `POST /sa3-synth` generates from caption tokens using the same SA3 model and
@@ -705,6 +743,8 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-joint-train` | YuE2 AR and NAR joint training. `--eval-base-loss` trains nothing: it prints the base planner CE and decoder flow MSE per song (the Optimise phase). `--eval-adapted --resume <record> [--eval-dataset <held-out dataset.json>]` also trains nothing: it restores the checkpoint's adapters and prints base vs adapted planner CE and decoder MSE per song ([training internals](training-internals.md)). `--resume` restores optimizer state exactly; older 8-bit records load with a note ([training internals](training-internals.md)) |
 | `yue2-optim-check` | Optimizer self-check |
 | `yue2-batch-check` | CPU self-check of the AR sequence layouts the joint trainer builds, no model needed |
+| `heartmula-prepare` | Sample list (audio, tags, lyrics) to HeartCodec codes and prompt ids, one sample per track, none cut ([HeartMuLa training](#heartmula-training)) |
+| `heartmula-train` | Train a HeartMuLa backbone LoRA from a prepared cache; `--stop-after` and `--resume` drive checkpoint previews ([HeartMuLa training](#heartmula-training)) |
 | `spike` | Phase-0 evidence runs |
 
 `yue2-prepare-aitk --caption-dropout-trigger <text>` sets the exact style text

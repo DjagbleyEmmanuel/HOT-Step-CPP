@@ -297,7 +297,7 @@ timeouts in `aceClient.ts` are long for that reason.
 
 ## Backends
 
-The server can drive four model families through one interface. The registry is
+The server can drive five model families through one interface. The registry is
 `server/src/services/backends/registry.ts`, and the interface (`EngineBackend`) is in
 `services/backends/types.ts`. Registration order is the backend toggle's order.
 
@@ -307,6 +307,7 @@ The server can drive four model families through one interface. The registry is
 | `minimax-m3` | MiniMax-Music3 | `services/backends/minimax/` | `engine/src/minimax/`, `/mm3/*` |
 | `yue2` | YuE2 | `services/backends/yue2/` | `engine/src/yue2/`, `/yue2/*` |
 | `sa3` | Stable Audio 3 | `services/backends/sa3/` | `engine/src/sa3-*.h`, `/sa3/props`, `/sa3-synth` |
+| `heartmula` | HeartMuLa | `services/backends/heartmula/` | `engine/src/heartmula/`, `/heartmula/*` |
 
 Each backend reports a capability manifest (duration limits, whether it has an LM, plugins,
 adapters and so on). The UI reads it from `GET /api/capabilities` and hides controls a
@@ -449,8 +450,8 @@ map of top-level pieces.
 | `engine/src/minimax/` | MiniMax-Music3 port and its `/mm3/*` routes (`mm3-server.h`, `mm3-job.h`) |
 | `engine/src/yue2/` | YuE2 port and its `/yue2/*` routes (`yue2-server.h`), plus the SheetSage lead-sheet model |
 | `engine/src/moss/` | MOSS-Music audio encoder used by `ace-caption` |
-| `engine/src/train/` | Training code behind `ace-train` (ACE-Step DiT and LM, MM3, YuE2, SA3) |
-| `engine/tools/ace-train.cpp` | Training CLI. Subcommands include `preprocess`, `train-dit`, `train-lm`, `mm3-lm-train`, `mm3-train-dit`, `yue2-joint-train`, `yue2-sheet`, `sa3-train` and others |
+| `engine/src/train/` | Training code behind `ace-train` (ACE-Step DiT and LM, MM3, YuE2, SA3, HeartMuLa) |
+| `engine/tools/ace-train.cpp` | Training CLI. Subcommands include `preprocess`, `train-dit`, `train-lm`, `mm3-lm-train`, `mm3-train-dit`, `yue2-joint-train`, `yue2-sheet`, `sa3-train`, `heartmula-prepare`, `heartmula-train` and others |
 | `engine/plugins/` | Built-in Lua solvers, schedulers and guidance modes. See [plugins-authoring.md](plugins-authoring.md) |
 | `engine/ggml` | Submodule pinned to the HOT-ggml fork. See [ggml-fork.md](ggml-fork.md) |
 

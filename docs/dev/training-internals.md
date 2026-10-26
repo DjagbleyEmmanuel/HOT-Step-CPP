@@ -132,6 +132,75 @@ audio and clip count, the encoding cache only when its fingerprint validates,
 captured snapshots across the dataset's runs, and the newest published adapter.
 Readiness is never inferred from a finished run alone.
 
+## HeartMuLa backbone LoRA training
+
+Native backbone LoRA for HeartMuLa 3B. The engine side (spec, CLI, measured numbers)
+is [HeartMuLa training](engine.md#heartmula-training); this section is the server and
+UI side. The shared shapes are `server/src/contracts/heartmulaTraining.ts`.
+
+**Files.** `services/training/heartmulaPrepare.ts` (sample list, stale check),
+`heartmulaTrain.ts` (recipe and preview validation, model discovery, argv),
+`heartmulaRuns.ts` (run folders, status, checkpoints, publication), `heartmulaRunner.ts`
+(the two jobs), `heartmulaPreview.ts` (preview catalogue and render),
+`heartmulaStatus.ts` (readiness and the status route). Routes are `heartmula-*` in
+`routes/training.ts`. The UI is the HeartMuLa plug-in (`plugins/heartmula.tsx`),
+`useHeartmulaController.ts` and the three `Heartmula*Card.tsx` leaves; `TrainPanel`
+hosts the plug-in's Review page.
+
+**Runs.** A run lives at `<adapters>/heartmula-runs/<slug>/<adapter name>/<stamp>/`
+with `run.json` (the recipe and resolved preview settings), `status.json`, the
+trainer's `hm_train_state.bin` and `adapters/step-NNNNNN.gguf`, and `previews/`.
+Checkpoints stay outside `heartmula-lm-adapters`, so only a finished run reaches the
+generation picker. A stored live state with no job behind it reads as failed and
+stays resumable. A resume keeps the saved recipe and preview settings.
+
+**Readiness.** CUDA build, `ace-train` present, the four base files, and a selected
+GPU of at least `HEARTMULA_MIN_VRAM_MB`. That floor is the trainer's measured
+smallest mode (10.41 GiB allocated, every block recomputed) plus 1.5 GiB for the CUDA
+context. The default mode needs 15.36 GiB; `--keep-layers auto` bridges the gap.
+Prepare also needs the encoder pack; there is no fallback to ACE preprocessing.
+
+**Segmented runs and previews.** `runHeartmulaTrainJob` follows YuE2's lifecycle. With
+previews on (`everySteps > 0`):
+
+1. Before the first segment, the base model is rendered (the engine is up).
+2. Each segment runs `ace-train heartmula-train --stop-after N --resume`, where N is
+   the next multiple of `everySteps` below the run's total. The trainer checkpoints
+   with reason `stop` and exits 3; `runYue2AceTrain` restarts the engine.
+3. `renderHeartmulaPreview` renders the saved `step-N.gguf` through `heartmulaClient`
+   and unloads the model. The next segment stops the engine again and resumes.
+4. After exit 0 the adapter is published, then the final take is rendered, even when
+   the last step is off the cadence. A step that already has a done take is not
+   rendered twice.
+
+A checkpoint with reason `now` (the Save and pause button) ends the run as paused, not
+as a preview pause. On resume, a cadence step with no take is rendered first. A failed
+render is recorded and training goes on. A render that cannot leave the engine clean
+(the model did not unload) throws `HeartmulaPreviewCleanupError` and fails the run, with
+the checkpoints kept. Cancel marks the take `skipped` and cancels the engine job. A run
+never trains while it previews, and `POST .../heartmula-previews/render` and the train
+start each refuse while the other is active.
+
+**Provenance.** Each take records its run, kind (`base`, `step`, `final`), step, the
+resolved fixture (tags, lyrics, seed, sampler), the adapter file relative to the run
+and its SHA-256, the render time, and the pause it cost (trainer `stop` checkpoint to
+the next trainer `start`: engine restart, render, engine stop, model reload). Takes
+are stored in `previews/index.json`, audio first and the record after, and served only
+by the file name a done record holds.
+
+**Previews render on the trainer's base.** An adapter is bound to its base model by
+fingerprint, so a take always renders on 3B F16 (`HEARTMULA_TRAIN_BASE`), whatever the
+user generates with. A render on another variant or quantization is refused by the
+engine with `base_fingerprint differs`; this was found in the first real run and is why
+the pick is fixed.
+
+**Measured in the app** (RTX 5090, nothing else on the GPU, `--attn auto --keep-layers
+auto`: flash-bf16, 28 blocks kept): four 94-second samples, 4 micro-batches, median
+1001 ms per step and 15.78 GiB allocated, which scales to the engine contract's
+908 ms at its 84.7-second clip. A 30-second preview took 13 s to render and paused
+training for 18 to 20 s. Cancelling during a preview left the checkpoint, marked the
+take skipped, returned the GPU to its idle level and left the engine ready to generate.
+
 ## YuE2 joint training
 
 The opt-in `fixed-recipe` method (the joint card's HOT-Approved button; `applyFixedRecipe` in `yue2JointTrainRunner.ts`) defaults to the bf16 LM base (the request's `base` is kept when set, and the standalone prepare route takes the same `base`), rank-64 LoRA (alpha 64) at the native four fused sites, 1,500 steps saved every 200 at seed 42, one song per update, whole-song AR, a 1,500-frame NAR crop, CE weight 0.5 and KL weight 0.2. It uses AdamW through LmOptim at LR 1e-4 with epsilon 1e-6, constant LR, an AR LR multiplier of 0.5, caption and lead-sheet dropout of 0.5 each, and no text or lyric dropout or lyric timing. Like every method it trains on a -14 LUFS cache, but nothing refuses another level. The server forces these values, apart from the base, even if a saved form contains other values. Its runner omits `--nar-drift` and retains the installed v9 companion decoder.

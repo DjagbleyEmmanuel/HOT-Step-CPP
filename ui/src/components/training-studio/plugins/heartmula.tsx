@@ -24,6 +24,8 @@ export interface HeartmulaTrainingView {
   onCancel: HeartmulaTrainCardProps['onCancel'];
   previews: HeartmulaPreviewCardProps['previews'];
   previewError?: string | null;
+  /** A manual preview render is in flight (the server refuses a second one). */
+  previewBusy?: boolean;
   onRenderPreview?: HeartmulaPreviewCardProps['onRender'];
 }
 
@@ -43,7 +45,7 @@ function HeartmulaPage({ context, useController, review = false }: {
   return <div className="flex flex-col gap-4">
     {view.error && <p role="alert" className="text-xs text-red-500">{view.error}</p>}
     {view.loading && !view.status && <p role="status" className="text-xs text-zinc-500">{t('trainingStudio.heartmula.loading', 'Loading HeartMuLa training status…')}</p>}
-    {review ? <HeartmulaPreviewCard previews={view.previews} busy={view.busy} error={view.previewError} onRender={view.onRenderPreview} />
+    {review ? <HeartmulaPreviewCard previews={view.previews} busy={view.busy || !!view.previewBusy} error={view.previewError} onRender={view.onRenderPreview} />
       : view.status && (context.section === 'prepare'
         ? <HeartmulaPrepareCard key={view.scopeKey} status={view.status.prepare} busy={view.busy} preparing={view.preparing}
           blockedReason={view.prepareBlockedReason} onPrepare={view.onPrepare} />
@@ -53,11 +55,8 @@ function HeartmulaPage({ context, useController, review = false }: {
   </div>;
 }
 
-/** Slice 5 supplies its registry facts and existing state owner here. The
- * review renderer is also exposed for the Review phase host in slice 7. */
-export function createHeartmulaPlugin({ target, useController }: HeartmulaPluginIntegration): TrainingPlugin & {
-  renderReview: NonNullable<TrainingPlugin['renderTrain']>;
-} {
+/** The integration supplies its registry facts and existing state owner here; TrainPanel hosts the Review page. */
+export function createHeartmulaPlugin({ target, useController }: HeartmulaPluginIntegration): TrainingPlugin {
   return {
     ...target,
     renderPrepare: context => <HeartmulaPage context={context} useController={useController} />,

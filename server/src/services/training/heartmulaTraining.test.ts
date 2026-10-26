@@ -12,7 +12,7 @@ config.aceServer.models = path.join(root, 'models');
 const train = await import('./heartmulaTrain.js');
 const runs = await import('./heartmulaRuns.js');
 const prep = await import('./heartmulaPrepare.js');
-const { HEARTMULA_RECIPE_DEFAULTS } = await import('../../contracts/heartmulaTraining.js');
+const { HEARTMULA_RECIPE_DEFAULTS, HEARTMULA_PREVIEW_DEFAULTS } = await import('../../contracts/heartmulaTraining.js');
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 const ds = { id: 'ds1', slug: 'demo', customTag: 'trig' };
@@ -25,6 +25,28 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.throws(() => train.resolveHeartmulaRecipe({ rank: 1.5 }), /rank/);
   assert.throws(() => train.resolveHeartmulaRecipe({ learningRate: -1 }), /learningRate/);
   assert.throws(() => train.resolveHeartmulaRecipe({ nope: 1 }), /Unsupported/);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.loraDropout, 0);
+  assert.equal(train.resolveHeartmulaRecipe({ loraDropout: 0.05 }).loraDropout, 0.05);
+  assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: 1 }), /loraDropout/);
+  assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: -0.1 }), /loraDropout/);
+});
+
+test('preview settings: defaults, overrides, and every bad value refused', () => {
+  const D = HEARTMULA_PREVIEW_DEFAULTS;
+  assert.deepEqual(train.resolveHeartmulaPreviewSettings(undefined), D);
+  assert.deepEqual(train.resolveHeartmulaPreviewSettings({}), D);
+  assert.equal(train.resolveHeartmulaPreviewSettings({ everySteps: 0 }).everySteps, 0);
+  assert.equal(train.resolveHeartmulaPreviewSettings({ seed: 7, seconds: 60 }).seconds, 60);
+  for (const bad of [{ nope: 1 }, { everySteps: -1 }, { everySteps: 1.5 }, { seconds: 1 }, { seconds: 241 }, { temperature: 0 }, { topk: 0 },
+    { cfgScale: 0.5 }, { codecSteps: 0 }, { codecGuidance: 11 }, { tags: ' ' }, { tags: 5 }, { seed: -1 }, { seed: true }]) {
+    assert.throws(() => train.resolveHeartmulaPreviewSettings(bad), /preview|Unsupported/, JSON.stringify(bad));
+  }
+  assert.throws(() => train.resolveHeartmulaPreviewSettings([]), /object/);
+  // a new run stores the resolved fixture, and a bad one refuses the start
+  const made = runs.resolveHeartmulaRun(ds, { preview: { everySteps: 50 } });
+  assert.equal((made.record.preview as typeof D).everySteps, 50);
+  assert.equal((made.record.preview as typeof D).tags, D.tags);
+  assert.throws(() => runs.resolveHeartmulaRun(ds, { preview: { seconds: 0 } }), /preview seconds/);
 });
 
 test('argv matches the trainer CLI contract', () => {
@@ -32,7 +54,10 @@ test('argv matches the trainer CLI contract', () => {
     dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: true,
   });
   assert.deepEqual(args.slice(0, 7), ['heartmula-train', '--data', 'D', '--out', 'R', '--models', 'M']);
-  assert.ok(args.join(' ').includes('--grad-accum 4 --seed 0 --save-every 100 --name a --resume'));
+  assert.ok(args.join(' ').includes('--grad-accum 4 --seed 0 --save-every 100 --attn auto --keep-layers auto --lora-dropout 0 --name a --resume'));
+  assert.ok(!args.includes('--stop-after'));
+  const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
+  assert.ok(seg.join(' ').includes('--lora-dropout 0.05 --name a --stop-after 100'));
   const prepare = train.buildHeartmulaPrepareArgs({ samplesJson: 'S', outDir: 'O', modelsDir: 'M', encoderDir: 'E', force: true });
   assert.deepEqual(prepare, ['heartmula-prepare', '--dataset', 'S', '--out', 'O', '--models', 'M', '--encoder', 'E', '--force']);
 });
@@ -67,7 +92,7 @@ test('runs: new run, resume rules, foreign dataset refused', () => {
   assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: '../../x/1' }), /Invalid/);
   assert.throws(() => runs.resolveHeartmulaRun(ds, { adapterName: '../x' }), /adapterName/);
   assert.throws(() => runs.resolveHeartmulaRun(ds, { bogus: 1 }), /Unsupported/);
-  assert.equal(runs.listHeartmulaRuns(ds.id, ds.slug).length, 1);
+  assert.ok(runs.listHeartmulaRuns(ds.id, ds.slug).some(r => r.id === first.id));
 });
 
 test('status: a stored live state with no job behind it reads as failed and resumable', () => {
@@ -166,12 +191,12 @@ test('device gate: refuses a small, absent or unidentifiable selected GPU', asyn
   const { heartmulaDeviceProblem } = await import('./heartmulaStatus.js');
   const gpu = (index: number, memoryMB: number) => ({ index, uuid: `GPU-${index}`, name: 'g', memoryMB });
   assert.equal(heartmulaDeviceProblem([gpu(0, 24 * 1024)]), null);
-  assert.match(heartmulaDeviceProblem([gpu(0, 8 * 1024)]) ?? '', /needs at least 20 GB/);
+  assert.match(heartmulaDeviceProblem([gpu(0, 8 * 1024)]) ?? '', /needs at least 11\.9 GB/);
   assert.match(heartmulaDeviceProblem([]) ?? '', /could not be identified/);
   const two = [gpu(0, 24 * 1024), gpu(1, 8 * 1024)];
   assert.equal(heartmulaDeviceProblem(two), null); // auto picks the larger card
   config.aceServer.cudaVisibleDevices = 'GPU-1';
-  try { assert.match(heartmulaDeviceProblem(two) ?? '', /needs at least 20 GB/); } finally { config.aceServer.cudaVisibleDevices = ''; }
+  try { assert.match(heartmulaDeviceProblem(two) ?? '', /needs at least 11\.9 GB/); } finally { config.aceServer.cudaVisibleDevices = ''; }
 });
 
 test('a missing encoder pack is described with the file names and the install step', () => {

@@ -78,7 +78,7 @@ export interface TrainingReadiness {
 // ── Rendering ────────────────────────────────────────────────────────────
 
 /** The page of a phase a plug-in is asked to draw. */
-export type TrainingSection = 'prepare' | 'optimise' | 'train';
+export type TrainingSection = 'prepare' | 'optimise' | 'train' | 'review';
 
 export interface TrainingRenderContext {
   datasetId: string;
@@ -103,6 +103,8 @@ export interface TrainingPlugin extends TrainingTargetSpec {
   renderOptimise?(ctx: TrainingRenderContext): ReactNode;
   /** The train page body for targets that own it. ACE's remains in TrainPanel until it migrates. */
   renderTrain?(ctx: TrainingRenderContext): ReactNode;
+  /** The Review page for targets whose checkpoint previews are per dataset (HeartMuLa); others keep the shared review list. */
+  renderReview?(ctx: TrainingRenderContext): ReactNode;
   /** Optional "perform all" entry, for shells that sequence stages. */
   performAll?(ctx: TrainingExecuteContext): Promise<void>;
 }

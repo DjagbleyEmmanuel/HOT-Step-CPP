@@ -52,6 +52,7 @@ In sidebar order. The sidebar lists only the studios the active backend can run.
 | [ACE-Step 1.5](user/training/ace-step.md) | LM and DiT adapters: dataset, settings, checkpoints |
 | [MiniMax-Music3](user/training/minimax-music3.md) | Planner LM adapters: rank, optimiser, steps, which checkpoint to ship |
 | [YuE2](user/training/yue2.md) | AR and NAR adapters: the staged chain, refinement, review |
+| [HeartMuLa](user/training/heartmula.md) | Backbone LoRA: Prepare, Train, checkpoint previews, memory and step time |
 | [Stable Audio 3](user/training/sa3.md) | Instrumental Medium DoRA-rows: vocal stripping, recipe, resume and audition |
 
 ## For contributors and agents

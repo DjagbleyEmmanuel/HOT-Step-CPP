@@ -70,6 +70,9 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   POST   /datasets/:id/train-lm                       — start an LM LoRA training job
 //   GET    /datasets/:id/train-lm                       — LM adapter / codes status
 //   POST   /datasets/:id/train-dit                      — start a DiT LoRA training job
+//   GET    /datasets/:id/heartmula-previews?run=        — HeartMuLa checkpoint-preview takes
+//   POST   /datasets/:id/heartmula-previews/render      — render or retry one take (base or a saved step)
+//   GET    /datasets/:id/heartmula-previews/audio?run=&file= — one HeartMuLa preview WAV
 //   POST   /datasets/:id/sa3-train                      — prepare and train SA3 Medium DoRA-rows
 //   GET    /datasets/:id/sa3-train                      — readiness, recipe and resumable SA3 runs
 //   GET    /datasets/:id/sa3-previews?run=              — SA3 checkpoint-preview records
@@ -110,8 +113,14 @@ import {
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
 import { heartmulaReadiness, heartmulaStatus } from '../services/training/heartmulaStatus.js';
 import { heartmulaPrepareStatus } from '../services/training/heartmulaPrepare.js';
-import { missingEncoderMessage } from '../services/training/heartmulaTrain.js';
-import { resolveHeartmulaRun } from '../services/training/heartmulaRuns.js';
+import { missingEncoderMessage, resolveHeartmulaPreviewSettings } from '../services/training/heartmulaTrain.js';
+import {
+  heartmulaCheckpointSteps, heartmulaRunById, HEARTMULA_RUN_ID, listHeartmulaRuns, resolveHeartmulaRun,
+} from '../services/training/heartmulaRuns.js';
+import {
+  heartmulaPreviewAudioPath, heartmulaPreviewBusy, heartmulaPreviewKind, listHeartmulaPreviewRecords, renderHeartmulaPreview,
+} from '../services/training/heartmulaPreview.js';
+import { HEARTMULA_PREVIEW_DEFAULTS, type HeartmulaPreviewListResponse } from '../contracts/heartmulaTraining.js';
 import { requestHeartmulaCheckpoint, type HeartmulaTrainJobOpts } from '../services/training/heartmulaRunner.js';
 import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
@@ -6042,8 +6051,7 @@ router.post('/datasets/:id/sa3-train', (req: Request, res: Response) => {
 
 // ── HeartMuLa backbone LoRA (contracts/heartmulaTraining.ts) ─────────────
 // No ACE preprocessing anywhere on this path: prepare encodes with the
-// HeartCodec encoder pack and the trainer reads that cache. Previews are the
-// preview slice's routes.
+// HeartCodec encoder pack and the trainer reads that cache.
 
 router.get('/datasets/:id/heartmula-status', async (req: Request, res: Response) => {
   const ds = repo.getDataset(String(req.params.id));
@@ -6054,6 +6062,7 @@ router.get('/datasets/:id/heartmula-status', async (req: Request, res: Response)
 /** Shared admission for the two HeartMuLa starts; returns an error text, or null when the job may start. */
 function heartmulaBlocked(ds: TrainingDatasetRow, needEncoder: boolean): string | null {
   if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) return 'A job or pipeline is queued or running for this dataset.';
+  if (listHeartmulaRuns(ds.id, ds.slug).some(r => heartmulaPreviewBusy(r.dir))) return 'A checkpoint preview is rendering; training waits until it ends.';
   const ready = heartmulaReadiness();
   if (ready.backend !== 'cuda') return `HeartMuLa training needs a CUDA engine build (this one is ${ready.backend}).`;
   if (!aceTrainExe()) return 'ace-train was not found next to ace-server — rebuild the engine';
@@ -6111,6 +6120,83 @@ router.post('/datasets/:id/heartmula-checkpoint', (req: Request, res: Response) 
   }
   if (!requestHeartmulaCheckpoint(job)) { res.status(409).json({ error: 'The trainer is still loading; try again once it reports its first step' }); return; }
   res.status(202).json({ ok: true });
+});
+
+// ── HeartMuLa checkpoint previews ────────────────────────────────────────
+// The runner renders them between trainer segments; these routes list them,
+// retry one, and serve the audio by the file name a record holds.
+
+type HeartmulaPreviewRun = { id: string; dir: string; record: ReturnType<typeof heartmulaRunById>['record'] };
+
+/** The asked run (400 malformed, 404 unknown), or the dataset's newest when none is asked. */
+function heartmulaPreviewRun(ds: TrainingDatasetRow, asked: unknown, res: Response): HeartmulaPreviewRun | null | undefined {
+  const id = typeof asked === 'string' && asked.trim() ? asked.trim() : listHeartmulaRuns(ds.id, ds.slug)[0]?.id;
+  if (id === undefined) return null;
+  if (!HEARTMULA_RUN_ID.test(id)) { res.status(400).json({ error: 'Invalid HeartMuLa run' }); return undefined; }
+  try { return heartmulaRunById(ds.id, ds.slug, id); }
+  catch { res.status(404).json({ error: 'HeartMuLa run not found' }); return undefined; }
+}
+
+function heartmulaRunPreviewSettings(r: HeartmulaPreviewRun): ReturnType<typeof resolveHeartmulaPreviewSettings> {
+  try { return resolveHeartmulaPreviewSettings(r.record.preview, HEARTMULA_PREVIEW_DEFAULTS); } catch { return HEARTMULA_PREVIEW_DEFAULTS; }
+}
+
+function heartmulaPreviewList(ds: TrainingDatasetRow, r: HeartmulaPreviewRun | null): HeartmulaPreviewListResponse {
+  if (!r) return { run: null, settings: HEARTMULA_PREVIEW_DEFAULTS, previews: [] };
+  return { run: r.id, settings: heartmulaRunPreviewSettings(r),
+    previews: listHeartmulaPreviewRecords(r.dir).map(({ file, id: _id, ...p }) => ({ ...p,
+      audioUrl: p.status === 'done' && file && heartmulaPreviewAudioPath(r.dir, file)
+        ? `/api/training/datasets/${encodeURIComponent(ds.id)}/heartmula-previews/audio?run=${encodeURIComponent(r.id)}&file=${encodeURIComponent(file)}`
+        : null })) };
+}
+
+router.get('/datasets/:id/heartmula-previews', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    const r = heartmulaPreviewRun(ds, req.query.run, res);
+    if (r !== undefined) res.json(heartmulaPreviewList(ds, r));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/** Body: HeartmulaPreviewRenderRequest. Renders (or retries) one take at the base (step 0) or a saved checkpoint.
+ *  Never while a job runs on the dataset: previews and training do not share the GPU. */
+router.post('/datasets/:id/heartmula-previews/render', async (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+    if (typeof b.run !== 'string' || !b.run.trim()) { res.status(400).json({ error: 'HeartMuLa preview render needs a run' }); return; }
+    const r = heartmulaPreviewRun(ds, b.run, res);
+    if (!r) return;
+    const step = Number(b.step);
+    if (!Number.isSafeInteger(step) || (step !== 0 && !heartmulaCheckpointSteps(r.dir).includes(step))) {
+      res.status(400).json({ error: 'That run has no saved checkpoint at that step' }); return;
+    }
+    let settings;
+    try { settings = resolveHeartmulaPreviewSettings(b.settings, heartmulaRunPreviewSettings(r)); }
+    catch (err: any) { res.status(400).json({ error: err.message }); return; }
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) { res.status(409).json({ error: 'A job is queued or running; previews wait until it ends.' }); return; }
+    if (heartmulaPreviewBusy(r.dir)) { res.status(409).json({ error: 'A preview of this run is already rendering.' }); return; }
+    if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }
+    await runOnGpuLane(async () => {
+      await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings });
+    }, { label: 'heartmula checkpoint preview', family: 'heartmula' });
+    res.json(heartmulaPreviewList(ds, r));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/datasets/:id/heartmula-previews/audio', (req: Request, res: Response) => {
+  const ds = repo.getDataset(String(req.params.id));
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  try {
+    if (typeof req.query.run !== 'string' || !req.query.run.trim()) { res.status(400).json({ error: 'HeartMuLa preview audio needs a run' }); return; }
+    const r = heartmulaPreviewRun(ds, req.query.run, res);
+    if (!r) return;
+    const file = typeof req.query.file === 'string' ? heartmulaPreviewAudioPath(r.dir, req.query.file) : null;
+    if (!file) { res.status(404).json({ error: 'Preview audio not found' }); return; }
+    res.type('audio/wav').sendFile(file, { dotfiles: 'allow' }); // validated above; a data folder may sit under a dot directory
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {

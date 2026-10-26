@@ -43,6 +43,8 @@ export interface HeartmulaRecipe {
   seed: number;
   /** Write a resumable checkpoint every N steps; 0 = only on stop/finish. */
   checkpointEvery: number;
+  /** LoRA dropout on the adapter inputs, 0 <= p < 1. Advanced: 0.05 is the proven recipe (+8% step time, +1.3 GiB). */
+  loraDropout: number;
 }
 
 /** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
@@ -54,6 +56,7 @@ export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   gradAccum: 4,
   seed: 0,
   checkpointEvery: 100,
+  loraDropout: 0,
 };
 
 // ── Prepare ──────────────────────────────────────────────────────────────
@@ -255,6 +258,14 @@ export interface HeartmulaPreviewRecord {
   status: HeartmulaPreviewStatus;
   /** Server-validated URL under the audio route; null until `status` is 'done'. */
   audioUrl: string | null;
+  /** Provenance: the adapter file this take was rendered with, relative to the run folder; null for 'base'. */
+  adapter: string | null;
+  /** SHA-256 of that adapter file, so a take can be matched to the exact weights; null for 'base'. */
+  adapterSha256: string | null;
+  /** Wall time of the render itself (queue, synth, fetch), ms; null until done. */
+  renderMs: number | null;
+  /** What this preview cost the run: trainer exit to the next trainer start (engine restart, render, engine stop, model reload), ms; null when it did not pause a run. */
+  pauseMs: number | null;
   error: string | null;
   /** Epoch ms. */
   createdAt: number;
