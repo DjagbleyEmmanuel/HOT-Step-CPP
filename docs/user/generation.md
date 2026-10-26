@@ -12,6 +12,20 @@ time you open the app. A different browser, or one with its site data cleared, s
 the defaults listed below. To keep a set of settings you can return to, save a
 [profile](#profiles).
 
+## HeartMuLa controls
+
+Choose HeartMuLa in the engine picker. In Custom-Gen, Tags describes the genre,
+mood, instruments and vocal style; Lyrics keeps the song's words. Duration is
+an upper limit of 240 seconds. Auto lets the model end the song within that limit.
+A duration carried over from another backend is capped at 240 seconds.
+
+Models selects the variant, global language model, local decoder, codec flow and
+waveform decoder independently. Adapters selects a compatible HeartMuLa GGUF LoRA;
+None uses the base model. Adapter strength ranges from 0 to 2, with 1 as the
+default and 0 using base logits. Generation exposes the seed and the backend's
+sampling and codec controls. Model selections and sampling settings are remembered
+for this backend. Queued requests capture the component choices, adapter and strength.
+
 ## The bar at a glance
 
 | Section | What it holds |

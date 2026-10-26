@@ -2,8 +2,8 @@
 
 `engine/` is the C++17/GGML inference and training engine behind HOT-Step. It
 started as a fork of [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp)
-(ACE-Step 1.5 on GGML) and now also carries three more model families, MiniMax-Music3
-(MM3), YuE2 and Stable Audio 3 (SA3), plus a training toolchain, a Lua sampler-plugin
+(ACE-Step 1.5 on GGML) and now also carries MiniMax-Music3
+(MM3), YuE2, Stable Audio 3 (SA3) and HeartMuLa, plus a training toolchain, a Lua sampler-plugin
 host and optional TensorRT paths.
 
 This page is the map. For the request JSON and every CLI flag, see
@@ -18,6 +18,7 @@ toolchains, see [building.md](building.md).
 | `engine/src/` | Engine modules, header-only for the most part. `acestep-core` compiles only `request.cpp`, `model-store.cpp`, `pipeline-lm.cpp`, `pipeline-synth.cpp`, `pipeline-synth-ops.cpp` and `pipeline-understand.cpp` |
 | `engine/src/minimax/` | MiniMax-Music3 backend (`mm3-*.h`) |
 | `engine/src/yue2/` | YuE2 backend (`yue2-*.h`) and the SheetSage2 lead-sheet transcriber (`sheetsage-*.h`) |
+| `engine/src/heartmula/` | HeartMuLa global/local LMs, tokenizer, LoRA, HeartCodec encoder/decoder, pipeline and HTTP routes |
 | `engine/src/sa3-*.h` | Stable Audio 3: the DiT (`sa3-dit-ggml.h`), SAME autoencoder (`sa3-same-ggml.h`), T5Gemma text encoder (`sa3-t5gemma-enc.h`), the sampling loop behind `/sa3-refine` and `/sa3-synth` (`sa3-refine.h`), the checkpoint-preview resolver (`sa3-preview-resolver.h`) and the boot probe (`sa3-families.h`) |
 | `engine/src/train/` | Trainers and dataset preprocessors used by `ace-train` |
 | `engine/src/moss/` | MOSS-Music captioner used by `ace-caption` |
@@ -49,6 +50,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `mastering` | `tools/mastering.cpp` | Reference-based mastering (the matchering algorithm) |
 | `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`, `--monitor`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins. `--monitor` (Windows, WASAPI) plays a track through the chain live, driven by a control file the server rewrites atomically with an increasing `seq`; see the note below |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
+| `heartmula-generate` | `tools/heartmula-generate.cpp` | HeartMuLa text-to-music CLI using the same pipeline as `/heartmula/synth`, with seed, cancellation and audio checks |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
 | `yue2-train-gemm-precision-test` | `tools/yue2-train-gemm-precision-test.cpp` | The YuE2 trainer's BF16 GEMMs against `YUE2_AITK_PRECISION=strict-f32`, forward and backward, at YuE2 shapes on the first GPU |
 | `yue2-convrot8-cpu-numeric-test`, `yue2-*-metal-*-test` | `tools/yue2-*.cpp` | YuE2 training-op gates: the CPU ConvRot8 kernels bit for bit against a scalar oracle, and each Metal training kernel against the CPU backend or the Metal kernel it replaced. The Metal ones skip without a Metal device |
@@ -144,6 +146,35 @@ fixed 120 BPM file, byte for byte (`--validate-midi`).
 | `--abc-out <file> [--abc-ins <program>] [--abc-melody-only]` | Also write a YuE2 two-voice ABC lead sheet (`tools/midi-abc.h`) through SheetSage2's notation stage: voice notes → Vocal, one instrument's top line → Ins, a Krumhansl key estimate and half-bar template chords, notes pre-snapped to the 4-per-beat subbeat grid. Prints a `{"type":"abc",...}` summary line |
 | `--track <audio>` | Beats and grid only (needs `--beat-model` and `--beats-out`) |
 | `--self-test-grid` | Grid maths on synthetic beats with known answers |
+
+## HeartMuLa
+
+`heartmula/pipeline.h` runs tags and lyrics through the global language model and
+local decoder, then decodes eight RVQ codes per frame through HeartCodec's flow
+model and scalar waveform decoder. Output is stereo 48 kHz. Duration is capped
+at 240 seconds, or 3000 frames at 12.5 Hz; EOS can finish earlier. A sampled code
+8192 is reserved, outside the codec's 0..8191 range. The pipeline returns
+`bad_codes` before retaining that frame, including for `codes_only` requests.
+EOS tokens at 8193 or above still end generation normally.
+
+The tokenizer, global/local LM pair, RVQ, flow and waveform decoder are separate
+GGUF components. Discovery checks their metadata and dependencies; the LM pair
+must share a base fingerprint. LoRA targets the global LM. The codec encoder
+components are available for audio encoding but are not loaded for text generation.
+See [the component and HTTP contract](../../engine/docs/HEARTMULA_CONTRACT.md).
+
+LM and codec run in separate phases, with admission against free device memory
+before each load and cancellation checks throughout. Without keep-loaded, each
+phase unloads the other and completion frees both. Requested prompt and duration
+determine the KV allocation. CUDA admission uses NVML where available, matching
+the selected device by PCI identity, with a GGML fallback.
+
+`heartmula/server.h` registers `/heartmula/*` after the shared job system and the
+MM3/YuE2 unload handlers. `engine/verify-hooks.ps1` checks both this include and
+the `heartmula_register_routes()` call. Synth jobs use the shared worker and
+`/job` polling. `heartmula-generate` exercises the same pipeline from JSON;
+`node tools/engine-smoke.mjs` includes a fixed-seed HeartMuLa render when its
+models are installed.
 
 ## How ace-server is organised
 

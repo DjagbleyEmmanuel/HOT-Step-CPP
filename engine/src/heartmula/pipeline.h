@@ -886,6 +886,10 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
                 res->end_reason = "completed";
                 break;
             }
+            // Reject reserved code 8192 before another LM step or a codes-only return.
+            if (std::any_of(codes, codes + HEARTMULA_CODEBOOKS, [](int32_t c) { return c < 0 || c >= 8192; })) {
+                return finish("bad_codes", "a sampled code is outside the codec's 8192-entry codebook");
+            }
             res->codes.insert(res->codes.end(), codes, codes + HEARTMULA_CODEBOOKS);
         }
         res->frames   = (int64_t) res->codes.size() / HEARTMULA_CODEBOOKS;
@@ -905,7 +909,7 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
         res->end_reason = "completed";
     }
     for (int32_t c : res->codes) {
-        if (c >= 8192) {
+        if (c < 0 || c >= 8192) {
             return finish("bad_codes", "a sampled code is outside the codec's 8192-entry codebook");
         }
     }
