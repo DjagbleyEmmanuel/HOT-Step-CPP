@@ -34,7 +34,7 @@ import { formatMB, yue2AdapterHalfBytes } from '../../utils/yue2AdapterSize';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
-import { PreviewField, TrainingPreviewSettings, TrainingCheckpointLadder, TrainingRunPicker } from './TrainingPreviewPanel';
+import { PreviewField, TrainingPreviewSettings, TrainingCheckpointLadder, TrainingRunPicker, TrainingPresetChoice } from './TrainingPreviewPanel';
 import { TrainingRunPanel } from './Yue2StageCard';
 import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
@@ -1171,7 +1171,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {form.method !== 'fixed-recipe' && !activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <button type="button" disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
+          <TrainingPresetChoice selected={form.method === 'fixed-recipe'} disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
             method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 64, alpha: 64,
             steps: 1500, saveEvery: 200, seed: 42,
             optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
@@ -1180,21 +1180,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             gradAccum: 1, arCropFrames: 0, narCropFrames: 1500,
             ...YUE2_JOINT_FIXED_RECIPE_DROPOUTS,
             lyricTiming: false, cursorWeight: 0, calibrated: false, autoRefine: false,
-          })); }} className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${form.method === 'fixed-recipe'
-            ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
-            : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
+          })); }}>
             <span className="text-base font-bold">{t('trainingStudio.yue2.method.preset_fixed-recipe', 'HOT-Approved')}</span>
             <span className="text-xs text-zinc-500">1500 × 1 {t('trainingStudio.yue2.method.presetFixedSong', 'song')}</span>
-          </button>
-          {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
+          </TrainingPresetChoice>
+          {PRESETS.map(p => <TrainingPresetChoice key={p.key} selected={activePreset(form) === p.key} disabled={active || starting || preparing || yue2RunAllActive}
             onClick={() => setForm(previous => ({ ...previous,
-              ...(previous.method === 'fixed-recipe' ? DEFAULT_FORM : {}), ...presetValues(p) }))}
-            className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${activePreset(form) === p.key
-              ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
-              : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
+              ...(previous.method === 'fixed-recipe' ? DEFAULT_FORM : {}), ...presetValues(p) }))}>
             <span className="text-base font-bold">{t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}</span>
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
-          </button>)}
+          </TrainingPresetChoice>)}
         </div>
         {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.fixedRecipeNote', 'The server fixes the adapter, optimizer, loss, crop and timing settings for this method. The base defaults to bf16 and can be changed below.')}</p>}
         {form.method === 'fixed-recipe' && (form.base || 'bf16') !== 'bf16' && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.fixedRecipeBaseNote', 'Not ear-tested on this base: HOT-Approved was tuned and scored on bf16. A quantized base uses less VRAM.')}</p>}

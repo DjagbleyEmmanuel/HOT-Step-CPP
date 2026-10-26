@@ -1,14 +1,15 @@
-import { Loader2, Play } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { TrainingChart } from './TrainingChart';
-import { PreviewField, TrainingPreviewSettings, TrainingRunPicker } from './TrainingPreviewPanel';
-import { TrainingRunPanel } from './Yue2StageCard';
+import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPresetChoice } from './TrainingPreviewPanel';
+import { TrainingBatchCard, TrainingAllStagesCard, TrainingRunPanel } from './Yue2StageCard';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 
 export interface HeartmulaTrainCardProps {
-  children?: ReactNode;
   datasetId?: string;
   status: HeartmulaStatusResponse;
   slug: string;
@@ -34,18 +35,43 @@ const FIELDS: Array<{ key: keyof HeartmulaRecipe; label: string; info: string; m
   { key: 'checkpointEvery', label: 'Save every', info: 'Save resumable state every this many steps. Zero saves only when stopping or finishing. Preview cadence is separate.', min: 0, max: 1_000_000, step: 1 },
 ];
 
-export function HeartmulaTrainCard({ children, datasetId, status, slug, busy, trainStarted, blockedReason, onTrain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
+export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted, blockedReason, onTrain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
   const { t } = useTranslation();
   const [edits, setEdits] = useState<Partial<HeartmulaRecipe>>({});
   const [name, setName] = useState(slug);
   const [resumeRun, setResumeRun] = useState<string | null>(null);
   const [previewEvery, setPreviewEvery] = useState<number | null>(null);
-  const recipe = resumeRun ? status.runs.find(run => run.run === resumeRun)?.recipe ?? status.defaults : { ...status.defaults, ...edits };
+  const [manualResume, setManualResume] = useState('');
+  const [presetKey, setPresetKey] = useState('balanced');
+  const [presetName, setPresetName] = useState('');
+  const [presetError, setPresetError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const validRecipe = (value: unknown): value is HeartmulaRecipe => !!value && typeof value === 'object' && FIELDS.every(field => {
+    const number = (value as Record<string, unknown>)[field.key];
+    return typeof number === 'number' && Number.isFinite(number) && number >= field.min && number <= field.max
+      && (field.step !== 1 || Number.isInteger(number));
+  });
+  const [presets, setPresets] = useState<Array<{ name: string; recipe: HeartmulaRecipe }>>(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem('hs-heartmula-training-presets') ?? '[]');
+      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])) as unknown as HeartmulaRecipe })) : [];
+    } catch { return []; }
+  });
+  const persist = (next: typeof presets) => {
+    try { localStorage.setItem('hs-heartmula-training-presets', JSON.stringify(next)); setPresets(next); setPresetError(''); }
+    catch { setPresetError(t('trainingStudio.heartmula.presetStorageError', 'Could not save presets in this browser.')); }
+  };
+  const manualPath = manualResume.trim().replaceAll('\\', '/').replace(/\/$/, '');
+  const selectedResume = resumeRun ?? status.runs.find(item => item.run === manualPath || manualPath.endsWith('/' + item.run))?.run ?? null;
+  const recipe = selectedResume ? status.runs.find(run => run.run === selectedResume)?.recipe ?? status.defaults : { ...status.defaults, ...edits };
   const cadence = previewEvery ?? status.previewDefaults.everySteps;
   const run = status.run;
+  const [openedAt] = useState(Date.now);
+  const showRun = run && (['queued', 'running', 'previewing', 'checkpointing'].includes(run.state)
+    || run.updatedAt >= openedAt - 15 * 60_000);
   const ready = status.prepare.cacheValid && status.prepare.staleSamples === 0 && status.prepare.preparedSamples > 0;
-  const resume = resumeRun !== null;
-  const resumable = status.runs.some(item => item.run === resumeRun && item.resumable) && !busy;
+  const resume = resumeRun !== null || manualResume.trim() !== '';
+  const resumable = status.runs.some(item => item.run === selectedResume && item.resumable) && !busy;
   const jobLog = useTrainingStore(s => s.jobLog);
   const job = useTrainingStore(s => s.activeJob);
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
@@ -64,27 +90,109 @@ export function HeartmulaTrainCard({ children, datasetId, status, slug, busy, tr
       value={Number.isFinite(recipe[field.key]) ? recipe[field.key] : ''} disabled={locked}
       onChange={event => setEdits(previous => ({ ...previous, [field.key]: event.target.valueAsNumber }))} />
   </PreviewField>;
-  return <TrainingRunPanel title={t('trainingStudio.heartmula.train', 'Train HeartMuLa adapter')}
-    description={t('trainingStudio.heartmula.trainHint', 'Train a backbone LoRA on the prepared dataset with the HeartMuLa recipe. Saved checkpoints use the same fixed preview fixture.')}>
+  const changed = FIELDS.filter(field => recipe[field.key] !== status.defaults[field.key]);
+  const savePreset = () => {
+    if (!presetName.trim() || !validRecipe(recipe)) return;
+    persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...recipe } }].slice(-32));
+    setPresetName('');
+  };
+  const importPresets = async (file: File) => {
+    try {
+      if (file.size > 100_000) throw new Error('Preset file is too large');
+      const data = JSON.parse(await file.text());
+      if (data.version !== 1 || data.target !== 'heartmula' || !Array.isArray(data.presets) || data.presets.length > 32
+        || !data.presets.every((item: { name?: unknown; recipe?: unknown }) => typeof item.name === 'string'
+          && item.name.trim().length > 0 && item.name.length <= 64 && validRecipe(item.recipe))) throw new Error('Invalid HeartMuLa presets');
+      const merged = new Map(presets.map(item => [item.name, item]));
+      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])) as unknown as HeartmulaRecipe });
+      persist([...merged.values()].slice(-32));
+    } catch { setPresetError(t('trainingStudio.heartmula.presetImportError', 'Import a valid HeartMuLa preset file of up to 100 KB.')); }
+  };
+  const exportPreset = (preset: typeof presets[number]) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, target: 'heartmula', presets: [preset] }, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'heartmula-training-preset.json'; link.click(); URL.revokeObjectURL(url);
+  };
+  const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe, preview: { everySteps: cadence, seconds: 30 } });
+  return <div className="flex flex-col gap-4">
+    <TrainingBatchCard disabled description={t('trainingStudio.heartmula.batchUnavailable', 'HeartMuLa currently trains one dataset at a time. Batch queue support is not available.')} />
+    <TrainingAllStagesCard disabled={busy || !ready || !!blockedReason || (resume ? !resumable : !valid)} onRun={start}
+      description={ready ? t('trainingStudio.heartmula.allPrepared', 'Preparation is complete. Starts training with the settings below.')
+        : t('trainingStudio.heartmula.chainUnavailable', 'Prepare this dataset first. Automatic preparation before training is not available.')} />
+    <TrainingRunPanel title={t('trainingStudio.heartmula.selected', 'Backbone LoRA training is selected')}>
     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
       <div className="flex flex-col gap-1"><TrainingRunPicker label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
         info={t('trainingStudio.heartmula.resumeInfo', 'Continue a saved run with its recipe, preview settings and optimizer state. Recipe edits apply only to a new run.')}
-        value={resumeRun ?? ''} disabled={busy} onChange={value => setResumeRun(value || null)}
+        value={resumeRun ?? ''} disabled={busy} onChange={value => { setResumeRun(value || null); setManualResume(''); }}
         options={[{ value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
-          ...status.runs.map(item => ({ value: item.run, label: `${item.run} · ${item.step} · ${item.state}`, disabled: !item.resumable }))]} /></div>
+          ...status.runs.map(item => ({ value: item.run, label: `${item.run} · ${item.step} · ${item.state}`, disabled: !item.resumable }))]} />
+        {!resumeRun && <input className={`${INPUT} mt-2`} disabled={busy} value={manualResume} onChange={event => setManualResume(event.target.value)}
+          placeholder={t('trainingStudio.heartmula.resumePath', 'Or paste a run folder (optional)')}
+          title={t('trainingStudio.heartmula.resumePathInfo', 'Paste the ID or folder of a resumable run belonging to this dataset. Its saved recipe is restored.')} />}
+        {resume && !resumable && !busy && <p role="alert" className="text-xs text-amber-600">{t('trainingStudio.heartmula.resumeInvalid', 'Choose a resumable run from this dataset.')}</p>}
+      </div>
       <PreviewField label={t('trainingStudio.heartmula.adapterName', 'Adapter name')}
         info={t('trainingStudio.heartmula.adapterNameInfo', 'Name for the saved adapter. Use letters, numbers, underscores or hyphens, up to 64 characters.')}>
         <input className={INPUT} value={name} maxLength={64} disabled={locked} onChange={event => setName(event.target.value)} />
       </PreviewField>
     </div>
+    <div className="mt-4">
+      <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+        info={t('trainingStudio.heartmula.presetInfo', 'Presets change the update budget and songs per update. Balanced uses the current 480 by 4 recipe. Fast halves the updates; Thorough uses 720 updates averaging eight songs. HOT-Approved uses the current server recipe.')} />
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2">
+        {[{ key: 'approved', label: 'HOT-Approved', steps: status.defaults.steps, gradAccum: status.defaults.gradAccum },
+          { key: 'fast', label: 'Fast', steps: 240, gradAccum: 4 }, { key: 'balanced', label: 'Balanced', steps: 480, gradAccum: 4 },
+          { key: 'thorough', label: 'Thorough', steps: 720, gradAccum: 8 }].map(preset => <TrainingPresetChoice key={preset.key} disabled={locked}
+            selected={presetKey === preset.key && FIELDS.every(field => recipe[field.key] === ({ ...status.defaults, steps: preset.steps, gradAccum: preset.gradAccum })[field.key])}
+            onClick={() => { setPresetKey(preset.key); setEdits({ ...status.defaults, steps: preset.steps, gradAccum: preset.gradAccum }); }}>
+            <span className="text-base font-bold">{t(`trainingStudio.heartmula.preset.${preset.key}`, preset.label)}</span>
+            <span className="text-xs text-zinc-500">{t('trainingStudio.heartmula.presetBudget', '{{steps}} × {{songs}} songs', { steps: preset.steps, songs: preset.gradAccum })}</span>
+          </TrainingPresetChoice>)}
+      </div>
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('trainingStudio.heartmula.userPresetInfo', 'Save and share recipe settings. Presets never include dataset, adapter name or resume paths.')} />
+        {presets.map(preset => <span key={preset.name} className={`inline-flex items-center gap-1 rounded-lg border-2 pl-3 pr-1 py-1 text-xs ${FIELDS.every(field => preset.recipe[field.key] === recipe[field.key])
+          ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300' : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100'}`}>
+          <button type="button" disabled={locked} onClick={() => { setEdits({ ...preset.recipe }); setPresetKey('custom'); }} className="font-semibold hover:underline disabled:opacity-40">{preset.name}</button>
+          <button type="button" disabled={locked || !validRecipe(recipe)} onClick={() => persist(presets.map(item => item.name === preset.name ? { ...item, recipe: { ...recipe } } : item))}
+            title={t('trainingStudio.yue2.method.presetUpdate', 'Overwrite this preset with the current settings')} className="rounded p-0.5 text-zinc-400 hover:text-amber-600 disabled:opacity-40"><Save size={12} /></button>
+          <button type="button" onClick={() => exportPreset(preset)} title={t('trainingStudio.yue2.method.presetExport', 'Download this preset as a .json file to share or back up')} className="rounded p-0.5 text-zinc-400 hover:text-amber-600"><Download size={12} /></button>
+          <button type="button" disabled={locked} onClick={() => persist(presets.filter(item => item.name !== preset.name))} title={t('trainingStudio.yue2.method.presetRemove', 'Delete this preset')} className="rounded p-0.5 text-zinc-400 hover:text-red-600 disabled:opacity-40"><X size={12} /></button>
+        </span>)}
+        <input className={`${INPUT} !w-48 !py-1 !text-xs`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
+          maxLength={64} value={presetName} disabled={locked} onChange={event => setPresetName(event.target.value)} />
+        <button type="button" disabled={locked || !presetName.trim() || !validRecipe(recipe)} onClick={savePreset} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{t('trainingStudio.yue2.method.presetSave', 'Save current settings')}</button>
+        <button type="button" disabled={locked} onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}</button>
+        <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPresets(file); }} />
+      </div>
+      {presetError && <p role="alert" className="mt-1 text-xs text-red-500">{presetError}</p>}
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.changedSettings', 'Changed from defaults')}</span>
+        {!changed.length ? <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noChangedSettings', 'none: this form is the recipe defaults')}</span>
+          : <>{changed.map(field => <span key={field.key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">{field.key}: {recipe[field.key]}
+            <button type="button" disabled={locked} title={t('trainingStudio.yue2.method.resetSetting', 'Reset this setting to its default')} onClick={() => setEdits(previous => { const next = { ...previous }; delete next[field.key]; return next; })} className="rounded p-0.5 hover:text-sky-900 dark:hover:text-white disabled:opacity-40"><RotateCcw size={11} /></button>
+          </span>)}<button type="button" disabled={locked} onClick={() => setEdits({})} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}</button></>}
+      </div>
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+      <PreviewField label={t('trainingStudio.yue2.method.base', 'Base model')} info={t('trainingStudio.heartmula.baseInfo', 'HeartMuLa training uses the 3B F16 backbone.')}>
+        <StyledSelect accent="amber" className="w-full" disabled value="3b-f16" onChange={() => {}} options={[{ value: '3b-f16', label: '3B · F16' }]} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.yue2.method.trainingGpu', 'Training GPU')} info={t('trainingStudio.heartmula.gpuInfo', 'The current HeartMuLa trainer selects its CUDA device automatically. Per-run GPU selection is not supported.')}>
+        <StyledSelect accent="amber" className="w-full" disabled value="auto" onChange={() => {}} options={[{ value: 'auto', label: t('trainingStudio.heartmula.gpuAuto', 'Automatic (CUDA)') }]} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')} info={t('trainingStudio.heartmula.adapterTypeInfo', 'The current HeartMuLa trainer supports backbone LoRA adapters.')}>
+        <StyledSelect accent="amber" className="w-full" disabled value="lora" onChange={() => {}} options={[{ value: 'lora', label: 'LoRA' }]} />
+      </PreviewField>
+    </div>
     <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-3">
-      {[FIELDS[0], FIELDS[7], FIELDS[3], FIELDS[4], FIELDS[1], FIELDS[2]].map(numberField)}
+      {[FIELDS[0], FIELDS[7], FIELDS[5], FIELDS[1], FIELDS[2], FIELDS[3]].map(numberField)}
     </div>
     <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
-      <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.heartmula.advanced', 'Advanced training controls')}</summary>
-      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">{[FIELDS[5], FIELDS[6]].map(numberField)}</div>
+      <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.advanced', 'Advanced')}</summary>
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">{[FIELDS[6], FIELDS[4]].map(numberField)}</div>
     </details>
-    <TrainingPreviewSettings title={t('trainingStudio.heartmula.previewSettings', 'Checkpoint previews')}
+    <TrainingPreviewSettings title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
       enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewEvery(enabled ? status.previewDefaults.everySteps || 100 : 0)}
       enableLabel={t('trainingStudio.heartmula.enablePreviews', 'Render 30-second checkpoint previews')}
       enableInfo={t('trainingStudio.heartmula.enablePreviewsInfo', 'The server pauses training, renders the fixed fixture, then resumes. Keep previews enabled to hear how the adapter changes.')}>
@@ -99,11 +207,12 @@ export function HeartmulaTrainCard({ children, datasetId, status, slug, busy, tr
     <p className="text-[11px] text-zinc-500 mt-2">{resume
       ? t('trainingStudio.heartmula.resumeSummary', 'Resume {{run}} with its saved recipe and preview settings.', { run: resumeRun })
       : t('trainingStudio.heartmula.recipeSummary', '3B backbone LoRA · rank {{rank}} · alpha {{alpha}} · {{steps}} steps', { ...recipe })}</p>
+    <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.heartmula.adapterFolder', 'Adapters are saved in your global adapters folder under heartmula-lm-adapters/.')}</p>
     {!ready && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{t('trainingStudio.heartmula.prepareRequired', 'Prepare a non-empty dataset with no stale samples before training.')}</p>}
     {blockedReason && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{blockedReason}</p>}
     <div className="mt-4 flex items-center gap-3 flex-wrap">
       <button type="button" className={BUTTON} disabled={busy || !ready || !!blockedReason || (resume ? !resumable : !valid)}
-        onClick={() => onTrain(resumeRun ? { resumeRun } : { adapterName: name, recipe, preview: { everySteps: cadence, seconds: 30 } })}>
+        onClick={start}>
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
         {resume ? t('trainingStudio.heartmula.resume', 'Resume run') : t('trainingStudio.heartmula.start', 'Start training')}
       </button>
@@ -113,7 +222,7 @@ export function HeartmulaTrainCard({ children, datasetId, status, slug, busy, tr
       {busy && <button type="button" className="text-xs text-red-600 dark:text-red-400 hover:underline" onClick={onCancel}>{t('trainingStudio.heartmula.cancel', 'Cancel')}</button>}
       {run && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{run.state} · {run.step}/{run.totalSteps}</span>}
     </div>
-    {run && <div className="mt-3" aria-live="polite">
+    {showRun && <div className="mt-3" aria-live="polite">
       {run.error && <p role="alert" className="text-xs text-red-500">{run.error}</p>}
       {run.lossHistory.length > 0 && <TrainingChart epochs={[]} steps={run.lossHistory.map(point => ({ ...point, ep: point.step }))} target={0}
         config={{ series: ['loss'], defaults: ['loss'], xMax: run.totalSteps }} />}
@@ -127,6 +236,6 @@ export function HeartmulaTrainCard({ children, datasetId, status, slug, busy, tr
       <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
       <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{ownLog.slice(-100).map(line => line.message).join('\n')}</pre>
     </details>}
-    {children}
-  </TrainingRunPanel>;
+    </TrainingRunPanel>
+  </div>;
 }

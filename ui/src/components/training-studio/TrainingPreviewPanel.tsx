@@ -13,6 +13,17 @@ import { StyledSelect } from '../shared/StyledSelect';
 
 export const PREVIEW_INPUT = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
 
+export function TrainingPresetChoice({ selected, disabled, onClick, children }: {
+  selected: boolean; disabled?: boolean; onClick: () => void; children: ReactNode;
+}) {
+  return <button type="button" disabled={disabled} onClick={onClick}
+    className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${selected
+      ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+      : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
+    {children}
+  </button>;
+}
+
 /** The run picker and ladder frame used by the YuE2 training page. */
 export function TrainingRunPicker({ label, info, value, onChange, options, disabled }: {
   label: string; info: string; value: string; onChange: (value: string) => void;

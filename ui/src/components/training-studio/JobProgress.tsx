@@ -29,6 +29,7 @@ const PHASE_KEYS: Record<string, string> = {
   'engine-stop': 'trainingStudio.job.phaseEngineStop',
   'loading-models': 'trainingStudio.job.phaseLoadingModels',
   preprocess: 'trainingStudio.job.phasePreprocess',
+  encoding: 'trainingStudio.job.phaseEncoding',
   stats: 'trainingStudio.job.phaseStats',
   'engine-restart': 'trainingStudio.job.phaseEngineRestart',
   // train-lm phases (§2.7). 'engine-stop', 'loading-models' and

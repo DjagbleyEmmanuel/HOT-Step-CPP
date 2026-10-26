@@ -20,7 +20,10 @@ const { createHeartmulaPlugin } = await import('./plugins/heartmula');
 const { useHeartmulaController, heartmulaPreviewOptions } = await import('./useHeartmulaController');
 const { TRAINING_TARGETS } = await import('./trainingTargets');
 const { heartmulaChips, heartmulaReadiness } = await import('./plugins/chips');
-await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });
+await i18n.use(initReactI18next).init({ lng: 'en', resources: { en: { translation: {
+  'trainingStudio.job.running': '{{done}}/{{total}} · {{phase}}',
+  'trainingStudio.job.phaseEncoding': 'Encoding audio',
+} } }, interpolation: { escapeValue: false } });
 
 const status: HeartmulaStatusResponse = {
   ready: { available: true, backend: 'cuda', missingModels: [], deviceProblem: null, encoderMissing: false, encoderHelp: null },
@@ -32,13 +35,36 @@ test('HeartMuLa recipe and start stay visible, with only optional settings folde
   const { document } = parseHTML(renderToStaticMarkup(createElement(HeartmulaTrainCard, {
     status, slug: 'example', busy: false, trainStarted: false, onTrain() {}, onCheckpoint() {}, onCancel() {},
   })));
-  const fields = [...document.querySelectorAll('input')];
-  assert.equal(fields.filter(field => !field.closest('details')).length, 7);
+  const fields = [...document.querySelectorAll('input[type="number"]')];
+  assert.equal(fields.filter(field => !field.closest('details')).length, 6);
   assert.equal(fields.filter(field => field.closest('details')).length, 3);
+  const text = document.documentElement.textContent;
+  for (const label of ['HOT-Approved', 'Fast', 'Balanced', 'Thorough', 'Save current settings', 'Changed from defaults']) assert.ok(text.includes(label), label);
+  assert.doesNotMatch(text, /Checkpoint ladder|Train HeartMuLa adapter/);
   const start = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Start training'))!;
   assert.ok(start);
   assert.equal(start.closest('details'), null);
   assert.equal(start.hasAttribute('disabled'), false);
+});
+
+test('HeartMuLa Train follows the preset and settings order and hides old run metrics', () => {
+  const render = (state: 'running' | 'done', updatedAt: number) => renderToStaticMarkup(createElement(HeartmulaTrainCard, {
+    status: { ...status, run: { run: 'example/one', state, updatedAt, step: 1, totalSteps: 480, loss: 2,
+      lossHistory: [{ step: 1, loss: 2 }], msPerStep: 1000, peakVramMiB: 10000, checkpointStep: 1,
+      adapterFile: null, error: null, startedAt: 0 } },
+    slug: 'example', busy: false, trainStarted: false, onTrain() {}, onCheckpoint() {}, onCancel() {},
+  }));
+  const old = render('done', 0);
+  const labels = ['Resume a previous run', 'HOT-Approved', 'Your presets', 'Changed from defaults', 'Base model',
+    'Training GPU', 'Adapter type', 'Updates', 'Advanced', 'Checkpoint previews (optional)', 'heartmula-lm-adapters/', 'Start training'];
+  let position = -1;
+  for (const label of labels) {
+    const next = old.indexOf(label, position + 1);
+    assert.ok(next > position, `Section out of order or missing: ${label}`); position = next;
+  }
+  assert.doesNotMatch(old, /Peak VRAM|Checkpoint ladder/);
+  assert.match(render('running', 0), /Peak VRAM/);
+  assert.match(render('done', Date.now()), /Peak VRAM/);
 });
 
 test('HeartMuLa Prepare shows live per-track progress outside the settings fold and rejects another dataset job', () => {
@@ -46,7 +72,7 @@ test('HeartMuLa Prepare shows live per-track progress outside the settings fold 
   const saved = { ...initial };
   try {
     Object.assign(initial, {
-      activeJob: { id: 'prepare', kind: 'heartmula-prepare', datasetId: 'one', status: 'running', phase: 'encode',
+      activeJob: { id: 'prepare', kind: 'heartmula-prepare', datasetId: 'one', status: 'running', phase: 'encoding',
         done: 2, total: 4, failed: 0, currentSampleId: 'track-three.wav', engineQueueDepth: 0 },
       jobLog: [{ ts: 1, level: 'info', message: 'Encoding track three' }], samplesById: {},
     });
@@ -57,6 +83,7 @@ test('HeartMuLa Prepare shows live per-track progress outside the settings fold 
     assert.match(html, /track-three.wav/);
     assert.match(html, /2 \/ 4/);
     assert.match(html, /Encoding track three/);
+    assert.match(html, /Encoding audio/);
     const { document } = parseHTML(html);
     const log = [...document.querySelectorAll('div')].find(node => node.textContent === 'Encoding track three')!;
     assert.equal(log.closest('details'), null);

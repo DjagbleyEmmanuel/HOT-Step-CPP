@@ -46,9 +46,9 @@ test('HeartMuLa Prepare and Train reach their cards independently of ACE capabil
         const prepare = render('prepare');
         assert.match(prepare, /Prepare HeartMuLa audio/);
         assert.match(prepare, /4 prepared/);
-        assert.doesNotMatch(prepare, /Train HeartMuLa adapter/);
+        assert.doesNotMatch(prepare, /Backbone LoRA training is selected/);
         const train = render('train');
-        assert.match(train, /Train HeartMuLa adapter/);
+        assert.match(train, /Backbone LoRA training is selected/);
         assert.match(train, /Start training/);
         assert.doesNotMatch(train, /Prepare HeartMuLa audio/);
       }

@@ -10,6 +10,8 @@ import { heartmulaPreviewOptions, heartmulaStatusOptions } from '../useHeartmula
 import { useTrainingStore } from '../../../stores/trainingStore';
 import { Cpu, Loader2, RefreshCw } from 'lucide-react';
 import { TrainingReviewHeader, TrainingReviewRunRow } from '../ReviewPanel';
+import { TrainingAllStagesCard } from '../Yue2StageCard';
+import { Yue2ClearPreparedCard } from '../Yue2ClearPreparedCard';
 
 /** The integration owns Query snapshots, captured targets, commands and errors.
  * No leaf starts a second reader or job lifecycle beside that owner. */
@@ -90,13 +92,18 @@ function HeartmulaPage({ context, useController, review = false }: {
     {view.loading && !view.status && <div role="status" className="flex items-center justify-center py-20 text-zinc-500 text-sm"><Loader2 size={18} className="animate-spin mr-2" />{t('trainingStudio.heartmula.loading', 'Loading HeartMuLa training status…')}</div>}
     {review ? previewCard
       : view.status && (context.section === 'prepare'
-        ? <HeartmulaPrepareCard key={view.scopeKey} datasetId={context.datasetId} status={view.status.prepare} busy={view.busy} preparing={view.preparing}
-          blockedReason={view.prepareBlockedReason} onPrepare={view.onPrepare} />
+        ? <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <TrainingAllStagesCard description={t('trainingStudio.heartmula.allPrepare', 'Runs the preparation stage below. Training is on the Train page.')}
+              disabled={view.busy || !!view.prepareBlockedReason} onRun={() => view.onPrepare({})} />
+            <Yue2ClearPreparedCard key={view.scopeKey} datasetId={context.datasetId} disabled={view.busy} target="heartmula" />
+          </div>
+          <HeartmulaPrepareCard key={view.scopeKey} datasetId={context.datasetId} status={view.status.prepare} busy={view.busy} preparing={view.preparing}
+            blockedReason={view.prepareBlockedReason} onPrepare={view.onPrepare} />
+        </>
         : <HeartmulaTrainCard key={view.scopeKey} datasetId={context.datasetId} status={view.status} slug={context.slug} busy={view.busy}
           trainStarted={view.trainStarted} blockedReason={view.trainBlockedReason}
-          onTrain={view.onTrain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} >
-            {view.status.runs.length > 0 && previewCard}
-          </HeartmulaTrainCard>)}
+          onTrain={view.onTrain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} />)}
   </div>;
 }
 

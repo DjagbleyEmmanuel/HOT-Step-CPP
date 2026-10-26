@@ -57,8 +57,8 @@ the recent log remain visible while the settings are folded away.
 The starting recipe is rank 64, alpha 64, learning rate 1e-4, 480 steps and four
 micro-batches per step. The Train page uses YuE2's amber training panel. Choose
 **Resume a previous run** or enter an adapter name, then set the steps, save
-interval, learning rate, gradient accumulation, rank and alpha in the visible
-parameter row. Seed and dropout sit under **Advanced training controls**.
+interval, seed, rank, alpha and learning rate in the visible parameter row.
+Dropout and songs per update sit under **Advanced**.
 Checkpoint preview settings follow the recipe, and the start, pause and cancel
 controls stay below the form:
 
@@ -80,10 +80,35 @@ Measured on an RTX 5090 with nothing else on the GPU, four 94-second samples, ra
 Step time scales with clip length, and the memory figure is the fastest setting; a
 card with less free memory keeps fewer blocks resident and takes longer per step.
 
+### Presets and resume
+
+The recipe cards follow YuE2's layout. **HOT-Approved** selects the current
+server recipe; **Fast** uses 240 updates with four songs per update;
+**Balanced** uses 480 with four; **Thorough** uses 720 with eight. These change
+the training budget, not the model or loss function. Save your own settings in
+**Your presets**, or import and export HeartMuLa preset JSON files. Browser
+presets store only recipe values, never dataset, adapter name or resume paths.
+The changed-settings row shows differences from the server defaults and resets
+each field independently.
+
+Resume from the picker or paste a known run ID or run-folder path from this
+dataset. The saved recipe is restored. Base model, GPU and adapter type are
+shown in the same row as YuE2, but fixed to 3B F16, automatic CUDA and LoRA by the current
+trainer. Attention mode and layer residency are automatic, with no per-run
+controls exposed by this API.
+
+The current HeartMuLa API does not provide a multi-dataset queue or an automatic
+Prepare-then-Train command. **Train multiple** is unavailable; **Perform all
+stages** on Train starts training only after preparation is complete. When the
+cache is stale, use Prepare first. On Prepare, Perform all stages runs the
+single encoding stage. The adjacent cache-clear card clears other backends'
+caches while keeping HeartMuLa codes; **Rebuild all samples** regenerates them.
+
 ## Checkpoint previews
 
-The checkpoint ladder uses the same preview cards and players as YuE2, on both
-Train and Review. Use its **Run** picker to compare checkpoints from an earlier
+The checkpoint ladder uses the same preview cards and players as YuE2 on
+Review. Train shows the live loss chart, step time and VRAM for an active run
+or a run that finished within 15 minutes of opening the page. Use its **Run** picker to compare checkpoints from an earlier
 run. HeartMuLa omits YuE2 scoring, alignment and decoder controls.
 
 With previews on (the default is every 100 steps), the server pauses training at
