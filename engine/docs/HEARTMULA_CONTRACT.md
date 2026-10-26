@@ -60,7 +60,8 @@ headers only.
 are not needed to generate. They reach a machine the way the generation packs do, by running
 the converter on the upstream weights:
 `python engine/tools/convert-heartmula.py --src <checkpoint-root> --out <dir> --only encoder`
-(needs `HeartCodec-oss` and `HeartCodec-oss-encoder` under `--src`, plus numpy, torch,
+(needs `HeartCodec-oss` and `HeartCodec-oss-encoder` under `--src`, with `tokenizer.json` and
+`gen_config.json` in the `--src` root, plus numpy, torch,
 safetensors and `gguf==0.17.1`). Copy the four encoder files into `<models>/heartmula/`.
 The run also writes `heartcodec-rvq-F32.gguf`; it is byte-identical to the installed one
 (checked by SHA-256), and the encoder files pin it by hash. The training status route

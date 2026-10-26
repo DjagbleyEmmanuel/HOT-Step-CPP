@@ -9,7 +9,8 @@ Example:
 --only encoder writes just what training's Prepare needs: the four HeartCodec
 encoder files (muencoder, wavlm, whisper, query) plus heartcodec-rvq-F32.gguf,
 which they pin by hash. It needs only HeartCodec-oss and HeartCodec-oss-encoder
-under --src. Copy the four encoder files next to the generation packs; the RVQ
+under --src, plus tokenizer.json and gen_config.json in the --src root (their
+hashes go into the manifest). Copy the four encoder files next to the generation packs; the RVQ
 file must be byte-identical to the one already installed, or the pack is refused.
 
 Both 3B variants are mandatory and retain distinct identities. Source names are
