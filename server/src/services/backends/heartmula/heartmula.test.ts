@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import assert from 'node:assert/strict';
+import { heartmulaStageText } from './progress.js';
 
 // Isolate the settings database, audio files and engine transport from the app.
 test('HeartMuLa contract, queued picks, validation, persistence, cancellation and residency', t => {
@@ -187,4 +189,17 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       ACESTEPCPP_MODELS: path.join(root, 'models'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters'),
       TRAINING_DIR: path.join(root, 'training') },
   }); } catch (err: any) { throw new Error(err.stderr?.toString() || err.message); }
+});
+
+test('HeartMuLa queue card text follows the engine stage and ticks for the stall watchdog', () => {
+  assert.equal(heartmulaStageText({ stage: 'loading_lm' })?.stage, 'Loading HeartMuLa LM...');
+  const lm = heartmulaStageText({ stage: 'frames', frames_done: 750, max_frames: 3000 });
+  assert.equal(lm?.stage, 'HeartMuLa LM: 60.0s of up to 240s: Step 750/3000');
+  assert.equal(lm?.progress, 25);
+  const codec = heartmulaStageText({ stage: 'codec_decode', codec_chunk: 1, codec_chunks: 3, codec_step: 15, codec_steps: 10 });
+  assert.equal(codec?.stage, 'HeartCodec decode: chunk 2/3: Step 15/30');
+  assert.equal(codec?.progress, 83);
+  assert.match(lm!.stage, /: Step \d+/);
+  assert.equal(heartmulaStageText({ stage: 'done' }), null);
+  assert.equal(heartmulaStageText({ stage: 'frames', frames_done: 5, max_frames: 0 })?.progress, 10);
 });

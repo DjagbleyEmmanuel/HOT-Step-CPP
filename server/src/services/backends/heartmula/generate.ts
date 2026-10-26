@@ -13,6 +13,7 @@ import type { HeartmulaRequest } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { GenerationContext, GenerationOutcome, BackendModelSelection } from '../types.js';
 import { heartmulaPick } from './models.js';
+import { heartmulaStageText } from './progress.js';
 
 function number(value: unknown, name: string, fallback: number, min: number, max: number, integer = false): number {
   if (value === undefined) return fallback;
@@ -116,7 +117,22 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     ctx.attempt.engineJobIds.push(engineId);
     ctx.hooks.onEngineJob(engineId);
     checkCancelled();
-    await ctx.pollUntilDone(engineId, job, ctx.signal, ctx.envelope.policy.timeoutMinutes);
+    // GET /job (pollUntilDone) only carries the shared phase; /heartmula/job has the
+    // stage and its counters, so the queue card shows where the render is.
+    const ticker = setInterval(() => {
+      void heartmulaClient.job(engineId).then(d => {
+        const text = job.status === 'cancelled' ? null : heartmulaStageText(d);
+        if (!text) return;
+        job.stage = text.stage;
+        job.progress = Math.max(job.progress ?? 0, text.progress);
+      }).catch(() => {});
+    }, 750);
+    ticker.unref?.();
+    try {
+      await ctx.pollUntilDone(engineId, job, ctx.signal, ctx.envelope.policy.timeoutMinutes);
+    } finally {
+      clearInterval(ticker);
+    }
     checkCancelled();
     const detail = await heartmulaClient.job(engineId);
     if (detail.status !== 'done') throw new Error(detail.error?.message || `HeartMuLa job ended with ${detail.status}`);

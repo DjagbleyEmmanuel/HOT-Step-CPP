@@ -58,6 +58,14 @@ export interface HeartmulaModels {
 export interface HeartmulaJob {
   status: string;
   stage: string;
+  prompt_tokens?: number;
+  prefill_done?: number;
+  frames_done?: number;
+  max_frames?: number;
+  codec_chunk?: number;
+  codec_chunks?: number;
+  codec_step?: number;
+  codec_steps?: number;
   seed: string;
   noise_seed: string;
   pick: Record<string, unknown>;
