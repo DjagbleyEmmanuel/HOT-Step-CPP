@@ -35,7 +35,7 @@ export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun,
       const state = t(`trainingStudio.heartmula.previewState.${record.status}`, { defaultValue: record.status });
       return <TrainingPreviewRung key={`${record.run}:${record.kind}:${record.step}:${record.createdAt}:${index}`} title={label}
         takes={[{ id: String(index), label, src: record.status === 'done' ? record.audioUrl : null,
-          sublabel: t('trainingStudio.heartmula.takeDetails', '{{seconds}} s · seed {{seed}} · temperature {{temperature}} · top-k {{topk}} · CFG {{cfg}} · codec {{codecSteps}} / {{codecGuidance}}', {
+          sublabel: t('trainingStudio.heartmula.takeDetails', 'up to {{seconds}} s · seed {{seed}} · temperature {{temperature}} · top-k {{topk}} · CFG {{cfg}} · codec {{codecSteps}} / {{codecGuidance}}', {
             seconds: record.settings.seconds, seed: record.settings.seed, temperature: record.settings.temperature,
             topk: record.settings.topk, cfg: record.settings.cfgScale, codecSteps: record.settings.codecSteps, codecGuidance: record.settings.codecGuidance,
           }), text: `${label} · ${state}${record.error ? ` · ${record.error}` : ''}` }]}
@@ -46,6 +46,12 @@ export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun,
         </button>}>
         <details className="mt-2 text-xs text-zinc-500">
           <summary className="cursor-pointer">{t('trainingStudio.heartmula.conditioning', 'Tags and lyrics')}</summary>
+          {record.source && <p className="mt-1 text-[11px] text-zinc-500">{[
+            t('trainingStudio.heartmula.sourceTags', 'Tags from {{from}}', { from: record.source.tags === 'override' ? t('trainingStudio.heartmula.sourceOverride', 'the override') : record.source.sampleName }),
+            t('trainingStudio.heartmula.sourceLyrics', 'Lyrics from {{from}}', { from: record.source.lyrics === 'override' ? t('trainingStudio.heartmula.sourceOverride', 'the override')
+              : record.source.lyrics === 'lyric-studio' ? t('trainingStudio.heartmula.sourceLyricStudio', 'Lyric Studio generation #{{id}} {{title}}', { id: record.source.generationId, title: record.source.generationTitle ?? '' }).trim()
+                : record.source.sampleName }),
+          ].join(' · ')}</p>}
           <p className="mt-1 whitespace-pre-wrap break-words">{record.settings.tags}</p>
           <p className="mt-1 whitespace-pre-wrap break-words">{record.settings.lyrics}</p>
         </details>

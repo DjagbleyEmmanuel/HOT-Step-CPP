@@ -6186,8 +6186,8 @@ router.post('/datasets/:id/heartmula-previews/render', async (req: Request, res:
       settings = resolveHeartmulaPreviewSettings(b.settings, run.settings);
       // A take's own tags or lyrics replace the run's, and say so.
       const given = (b.settings && typeof b.settings === 'object' ? b.settings : {}) as Record<string, unknown>;
-      source = { ...run.source, ...(typeof given.tags === 'string' && given.tags.trim() ? { tags: 'override' as const } : {}),
-        ...(typeof given.lyrics === 'string' && given.lyrics.trim() ? { lyrics: 'override' as const } : {}) };
+      source = { ...run.source, ...(typeof given.tags === 'string' && given.tags.trim() && given.tags !== run.settings.tags ?{ tags: 'override' as const } : {}),
+        ...(typeof given.lyrics === 'string' && given.lyrics.trim() && given.lyrics !== run.settings.lyrics ?{ lyrics: 'override' as const } : {}) };
     } catch (err: any) { res.status(400).json({ error: err.message }); return; }
     if (hasActivePipeline()) { res.status(409).json({ error: 'A pipeline is queued or running; previews wait until it ends.' }); return; }
     if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }

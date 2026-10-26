@@ -37,7 +37,11 @@ test('HeartMuLa recipe and start stay visible, with only optional settings folde
   })));
   const fields = [...document.querySelectorAll('input[type="number"]')];
   assert.equal(fields.filter(field => !field.closest('details')).length, 6);
-  assert.equal(fields.filter(field => field.closest('details')).length, 3);
+  assert.equal(fields.filter(field => field.closest('details')).length, 5);
+  // the preview section matches YuE2's: dataset-sourced prompt, a full-song length, no fixed fixture
+  const text0 = document.documentElement.textContent;
+  for (const label of ['Preview maximum seconds', 'Preview seed', 'Preview lyrics', 'Tags override', 'Lyrics override', 'Lyric Studio generation']) assert.ok(text0.includes(label), label);
+  assert.doesNotMatch(text0, /Fixed fixture|30-second/);
   const text = document.documentElement.textContent;
   for (const label of ['HOT-Approved', 'Fast', 'Balanced', 'Thorough', 'Save current settings', 'Changed from defaults']) assert.ok(text.includes(label), label);
   assert.doesNotMatch(text, /Checkpoint ladder|Train HeartMuLa adapter/);

@@ -112,9 +112,20 @@ or a run that finished within 15 minutes of opening the page. Use its **Run** pi
 run. HeartMuLa omits YuE2 scoring, alignment and decoder controls.
 
 With previews on (the default is every 100 steps), the server pauses training at
-each preview step, renders 30 seconds of audio from the saved checkpoint, then
-resumes. Training never runs while a preview renders. Every take uses the same
-tags, lyrics, seed and sampler, so takes differ only by their weights:
+each preview step, renders a full song (up to 240 seconds, the engine's maximum) from
+the saved checkpoint, then resumes. Training never runs while a preview renders.
+Every take uses the same tags, lyrics, seed and sampler, so takes differ only by
+their weights.
+
+The prompt comes from the dataset, as in YuE2's previews. The tags are those of
+the dataset's first sung track (the first track when none is sung), which is what
+training saw. The lyrics are the newest Lyric Studio generation for the dataset's
+artist, falling back to that track's own lyrics; set **Preview lyrics** to
+**Dataset lyrics** to skip the generation. **Tags override** and **Lyrics
+override** replace either. The prompt is worked out once when the run starts and
+saved with the run, so every take, retry and resume sings the same words. **Preview
+maximum seconds** (5 to 240) caps the length; a song ends on its own before that.
+On Review, each take lists the track and generation its tags and lyrics came from.
 
 - **Base model** is rendered once before training starts.
 - **Step N** is rendered at each preview step.
@@ -127,7 +138,9 @@ lists the takes oldest first, each with its seed and sampler; **Retry preview** 
 or is cancelled never stops the run, and the checkpoints are kept. Each pause costs
 the render time plus the engine restart and the trainer reloading its models. On the
 same card, a 30-second preview took about 13 s to render and paused training for 18
-to 20 s in total.
+to 20 s in total. A full 240-second song took about 70 s to render and paused training
+for about 80 s (a short instrumental clip dataset that ran to the cap; a song that ends
+earlier is shorter).
 
 A preview or a retry cannot start while a job runs on the dataset, and a job cannot
 start while a preview renders.

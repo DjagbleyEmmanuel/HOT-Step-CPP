@@ -1,7 +1,7 @@
 import { Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
+import type { HeartmulaPreviewSettings, HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { TrainingChart } from './TrainingChart';
 import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPresetChoice } from './TrainingPreviewPanel';
@@ -41,6 +41,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const [name, setName] = useState(slug);
   const [resumeRun, setResumeRun] = useState<string | null>(null);
   const [previewEvery, setPreviewEvery] = useState<number | null>(null);
+  const [previewEdits, setPreviewEdits] = useState<Partial<HeartmulaPreviewSettings>>({});
   const [manualResume, setManualResume] = useState('');
   const [presetKey, setPresetKey] = useState('balanced');
   const [presetName, setPresetName] = useState('');
@@ -65,6 +66,9 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const selectedResume = resumeRun ?? status.runs.find(item => item.run === manualPath || manualPath.endsWith('/' + item.run))?.run ?? null;
   const recipe = selectedResume ? status.runs.find(run => run.run === selectedResume)?.recipe ?? status.defaults : { ...status.defaults, ...edits };
   const cadence = previewEvery ?? status.previewDefaults.everySteps;
+  const previewSettings = { ...status.previewDefaults, ...previewEdits };
+  const setPreview = (patch: Partial<HeartmulaPreviewSettings>) => setPreviewEdits(previous => ({ ...previous, ...patch }));
+  const resetPreview = (key: keyof HeartmulaPreviewSettings) => () => setPreviewEdits(previous => { const next = { ...previous }; delete next[key]; return next; });
   const run = status.run;
   const [openedAt] = useState(Date.now);
   const showRun = run && (['queued', 'running', 'previewing', 'checkpointing'].includes(run.state)
@@ -76,9 +80,12 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const job = useTrainingStore(s => s.activeJob);
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
   const locked = busy || resume;
+  const edited = (key: keyof HeartmulaPreviewSettings) => !locked && previewEdits[key] !== undefined && previewEdits[key] !== status.previewDefaults[key];
   const valid = FIELDS.every(field => Number.isFinite(recipe[field.key]) && recipe[field.key] >= field.min
     && recipe[field.key] <= field.max && (field.step !== 1 || Number.isInteger(recipe[field.key])))
     && Number.isInteger(cadence) && cadence >= 0 && cadence <= 1_000_000
+    && Number.isInteger(previewSettings.seconds) && previewSettings.seconds >= 5 && previewSettings.seconds <= 240
+    && Number.isInteger(previewSettings.seed) && previewSettings.seed >= 0
     && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name);
   const numberField = (field: typeof FIELDS[number]) => <PreviewField key={field.key}
     label={t(`trainingStudio.heartmula.field.${field.key}`, field.label)}
@@ -112,7 +119,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, target: 'heartmula', presets: [preset] }, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = 'heartmula-training-preset.json'; link.click(); URL.revokeObjectURL(url);
   };
-  const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe, preview: { everySteps: cadence, seconds: 30 } });
+  const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe, preview: { ...previewEdits, everySteps: cadence } });
   return <div className="flex flex-col gap-4">
     <TrainingBatchCard disabled description={t('trainingStudio.heartmula.batchUnavailable', 'HeartMuLa currently trains one dataset at a time. Batch queue support is not available.')} />
     <TrainingAllStagesCard disabled={busy || !ready || !!blockedReason || (resume ? !resumable : !valid)} onRun={start}
@@ -194,15 +201,49 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
     </details>
     <TrainingPreviewSettings title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
       enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewEvery(enabled ? status.previewDefaults.everySteps || 100 : 0)}
-      enableLabel={t('trainingStudio.heartmula.enablePreviews', 'Render 30-second checkpoint previews')}
-      enableInfo={t('trainingStudio.heartmula.enablePreviewsInfo', 'The server pauses training, renders the fixed fixture, then resumes. Keep previews enabled to hear how the adapter changes.')}>
+      enableLabel={t('trainingStudio.heartmula.enablePreviews', 'Render a full-song preview at every checkpoint')}
+      enableInfo={t('trainingStudio.heartmula.enablePreviewsInfo', 'The server pauses training, renders one full song from the dataset, then resumes. The base model is rendered first and the final adapter last. Keep previews enabled to hear how the adapter changes.')}>
       <PreviewField label={t('trainingStudio.heartmula.previewEvery', 'Preview every, steps')}
         info={t('trainingStudio.heartmula.previewEveryInfo', 'Steps between audible previews. More frequent previews add more pauses.')}
         onReset={!locked && previewEvery !== null && cadence !== status.previewDefaults.everySteps ? () => setPreviewEvery(null) : undefined}>
         <input className={INPUT} type="number" min={1} max={1_000_000} step={1} value={Number.isFinite(cadence) ? cadence : ''}
           disabled={locked} onChange={event => setPreviewEvery(event.target.valueAsNumber)} />
       </PreviewField>
-      <p className="text-xs text-zinc-500 whitespace-pre-wrap break-words">{t('trainingStudio.heartmula.fixedFixture', 'Fixed fixture · seed {{seed}}\n{{tags}}\n{{lyrics}}', { ...status.previewDefaults })}</p>
+      <PreviewField label={t('trainingStudio.heartmula.previewSeconds', 'Preview maximum seconds')}
+        info={t('trainingStudio.heartmula.previewSecondsInfo', 'The longest a preview may run, from 5 to 240 seconds. A full song ends on its own before that. Longer previews pause training for longer at every checkpoint.')}
+        meta={t('trainingStudio.heartmula.previewSecondsMeta', 'default 240')}
+        onReset={edited('seconds') ? resetPreview('seconds') : undefined}>
+        <input className={INPUT} type="number" min={5} max={240} step={1} value={Number.isFinite(previewSettings.seconds) ? previewSettings.seconds : ''}
+          disabled={locked} onChange={event => setPreview({ seconds: event.target.valueAsNumber })} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.heartmula.previewSeed', 'Preview seed')}
+        info={t('trainingStudio.heartmula.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.')}
+        meta={t('trainingStudio.heartmula.previewSeedMeta', 'default 42')}
+        onReset={edited('seed') ? resetPreview('seed') : undefined}>
+        <input className={INPUT} type="number" min={0} step={1} value={Number.isFinite(previewSettings.seed) ? previewSettings.seed : ''}
+          disabled={locked} onChange={event => setPreview({ seed: event.target.valueAsNumber })} />
+      </PreviewField>
+      <PreviewField wide label={t('trainingStudio.heartmula.previewLyrics', 'Preview lyrics')}
+        info={t('trainingStudio.heartmula.previewLyricsInfo', "Lyric Studio generation: the newest lyrics generated for this dataset's artist in Lyric Studio, so each checkpoint sings a song it never trained on. Falls back to the dataset's lyrics when there are none. Dataset lyrics: the first sung track's own lyrics. Either way the tags come from the dataset, because that is what training saw, and every checkpoint of a run uses the same words.")}
+        onReset={edited('lyricsSource') ? resetPreview('lyricsSource') : undefined}>
+        <StyledSelect accent="amber" className="w-full" disabled={locked} value={previewSettings.lyricsSource ?? 'generated'}
+          onChange={value => setPreview({ lyricsSource: value === 'dataset' ? 'dataset' : undefined })}
+          options={[
+            { value: 'generated', label: t('trainingStudio.heartmula.previewLyricsGenerated', 'Lyric Studio generation (falls back to dataset lyrics)') },
+            { value: 'dataset', label: t('trainingStudio.heartmula.previewLyricsDataset', 'Dataset lyrics') },
+          ]} />
+      </PreviewField>
+      <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.heartmula.previewSongHint', 'The tags come from the first sung track in this dataset. Tags and lyrics overrides below replace either choice.')}</p>
+      <PreviewField wide label={t('trainingStudio.heartmula.previewTags', 'Tags override (optional)')}
+        info={t('trainingStudio.heartmula.previewTagsInfo', "Replaces the preview track's own tags for the rendered sample. Leave blank to use the track's tags as-is.")}
+        onReset={edited('tags') ? resetPreview('tags') : undefined}>
+        <textarea className={`${INPUT} min-h-16 resize-y`} value={previewSettings.tags} disabled={locked} onChange={event => setPreview({ tags: event.target.value })} />
+      </PreviewField>
+      <PreviewField wide label={t('trainingStudio.heartmula.previewLyricsOverride', 'Lyrics override (optional)')}
+        info={t('trainingStudio.heartmula.previewLyricsOverrideInfo', "Replaces the preview track's own lyrics for the rendered sample. Leave blank to use the track's lyrics as-is.")}
+        onReset={edited('lyrics') ? resetPreview('lyrics') : undefined}>
+        <textarea className={`${INPUT} min-h-20 resize-y`} value={previewSettings.lyrics} disabled={locked} onChange={event => setPreview({ lyrics: event.target.value })} />
+      </PreviewField>
     </TrainingPreviewSettings>
     <p className="text-[11px] text-zinc-500 mt-2">{resume
       ? t('trainingStudio.heartmula.resumeSummary', 'Resume {{run}} with its saved recipe and preview settings.', { run: resumeRun })
