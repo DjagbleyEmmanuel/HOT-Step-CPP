@@ -49,7 +49,9 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
   const runId = status?.run?.run ?? null;
   const previewQuery = useQuery({ ...heartmulaPreviewOptions(worker, datasetId, runId ?? '', busy), enabled: runId !== null });
   const [rendering, setRendering] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewCommandError, setPreviewCommandError] = useState<{
+    worker: string | null; datasetId: string; run: string; message: string;
+  } | null>(null);
 
   // The last poll can predate the job's final state: read once more when it ends.
   const wasBusy = useRef(busy);
@@ -59,10 +61,11 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
   }, [busy, client, worker, datasetId]);
 
   const onRenderPreview = (request: HeartmulaPreviewRenderRequest) => {
-    setRendering(true); setPreviewError(null);
+    setRendering(true); setPreviewCommandError(null);
     // A retry carries no form values: the server renders with the run's own saved fixture unless the take's settings are sent back, as they are here.
     void renderHeartmulaPreview(datasetId, request, { worker })
-      .catch(err => setPreviewError(err instanceof Error ? err.message : String(err)))
+      .catch(err => setPreviewCommandError({ worker, datasetId, run: request.run,
+        message: err instanceof Error ? err.message : String(err) }))
       .finally(() => {
         setRendering(false);
         void client.invalidateQueries({ queryKey: heartmulaPreviewOptions(worker, datasetId, request.run, false).queryKey });
@@ -95,7 +98,9 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
     onCheckpoint: run => { void checkpoint(run); },
     onCancel: () => { void cancel().then(refresh); },
     previews: runId !== null ? previewQuery.data ?? null : null,
-    previewError: previewError ?? (previewQuery.error?.message ?? null),
+    previewError: previewQuery.error?.message ?? null,
+    previewCommandError: previewCommandError?.worker === worker && previewCommandError.datasetId === datasetId
+      ? previewCommandError : null,
     previewBusy: rendering,
     onRenderPreview,
   };

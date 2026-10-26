@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register } from 'node:module';
-import { createElement } from 'react';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parseHTML } from 'linkedom';
 import i18n from 'i18next';
@@ -14,6 +16,10 @@ Object.assign(globalThis, { React: await import('react'), localStorage: { getIte
 const { HeartmulaTrainCard } = await import('./HeartmulaTrainCard');
 const { HeartmulaPrepareCard } = await import('./HeartmulaPrepareCard');
 const { useTrainingStore } = await import('../../stores/trainingStore');
+const { createHeartmulaPlugin } = await import('./plugins/heartmula');
+const { useHeartmulaController, heartmulaPreviewOptions } = await import('./useHeartmulaController');
+const { TRAINING_TARGETS } = await import('./trainingTargets');
+const { heartmulaChips, heartmulaReadiness } = await import('./plugins/chips');
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });
 
 const status: HeartmulaStatusResponse = {
@@ -56,4 +62,74 @@ test('HeartMuLa Prepare shows live per-track progress outside the settings fold 
     assert.equal(log.closest('details'), null);
     assert.doesNotMatch(render('two'), /track-three.wav|Encoding track three/);
   } finally { Object.assign(initial, saved); }
+});
+
+test('a rejected older-run preview retry stays visible after a successful list refetch and belongs to that run', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  const savedStore = useTrainingStore.getState();
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  useTrainingStore.setState({ trainingWorker: null, activeJob: null, error: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const runs = ['older', 'latest'].map(run => ({ run, adapterName: `${run} run`, recipe: HEARTMULA_RECIPE_DEFAULTS,
+    state: 'failed' as const, step: 20, resumable: true, published: null }));
+  const snapshot = { ...status, runs, run: { run: 'latest', state: 'failed', step: 20, totalSteps: 480,
+    loss: null, lossHistory: [], msPerStep: null, peakVramMiB: null, checkpointStep: 20, adapterFile: null,
+    error: null, startedAt: null, updatedAt: 0 } };
+  let olderReads = 0;
+  let rejectedRun = '';
+  let failList = false;
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    const respond = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } });
+    if (init?.method === 'POST') {
+      rejectedRun = JSON.parse(String(init.body)).run;
+      return respond({ error: 'Preview retry rejected' }, 409);
+    }
+    if (url.includes('heartmula-status')) return respond(snapshot);
+    if (url.includes('heartmula-previews')) {
+      const run = new URL(url, 'http://localhost').searchParams.get('run');
+      if (run === 'older') {
+        olderReads++;
+        if (failList) return respond({ error: 'Preview list unavailable' }, 400);
+      }
+      return respond({ run, settings: HEARTMULA_PREVIEW_DEFAULTS, previews: run === 'older' ? [{
+        run, kind: 'step', step: 20, settings: HEARTMULA_PREVIEW_DEFAULTS, status: 'failed', audioUrl: null,
+        adapter: null, adapterSha256: null, renderMs: null, pauseMs: null, error: 'Original take failed', createdAt: 1,
+      }] : [] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const root = createRoot(document.getElementById('root')!);
+  const plugin = createHeartmulaPlugin({ target: { ...TRAINING_TARGETS.heartmula, chips: heartmulaChips, readiness: heartmulaReadiness }, useController: useHeartmulaController });
+  const click = async (text: string) => {
+    const button = [...document.querySelectorAll('button')].find(node => node.textContent.includes(text));
+    assert.ok(button, `Missing button: ${text}`);
+    await act(async () => { button.click(); });
+  };
+  const until = async (predicate: () => boolean) => {
+    for (let attempt = 0; attempt < 50 && !predicate(); attempt++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+    assert.ok(predicate(), document.body.textContent ?? 'No rendered content');
+  };
+  try {
+    await act(async () => { root.render(createElement(QueryClientProvider, { client },
+      plugin.renderReview!({ datasetId: 'one', slug: 'example', trigger: '', section: 'review' }))); });
+    await until(() => document.body.textContent!.includes('older run'));
+    await click('older run');
+    await until(() => document.body.textContent!.includes('Retry preview'));
+    await click('Retry preview');
+    await until(() => olderReads >= 2 && rejectedRun === 'older' && !client.isFetching());
+    assert.match(document.querySelector('[role="alert"]')?.textContent ?? '', /Preview retry rejected/);
+    await click('latest run');
+    assert.doesNotMatch(document.body.textContent!, /Preview retry rejected/);
+    await click('older run');
+    assert.match(document.body.textContent!, /Preview retry rejected/);
+    failList = true;
+    await act(async () => { await client.invalidateQueries({ queryKey: heartmulaPreviewOptions(null, 'one', 'older', false).queryKey }); });
+    await until(() => document.body.textContent!.includes('Preview list unavailable'));
+    assert.match(document.body.textContent!, /Preview retry rejected/);
+  } finally {
+    await act(async () => { root.unmount(); });
+    client.clear(); useTrainingStore.setState(savedStore); Object.assign(globalThis, saved);
+  }
 });

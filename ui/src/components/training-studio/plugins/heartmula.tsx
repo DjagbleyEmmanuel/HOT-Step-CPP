@@ -30,6 +30,8 @@ export interface HeartmulaTrainingView {
   onCancel: HeartmulaTrainCardProps['onCancel'];
   previews: HeartmulaPreviewCardProps['previews'];
   previewError?: string | null;
+  /** A rejected render command, scoped by the controller to this dataset/worker. */
+  previewCommandError?: { run: string; message: string } | null;
   /** A manual preview render is in flight (the server refuses a second one). */
   previewBusy?: boolean;
   onRenderPreview?: HeartmulaPreviewCardProps['onRender'];
@@ -58,7 +60,9 @@ function HeartmulaPage({ context, useController, review = false }: {
   const previewCard = <HeartmulaPreviewCard runs={view.status?.runs} selectedRun={selectedRun}
     onSelectRun={run => setSelection({ scope: view.scopeKey, run })}
     previews={olderRun ? previews.data ?? null : view.previews} busy={view.busy || !!view.previewBusy}
-    error={olderRun ? previews.error?.message : view.previewError} onRender={view.onRenderPreview} />;
+    error={olderRun ? previews.error?.message : view.previewError}
+    commandError={view.previewCommandError?.run === selectedRun ? view.previewCommandError.message : null}
+    onRender={view.onRenderPreview} />;
   return <div className="flex flex-col gap-4">
     {review ? <>
       <TrainingReviewHeader title={t('trainingStudio.review.title', 'Awaiting review')}

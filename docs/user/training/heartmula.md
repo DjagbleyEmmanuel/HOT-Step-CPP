@@ -106,3 +106,7 @@ to 20 s in total.
 
 A preview or a retry cannot start while a job runs on the dataset, and a job cannot
 start while a preview renders.
+
+If a preview retry is rejected, its error stays visible on that run's ladder even
+after the preview list refreshes. Switching runs shows only the selected run's
+retry error. Errors loading the list appear separately.

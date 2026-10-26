@@ -9,11 +9,12 @@ export interface HeartmulaPreviewCardProps {
   previews: HeartmulaPreviewListResponse | null;
   busy: boolean;
   error?: string | null;
+  commandError?: string | null;
   onRender?: (request: HeartmulaPreviewRenderRequest) => void;
 }
 
 /** Preview orchestration and retries belong to the server integration. */
-export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun, previews, busy, error, onRender }: HeartmulaPreviewCardProps) {
+export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun, previews, busy, error, commandError, onRender }: HeartmulaPreviewCardProps) {
   const { t } = useTranslation();
   return <TrainingCheckpointLadder>
     <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')}</h3>
@@ -25,6 +26,7 @@ export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun,
     </div>}
     <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.heartmula.reviewInfo', 'Compare the base model, saved checkpoints and final adapter with the same tags, lyrics, seed and sampler. Training pauses while each preview renders.')}</p>
     {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
+    {commandError && <p role="alert" className="text-xs text-red-500">{commandError}</p>}
     {!previews?.previews.length && <p className="text-xs text-zinc-500">{t('trainingStudio.heartmula.noPreviews', 'No checkpoint previews yet.')}</p>}
     <TrainingPreviewLadderRows>{previews?.previews.map((record, index) => {
       const label = record.kind === 'base' ? t('trainingStudio.heartmula.base', 'Base model')
