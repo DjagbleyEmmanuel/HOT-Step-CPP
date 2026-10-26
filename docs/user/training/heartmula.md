@@ -48,13 +48,19 @@ the reason shown, when its prompt is invalid, when it is too long for the model'
 8192-position context, when its audio is missing or unreadable, or when encoding
 fails. Changing a track's audio, caption, genre or lyrics makes its sample stale;
 run Prepare again before training. Prepared codes are cached, so a second run is
-cheap.
+cheap. The Prepare card uses the same live progress panel as YuE2: completed and
+failed track counts, current track, phase, an ETA once enough tracks finish, and
+the recent log remain visible while the settings are folded away.
 
 ## Train
 
 The starting recipe is rank 64, alpha 64, learning rate 1e-4, 480 steps and four
-micro-batches per step. The page asks for an adapter name and **Training steps**; the rest sit under
-**Advanced training controls**:
+micro-batches per step. The Train page uses YuE2's amber training panel. Choose
+**Resume a previous run** or enter an adapter name, then set the steps, save
+interval, learning rate, gradient accumulation, rank and alpha in the visible
+parameter row. Seed and dropout sit under **Advanced training controls**.
+Checkpoint preview settings follow the recipe, and the start, pause and cancel
+controls stay below the form:
 
 | Control | Meaning |
 |---|---|
@@ -75,6 +81,10 @@ Step time scales with clip length, and the memory figure is the fastest setting;
 card with less free memory keeps fewer blocks resident and takes longer per step.
 
 ## Checkpoint previews
+
+The checkpoint ladder uses the same preview cards and players as YuE2, on both
+Train and Review. Use its **Run** picker to compare checkpoints from an earlier
+run. HeartMuLa omits YuE2 scoring, alignment and decoder controls.
 
 With previews on (the default is every 100 steps), the server pauses training at
 each preview step, renders 30 seconds of audio from the saved checkpoint, then

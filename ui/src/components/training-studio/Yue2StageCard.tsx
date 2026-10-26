@@ -9,6 +9,17 @@ import { Check, ChevronDown } from 'lucide-react';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
+/** YuE2's training form stays visible; only its optional settings fold away. */
+export function TrainingRunPanel({ title, description, children }: {
+  title: React.ReactNode; description: React.ReactNode; children: React.ReactNode;
+}) {
+  return <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
+    <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">{title}</h3>
+    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">{description}</p>
+    {children}
+  </div>;
+}
+
 export const Yue2StageCard: React.FC<{
   icon: React.ReactNode;
   title: string;

@@ -1,8 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import type { HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest } from '../../../../server/src/contracts/heartmulaTraining';
-import { TrainingPreviewRung } from './TrainingPreviewPanel';
+import type { HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest, HeartmulaRunSummary } from '../../../../server/src/contracts/heartmulaTraining';
+import { TrainingCheckpointLadder, TrainingPreviewLadderRows, TrainingPreviewRung, TrainingRunPicker } from './TrainingPreviewPanel';
 
 export interface HeartmulaPreviewCardProps {
+  runs?: HeartmulaRunSummary[];
+  selectedRun?: string;
+  onSelectRun?: (run: string) => void;
   previews: HeartmulaPreviewListResponse | null;
   busy: boolean;
   error?: string | null;
@@ -10,14 +13,20 @@ export interface HeartmulaPreviewCardProps {
 }
 
 /** Preview orchestration and retries belong to the server integration. */
-export function HeartmulaPreviewCard({ previews, busy, error, onRender }: HeartmulaPreviewCardProps) {
+export function HeartmulaPreviewCard({ runs = [], selectedRun = '', onSelectRun, previews, busy, error, onRender }: HeartmulaPreviewCardProps) {
   const { t } = useTranslation();
-  return <section className="rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4 space-y-3">
-    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{t('trainingStudio.heartmula.review', 'Review checkpoint previews')}</h3>
-    <p className="text-xs text-zinc-500">{t('trainingStudio.heartmula.reviewInfo', 'Compare the base model, saved checkpoints and final adapter with the same tags, lyrics, seed and sampler. Training pauses while each preview renders.')}</p>
+  return <TrainingCheckpointLadder>
+    <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')}</h3>
+    {runs.length > 0 && onSelectRun && <div className="mt-2 flex flex-col gap-1 max-w-md">
+      <TrainingRunPicker label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
+        info={t('trainingStudio.heartmula.reviewRunInfo', 'Choose a training run to hear its saved checkpoint previews.')}
+        value={selectedRun} onChange={onSelectRun}
+        options={runs.map(run => ({ value: run.run, label: `${run.run} · ${run.step} · ${run.state}` }))} />
+    </div>}
+    <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.heartmula.reviewInfo', 'Compare the base model, saved checkpoints and final adapter with the same tags, lyrics, seed and sampler. Training pauses while each preview renders.')}</p>
     {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
     {!previews?.previews.length && <p className="text-xs text-zinc-500">{t('trainingStudio.heartmula.noPreviews', 'No checkpoint previews yet.')}</p>}
-    {previews?.previews.map((record, index) => {
+    <TrainingPreviewLadderRows>{previews?.previews.map((record, index) => {
       const label = record.kind === 'base' ? t('trainingStudio.heartmula.base', 'Base model')
         : record.kind === 'final' ? t('trainingStudio.heartmula.final', 'Final · step {{step}}', { step: record.step })
           : t('trainingStudio.heartmula.step', 'Step {{step}}', { step: record.step });
@@ -39,6 +48,6 @@ export function HeartmulaPreviewCard({ previews, busy, error, onRender }: Heartm
           <p className="mt-1 whitespace-pre-wrap break-words">{record.settings.lyrics}</p>
         </details>
       </TrainingPreviewRung>;
-    })}
-  </section>;
+    })}</TrainingPreviewLadderRows>
+  </TrainingCheckpointLadder>;
 }

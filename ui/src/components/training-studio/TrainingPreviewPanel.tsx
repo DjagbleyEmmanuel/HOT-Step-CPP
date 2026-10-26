@@ -9,8 +9,28 @@ import React, { type ReactNode } from 'react';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../shared/Toggle';
 import { PreviewPlayer } from './PreviewPlayer';
+import { StyledSelect } from '../shared/StyledSelect';
 
 export const PREVIEW_INPUT = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
+
+/** The run picker and ladder frame used by the YuE2 training page. */
+export function TrainingRunPicker({ label, info, value, onChange, options, disabled }: {
+  label: string; info: string; value: string; onChange: (value: string) => void;
+  options: Array<{ value: string; label: string; disabled?: boolean }>; disabled?: boolean;
+}) {
+  return <>
+    <ParamLabel label={label} info={info} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
+    <StyledSelect accent="amber" className="w-full" value={value} onChange={onChange} options={options} disabled={disabled} />
+  </>;
+}
+
+export function TrainingCheckpointLadder({ children }: { children: ReactNode }) {
+  return <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">{children}</div>;
+}
+
+export function TrainingPreviewLadderRows({ children }: { children: ReactNode }) {
+  return <div className="mt-3 flex flex-col gap-3">{children}</div>;
+}
 
 /** The collapsible settings block: an optional lead slot, the enable toggle,
  *  an optional slot under it, and the fields grid while previews are on. */

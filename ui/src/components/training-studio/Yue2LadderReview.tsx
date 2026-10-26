@@ -22,7 +22,7 @@ import {
 } from '../../services/trainingApi';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { ParamLabel } from '../shared/ParamLabel';
-import { TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
+import { TrainingPreviewLadderRows, TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
 
 import { cleanupReviewRung, pickFromLadder, selectReviewRung, type ReviewPick } from '../../services/trainingReviewApi';
 
@@ -254,7 +254,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
       {labelsPending && <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
         {t('trainingStudio.refine.labelsPending', 'Blind labels for this run are not in yet — scoring opens once they are.')}
       </div>}
-      {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
+      {ladder.length > 0 && <TrainingPreviewLadderRows>
         {jointLadder && <div className="flex items-center gap-2 text-xs">
           <Toggle id={`blind-${idPrefix}`} checked={blindRungs} onChange={value => writePersistedState('hs-yue2-blind-rungs', value)} />
           <ParamLabel label={t('trainingStudio.refine.blindToggle', 'Blind rungs')}
@@ -322,7 +322,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             </div>}
           </TrainingPreviewRung>;
         })}
-      </div>}
+      </TrainingPreviewLadderRows>}
       {bestStep !== undefined && <div className="hidden md:block fixed right-4 bottom-4 z-40 max-w-xs rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/90 dark:bg-zinc-900/90 shadow-xl p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.scoreboardTitle', 'Scoreboard')}</span>

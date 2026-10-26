@@ -34,7 +34,8 @@ import { formatMB, yue2AdapterHalfBytes } from '../../utils/yue2AdapterSize';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
-import { PreviewField, TrainingPreviewSettings } from './TrainingPreviewPanel';
+import { PreviewField, TrainingPreviewSettings, TrainingCheckpointLadder, TrainingRunPicker } from './TrainingPreviewPanel';
+import { TrainingRunPanel } from './Yue2StageCard';
 import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Yue2SplitChart } from './Yue2SplitChart';
@@ -1026,13 +1027,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => { onTimingLockedChange?.(timingLocked); }, [timingLocked, onTimingLockedChange]);
   const progress = job && job.total > 0 ? ` · ${job.done}/${job.total}` : '';
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
-      <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-        {t('trainingStudio.yue2.method.aitkTitle', 'Joint Training')}
-      </h3>
-      <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
-        {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains the planner (AR) and decoder (NAR) adapters together with the YuE2 report recipe. Unchanged prepared data is reused.')}
-      </p>
+    <TrainingRunPanel title={t('trainingStudio.yue2.method.aitkTitle', 'Joint Training')}
+      description={t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains the planner (AR) and decoder (NAR) adapters together with the YuE2 report recipe. Unchanged prepared data is reused.')}>
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
         <div>
           <label className="flex flex-col gap-1">
@@ -1765,15 +1761,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {awaitingMirror && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.awaitingMirror', 'Waiting for the first sync from {{worker}}', { worker: trainingWorker })}</p>
       </div>}
-      {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+      {ladderRunRec && <TrainingCheckpointLadder>
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}
           {ladderRunRec.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
             title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}</p>
         {aitkRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
-          <ParamLabel label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
-            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.ladderRunInfo', 'This dataset has more than one joint run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')} />
-          <StyledSelect accent="amber" className="w-full" value={ladderRunRec.jobId} onChange={setPickedLadderRun}
+          <TrainingRunPicker label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
+            info={t('trainingStudio.yue2.method.ladderRunInfo', 'This dataset has more than one joint run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')}
+            value={ladderRunRec.jobId} onChange={setPickedLadderRun}
             options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
               label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
         </div>}
@@ -1781,7 +1776,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
           renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 1, arScale: form.preview?.arScale ?? LADDER_PREVIEW.arScale, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
           onError={setError} idPrefix="train-rung" />
-      </div>}
-    </div>
+      </TrainingCheckpointLadder>}
+    </TrainingRunPanel>
   );
 };

@@ -16,6 +16,22 @@ import { finishReviewBatch, pickFromLadder, type ReviewPick } from '../../servic
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
 
+export function TrainingReviewHeader({ title, description, actions }: {
+  title: React.ReactNode; description: React.ReactNode; actions?: React.ReactNode;
+}) {
+  return <div className="flex items-center gap-2">
+    <ListChecks size={16} className="text-amber-500" />
+    <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{title}</span>
+    <span className="text-[11px] text-zinc-500">{description}</span>
+    <span className="flex-1" />
+    {actions}
+  </div>;
+}
+
+export function TrainingReviewRunRow({ onOpen, children }: { onOpen: () => void; children: React.ReactNode }) {
+  return <button type="button" onClick={onOpen} className="w-full text-left rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 hover:bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">{children}</button>;
+}
+
 /** Scored, not-yet-finished, not-already-queued rows eligible for "Finish
  *  scored". A worker-origin row is eligible too: the mirror has already
  *  copied its rungs here, so it finishes like any local run. Exported for a
@@ -100,7 +116,7 @@ export const ReviewPanel: React.FC = () => {
   // KL ladders still open on the (hidden) Refine tab.
   const open = (r: Yue2ReviewRow) => { setRefineLadderRun(r.refineRun); void openDataset(r.datasetId).then(() => setPhase(r.baseMatched ? 'train' : 'refine')); };
   const Row: React.FC<{ r: Yue2ReviewRow }> = ({ r }) => (
-    <button type="button" onClick={() => open(r)} className="w-full text-left rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 hover:bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+    <TrainingReviewRunRow onOpen={() => open(r)}>
       <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 max-[1023px]:min-w-0 min-[1024px]:min-w-[180px]">{r.datasetName}</span>
       {r.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300" title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{r.origin}</span>}
       <span className="text-[11px] text-zinc-500">{new Date(r.createdAt).toLocaleString()}</span>
@@ -109,17 +125,13 @@ export const ReviewPanel: React.FC = () => {
       {r.live ? <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.review.stillRunning', 'still refining')}</span>
         : r.unscored > 0 && !r.reviewed ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
         : <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{r.reviewed && r.unscored > 0 ? t('trainingStudio.review.reviewed', 'reviewed') : t('trainingStudio.review.scored', 'scored')}</span>}
-    </button>
+    </TrainingReviewRunRow>
   );
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <ListChecks size={16} className="text-amber-500" />
-        <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.review.title', 'Awaiting review')}</span>
-        <span className="text-[11px] text-zinc-500">{t('trainingStudio.review.intro', 'Runs with rungs you have not scored yet. Click one to render previews, listen and score.')}</span>
-        <span className="flex-1" />
-        <button type="button" onClick={() => void load()} disabled={loading} className="p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></button>
-      </div>
+      <TrainingReviewHeader title={t('trainingStudio.review.title', 'Awaiting review')}
+        description={t('trainingStudio.review.intro', 'Runs with rungs you have not scored yet. Click one to render previews, listen and score.')}
+        actions={<button type="button" onClick={() => void load()} disabled={loading} className="p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></button>} />
       {trainingWorker && <div className="flex items-center gap-2 text-[11px] text-zinc-500">
         <span>
           {!mirror ? t('trainingStudio.review.mirrorNone', 'Mirror from {{worker}}: no pass yet', { worker: trainingWorker })

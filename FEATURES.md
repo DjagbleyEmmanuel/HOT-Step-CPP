@@ -369,7 +369,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM adapters (0.6B, 1.7B, 4B) and DiT adapters, as LoRA or LoKr. There are no automatic checkpoint previews; Audition compares adapters and saved milestones. |
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |
-| HeartMuLa adapters | A native backbone LoRA trained on the 3B model, with its own Prepare (HeartCodec codes), Train and Review tabs and readiness checks independent of ACE-Step. Needs a CUDA build and about 12 GB of VRAM. [Details](docs/user/training/heartmula.md) |
+| HeartMuLa adapters | A native backbone LoRA trained on the 3B model, with YuE2-style Prepare (HeartCodec codes and live track progress), Train and Review tabs and readiness checks independent of ACE-Step. Needs a CUDA build and about 12 GB of VRAM. [Details](docs/user/training/heartmula.md) |
 | HeartMuLa checkpoint previews | Training pauses every N steps, renders the same 30-second fixture from the saved checkpoint, then resumes; the base model and the final adapter are rendered too. [Details](docs/user/training/heartmula.md#checkpoint-previews) |
 | MiniMax-Music3 checkpoint previews | Render previews during training pauses the trainer at checkpoints to render samples beside the base model, then resumes it. |
 | YuE2 adapters | Five-stage chain with Perform all stages, Joint Training of the AR and NAR pair as LoKr (the default), LoRA or DoRA with Prodigy, AdamW or Muon, checkpoint losses averaged over the last 20 logged steps, a visible live loss graph, and Review entries for unscored runs even without previews. |
