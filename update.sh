@@ -16,7 +16,7 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 cd "$SCRIPT_DIR"
 
 # ── Colors ────────────────────────────────────────────────────────────
@@ -263,7 +263,10 @@ if [ -e engine/ggml/.git ]; then
 fi
 
 # Resolve the active .env without starting the server or applying a data move.
-SHUTDOWN_PORT=$(cd server && node --import tsx --input-type=module -e "import fs from 'node:fs'; import {parse} from 'dotenv'; import {locateData} from './src/dataroot/locate.ts'; const r=locateData(); if(r.pendingMove || r.pointerError) process.exit(1); const f=r.children.envFile; const e=fs.existsSync(f)?parse(fs.readFileSync(f)):{}; const p=Number(process.env.SERVER_PORT ?? e.SERVER_PORT ?? 3001); if(Number.isInteger(p)===false||p<1||p>65535) process.exit(1); console.log(p);") || { echo '  ERROR: cannot resolve this checkout server port.'; exit 1; }
+SHUTDOWN_PORT=$(cd server && node --import tsx --input-type=module -e "import fs from 'node:fs'; import {parse} from 'dotenv'; import {locateData} from './src/dataroot/locate.ts'; const r=locateData(); if(r.pendingMove || r.pointerError || r.children === null) process.exit(1); const f=r.children.envFile; const e=fs.existsSync(f)?parse(fs.readFileSync(f)):{}; const p=Number(process.env.SERVER_PORT ?? e.SERVER_PORT ?? 3001); if(Number.isInteger(p)===false||p<1||p>65535) process.exit(1); console.log(p);" 2>/dev/null) || {
+    SHUTDOWN_PORT=${SERVER_PORT:-3001}
+    echo "  WARNING: cannot resolve this checkout server port; using $SHUTDOWN_PORT."
+}
 
 # Resolve executable paths, not process names or command-line arguments.
 own_engine_pids() {
@@ -300,7 +303,6 @@ if [ "$STATUS_CODE" = "200" ]; then
     done
     echo "  Server is running — requesting graceful shutdown..."
     curl --max-time 10 -s -X POST "http://localhost:$SHUTDOWN_PORT/api/shutdown" >/dev/null 2>&1 || true
-
 fi
 
 # Also handle an orphan engine when the Node server is already gone.

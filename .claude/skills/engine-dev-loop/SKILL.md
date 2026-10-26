@@ -112,6 +112,10 @@ with `dev.bat`, not just relaunch the engine.
    `Start-Sleep`; after 10 seconds stop only those PIDs, and abort after 15 seconds if
    any remain. `update.bat` uses the same filter. `update.sh` resolves each candidate's
    executable via `/proc/<pid>/exe` on Linux or `lsof -d txt` on macOS before killing it.
+   The update scripts must also repair installs with missing or stale dependencies:
+   if the port probe fails, including an unresolved data root with `children: null`,
+   they warn and use inherited `SERVER_PORT` or 3001, then retain the ownership checks
+   and path-filtered engine wait. `dev-rebuild.bat` still aborts on probe failure.
    The Windows implementation lives in `tools/prod/stop-checkout.ps1`. Before
    requesting shutdown it verifies that the configured port's listener is a
    Node process with a command line inside this checkout. An unknown listener

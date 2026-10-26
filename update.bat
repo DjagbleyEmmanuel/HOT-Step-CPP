@@ -178,14 +178,15 @@ echo   Checking for running server...
 REM Read the same active .env as the server, including a moved data folder.
 set "HOTSTEP_SHUTDOWN_PORT="
 pushd "%HOTSTEP_REPO_DIR%server" || goto :fail
-for /f "delims=" %%p in ('node --import tsx --input-type=module -e "import fs from 'node:fs'; import {parse} from 'dotenv'; import {locateData} from './src/dataroot/locate.ts'; const r=locateData(); if(r.pendingMove || r.pointerError) process.exit(1); const f=r.children.envFile; const e=fs.existsSync(f)?parse(fs.readFileSync(f)):{}; const p=Number(process.env.SERVER_PORT ?? e.SERVER_PORT ?? 3001); if(Number.isInteger(p)===false||p<1||p>65535) process.exit(1); console.log(p);"') do set "HOTSTEP_SHUTDOWN_PORT=%%p"
+for /f "delims=" %%p in ('node --import tsx --input-type=module -e "import fs from 'node:fs'; import {parse} from 'dotenv'; import {locateData} from './src/dataroot/locate.ts'; const r=locateData(); if(r.pendingMove || r.pointerError || r.children === null) process.exit(1); const f=r.children.envFile; const e=fs.existsSync(f)?parse(fs.readFileSync(f)):{}; const p=Number(process.env.SERVER_PORT ?? e.SERVER_PORT ?? 3001); if(Number.isInteger(p)===false||p<1||p>65535) process.exit(1); console.log(p);" 2^>nul') do set "HOTSTEP_SHUTDOWN_PORT=%%p"
 popd
 if not defined HOTSTEP_SHUTDOWN_PORT (
-    echo ERROR: could not resolve this checkout's server port.
-    goto :fail
+    set "HOTSTEP_SHUTDOWN_PORT=3001"
+    if defined SERVER_PORT set "HOTSTEP_SHUTDOWN_PORT=!SERVER_PORT!"
+    echo WARNING: could not resolve this checkout's server port; using !HOTSTEP_SHUTDOWN_PORT!.
 )
 REM A trailing directory separator excludes sibling checkouts with a shared prefix.
-pwsh -NoProfile -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT%
+pwsh -NoProfile -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port "%HOTSTEP_SHUTDOWN_PORT%"
 if errorlevel 1 goto :fail
 
 REM ── Phase 2: Code sync ─────────────────────────────────────────────
