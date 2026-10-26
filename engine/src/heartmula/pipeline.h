@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <random>
 
@@ -361,6 +362,12 @@ struct HeartMuLaRequest {
     // The job's own pick: absent keeps the current one, "" or null resets to default.
     std::optional<std::string> variant, global, local, flow, scalar, adapter;
     std::optional<float>       adapter_scale;
+    HeartMuLaAdapterScales     adapter_groups;  // attn/mlp/early/mid/late; global comes from the pick
+    // Sampler plugins for the HeartCodec flow decode (codec-plugins.h), ACE's field names.
+    // All empty = the native Euler loop.
+    std::string                        infer_method, scheduler, guidance_mode;
+    float                              flow_shift = 1.0f, apg_norm_threshold = 2.5f;
+    std::map<std::string, std::string> plugin_params;  // "<plugin>:<key>" -> value
 };
 
 namespace heartmula_pipeline_detail {
@@ -459,6 +466,36 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
         } else if (k == "adapter_scale") {
             if (!get_num(v, 0, 2, false, &d)) return bad("adapter_scale must be a number from 0 to 2");
             r->adapter_scale = (float) d;
+        } else if (k == "adapter_scale_attn" || k == "adapter_scale_mlp" || k == "adapter_scale_early" ||
+                   k == "adapter_scale_mid" || k == "adapter_scale_late") {
+            if (!get_num(v, 0, 2, false, &d)) return bad(k + " must be a number from 0 to 2");
+            HeartMuLaAdapterScales & g = r->adapter_groups;
+            (k == "adapter_scale_attn" ? g.attn : k == "adapter_scale_mlp" ? g.mlp : k == "adapter_scale_early" ? g.early
+             : k == "adapter_scale_mid" ? g.mid : g.late) = (float) d;
+        } else if (k == "infer_method" || k == "scheduler" || k == "guidance_mode") {
+            if (!yyjson_is_str(v) && !yyjson_is_null(v)) return bad(k + " must be a string");
+            (k == "infer_method" ? r->infer_method : k == "scheduler" ? r->scheduler : r->guidance_mode) =
+                yyjson_is_str(v) ? yyjson_get_str(v) : "";
+        } else if (k == "flow_shift") {
+            if (!get_num(v, 0.01, 20, false, &d)) return bad("flow_shift must be a number from 0.01 to 20");
+            r->flow_shift = (float) d;
+        } else if (k == "apg_norm_threshold") {
+            if (!get_num(v, 0, 100, false, &d)) return bad("apg_norm_threshold must be a number from 0 to 100");
+            r->apg_norm_threshold = (float) d;
+        } else if (k == "plugin_params") {
+            if (yyjson_is_null(v)) continue;
+            if (!yyjson_is_obj(v)) return bad("plugin_params must be an object");
+            // The coercion mm3-request.h and hot-step-server.cpp use, so one control means one thing.
+            size_t       pi, pmax;
+            yyjson_val * pk, * pv;
+            yyjson_obj_foreach(v, pi, pmax, pk, pv) {
+                std::string vs;
+                if (yyjson_is_str(pv)) vs = yyjson_get_str(pv);
+                else if (yyjson_is_real(pv)) vs = std::to_string(yyjson_get_real(pv));
+                else if (yyjson_is_int(pv)) vs = std::to_string(yyjson_get_int(pv));
+                else if (yyjson_is_bool(pv)) vs = yyjson_get_bool(pv) ? "true" : "false";
+                r->plugin_params[yyjson_get_str(pk)] = vs;
+            }
         } else if (k == "codes") {
             if (!yyjson_is_arr(v) || yyjson_arr_size(v) < 1 || yyjson_arr_size(v) > 3000) return bad("codes must be an array of 1 to 3000 frames");
             size_t fi, fmax;
@@ -594,6 +631,7 @@ struct HeartMuLaHooks {
     std::function<void(const char * stage, int step, int total)> progress;
     std::function<uint64_t()>                                reclaimable;  // idle VRAM of other backends
     std::function<void()>                                    reclaim;      // evict it
+    heartcodec::Solve                                        solve;        // sampler plugins, empty = native
 };
 
 // Physical free VRAM. Under Windows WDDM, cudaMemGetInfo counts other processes'
@@ -829,7 +867,9 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
             return finish("vram_alloc_failed", err);
         }
         // lm-graph.h note F: scale 0 or no adapter builds the base graph.
-        heartmula_lm_set_adapter(&g, p.adapter.empty() ? nullptr : &rt->adapter, p.adapter_scale);
+        HeartMuLaAdapterScales scales = req.adapter_groups;
+        scales.global                 = p.adapter_scale;
+        heartmula_lm_set_adapter(&g, p.adapter.empty() ? nullptr : &rt->adapter, scales);
         res->t_load += ms_since(t0);
         if (cancelled()) return finish("cancelled", "cancelled after loading");
 
@@ -960,7 +1000,8 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
         res->audio = heartcodec::decode(
             *rt->rvq, *rt->flow, *rt->scalar, rt->bp.backend, planar, res->frames, std::ref(noise), req.codec_steps,
             req.codec_guidance, cancelled,
-            [&](int n, int chunks) { progress("codec_decode", n * req.codec_steps, chunks * req.codec_steps); });
+            [&](int n, int chunks) { progress("codec_decode", n * req.codec_steps, chunks * req.codec_steps); }, {},
+            hooks.solve);
         res->samples = (int64_t) res->audio.size() / 2;
         res->t_codec = ms_since(t0);
     } catch (const heartcodec::Cancelled &) {

@@ -13,6 +13,7 @@
 // the worker publishes that snapshot at every stage change.
 
 #include "heartmula/pipeline.h"
+#include "heartmula/codec-plugins.h"
 
 #include "audio-io.h"
 #include "httplib.h"
@@ -451,6 +452,16 @@ static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std:
         info->codec_steps = req.codec_steps;
     }
     HeartMuLaHooks hooks = hm_reclaim_hooks();
+    {
+        MM3PluginSel sel;
+        sel.solver             = req.infer_method;
+        sel.scheduler          = req.scheduler;
+        sel.guidance           = req.guidance_mode;
+        sel.shift              = req.flow_shift;
+        sel.apg_norm_threshold = req.apg_norm_threshold;
+        sel.params.insert(req.plugin_params.begin(), req.plugin_params.end());
+        hooks.solve = heartcodec::plugin_solver(sel);
+    }
     std::string    last;
     hooks.cancelled = [&]() { return job->cancel.load(); };
     hooks.progress  = [&](const char * stage, int step, int total) {

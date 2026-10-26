@@ -205,7 +205,7 @@ Param traps:
 | `engine/src/hot-step-sampler-trt.h` | ACE TensorRT sampler: solver and guidance dispatch on the TensorRT DiT |
 | `engine/src/sampler-schedule.h` | Custom timesteps, scheduler dispatch, shift back-calculation, composite schedulers |
 | `engine/src/pipeline-synth-ops.cpp` | `ops_build_schedule` (:334) and the postprocess plugin caller + fallback (`ops_vae_decode_postprocess`, :1699) |
-| `engine/src/minimax/mm3-plugins.h`, `engine/src/sa3-refine.h`, `engine/src/yue2/yue2-nar-graph.h` + `yue2-nar-loop.h` | The MM3, SA3 and YuE2 NAR bridges (see "Four samplers" below) |
+| `engine/src/minimax/mm3-plugins.h`, `engine/src/sa3-refine.h`, `engine/src/yue2/yue2-nar-graph.h` + `yue2-nar-loop.h`, `engine/src/heartmula/codec-plugins.h` | The MM3, SA3, YuE2 NAR and HeartCodec bridges (see "Five samplers" below) |
 | `engine/src/hot-step-params.h` | `plugin_params` map + legacy sideband params |
 | `engine/tools/hot-step-server.cpp` | Registry init (:3409), `GET /plugins` (:3458), `plugin_params` JSON parse (:1021) |
 | `server/src/routes/plugins.ts` | Node proxy `/api/plugins` + 60 s cache + `/reload` |
@@ -237,11 +237,11 @@ Param traps:
 | Every solver/scheduler/guidance dead after upstream sync | `pipeline-synth-ops.cpp` lost the `hot-step-sampler.h` include: now a link error via the `hotstep_sampler_linked_` sentinel. Run `engine/verify-hooks.ps1` |
 | Generation very slow with custom guidance | Each `eval_cond`/`eval_uncond` in `post_step` is a full forward pass: budget them |
 
-## Four samplers run these plugins, not one
+## Five samplers run these plugins, not one
 
 The plugin layer never had an ACE dependency: every `lua_call_*` takes raw
 `float*`, element counts and a param map. What was ACE-specific was the
-*sampler*. Four families now dispatch into it, and a plugin change affects all of them:
+*sampler*. Five families now dispatch into it, and a plugin change affects all of them:
 
 | Sampler | Call sites | Notes |
 |---|---|---|
@@ -249,6 +249,7 @@ The plugin layer never had an ACE dependency: every `lua_call_*` takes raw
 | MiniMax-Music3 flow DiT | `minimax/mm3-plugins.h` | sigma ascends, latents channel-major: the bridge flips both |
 | StableStep / SA3 refine and `/sa3-synth` | `sa3-refine.h` | `t` already descends like ACE; latents channel-major |
 | YuE2 NAR decoder | `yue2/yue2-nar-graph.h`, `yue2/yue2-nar-loop.h` | solvers and schedulers only, from an allowlist; time-major, `n = frames * 64` |
+| HeartMuLa HeartCodec flow decode | `heartmula/codec-plugins.h` | MM3's sampler shape (t ascends), but time-major `[frames][256]`, so the bridge only negates; full-loop solvers refused; guidance only when codec guidance > 1 |
 
 **The layout trap, twice learned:** `apg_project()` (`guidance/apg-core.h`)
 normalises per channel over time and indexes `[t*Oc + c]`: it is hard-wired to

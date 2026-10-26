@@ -14,6 +14,10 @@ constexpr int overlap_frames = overlap_codes * 2;
 using Noise = std::function<std::vector<float>(size_t)>;
 using Progress = std::function<void(int, int)>;
 using Trace = std::function<void(const std::string &, int, const std::vector<float> &, const std::vector<int64_t> &)>;
+// A replacement for solve_euler, same arguments, called once per window (codec-plugins.h).
+// Empty = the native, parity-proven Euler loop.
+using Solve = std::function<std::vector<float>(const Velocity &, const std::vector<float> &, const std::vector<float> &,
+                                               const std::vector<float> &, int64_t, int64_t, int, float, const Cancel &)>;
 
 inline int64_t padded_code_length(int64_t frames) {
     require(frames > 0 && frames <= 3000, "code frame count must be in [1,3000]");
@@ -59,7 +63,8 @@ inline void append_crossfade(std::vector<float> & output, const std::vector<floa
 inline std::vector<float> decode(const Weights & rvq, const Weights & flow, const Weights & scalar,
                                  ggml_backend_t backend, const std::vector<int64_t> & codes, int64_t frames,
                                  const Noise & noise, int steps = 10, float guidance = 1.25f,
-                                 const Cancel & cancelled = {}, const Progress & progress = {}, const Trace & trace = {}) {
+                                 const Cancel & cancelled = {}, const Progress & progress = {}, const Trace & trace = {},
+                                 const Solve & solve = {}) {
     require(flow.fingerprint == scalar.fingerprint, "flow/scalar base fingerprint mismatch");
     require(!rvq.file_hash.empty() && flow.rvq_hash == rvq.file_hash && scalar.rvq_hash == rvq.file_hash,
             "flow/scalar RVQ dependency hash mismatch");
@@ -101,7 +106,8 @@ inline std::vector<float> decode(const Weights & rvq, const Weights & flow, cons
             std::copy(tail.begin(), tail.end(), context.begin() + overlap_frames * 256);
         }
         auto supplied = get_noise(size_t(chunk_frames * 256));
-        previous = solve_euler(velocity, supplied, context, mu, chunk_frames, overlap, steps, guidance, cancelled);
+        previous = solve ? solve(velocity, supplied, context, mu, chunk_frames, overlap, steps, guidance, cancelled)
+                         : solve_euler(velocity, supplied, context, mu, chunk_frames, overlap, steps, guidance, cancelled);
         if (trace) trace("latent", n, previous, {1, chunk_frames, 256});
         auto wav = scalar_decode(scalar, backend, previous, chunk_frames, cancelled);
         if (trace) trace("scalar_output", n, wav, {2, 1, chunk_frames * 1920});

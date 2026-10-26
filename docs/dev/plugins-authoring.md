@@ -601,15 +601,15 @@ Note the two spellings: solvers get `step_index`, guidance gets `step_idx`.
 Every call (solver step, scheduler, guidance, postprocess) also gets a
 `model_context` global with info about which backend is currently running:
 
-| Field | Type | ACE | MM3 | SA3 | YuE2 |
-|-------|------|-----|-----|-----|------|
-| `native_sr` | int | 48000 | 44100 | 44100 | 48000 |
-| `latent_fps` | int | 25 | the flow latent rate, read from the model (about 86) | 10 | 25 |
-| `latent_channels` | int | 64 | the DiT's input channels, read from the model | 256 | 64 |
-| `model_id` | string | `"ace"` | `"mm3"` | `"sa3"` | `"yue2"` |
-| `latent_rms` | float | 2.0 | 2.35 (range 1.76-3.14) | 0.685 | 0.935 for postprocess, 2.0 on the NAR path |
-| `engine_renoise` | bool | false | false | true while SA3's pingpong re-noise wraps a per-step Lua solver | false |
-| `yue2` | table | nil | nil | nil | the song plan, NAR solvers and schedulers only (below) |
+| Field | Type | ACE | MM3 | SA3 | YuE2 | HeartMuLa |
+|-------|------|-----|-----|-----|------|-----------|
+| `native_sr` | int | 48000 | 44100 | 44100 | 48000 | 48000 |
+| `latent_fps` | int | 25 | the flow latent rate, read from the model (about 86) | 10 | 25 | 25 |
+| `latent_channels` | int | 64 | the DiT's input channels, read from the model | 256 | 64 | 256 |
+| `model_id` | string | `"ace"` | `"mm3"` | `"sa3"` | `"yue2"` | `"heartmula"` |
+| `latent_rms` | float | 2.0 | 2.35 (range 1.76-3.14) | 0.685 | 0.935 for postprocess, 2.0 on the NAR path | 2.0 (default, not measured) |
+| `engine_renoise` | bool | false | false | true while SA3's pingpong re-noise wraps a per-step Lua solver | false | false |
+| `yue2` | table | nil | nil | nil | the song plan, NAR solvers and schedulers only (below) | nil |
 
 `latent_rms` is roughly how "loud" that model's native latent space runs.
 A rms-target slider tuned against ACE's ~2.0 and pointed at SA3 unchanged
