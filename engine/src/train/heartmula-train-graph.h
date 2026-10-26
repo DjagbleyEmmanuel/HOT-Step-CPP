@@ -30,6 +30,13 @@
 // segments run in frame chunks: a chunk is a view of Q[l], and its dX lands
 // in the matching columns of the gradient buffer.
 //
+// That is the full-recompute mode (--keep-layers -1). The default kept mode
+// (--keep-layers N, N >= 0) builds blocks 28-N..27, the head, the local
+// decoder and the tail as ONE graph with its backward (hmt_g_kept_bwd), so
+// none of that is recomputed; only blocks below 28-N keep the per-layer
+// segments, and Q / Gl are not allocated. Contract §8 has the measured
+// ms / VRAM per N.
+//
 // The loss of a micro-step is (1/8) sum_k mean_t CE_k, divided by the number
 // of micro-steps in its optimizer step (contract §1, "Batch"). That factor is
 // baked into the CE scale (`wce`), so every loss node is seeded with 1.
@@ -44,8 +51,9 @@
 //   G3  local GQA folds (heads, frames) into ne2, heads fastest; ne3 stays 1.
 //   G4  local q/k are laid out [D, heads*frames, 8] before RoPE.
 //   G5  v is transposed with one CONT over the combined permute.
-//   G6  local attention is exact (head dim 384); global is exact too in this
-//       slice (flash backward is a slice-4b lever).
+//   G6  local attention is exact (head dim 384); global attention is
+//       FLASH_ATTN_TRAIN (BF16 q/k/v where the device has the kernels, else
+//       TF32) or exact, per --attn.
 //   G7  activations stay F32.
 
 #include "heartmula/lm-graph.h"
@@ -55,7 +63,7 @@
 #include <string>
 #include <vector>
 
-#define HMT_MAX_NODES 8192
+#define HMT_MAX_NODES 32768
 
 // One LoRA site: y = W x + scale * B (A x). A [in, r], B [r, out], F32 params.
 struct HmtSite {
@@ -75,9 +83,11 @@ struct HmtSampleBuf {
     ggml_context *        lctx = nullptr;  // labels live alone so one clear zeroes them
     ggml_backend_buffer_t lbuf = nullptr;
     int64_t               S = 0, T = 0, L = 0;
+    bool                  consts = false;  // pos and the masks depend on L only: uploaded once per shape
 
     ggml_tensor * pos   = nullptr;  // I32 [L]
     ggml_tensor * mask  = nullptr;  // F32 [L, L] causal
+    ggml_tensor * mask16 = nullptr; // F16 [L, L] causal, for FLASH_ATTN_TRAIN
     ggml_tensor * tids  = nullptr;  // I32 [L] text ids (prompt rows)
     ggml_tensor * aids  = nullptr;  // I32 [8L] flat audio_embeddings rows
     ggml_tensor * wt    = nullptr;  // F32 [1, L] text gate
@@ -110,6 +120,9 @@ struct HmtGraphCtx {
     const HeartMuLaModel *            m     = nullptr;
     const std::vector<HmtLayerLora> * lora  = nullptr;
     float                             scale = 1.0f;  // alpha / rank
+    int                               attn  = 0;     // global attention: 0 exact, 1 flash (TF32), 2 flash BF16 q/k/v
+    ggml_tensor *                     drop_pool = nullptr;  // F32 dropout mask pool, null at p = 0
+    uint64_t                          drop_key  = 0;        // per micro-step: picks every site's mask window
     const LmOptim *                   opt   = nullptr;
     HmtCkpt *                         ck    = nullptr;
     HmtSampleBuf *                    sb    = nullptr;
@@ -141,8 +154,11 @@ static ggml_tensor * hmt_new(ggml_context * ctx, ggml_type t, int64_t n0, int64_
     return x;
 }
 
-// Persistent buffers. `Lcap`/`Tcap` are the longest sample's L and T.
-static bool hmt_ckpt_alloc(HmtCkpt * c, ggml_backend_t backend, int64_t Lcap, int64_t Tcap, std::string * err) {
+// Persistent buffers. `Lcap`/`Tcap` are the longest sample's L and T. Only
+// C[0..nC) exist (the rest stay null); the local checkpoints Q and Gl only with
+// `local`, and Gg only when a global block is recomputed (nC > 1).
+static bool hmt_ckpt_alloc(HmtCkpt * c, ggml_backend_t backend, int64_t Lcap, int64_t Tcap, int nC, bool local,
+                           std::string * err) {
     hmt_ckpt_free(c);
     const int64_t    H  = 3072;
     ggml_init_params ip = { 64 * ggml_tensor_overhead(), nullptr, true };
@@ -151,6 +167,7 @@ static bool hmt_ckpt_alloc(HmtCkpt * c, ggml_backend_t backend, int64_t Lcap, in
     c->Tcap             = Tcap;
     char nm[32];
     for (int l = 0; l <= 28; l++) {
+        if (l >= nC) { c->C.push_back(nullptr); continue; }
         snprintf(nm, sizeof(nm), "hmt.C%d", l);
         c->C.push_back(hmt_new(c->ctx, GGML_TYPE_F32, H, Lcap, 1, nm));
         // ggml_set_param only asserts op == NONE, so a pre-allocated leaf is
@@ -158,15 +175,19 @@ static bool hmt_ckpt_alloc(HmtCkpt * c, ggml_backend_t backend, int64_t Lcap, in
         // C[0] has nothing trainable upstream, so it never needs one.
         if (l > 0) ggml_set_param(c->C.back());
     }
-    for (int l = 0; l <= 3; l++) {
+    for (int l = 0; l <= 3 && local; l++) {
         snprintf(nm, sizeof(nm), "hmt.Q%d", l);
         c->Q.push_back(hmt_new(c->ctx, GGML_TYPE_F32, H, 8 * Tcap, 1, nm));
         ggml_set_param(c->Q.back());
     }
-    c->Gg[0] = hmt_new(c->ctx, GGML_TYPE_F32, H, Lcap, 1, "hmt.Gg0");
-    c->Gg[1] = hmt_new(c->ctx, GGML_TYPE_F32, H, Lcap, 1, "hmt.Gg1");
-    c->Gl[0] = hmt_new(c->ctx, GGML_TYPE_F32, H, 8 * Tcap, 1, "hmt.Gl0");
-    c->Gl[1] = hmt_new(c->ctx, GGML_TYPE_F32, H, 8 * Tcap, 1, "hmt.Gl1");
+    if (nC > 1) {
+        c->Gg[0] = hmt_new(c->ctx, GGML_TYPE_F32, H, Lcap, 1, "hmt.Gg0");
+        c->Gg[1] = hmt_new(c->ctx, GGML_TYPE_F32, H, Lcap, 1, "hmt.Gg1");
+    }
+    if (local) {
+        c->Gl[0] = hmt_new(c->ctx, GGML_TYPE_F32, H, 8 * Tcap, 1, "hmt.Gl0");
+        c->Gl[1] = hmt_new(c->ctx, GGML_TYPE_F32, H, 8 * Tcap, 1, "hmt.Gl1");
+    }
     c->lpos  = hmt_new(c->ctx, GGML_TYPE_I32, 8, 1, 1, "hmt.lpos");
     c->lmask = hmt_new(c->ctx, GGML_TYPE_F32, 8, 8, 1, "hmt.lmask");
     c->t_one = hmt_new(c->ctx, GGML_TYPE_F32, 1, 1, 1, "hmt.one");
@@ -200,6 +221,7 @@ static bool hmt_sample_alloc(HmtSampleBuf * s, ggml_backend_t backend, int64_t S
     s->S = S, s->T = T, s->L = L;
     s->pos    = hmt_new(s->ctx, GGML_TYPE_I32, L, 1, 1, "hmt.pos");
     s->mask   = hmt_new(s->ctx, GGML_TYPE_F32, L, L, 1, "hmt.mask");
+    s->mask16 = hmt_new(s->ctx, GGML_TYPE_F16, L, L, 1, "hmt.mask16");
     s->tids   = hmt_new(s->ctx, GGML_TYPE_I32, L, 1, 1, "hmt.tids");
     s->aids   = hmt_new(s->ctx, GGML_TYPE_I32, 8 * L, 1, 1, "hmt.aids");
     s->wt     = hmt_new(s->ctx, GGML_TYPE_F32, 1, L, 1, "hmt.wt");
@@ -224,10 +246,12 @@ static bool hmt_sample_alloc(HmtSampleBuf * s, ggml_backend_t backend, int64_t S
 static void hmt_sample_upload(HmtSampleBuf * s, const int32_t * prompt, int64_t muq_idx, const int32_t * codes) {
     const int64_t S = s->S, T = s->T, L = s->L, V = HEARTMULA_AUDIO_VOCAB;
     std::vector<int32_t> pos((size_t) L), tids((size_t) L, 0), aids((size_t) (8 * L), 0);
-    std::vector<float>   mask((size_t) (L * L)), wt((size_t) L, 0.0f), wm((size_t) L, 0.0f), wa((size_t) (8 * L), 0.0f);
+    std::vector<float>   mask(s->consts ? 0 : (size_t) (L * L)), wt((size_t) L, 0.0f), wm((size_t) L, 0.0f), wa((size_t) (8 * L), 0.0f);
     for (int64_t n = 0; n < L; n++) {
-        pos[(size_t) n] = (int32_t) n;
-        for (int64_t j = 0; j < L; j++) mask[(size_t) (n * L + j)] = j <= n ? 0.0f : -INFINITY;
+        if (!s->consts) {
+            pos[(size_t) n] = (int32_t) n;
+            for (int64_t j = 0; j < L; j++) mask[(size_t) (n * L + j)] = j <= n ? 0.0f : -INFINITY;
+        }
         if (n < S) {
             tids[(size_t) n] = prompt[n];
             (n == muq_idx ? wm : wt)[(size_t) n] = 1.0f;  // §2.1: the MuQ row is muq_linear(0) = its bias
@@ -247,8 +271,14 @@ static void hmt_sample_upload(HmtSampleBuf * s, const int32_t * prompt, int64_t 
         for (int p = 1; p < 8; p++) lids[(size_t) (t * 8 + p)] = codes[t * 8 + p - 1] + (p - 1) * (int32_t) V;
         for (int k = 0; k < 8; k++) lidx[(size_t) (k * T + t)] = (k * T + t) * V + codes[t * 8 + k];
     }
-    ggml_backend_tensor_set(s->pos, pos.data(), 0, ggml_nbytes(s->pos));
-    ggml_backend_tensor_set(s->mask, mask.data(), 0, ggml_nbytes(s->mask));
+    if (!s->consts) {
+        ggml_backend_tensor_set(s->pos, pos.data(), 0, ggml_nbytes(s->pos));
+        ggml_backend_tensor_set(s->mask, mask.data(), 0, ggml_nbytes(s->mask));
+        std::vector<ggml_fp16_t> mask16(mask.size());
+        ggml_fp32_to_fp16_row(mask.data(), mask16.data(), (int64_t) mask.size());
+        ggml_backend_tensor_set(s->mask16, mask16.data(), 0, ggml_nbytes(s->mask16));
+        s->consts = true;
+    }
     ggml_backend_tensor_set(s->tids, tids.data(), 0, ggml_nbytes(s->tids));
     ggml_backend_tensor_set(s->aids, aids.data(), 0, ggml_nbytes(s->aids));
     ggml_backend_tensor_set(s->wt, wt.data(), 0, ggml_nbytes(s->wt));
@@ -262,11 +292,28 @@ static void hmt_sample_upload(HmtSampleBuf * s, const int32_t * prompt, int64_t 
 
 // ── Blocks ─────────────────────────────────────────────────────────────────
 
+// LoRA dropout (contract §1, lever 6): the A branch reads x times a mask. Each
+// mask is a window of the persistent pool (Bernoulli(1 - p) values of 0 or
+// 1 / (1 - p), drawn once from the seed) at an offset hashed from the micro-
+// step key, the layer and the site. A recompute reads the same window, so the
+// masks reproduce exactly with no per-step upload and nothing retained.
+static ggml_tensor * hmt_drop(ggml_context * ctx, const HmtGraphCtx & g, ggml_tensor * x, int l, int site) {
+    if (!g.drop_pool) return x;
+    const int64_t n     = ggml_nelements(x);
+    const int64_t slots = (ggml_nelements(g.drop_pool) - n) / 16;
+    uint64_t      z     = g.drop_key + 0x9E3779B97F4A7C15ull * (uint64_t) (l * 4 + site + 1);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    const size_t  off   = (size_t) (z % (uint64_t) slots) * 16 * sizeof(float);
+    return ggml_mul(ctx, x, ggml_view_2d(ctx, g.drop_pool, x->ne[0], x->ne[1], x->ne[0] * sizeof(float), off));
+}
+
 static ggml_tensor * hmt_linear(ggml_context * ctx, ggml_tensor * w, const HmtSite * site, float scale,
-                                ggml_tensor * x) {
+                                ggml_tensor * x, ggml_tensor * xa = nullptr) {
     ggml_tensor * y = ggml_mul_mat(ctx, w, x);
     if (site && site->A) {
-        ggml_tensor * t = ggml_mul_mat(ctx, site->A, x);
+        ggml_tensor * t = ggml_mul_mat(ctx, site->A, xa ? xa : x);
         if (scale != 1.0f) t = ggml_scale(ctx, t, scale);
         y = ggml_add(ctx, y, ggml_mul_mat(ctx, site->B, t));
     }
@@ -275,8 +322,10 @@ static ggml_tensor * hmt_linear(ggml_context * ctx, ggml_tensor * w, const HmtSi
 
 static ggml_tensor * hmt_mlp(ggml_context * ctx, const HeartMuLaLayer & w, ggml_tensor * x, float eps) {
     ggml_tensor * n = heartmula_rms(ctx, x, w.mlp_norm, eps);
-    ggml_tensor * g = ggml_silu(ctx, ggml_mul_mat(ctx, w.w1, n));
-    return ggml_add(ctx, x, ggml_mul_mat(ctx, w.w2, ggml_mul(ctx, g, ggml_mul_mat(ctx, w.w3, n))));
+    // Split SwiGLU: its backward keeps only the two GEMM outputs and recomputes the
+    // silu, so the [ffn, rows] silu output is never retained.
+    ggml_tensor * g = ggml_swiglu_split(ctx, ggml_mul_mat(ctx, w.w1, n), ggml_mul_mat(ctx, w.w3, n));
+    return ggml_add(ctx, x, ggml_mul_mat(ctx, w.w2, g));
 }
 
 // Global block on x [H, L] (batch 1, so every ne3 is 1).
@@ -287,18 +336,38 @@ static ggml_tensor * hmt_global_block(ggml_context * ctx, const HmtGraphCtx & g,
     const HmtLayerLora *      lr = g.lora ? &(*g.lora)[(size_t) l] : nullptr;
     const int64_t             D = c.head_dim, L = x->ne[1];
     ggml_tensor * n = heartmula_rms(ctx, x, w.sa_norm, c.rms_eps);
-    ggml_tensor * q = ggml_reshape_3d(ctx, hmt_linear(ctx, w.q, lr ? &lr->s[0] : nullptr, g.scale, n), D, c.n_head, L);
-    ggml_tensor * k = ggml_reshape_3d(ctx, hmt_linear(ctx, w.k, lr ? &lr->s[1] : nullptr, g.scale, n), D, c.n_head_kv, L);
-    ggml_tensor * v = ggml_reshape_3d(ctx, hmt_linear(ctx, w.v, lr ? &lr->s[2] : nullptr, g.scale, n), D, c.n_head_kv, L);
+    auto lin = [&](ggml_tensor * W, int s, ggml_tensor * in) {
+        return hmt_linear(ctx, W, lr ? &lr->s[s] : nullptr, g.scale, in, lr ? hmt_drop(ctx, g, in, l, s) : nullptr);
+    };
+    ggml_tensor * q = ggml_reshape_3d(ctx, lin(w.q, 0, n), D, c.n_head, L);
+    ggml_tensor * k = ggml_reshape_3d(ctx, lin(w.k, 1, n), D, c.n_head_kv, L);
+    ggml_tensor * v = ggml_reshape_3d(ctx, lin(w.v, 2, n), D, c.n_head_kv, L);
     q = heartmula_rope(ctx, q, g.sb->pos, st);
     k = heartmula_rope(ctx, k, g.sb->pos, st);
-    ggml_tensor * q3 = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [D, L, Nh]
-    ggml_tensor * k3 = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));  // [D, L, Nkv]
-    ggml_tensor * vt = ggml_cont(ctx, ggml_permute(ctx, v, 1, 2, 0, 3));  // [L, D, Nkv] (G5)
-    ggml_tensor * s  = ggml_soft_max_ext(ctx, ggml_mul_mat(ctx, k3, q3), g.sb->mask, 1.0f / sqrtf((float) D), 0.0f);
-    ggml_tensor * o  = ggml_cont(ctx, ggml_permute(ctx, ggml_mul_mat(ctx, vt, s), 0, 2, 1, 3));  // [D, Nh, L]
-    o = ggml_reshape_2d(ctx, o, D * c.n_head, L);
-    x = ggml_add(ctx, x, hmt_linear(ctx, w.o, lr ? &lr->s[3] : nullptr, g.scale, o));
+    ggml_tensor * o;
+    if (g.attn) {
+        // FLASH_ATTN_TRAIN reads q/k/v as permuted views (only nb[0] == 4 needed) and
+        // keeps O + LSE instead of the [L, L, Nh] softmax. BF16 casts q/k/v only (G7).
+        ggml_tensor * qp = ggml_permute(ctx, q, 0, 2, 1, 3), * kp = ggml_permute(ctx, k, 0, 2, 1, 3);
+        ggml_tensor * vp = ggml_permute(ctx, v, 0, 2, 1, 3);
+        if (g.attn == 2) {
+            qp = ggml_cast(ctx, qp, GGML_TYPE_BF16);
+            kp = ggml_cast(ctx, kp, GGML_TYPE_BF16);
+            vp = ggml_cast(ctx, vp, GGML_TYPE_BF16);
+        }
+        ggml_tensor * packed = ggml_flash_attn_train(ctx, qp, kp, vp, g.sb->mask16, 1.0f / sqrtf((float) D));
+        ggml_flash_attn_train_set_prec(packed, g.attn == 2 ? GGML_PREC_BF16 : GGML_PREC_DEFAULT);
+        ggml_flash_attn_train_set_causal(packed, 0);
+        o = ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), D * c.n_head, L);  // [D, Nh, L]
+    } else {
+        ggml_tensor * q3 = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [D, L, Nh]
+        ggml_tensor * k3 = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));  // [D, L, Nkv]
+        ggml_tensor * vt = ggml_cont(ctx, ggml_permute(ctx, v, 1, 2, 0, 3));  // [L, D, Nkv] (G5)
+        ggml_tensor * s  = ggml_soft_max_ext(ctx, ggml_mul_mat(ctx, k3, q3), g.sb->mask, 1.0f / sqrtf((float) D), 0.0f);
+        o = ggml_cont(ctx, ggml_permute(ctx, ggml_mul_mat(ctx, vt, s), 0, 2, 1, 3));  // [D, Nh, L]
+        o = ggml_reshape_2d(ctx, o, D * c.n_head, L);
+    }
+    x = ggml_add(ctx, x, lin(w.o, 3, o));
     return hmt_mlp(ctx, w, x, c.rms_eps);
 }
 
@@ -495,6 +564,42 @@ static ggml_cgraph * hmt_g_tail_bwd(HmtGraphCtx & g, int64_t f0, int64_t Tc, flo
     }
     if (taps) ggml_set_output(y);
     hmt_backward(g, ctx, gf, Ls, g.ck->Q[3], g.ck->Gl[dst]);
+    return gf;
+}
+
+// Kept tail: global blocks k0..27, the head, the whole local decoder and all
+// eight CEs in ONE graph with its backward, so none of it is recomputed. The
+// graph's dX for C[k0] lands in Gg[0]; blocks below k0 keep the per-layer
+// recompute. Outputs and taps as hmt_g_head_bwd / hmt_g_tail_bwd (Tc = T).
+static ggml_cgraph * hmt_g_kept_bwd(HmtGraphCtx & g, int k0, float wce, HmtHeadOut * head, HmtTailOut * tail, bool taps) {
+    const HeartMuLaModel & m = *g.m;
+    const int64_t          H = m.local.cfg.n_embd, T = g.sb->T, V = HEARTMULA_AUDIO_VOCAB;
+    ggml_cgraph *          gf;
+    ggml_context *         ctx = hmt_begin(g, &gf, true);
+    ggml_tensor *          X   = hmt_cols(ctx, g.ck->C[(size_t) k0], 0, g.sb->L);
+    for (int l = k0; l < 28; l++) X = hmt_global_block(ctx, g, l, X);
+    ggml_tensor * Q = hmt_head(ctx, g, X, head);
+    for (int l = 0; l < 3; l++) Q = hmt_local_block(ctx, g, l, Q);
+    ggml_tensor * y  = ggml_reshape_3d(ctx, heartmula_rms(ctx, Q, m.local.norm, m.local.cfg.rms_eps), H, 8, T);
+    ggml_tensor * Ls = ggml_scale(ctx, head->ce0, wce);
+    ggml_set_output(head->ce0);
+    tail->dec = y;
+    for (int i = 1; i < 8; i++) {
+        ggml_tensor * yi  = ggml_cont(ctx, ggml_view_2d(ctx, y, H, T, y->nb[2], (size_t) i * y->nb[1]));
+        ggml_tensor * lg  = ggml_mul_mat(ctx, m.audio_head[i - 1], yi);
+        ggml_tensor * lab = ggml_view_2d(ctx, g.sb->labels, V, T, g.sb->labels->nb[1], (size_t) i * g.sb->labels->nb[2]);
+        tail->ce[i]     = ggml_cross_entropy_loss(ctx, lg, lab);
+        tail->logits[i] = lg;
+        ggml_set_output(tail->ce[i]);
+        if (taps) ggml_set_output(lg);
+        Ls = ggml_add(ctx, Ls, ggml_scale(ctx, tail->ce[i], wce));
+    }
+    if (taps) {
+        ggml_set_output(y);
+        ggml_set_output(head->last);
+        ggml_set_output(head->logits);
+    }
+    hmt_backward(g, ctx, gf, Ls, k0 > 0 ? g.ck->C[(size_t) k0] : nullptr, k0 > 0 ? g.ck->Gg[0] : nullptr);
     return gf;
 }
 

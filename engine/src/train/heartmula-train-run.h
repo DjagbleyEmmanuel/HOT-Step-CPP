@@ -14,6 +14,7 @@
 //       [--grad-accum 4] [--seed 0] [--max-frames 0] [--max-grad-norm 0]
 //       [--save-every 100] [--stop-after N] [--resume] [--name <adapter name>]
 //       [--weights f16|bf16] [--local-chunk 0] [--lora-dropout 0]
+//       [--attn auto|flash-bf16|flash|exact] [--keep-layers auto|-1|0..28]
 //
 // Files under --out:
 //   hm_train_state.bin          the resumable checkpoint (latest only)
@@ -57,6 +58,7 @@
 #include "train/heartmula-train-state.h"
 
 #include <chrono>
+#include <map>
 
 struct HeartmulaTrainArgs {
     std::string data_dir, out_dir, models_dir, global_path, local_path, variant = "3B", type = "F16";
@@ -64,6 +66,8 @@ struct HeartmulaTrainArgs {
     int      rank = 64, accum = 4, save_every = 100;
     float    alpha = 64.0f, lr = 1e-4f, wd = 0.01f, beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f, clip = 0.0f, dropout = 0.0f;
     int64_t  steps = 480, stop_after = 0, max_frames = 0, local_chunk = 0;
+    int      keep = -2;            // --keep-layers: -2 auto, -1 recompute every block, 0..28 kept blocks
+    std::string attn = "auto";     // --attn auto|flash-bf16|flash|exact
     uint64_t seed = 0;
     bool     resume = false;
 };
@@ -100,11 +104,46 @@ struct HmtRun {
     HmtSampleBuf   sb;
     HmtGraphCtx    g;
     int64_t        chunk     = 0;
+    int            keep      = -1;  // --keep-layers: -1 recompute everything, else kept global blocks
+    float          drop_p    = 0.0f;
+    uint64_t       seed      = 0;
+    ggml_context *        drop_ctx = nullptr;  // the dropout mask pool (lever 6)
+    ggml_backend_buffer_t drop_buf = nullptr;
     size_t         peak_sched = 0;
     bool           taps      = false;
     // selftest taps, filled when `taps` is set
     std::vector<float> tap_last, tap_dec, tap_logits[8];
+    // HMT_PROFILE=1: per-segment wall time (build = since the previous compute ended,
+    // alloc, compute to a device sync). The sync costs overlap, so profile runs only.
+    struct Prof { double build = 0, alloc = 0, comp = 0; int n = 0; };
+    bool                        prof = getenv("HMT_PROFILE") != nullptr;
+    const char *                prof_tag = "?";
+    std::map<std::string, Prof> prof_acc;
+    std::chrono::steady_clock::time_point prof_t = std::chrono::steady_clock::now();
 };
+
+// Host-side work between graphs, recorded under its own tag (inside the next
+// segment's build time as well, so it is a breakdown, not an addition).
+template <typename F> static auto hmt_prof_host(HmtRun & R, const char * tag, F && f) {
+    if (!R.prof) return f();
+    const auto t0 = std::chrono::steady_clock::now();
+    auto       r  = f();
+    HmtRun::Prof & p = R.prof_acc[tag];
+    p.build += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    p.n++;
+    return r;
+}
+
+static void hmt_prof_dump(HmtRun & R, const char * what) {
+    if (!R.prof) return;
+    double b = 0, a = 0, c = 0;
+    for (auto & [k, p] : R.prof_acc) {
+        fprintf(stderr, "[hm-prof] %-14s n %5d  build %8.1f  alloc %8.1f  compute %8.1f ms\n", k.c_str(), p.n, p.build, p.alloc, p.comp);
+        b += p.build, a += p.alloc, c += p.comp;
+    }
+    fprintf(stderr, "[hm-prof] %s total: build %.1f alloc %.1f compute %.1f ms\n", what, b, a, c);
+    R.prof_acc.clear();
+}
 
 static void hmt_run_free(HmtRun * R) {
     if (R->g.sched) ggml_backend_sched_free(R->g.sched);
@@ -113,6 +152,10 @@ static void hmt_run_free(HmtRun * R) {
     R->g.ctx   = nullptr;
     hmt_sample_free(&R->sb);
     hmt_ckpt_free(&R->ck);
+    if (R->drop_buf) ggml_backend_buffer_free(R->drop_buf);
+    if (R->drop_ctx) ggml_free(R->drop_ctx);
+    R->drop_buf = nullptr;
+    R->drop_ctx = nullptr;
     lm_optim_free(&R->opt);
     hmt_lora_free(&R->lora);
     heartmula_model_free(&R->m);
@@ -121,17 +164,28 @@ static void hmt_run_free(HmtRun * R) {
 static size_t hmt_alloc_bytes(const HmtRun & R) {
     size_t n = 0;
     for (ggml_backend_buffer_t b : { R.m.wctx_global.buffer, R.m.wctx_local.buffer, R.lora.buf, R.opt.buf_grad, R.opt.buf_mom,
-                                     R.opt.buf_alt, R.ck.buf, R.sb.buf, R.sb.lbuf }) {
+                                     R.opt.buf_alt, R.ck.buf, R.sb.buf, R.sb.lbuf, R.drop_buf }) {
         if (b) n += ggml_backend_buffer_get_size(b);
     }
     return n + R.peak_sched;
 }
 
 static bool hmt_compute(HmtRun & R, ggml_cgraph * gf, std::string * err) {
+    using clk = std::chrono::steady_clock;
+    const auto t0 = clk::now();
     ggml_backend_sched_reset(R.g.sched);
     if (!ggml_backend_sched_alloc_graph(R.g.sched, gf)) { *err = "graph allocation failed (out of VRAM?)"; return false; }
+    const auto t1 = clk::now();
     R.peak_sched = std::max(R.peak_sched, ggml_backend_sched_get_buffer_size(R.g.sched, R.m.bp.backend));
     if (ggml_backend_sched_graph_compute(R.g.sched, gf) != GGML_STATUS_SUCCESS) { *err = "graph compute failed"; return false; }
+    if (R.prof) {
+        ggml_backend_sched_synchronize(R.g.sched);
+        const auto t2 = clk::now();
+        auto ms = [](clk::time_point a, clk::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        HmtRun::Prof & p = R.prof_acc[R.prof_tag];
+        p.build += ms(R.prof_t, t0), p.alloc += ms(t0, t1), p.comp += ms(t1, t2), p.n++;
+        R.prof_t = t2;
+    }
     return true;
 }
 
@@ -147,17 +201,55 @@ static bool hmt_micro_step(HmtRun & R, const int32_t * prompt, int64_t S, int64_
                            int64_t T, float wce, double ce[8], std::string * err) {
     HmtGraphCtx & g = R.g;
     if (!hmt_sample_alloc(&R.sb, R.m.bp.backend, S, T, err)) return false;
-    hmt_sample_upload(&R.sb, prompt, muq_idx, codes);
+    hmt_prof_host(R, "host upload", [&] { hmt_sample_upload(&R.sb, prompt, muq_idx, codes); return 0; });
     ggml_backend_buffer_clear(R.sb.lbuf, 0);
     const int64_t chunk = R.chunk > 0 ? std::min(R.chunk, T) : T;
     auto run = [&](ggml_cgraph * gf) { return hmt_compute(R, gf, err); };
+    auto tag = [&](const char * t) { R.prof_tag = t; };
 
     // Forward, checkpointing every block boundary.
+    tag("embed");
     if (!run(hmt_g_labels(g)) || !run(hmt_g_embed(g))) return false;
+    if (R.keep >= 0) {
+        // Kept tail (--keep-layers): blocks k0..27 and the local decoder in one graph, no recompute.
+        const int k0 = 28 - R.keep;
+        tag("global fwd");
+        for (int l = 0; l < k0; l++) if (!run(hmt_g_global_fwd(g, l))) return false;
+        tag("kept");
+        if (k0 > 0) ggml_backend_tensor_memset(R.ck.Gg[0], 0, 0, ggml_nbytes(R.ck.Gg[0]));
+        HmtHeadOut head;
+        HmtTailOut tail;
+        if (!run(hmt_g_kept_bwd(g, k0, wce, &head, &tail, R.taps))) return false;
+        ce[0] = hmt_read1(head.ce0);
+        for (int i = 1; i < 8; i++) ce[i] = hmt_read1(tail.ce[i]);
+        if (R.taps) {
+            auto get = [](ggml_tensor * t, std::vector<float> & v) {
+                v.resize((size_t) ggml_nelements(t));
+                ggml_backend_tensor_get(t, v.data(), 0, ggml_nbytes(t));
+            };
+            get(tail.dec, R.tap_dec);
+            get(head.last, R.tap_last);
+            get(head.logits, R.tap_logits[0]);
+            for (int i = 1; i < 8; i++) get(tail.logits[i], R.tap_logits[i]);
+        }
+        tag("global bwd");
+        int cur = 0;
+        for (int l = k0 - 1; l >= 0; l--) {
+            if (l > 0) ggml_backend_tensor_memset(R.ck.Gg[1 - cur], 0, 0, ggml_nbytes(R.ck.Gg[1 - cur]));
+            if (!run(hmt_g_global_bwd(g, l, cur))) return false;
+            cur = 1 - cur;
+        }
+        tag("optimizer");
+        return true;
+    }
+    tag("global fwd");
     for (int l = 0; l < 28; l++) if (!run(hmt_g_global_fwd(g, l))) return false;
+    tag("head fwd");
     if (!run(hmt_g_head_fwd(g))) return false;
+    tag("local fwd");
     for (int l = 0; l < 3; l++)
         for (int64_t f0 = 0; f0 < T; f0 += chunk) if (!run(hmt_g_local_fwd(g, l, f0, std::min(chunk, T - f0)))) return false;
+    tag("tail bwd");
 
     // Backward, last segment first.
     for (int k = 0; k < 8; k++) ce[k] = 0.0;
@@ -176,6 +268,7 @@ static bool hmt_micro_step(HmtRun & R, const int32_t * prompt, int64_t S, int64_
             }
         }
     }
+    tag("local bwd");
     int cur = 0;
     for (int l = 2; l >= 0; l--) {
         ggml_backend_tensor_memset(R.ck.Gl[1 - cur], 0, 0, ggml_nbytes(R.ck.Gl[1 - cur]));
@@ -184,6 +277,7 @@ static bool hmt_micro_step(HmtRun & R, const int32_t * prompt, int64_t S, int64_
     }
     ggml_backend_tensor_memset(R.ck.Gg[0], 0, 0, ggml_nbytes(R.ck.Gg[0]));
     HmtHeadOut head;
+    tag("head bwd");
     if (!run(hmt_g_head_bwd(g, cur, wce, &head, R.taps))) return false;
     ce[0] = hmt_read1(head.ce0);
     if (R.taps) {
@@ -192,12 +286,14 @@ static bool hmt_micro_step(HmtRun & R, const int32_t * prompt, int64_t S, int64_
         R.tap_logits[0].resize((size_t) ggml_nelements(head.logits));
         ggml_backend_tensor_get(head.logits, R.tap_logits[0].data(), 0, ggml_nbytes(head.logits));
     }
+    tag("global bwd");
     cur = 0;
     for (int l = 27; l >= 0; l--) {
         if (l > 0) ggml_backend_tensor_memset(R.ck.Gg[1 - cur], 0, 0, ggml_nbytes(R.ck.Gg[1 - cur]));
         if (!run(hmt_g_global_bwd(g, l, cur))) return false;
         cur = 1 - cur;
     }
+    tag("optimizer");
     return true;
 }
 
@@ -257,59 +353,137 @@ static bool hmt_setup(HmtRun & R, const HeartmulaTrainArgs & a, std::string * er
     R.g.ck    = &R.ck;
     R.g.sb    = &R.sb;
     R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
+    R.drop_p  = a.dropout;
+    R.seed    = a.seed;
     return true;
+}
+
+// The dropout mask pool: max(16M, 4 x the largest mask) F32 values, each 0 with
+// probability p and 1 / (1 - p) otherwise, drawn once from the seed (so a resume
+// rebuilds the same pool). Windows overlap between sites, but every window is
+// an i.i.d. Bernoulli field and two sites never read the same value at the same
+// position unless their offsets collide.
+static bool hmt_drop_alloc(HmtRun & R, int64_t Lcap, std::string * err) {
+    if (R.drop_p <= 0.0f) return true;
+    const int64_t n = std::max<int64_t>((int64_t) 16 << 20, 4 * 3072 * Lcap);
+    ggml_init_params ip = { ggml_tensor_overhead(), nullptr, true };
+    R.drop_ctx          = ggml_init(ip);
+    R.g.drop_pool       = hmt_new(R.drop_ctx, GGML_TYPE_F32, n, 1, 1, "hmt.drop_pool");
+    R.drop_buf          = ggml_backend_alloc_ctx_tensors(R.drop_ctx, R.m.bp.backend);
+    if (!R.drop_buf) { *err = "the dropout mask pool does not fit"; return false; }
+    std::mt19937_64    rng(hmt_mix(R.seed, 0, 0xD209));
+    std::vector<float> v((size_t) n);
+    const uint64_t     keep_below = (uint64_t) ((1.0 - (double) R.drop_p) * 18446744073709551616.0);
+    const float        scale      = 1.0f / (1.0f - R.drop_p);
+    for (auto & x : v) x = rng() < keep_below ? scale : 0.0f;
+    ggml_backend_tensor_set(R.g.drop_pool, v.data(), 0, ggml_nbytes(R.g.drop_pool));
+    return true;
+}
+
+static const char * hmt_attn_name(int attn) {
+    return attn == 2 ? "flash-bf16" : attn == 1 ? "flash" : "exact";
 }
 
 // Memory admission and the op probe (contract §6.3). Builds every segment at
 // the largest shapes the run will see, reserves it, and refuses a node the GPU
-// would not run. With --local-chunk 0 the frame chunk of the local segments
-// halves until the compute buffer fits the free VRAM.
-static bool hmt_admit(HmtRun & R, int64_t Smax, int64_t Tmax, int64_t chunk_arg, std::string * err) {
-    if (!hmt_ckpt_alloc(&R.ck, R.m.bp.backend, Smax + Tmax - 1, Tmax, err)) return false;
-    if (!hmt_sample_alloc(&R.sb, R.m.bp.backend, Smax, Tmax, err)) return false;
-    const DitGpuMem mem    = dit_gpu_mem_query(R.m.bp.backend);
-    const size_t    margin = (size_t) 768 << 20;
-    const size_t    budget = mem.free > margin ? mem.free - margin : 0;
-    ggml_backend_t  gpu    = R.m.bp.backend;
-    for (int64_t chunk = chunk_arg > 0 ? std::min(chunk_arg, Tmax) : Tmax;; chunk = (chunk + 1) / 2) {
+// would not run.
+//
+// Attention (--attn auto): the first of flash-bf16, flash, exact whose global
+// block the device runs entirely (supports_op is capability-exact for
+// FLASH_ATTN_TRAIN: BF16 needs CUDA sm_80+). Recompute (--keep-layers auto):
+// the most kept global blocks out of 28, 24, ..., 0 whose graphs fit the free
+// VRAM, then full recompute (-1). With full recompute and --local-chunk 0 the
+// frame chunk of the local segments halves until the compute buffer fits.
+static bool hmt_admit(HmtRun & R, int64_t Smax, int64_t Tmax, int64_t chunk_arg, const std::string & attn_arg, int keep_arg,
+                      std::string * err) {
+    ggml_backend_t gpu    = R.m.bp.backend;
+    const bool     on_gpu = gpu != R.m.bp.cpu_backend;
+    const int64_t  Lcap   = Smax + Tmax - 1;
+    if (!hmt_sample_alloc(&R.sb, gpu, Smax, Tmax, err) || !hmt_drop_alloc(R, Lcap, err)) return false;
+
+    std::vector<int> attns = attn_arg == "auto" ? std::vector<int>{ 2, 1, 0 }
+                           : std::vector<int>{ attn_arg == "flash-bf16" ? 2 : attn_arg == "flash" ? 1 : 0 };
+    if (!on_gpu && attn_arg == "auto") attns = { 1, 0 };  // the CPU has no BF16 kernels
+    if (!hmt_ckpt_alloc(&R.ck, gpu, Lcap, Tmax, 2, false, err)) return false;
+    std::string why;
+    for (size_t i = 0; i < attns.size(); i++) {
+        R.g.attn = attns[i];
+        std::string e;
+        if (!on_gpu || hmt_probe_graph(gpu, hmt_g_global_bwd(R.g, 1, 0), "global backward", &e)) break;
+        if (i + 1 == attns.size()) { *err = e; return false; }
+        why += (why.empty() ? "" : "; ") + std::string(hmt_attn_name(attns[i])) + ": " + e;
+    }
+    if (!why.empty()) fprintf(stderr, "[hm-train] attention fallback: %s\n", why.c_str());
+
+    std::vector<int> keeps;
+    if (keep_arg == -2) {
+        for (int k = 28; k >= 0; k -= 4) keeps.push_back(k);
+        keeps.push_back(-1);
+    } else {
+        keeps.push_back(keep_arg);
+    }
+    size_t need = 0, budget = 0;
+    for (int keep : keeps) {
+        R.keep = keep;
         if (R.g.sched) ggml_backend_sched_free(R.g.sched);
-        R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
-        HmtTailOut tail;
-        HmtHeadOut head;
-        struct { const char * what; std::function<ggml_cgraph *()> build; } segs[] = {
-            { "labels", [&] { return hmt_g_labels(R.g); } },
-            { "embed", [&] { return hmt_g_embed(R.g); } },
-            { "global forward", [&] { return hmt_g_global_fwd(R.g, 27); } },
-            { "global backward", [&] { return hmt_g_global_bwd(R.g, 27, 0); } },
-            { "head forward", [&] { return hmt_g_head_fwd(R.g); } },
-            { "head backward", [&] { return hmt_g_head_bwd(R.g, 0, 1.0f, &head, false); } },
-            { "local forward", [&] { return hmt_g_local_fwd(R.g, 0, 0, chunk); } },
-            { "local backward", [&] { return hmt_g_local_bwd(R.g, 0, 0, chunk, 0); } },
-            { "tail backward", [&] { return hmt_g_tail_bwd(R.g, 0, chunk, 1.0f, 0, &tail, false); } },
-            { "grad norm", [&] { return hmt_g_gradnorm(R.g); } },
-        };
-        bool ok = true;
-        for (auto & s : segs) {
-            ggml_cgraph * gf = s.build();
-            if (gpu != R.m.bp.cpu_backend && !hmt_probe_graph(gpu, gf, s.what, err)) return false;
-            if (!ggml_backend_sched_reserve(R.g.sched, gf)) { ok = false; break; }
-        }
-        const size_t need = ggml_backend_sched_get_buffer_size(R.g.sched, gpu);
-        if (ok && (need <= budget || !R.m.bp.has_gpu)) {
-            R.chunk      = chunk < Tmax ? chunk : 0;
-            R.peak_sched = need;
-            fprintf(stderr, "[hm-train] admission: compute %.0f MiB, persistent %.0f MiB, local chunk %lld of %lld frames, "
-                            "device free %.0f MiB (%s)\n", need / 1048576.0, (hmt_alloc_bytes(R) - need) / 1048576.0,
-                    (long long) chunk, (long long) Tmax, mem.free / 1048576.0, mem.source());
-            return true;
-        }
-        if (chunk_arg > 0 || chunk <= 16) {
-            *err = "does not fit: the training graphs need " + std::to_string(need >> 20) + " MiB of compute memory, " +
-                   std::to_string(budget >> 20) + " MiB is free beyond the weights (S " + std::to_string((long long) Smax) +
-                   ", T " + std::to_string((long long) Tmax) + "). Shorten the clips (--max-frames) or free VRAM";
-            return false;
+        R.g.sched = nullptr;
+        // kept mode: C[0..k0] only, no local checkpoints
+        if (!hmt_ckpt_alloc(&R.ck, gpu, Lcap, Tmax, keep < 0 ? 29 : 29 - keep, keep < 0, err)) return false;
+        const DitGpuMem mem    = dit_gpu_mem_query(gpu);
+        const size_t    margin = (size_t) 768 << 20;
+        budget                 = mem.free > margin ? mem.free - margin : 0;
+        for (int64_t chunk = chunk_arg > 0 ? std::min(chunk_arg, Tmax) : Tmax;; chunk = (chunk + 1) / 2) {
+            if (R.g.sched) ggml_backend_sched_free(R.g.sched);
+            R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
+            HmtTailOut tail;
+            HmtHeadOut head;
+            struct Seg { const char * what; std::function<ggml_cgraph *()> build; };
+            std::vector<Seg> segs = {
+                { "labels", [&] { return hmt_g_labels(R.g); } },
+                { "embed", [&] { return hmt_g_embed(R.g); } },
+                { "grad norm", [&] { return hmt_g_gradnorm(R.g); } },
+            };
+            if (keep < 28) {
+                segs.push_back({ "global forward", [&] { return hmt_g_global_fwd(R.g, 0); } });
+                segs.push_back({ "global backward", [&] { return hmt_g_global_bwd(R.g, 1, 0); } });
+            }
+            if (keep >= 0) {
+                segs.push_back({ "kept", [&] { return hmt_g_kept_bwd(R.g, 28 - keep, 1.0f, &head, &tail, false); } });
+            } else {
+                segs.push_back({ "head forward", [&] { return hmt_g_head_fwd(R.g); } });
+                segs.push_back({ "head backward", [&] { return hmt_g_head_bwd(R.g, 0, 1.0f, &head, false); } });
+                segs.push_back({ "local forward", [&] { return hmt_g_local_fwd(R.g, 0, 0, chunk); } });
+                segs.push_back({ "local backward", [&] { return hmt_g_local_bwd(R.g, 0, 0, chunk, 0); } });
+                segs.push_back({ "tail backward", [&] { return hmt_g_tail_bwd(R.g, 0, chunk, 1.0f, 0, &tail, false); } });
+            }
+            bool        ok = true;
+            std::string splits;  // graph splits per segment: 1 = the whole graph on one backend
+            for (auto & s : segs) {
+                ggml_cgraph * gf = s.build();
+                if (on_gpu && !hmt_probe_graph(gpu, gf, s.what, err)) return false;
+                if (!ggml_backend_sched_reserve(R.g.sched, gf)) { ok = false; break; }
+                splits += std::string(splits.empty() ? "" : ", ") + s.what + " " + std::to_string(ggml_graph_n_nodes(gf)) +
+                          " nodes/" + std::to_string(ggml_backend_sched_get_n_splits(R.g.sched)) + " split";
+            }
+            need = ok ? ggml_backend_sched_get_buffer_size(R.g.sched, gpu) : SIZE_MAX;
+            if (ok && (need <= budget || !R.m.bp.has_gpu)) {
+                R.chunk      = chunk < Tmax ? chunk : 0;
+                R.peak_sched = need;
+                fprintf(stderr, "[hm-train] admission: %s attention, keep-layers %d, compute %.0f MiB, persistent %.0f MiB, "
+                                "local chunk %lld of %lld frames, device free %.0f MiB (%s)\n",
+                        hmt_attn_name(R.g.attn), keep, need / 1048576.0, (hmt_alloc_bytes(R) - need) / 1048576.0,
+                        (long long) chunk, (long long) Tmax, mem.free / 1048576.0, mem.source());
+                fprintf(stderr, "[hm-train] placement: %s\n", splits.c_str());
+                return true;
+            }
+            if (keep >= 0 || chunk_arg > 0 || chunk <= 16) break;
         }
     }
+    *err = "does not fit: the training graphs need " + (need == SIZE_MAX ? std::string("more than the free") : std::to_string(need >> 20)) +
+           " MiB of compute memory, " + std::to_string(budget >> 20) + " MiB is free beyond the weights (S " +
+           std::to_string((long long) Smax) + ", T " + std::to_string((long long) Tmax) +
+           "). Shorten the clips (--max-frames) or free VRAM";
+    return false;
 }
 
 // ── Training loop ──────────────────────────────────────────────────────────
@@ -329,7 +503,6 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         return 1;
     };
     if (a.data_dir.empty() || a.out_dir.empty()) { fprintf(stderr, "heartmula-train: --data and --out are required\n"); return 2; }
-    if (a.dropout != 0.0f) return fail("--lora-dropout > 0 is not implemented natively yet (training contract section 9: the default waits on slice 4b's cost numbers)");
     if (!hmt_resolve_models(&a, &err)) return fail(err);
     HmtData data;
     if (!hmt_data_load(a.data_dir, &data, &err)) return fail(err);
@@ -351,11 +524,12 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         Smax = std::max<int64_t>(Smax, (int64_t) s.prompt.size());
         Tmax = std::max<int64_t>(Tmax, a.max_frames > 0 ? std::min(s.frames, a.max_frames) : s.frames);
     }
-    if (!hmt_admit(R, Smax, Tmax, a.local_chunk, &err)) { hmt_run_free(&R); return fail(err); }
+    if (!hmt_admit(R, Smax, Tmax, a.local_chunk, a.attn, a.keep, &err)) { hmt_run_free(&R); return fail(err); }
 
     HmtIdentity id;
     id.rank = a.rank, id.accum = a.accum, id.bf16 = a.weights == "bf16";
     id.alpha = a.alpha, id.lr = a.lr, id.wd = a.wd, id.beta1 = a.beta1, id.beta2 = a.beta2, id.eps = a.eps, id.clip = a.clip;
+    id.dropout = a.dropout;
     id.seed = a.seed, id.data = data.fingerprint, id.max_frames = a.max_frames, id.base_fingerprint = R.m.base_fingerprint;
     id.weights = hmt_weights_id(a.global_path) + "|" + hmt_weights_id(a.local_path);
     const uint64_t ident = hmt_identity_hash(id);
@@ -376,16 +550,16 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                  std::to_string((long long) a.steps) + ",\"samples\":" + std::to_string(data.samples.size()) +
                  ",\"rank\":" + std::to_string(a.rank) + ",\"alpha\":" + hmt_num(a.alpha) + ",\"lr\":" + hmt_num(a.lr) +
                  ",\"grad_accum\":" + std::to_string(a.accum) + ",\"smax\":" + std::to_string((long long) Smax) +
-                 ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) +
+                 ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) + ",\"keep_layers\":" + std::to_string(R.keep) + ",\"lora_dropout\":" + hmt_num(a.dropout) +
                  ",\"params\":" + std::to_string((long long) hmt_lora_param_count(R.lora)) +
                  ",\"alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_free_mib\":" + hmt_num(mem.free / 1048576.0) +
-                 ",\"weights\":" + hmt_json_str(a.weights) + ",\"attention\":\"exact\",\"bwd\":\"mm\",\"global\":" +
+                 ",\"weights\":" + hmt_json_str(a.weights) + ",\"attention\":\"" + hmt_attn_name(R.g.attn) + "\",\"bwd\":\"mm\",\"global\":" +
                  hmt_json_str(a.global_path) + ",\"local\":" + hmt_json_str(a.local_path));
     }
-    fprintf(stderr, "[hm-train] %zu samples, %lld LoRA parameters (rank %d, alpha %g), %s weights, exact attention, "
-                    "backward arm mm, AdamW lr %g wd %g, grad-accum %d, %lld steps\n",
+    fprintf(stderr, "[hm-train] %zu samples, %lld LoRA parameters (rank %d, alpha %g), %s weights, %s attention "
+                    "(%s), keep-layers %d, backward arm mm, AdamW lr %g wd %g, grad-accum %d, %lld steps\n",
             data.samples.size(), (long long) hmt_lora_param_count(R.lora), a.rank, (double) a.alpha, a.weights.c_str(),
-            (double) a.lr, (double) a.wd, a.accum, (long long) a.steps);
+            hmt_attn_name(R.g.attn), R.g.attn == 2 ? "bf16" : R.g.attn == 1 ? "tf32" : "f32 softmax", R.keep, (double) a.lr, (double) a.wd, a.accum, (long long) a.steps);
 
     auto checkpoint = [&](const char * reason) -> bool {
         cnt.opt_step = R.opt.opt_step;
@@ -400,6 +574,8 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
 
     std::vector<int32_t> codes;
     int consecutive_bad = 0;
+    DitGpuMem mem;
+    auto      mem_at = std::chrono::steady_clock::now();
     while (cnt.steps_done < a.steps) {
         const auto t0 = std::chrono::steady_clock::now();
         const std::vector<HmtPick> picks = hmt_schedule(data, a.accum, a.max_frames, a.seed, cnt.steps_done);
@@ -407,6 +583,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         double ce_sum[8] = {}, loss = 0.0;
         bool   finite = true;
         for (const HmtPick & p : picks) {
+            R.g.drop_key = hmt_mix(a.seed, (uint64_t) cnt.steps_done, (uint64_t) (&p - picks.data()));
             if (hmt_exists(f_cancel)) {
                 fs::remove(fs::u8path(f_cancel), ec);
                 fprintf(stderr, "[hm-train] cancelled at step %lld; the last checkpoint stands\n", (long long) cnt.steps_done);
@@ -437,11 +614,15 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
             if (++consecutive_bad >= 3) { hmt_run_free(&R); return fail("three optimizer steps in a row had a non-finite loss or gradient"); }
         } else {
             consecutive_bad = 0;
-            if (!lm_optim_step(&R.opt, R.g.sched, &st)) { hmt_run_free(&R); return fail("optimizer step failed"); }
+            if (!hmt_prof_host(R, "host adamw", [&] { return lm_optim_step(&R.opt, R.g.sched, &st); })) { hmt_run_free(&R); return fail("optimizer step failed"); }
         }
         cnt.steps_done++;
         const double    ms  = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        const DitGpuMem mem = dit_gpu_mem_query(R.m.bp.backend);
+        // An NVML query costs ~9 ms, so the step event's device_used_mib refreshes at most every 5 s.
+        if (cnt.steps_done == 1 || std::chrono::steady_clock::now() - mem_at > std::chrono::seconds(5)) {
+            mem    = hmt_prof_host(R, "host nvml", [&] { return dit_gpu_mem_query(R.m.bp.backend); });
+            mem_at = std::chrono::steady_clock::now();
+        }
         std::string     ces;
         for (int k = 0; k < 8; k++) ces += (k ? "," : "") + hmt_num(ce_sum[k]);
         hmt_emit("\"event\":\"step\",\"step\":" + std::to_string((long long) cnt.steps_done) + ",\"total\":" +
@@ -451,6 +632,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                  ",\"peak_alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_used_mib\":" + hmt_num(mem.used / 1048576.0));
         fprintf(stderr, "[hm-train] step %lld/%lld loss %.4f grad-norm %.4g %.0f ms (%zu micro)\n", (long long) cnt.steps_done,
                 (long long) a.steps, loss, std::sqrt(gn2), ms, picks.size());
+        hmt_prof_dump(R, "step");
 
         const bool final = cnt.steps_done >= a.steps;
         const bool now   = hmt_exists(f_now);
@@ -557,7 +739,7 @@ static int hmt_selftest(const HeartmulaTrainArgs & a_in) {
     const int64_t crop[2] = { (int64_t) crops_n.f[0], (int64_t) crops_n.f[2] }, CT = (int64_t) (crops_n.f[1] - crops_n.f[0]);
 
     HmtRun R;
-    if (!hmt_setup(R, a, &err) || !hmt_admit(R, S, Tall, a.local_chunk, &err)) {
+    if (!hmt_setup(R, a, &err) || !hmt_admit(R, S, Tall, a.local_chunk, a.attn, a.keep, &err)) {
         fprintf(stderr, "heartmula-train: %s\n", err.c_str());
         hmt_run_free(&R);
         return 1;
@@ -768,6 +950,7 @@ static int hmt_selftest(const HeartmulaTrainArgs & a_in) {
             const auto t0 = std::chrono::steady_clock::now();
             if (!hmt_micro_step(R, prompt.data(), S, muq, codes.data(), Tall, 1.0f / 32.0f, ce, &err)) goto run_fail;
             if (i) ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+            hmt_prof_dump(R, "micro-batch");
         }
         lm_optim_zero_grad(&R.opt);
         std::sort(ms.begin(), ms.end());
@@ -789,8 +972,9 @@ run_fail:
 
 static int heartmula_train_run(const HeartmulaTrainArgs & a) {
     if (a.rank < 1 || a.accum < 1 || a.steps < 1 || !(a.lr > 0) || !(a.alpha > 0) || a.wd < 0 || a.clip < 0 ||
-        (a.weights != "bf16" && a.weights != "f16")) {
-        fprintf(stderr, "heartmula-train: invalid settings (rank, grad-accum, steps >= 1; lr, alpha > 0; --weights bf16|f16)\n");
+        a.keep < -2 || a.keep > 28 || !(a.dropout >= 0.0f && a.dropout < 1.0f) || (a.attn != "auto" && a.attn != "exact" && a.attn != "flash" && a.attn != "flash-bf16") || (a.weights != "bf16" && a.weights != "f16")) {
+        fprintf(stderr, "heartmula-train: invalid settings (rank, grad-accum, steps >= 1; lr, alpha > 0; --weights bf16|f16; "
+                        "--attn auto|flash-bf16|flash|exact; --keep-layers auto|-1..28; 0 <= --lora-dropout < 1)\n");
         return 2;
     }
     return a.selftest.empty() ? hmt_train(a) : hmt_selftest(a);

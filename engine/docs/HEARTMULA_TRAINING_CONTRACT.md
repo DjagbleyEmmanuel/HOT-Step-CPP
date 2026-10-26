@@ -40,7 +40,8 @@ Training touches it as follows.
   4 even for a short end-of-epoch step; native does not copy that.
 - **Dropout:** the recipe applies p = 0.05 to the input of every LoRA branch,
   independently per site. The fixtures use p = 0 because no two RNGs agree.
-  Section 7 lists what dropout costs natively; the trainer keeps it as an option.
+  Native implements it as `--lora-dropout p` (default 0); section 8.1, lever 6
+  says how and what it costs.
 
 ## 2. Loss (frozen)
 
@@ -237,7 +238,7 @@ probe failing first and passing after the change.
 | G3 | Broadcast MUL_MAT backward asserts `ne3 == 1` (`ggml.c:7345`) | GQA by broadcast in the local decoder, where frames sit in `ne3` | Fold (heads, frames) into `ne2`, heads fastest: q index `t*Nh + h` then reads kv index `t*Nkv + h/2`, torchtune's GQA order. |
 | G4 | CUDA ROPE_BACK needs a `ggml_is_contiguous_2` source; the gradient arriving through the attention permute is a 4-D permuted view | the two local RoPE sites (global passes, its `ne3` is 1) | Lay local q and k out as `[D, heads*frames, 8, 1]` before RoPE (one CONT), so the gradient view is 3-D as in the global block. |
 | G5 | CONT backward asserts a contiguous gradient (`ggml.c:7523`) | `cont(transpose(cont(v)))` | One CONT over the combined permute and transpose view. |
-| G6 | FLASH_ATTN_TRAIN kernels take head dim 64 or 128 | the local decoder's head dim 384 | Local attention stays exact. It is 8 x 8 per frame, so the retained softmax is T x 8 heads x 64 values, about 2.3 MiB per layer at T = 1112. |
+| G6 | FLASH_ATTN_TRAIN kernels take head dim 64 or 128 | the local decoder's head dim 384 | Local attention stays exact. It is 8 x 8 per frame, so the retained softmax is T x 8 heads x 64 values, about 2.3 MiB per layer at T = 1112. Global attention (head dim 128) uses FLASH_ATTN_TRAIN since slice 4b (section 8.1). |
 | G7 | Autodiff accepts BF16 sources only as MUL_MAT `src0` or FLASH_ATTN_TRAIN q/k/v (`ggml.c:8026`) | casting activations to BF16 | Keep activations F32 (use BF16 rounding, as the YuE2 graph does), cast weights or q/k/v only. |
 
 Supported is not the same as correct. Slice 4's selftest still checks the
@@ -324,8 +325,85 @@ ms per micro-batch and peak allocated.
    clips; packing several short clips into one sequence needs a block-diagonal
    mask and per-clip positions.
 
+### 8.1 Measured (slice 4b)
+
+RTX 5090, Unreal not running, the app up and idle, 2026-10-26. Clip B whole
+(S 131, T 1059), rank 64, F16 weights. "Step" is four micro-batches of clip B
+(a four-copy cache) including AdamW; median of the timed steps after two
+warm-up steps. Allocated is the trainer's own figure (weights, factors,
+optimizer, checkpoints, compute buffer), comparable with Python's peak
+allocated.
+
+| Configuration | ms per step | allocated GiB |
+|---|---|---|
+| Python recipe (section 7) | 1336 | 17.28 |
+| Slice 4: exact attention, every block recomputed | 1796 | 10.41 |
+| flash-bf16, every block recomputed (`--keep-layers -1`) | 1373 | 10.41 |
+| flash-bf16, 14 blocks kept | 1060 | 13.62 |
+| flash (TF32), 28 blocks kept | 1102 | 15.67 |
+| **Default: flash-bf16, 28 blocks kept** | **908** | **15.36** |
+| default + `--weights bf16` | 924 | 15.36 |
+| default + `--lora-dropout 0.05` | 982 | 16.65 |
+
+Clip A whole, through `--selftest` (no optimizer in the figure): 239 ms per
+micro-batch against Python's 343, 15.76 GiB against 17.81. Every section 5
+bound holds at the default (gradients rel L2 at most 0.0094, cos at least
+0.99995; resume bit-identical).
+
+Per lever, one micro-batch per step on clip B, each measured on the build of
+that point:
+
+1. **Recompute.** The profile of the slice-4 graph (per micro-batch: global
+   forward 90 ms, global backward 208, local forward 40, local backward 90,
+   tail 11, graph build and allocation under 5 in total) put the cost in the
+   recompute, not in host work. `--keep-layers N` builds blocks 28-N..27, the
+   head, the local decoder and the tail as one graph with its backward, and
+   recomputes only the blocks below. With exact attention each kept block saved
+   about 3.7 ms and held 321 MiB; the local decoder kept saved 45 ms for
+   2.6 GiB (465 ms at N = -1, 420 at 0, 316 at 28 and 21.5 GiB). Losses are
+   bit-identical in every mode. `auto` (the default) takes the most of 28, 24,
+   ..., 0 that fits the free VRAM, then -1: with 14 GiB held by another process
+   it chose 8 and trained at 285 to 301 ms.
+2. **Flash-attention backward** (global attention only, G6). Faster here, not
+   just smaller: at N = -1, 465 ms exact, 410 TF32, 361 with BF16 q/k/v. With
+   BF16 q/k/v a kept block holds about 165 MiB (316 ms at N = 0, 244 at 28 and
+   17.1 GiB). `--attn auto` takes flash-bf16, then flash, then exact, by the
+   device's `supports_op` on the real global block (BF16 needs CUDA sm_80+).
+3. **Fused cross-entropy: not done.** It needs a new ggml op through the fork
+   (an index-label CE). The tail is 11 ms of 460 in the slice-4 profile, and the
+   one-hot labels take 278 MiB at clip B; that is the ceiling of the saving.
+4. **Q8_0 frozen weights: rejected for the default.** 3.4 GiB less, but
+   443 ms against 244 at N = 28 (536 at N = -1, 7.4 GiB). `--type Q8_0` stays
+   available for a small card.
+5. **GEMM precision: BF16 weights rejected.** 924 against 908 ms per step,
+   and slice 4 measured worse gradients with them (rel L2 0.011 against 0.004).
+6. **LoRA dropout** (section 1): implemented. Masks are windows of one
+   persistent pool of Bernoulli(1 - p) values (0 or 1 / (1 - p)), drawn once
+   from the seed, at an offset hashed from (seed, step, micro-batch, layer,
+   site). A recompute reads the same window, so p = 0.05 gives bit-identical
+   losses at N = -1, 14 and 28. Cost at the default: +74 ms per step (+8%) and
+   +1.3 GiB, the masked LoRA inputs autodiff keeps for dA. Windows of different
+   sites overlap in the pool, so a value can recur at a shifted position in
+   another site's mask; each mask on its own is an i.i.d. Bernoulli field.
+7. **Bucketing and packing: not done.** Graph build and allocation take under
+   2 ms per micro-batch in the kept mode, so there is nothing to amortise.
+
+Also kept: split SwiGLU in both MLPs (its backward keeps the two GEMM outputs
+and recomputes the silu: 1.8 GiB less at N = 28, same speed), checkpoint
+buffers allocated only for the blocks a mode recomputes (1 GiB at N = 28), the
+causal masks uploaded once per sample shape, and the NVML query behind the
+step event's `device_used_mib` refreshed at most every 5 s (it cost about 9 ms
+per step). Wall time per one-micro-batch step went from 253 to 232 ms with the
+last two.
+
+Placement: the admission log prints every segment's node count and scheduler
+splits. At the default all are one split on CUDA0 (the kept graph has 4484
+nodes), and the optimizer graph is all CUDA0. `HMT_PROFILE=1` prints the
+per-segment build, allocation and compute times per step.
+
 ## 9. Open
 
-- The probe covers op support, not speed or numerics. Slice 4 owns both.
-- Dropout default for native (section 1 and lever 6) waits on slice 4b's cost
-  numbers; changing it from the recipe's 0.05 is for Rob.
+- Dropout default for native: the CLI default stays p = 0; the recipe's 0.05
+  costs 8% per step and 1.3 GiB (8.1, lever 6). The choice is Rob's.
+- Fused cross-entropy (8.1, lever 3) would need a fork change; worth at most
+  about 2% of a step and 0.3 GiB.

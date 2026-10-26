@@ -361,7 +361,7 @@ static std::vector<HmtPick> hmt_schedule(const HmtData & d, int accum, int64_t m
 // Everything that decides WHAT is trained. A resume into anything else refuses.
 struct HmtIdentity {
     int32_t  rank = 0, accum = 0, bf16 = 0;
-    float    alpha = 0, lr = 0, wd = 0, beta1 = 0, beta2 = 0, eps = 0, clip = 0;
+    float    alpha = 0, lr = 0, wd = 0, beta1 = 0, beta2 = 0, eps = 0, clip = 0, dropout = 0;
     uint64_t seed = 0, data = 0;
     int64_t  max_frames = 0;
     std::string base_fingerprint;
@@ -401,6 +401,7 @@ static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     h = hmt_fnv(h, &id.seed, sizeof(id.seed));
     h = hmt_fnv(h, &id.data, sizeof(id.data));
     h = hmt_fnv(h, &id.max_frames, sizeof(id.max_frames));
+    if (id.dropout != 0.0f) h = hmt_fnv(h, &id.dropout, sizeof(id.dropout));  // p = 0 keeps older states resumable
     h = hmt_fnv(h, id.weights.data(), id.weights.size());
     return hmt_fnv(h, id.base_fingerprint.data(), id.base_fingerprint.size());
 }
