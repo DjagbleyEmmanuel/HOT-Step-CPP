@@ -7,9 +7,13 @@ import path from 'node:path';
 // Job records live under the training dir: a fresh one, always, before config loads.
 process.env.TRAINING_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'labeling-queue-'));
 const q = await import('./labelingQueue.js');
-/** A second copy of the module, as a restarted process would load it: its
- *  startup reconcile runs again over the same training dir. */
-const restart = () => import(`./labelingQueue.js?restart=${Math.random()}`) as Promise<typeof q>;
+/** A second copy of the module, as a restarted process would load it, then
+ *  its startup reconcile (index.ts) over the same training dir. */
+const restart = async () => {
+  const m = await import(`./labelingQueue.js?restart=${Math.random()}`) as typeof q;
+  m.recoverStaleJobs();
+  return m;
+};
 
 test.after(() => fs.rmSync(process.env.TRAINING_DIR!, { recursive: true, force: true }));
 

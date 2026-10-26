@@ -30,6 +30,7 @@ import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
+import { describeOwner, isMine, owner, ownerAlive, type Owner } from '../instance.js';
 import type { HeartmulaStatusResponse } from '../../contracts/heartmulaTraining.js';
 
 export type Yue2BatchStage = 'prepare' | 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
@@ -116,33 +117,46 @@ function toSummary(state: BatchState): Yue2BatchSummary {
 
 function batchesDir(): string { return path.join(trainingBaseDir, 'yue2-batches'); }
 
+/** On disk the summary also names the process running its loop (absent in
+ *  legacy files). Only that process persists a live batch. */
+type SnapshotFile = Yue2BatchSummary & { owner?: Owner };
+
 function persist(state: BatchState): void {
   try {
     fs.mkdirSync(batchesDir(), { recursive: true });
-    fs.writeFileSync(path.join(batchesDir(), `${state.id}.json`), JSON.stringify(toSummary(state), null, 2), 'utf-8');
+    const file: SnapshotFile = { ...toSummary(state), owner: owner() };
+    fs.writeFileSync(path.join(batchesDir(), `${state.id}.json`), JSON.stringify(file, null, 2), 'utf-8');
   } catch (err: any) {
     console.warn(`[Training] yue2 batch ${state.id} snapshot failed: ${err?.message || err}`);
   }
 }
 
-function readSnapshots(): Yue2BatchSummary[] {
+function readSnapshotFiles(): SnapshotFile[] {
   let names: string[];
   try { names = fs.readdirSync(batchesDir()).filter(n => n.endsWith('.json')); } catch { return []; }
-  const out: Yue2BatchSummary[] = [];
+  const out: SnapshotFile[] = [];
   for (const name of names) {
     try {
-      const snap = JSON.parse(fs.readFileSync(path.join(batchesDir(), name), 'utf-8')) as Yue2BatchSummary;
+      const snap = JSON.parse(fs.readFileSync(path.join(batchesDir(), name), 'utf-8')) as SnapshotFile;
       if (snap && typeof snap.id === 'string' && Array.isArray(snap.items)) out.push(snap);
     } catch { /* a corrupt snapshot is skipped, not fatal */ }
   }
   return out;
 }
 
+function readSnapshots(): Yue2BatchSummary[] {
+  return readSnapshotFiles().map(({ owner: _owner, ...summary }) => summary);
+}
+
 /** A batch that was running when the server died is paused, with its
- *  in-flight stage reset so resume re-runs it. Nothing restarts on its own. */
-function recoverStaleBatches(): void {
-  for (const snap of readSnapshots()) {
+ *  in-flight stage reset so resume re-runs it. Nothing restarts on its own.
+ *  A batch another live process is running (the other copy of the app,
+ *  services/instance.ts) is left alone. Called once at startup, after the
+ *  instance registry opens (index.ts). */
+export function recoverStaleBatches(): void {
+  for (const snap of readSnapshotFiles()) {
     if (!isActive(snap.status)) continue;
+    if (!isMine(snap.owner) && ownerAlive(snap.owner)) continue;
     for (const item of snap.items) {
       for (const s of item.stages) if (s.status === 'running') { if (s.jobId) s.resumeJobId = s.jobId; s.status = 'pending'; s.jobId = ''; s.startedAt = null; }
       if (item.status === 'running') { item.status = 'pending'; item.currentStage = null; }
@@ -152,7 +166,15 @@ function recoverStaleBatches(): void {
     console.log(`[Training] yue2 batch ${snap.id} recovered as paused after restart — resume to continue`);
   }
 }
-recoverStaleBatches();
+
+/** Why this process must not cancel, pause, resume or extend batch `id`:
+ *  another live process runs its loop. null when it may. */
+export function batchRunsElsewhere(id: string): string | null {
+  if (batches.has(id)) return null;
+  const snap = readSnapshotFiles().find(s => s.id === id);
+  if (!snap || !isActive(snap.status) || isMine(snap.owner) || !ownerAlive(snap.owner)) return null;
+  return `This batch is running in ${describeOwner(snap.owner)}; control it there`;
+}
 
 // ── Public API ───────────────────────────────────────────────────────────
 
@@ -338,7 +360,7 @@ export function resumeBatch(id: string): 'ok' | 'not_found' | 'busy' {
   if (live && live.status === 'paused') { live.pauseRequested = false; live.status = 'running'; persist(live); return 'ok'; }
   const snap = getBatch(id);
   if (!snap) return 'not_found';
-  if (hasActiveBatch() || hasActivePipeline()) return 'busy';
+  if (hasActiveBatch() || hasActivePipeline() || batchRunsElsewhere(id)) return 'busy';
   for (const item of snap.items) {
     if (item.status === 'done') continue;
     item.status = 'pending'; item.currentStage = null; item.error = null;
@@ -356,6 +378,7 @@ export function cancelBatch(id: string): boolean {
   if (!state) {
     const snap = getBatch(id);
     if (!snap) return false;
+    if (batchRunsElsewhere(id)) return true;   // its own loop owns the file; the route answers 409
     if (isActive(snap.status)) { snap.status = 'cancelled'; snap.finishedAt = Date.now(); const s = { ...snap, cancelRequested: false }; batches.set(id, s); persist(s); }
     return true;
   }

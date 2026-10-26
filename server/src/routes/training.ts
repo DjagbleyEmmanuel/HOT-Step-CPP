@@ -107,7 +107,7 @@ import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
 import { createDatasetFromFolder, DatasetCreateError } from '../services/training/datasetCreate.js';
 import { detailFor, syncCounters } from '../services/training/datasetDetail.js';
 import {
-  cancelPipeline, getPipeline, hasActivePipeline, listPipelines, pausePipeline, PIPELINE_STAGES,
+  cancelPipeline, getPipeline, hasActivePipeline, listPipelines, pausePipeline, pipelineRunsElsewhere, PIPELINE_STAGES,
   resumePipeline, startPipeline,
 } from '../services/training/pipelineRunner.js';
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
@@ -196,7 +196,7 @@ import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
 import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
-import { appendToBatch as appendToYue2Batch, hasActiveBatch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
+import { appendToBatch as appendToYue2Batch, hasActiveBatch, finishScoredLadders, cancelBatch as cancelYue2Batch, batchRunsElsewhere, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -520,6 +520,11 @@ router.get('/jobs/:jobId', (req: Request, res: Response) => {
 router.delete('/jobs/:jobId', (req: Request, res: Response) => {
   try {
     const jobId = req.params.jobId as string;
+    const elsewhere = queue.jobRunsElsewhere(jobId);
+    if (elsewhere) {
+      res.status(409).json({ error: elsewhere });
+      return;
+    }
     if (!queue.cancelJob(jobId)) {
       res.status(404).json({ error: 'Job not found' });
       return;
@@ -700,6 +705,11 @@ router.get('/pipeline/:id', (req: Request, res: Response) => {
 
 router.delete('/pipeline/:id', (req: Request, res: Response) => {
   try {
+    const elsewhere = pipelineRunsElsewhere(req.params.id as string);
+    if (elsewhere) {
+      res.status(409).json({ error: elsewhere });
+      return;
+    }
     if (!cancelPipeline(req.params.id as string)) {
       res.status(404).json({ error: 'Pipeline not found' });
       return;
@@ -716,6 +726,11 @@ router.delete('/pipeline/:id', (req: Request, res: Response) => {
 // pipeline; a finished/cancelled one answers 409.
 router.post('/pipeline/:id/pause', (req: Request, res: Response) => {
   try {
+    const elsewhere = pipelineRunsElsewhere(req.params.id as string);
+    if (elsewhere) {
+      res.status(409).json({ error: elsewhere });
+      return;
+    }
     const result = pausePipeline(req.params.id as string);
     if (result === 'not_found') {
       res.status(404).json({ error: 'Pipeline not found' });
@@ -738,6 +753,11 @@ router.post('/pipeline/:id/pause', (req: Request, res: Response) => {
 // already active.
 router.post('/pipeline/:id/resume', (req: Request, res: Response) => {
   try {
+    const elsewhere = pipelineRunsElsewhere(req.params.id as string);
+    if (elsewhere) {
+      res.status(409).json({ error: elsewhere });
+      return;
+    }
     const result = resumePipeline(req.params.id as string);
     if (result === 'not_found') {
       res.status(404).json({ error: 'Pipeline not found' });
@@ -796,6 +816,8 @@ router.get('/yue2-batch/:id', (req: Request, res: Response) => {
   res.json(batch);
 });
 router.delete('/yue2-batch/:id', (req: Request, res: Response) => {
+  const elsewhere = batchRunsElsewhere(req.params.id as string);
+  if (elsewhere) { res.status(409).json({ error: elsewhere }); return; }
   if (!cancelYue2Batch(req.params.id as string)) { res.status(404).json({ error: 'Batch not found' }); return; }
   res.json({ ok: true });
 });
@@ -811,18 +833,24 @@ router.post('/yue2-batch/finish', (req: Request, res: Response) => {
   res.status(202).json({ batch: result });
 });
 router.post('/yue2-batch/:id/items', (req: Request, res: Response) => {
+  const elsewhere = batchRunsElsewhere(req.params.id as string);
+  if (elsewhere) { res.status(409).json({ error: elsewhere }); return; }
   const ids = Array.isArray(req.body?.datasetIds) ? (req.body.datasetIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
   const result = appendToYue2Batch(req.params.id as string, ids);
   if ('error' in result) { res.status(409).json({ error: result.error }); return; }
   res.json({ batch: result });
 });
 router.post('/yue2-batch/:id/pause', (req: Request, res: Response) => {
+  const elsewhere = batchRunsElsewhere(req.params.id as string);
+  if (elsewhere) { res.status(409).json({ error: elsewhere }); return; }
   const r = pauseYue2Batch(req.params.id as string);
   if (r === 'not_found') { res.status(404).json({ error: 'Batch not found' }); return; }
   if (r === 'not_active') { res.status(409).json({ error: 'Batch is not running' }); return; }
   res.json({ ok: true });
 });
 router.post('/yue2-batch/:id/resume', (req: Request, res: Response) => {
+  const elsewhere = batchRunsElsewhere(req.params.id as string);
+  if (elsewhere) { res.status(409).json({ error: elsewhere }); return; }
   const r = resumeYue2Batch(req.params.id as string);
   if (r === 'not_found') { res.status(404).json({ error: 'Batch not found' }); return; }
   if (r === 'busy') { res.status(409).json({ error: 'A training batch is already running' }); return; }

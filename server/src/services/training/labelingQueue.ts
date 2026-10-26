@@ -9,6 +9,11 @@
 //     the trainers joined it and started blocking labeling for hours
 //   * one active job per dataset, enforced at the route layer with a 409
 //
+// Two copies of the app can share one training folder (services/instance.ts).
+// Each job's _meta.json carries its owner (instance id and PID). A restart
+// fails only jobs whose owner is dead, and a dataset a live process in the
+// other copy is working on is busy here too (a claim in the database).
+//
 // Within a label job, Essentia + tag reading (Pass A) and the network steps
 // (Pass B) run as concurrent lanes, so the review grid populates within seconds
 // while Genius/LLM work is still going. Per-service throughput is governed by
@@ -25,6 +30,7 @@ import { pushLog } from '../../routes/logs.js';
 import { closeTrainingLog, logTraining } from '../logger.js';
 import { config } from '../../config.js';
 import { jobsDir } from './paths.js';
+import { claim, describeOwner, foreignClaim, isMine, owner, ownerAlive, release, type Owner } from '../instance.js';
 import { buildSamples, loadSidecarMetadata, sampleFromParts } from './datasetScan.js';
 import { mergeFields, writeSidecar } from './sidecarIO.js';
 import {
@@ -115,9 +121,16 @@ export interface TrainingJob {
   /** Graceful trainer cancellation; the GPU lane stays held until close/restart. */
   cancelChild?: () => void;
   cleanupPending?: boolean;
+  /** The process running this job. A stand-in for another copy's job
+   *  (activeJobForDataset) carries that copy's owner. */
+  owner?: Owner;
 }
 
+/** What _meta.json holds: the summary plus the owner (absent in legacy files). */
+type MetaFile = TrainingJobSummary & { owner?: Owner };
+
 const jobs = new Map<string, TrainingJob>();
+const datasetKey = (datasetId: string) => `dataset:${datasetId}`;
 // Two serial chains, not one — see laneFor(). GPU work (trainers, preprocess,
 // audition) must not block CPU/network work (labeling, Genius, captions).
 let gpuTail: Promise<void> = Promise.resolve();
@@ -170,7 +183,12 @@ export function createJob(
     events: [],
     listeners: new Set(),
     controller: new AbortController(),
+    owner: owner(),
   };
+  if (datasetId) {
+    const held = claim(datasetKey(datasetId), job.id, jobStillActive);
+    if (held) throw new Error(`This dataset is busy in ${describeOwner(held.instance)} (job ${held.holder}); wait for it or stop it there`);
+  }
   jobs.set(job.id, job);
   // On disk from the start, not only once it ends: a job the server dies
   // during must still be there for recoverStaleJobs to mark failed.
@@ -182,11 +200,51 @@ export function getJob(id: string): TrainingJob | undefined {
   return jobs.get(id);
 }
 
+function readMeta(id: string): MetaFile | null {
+  try { return JSON.parse(fs.readFileSync(path.join(jobsDir(), id, '_meta.json'), 'utf-8')) as MetaFile; }
+  catch { return null; }
+}
+
+/** A claimed job is still going: its record says queued or running (or it
+ *  has no record yet). A claim its owner forgot to release frees itself. */
+function jobStillActive(id: string): boolean {
+  const meta = readMeta(id);
+  return !meta || meta.status === 'queued' || meta.status === 'running';
+}
+
 export function activeJobForDataset(datasetId: string): TrainingJob | undefined {
   for (const job of jobs.values()) {
     if (job.datasetId === datasetId && (job.status === 'queued' || job.status === 'running' || job.cleanupPending)) return job;
   }
-  return undefined;
+  // The other copy of the app may be working on it: a read-only stand-in, so
+  // every caller's "busy" check covers it. It is not in this process's map,
+  // so a cancel here does not reach it (see jobRunsElsewhere).
+  const held = foreignClaim(datasetKey(datasetId), jobStillActive);
+  if (!held) return undefined;
+  const meta = readMeta(held.holder);
+  return {
+    id: held.holder, datasetId, kind: meta?.kind ?? 'build', status: meta?.status === 'queued' ? 'queued' : 'running',
+    total: meta?.total ?? 0, done: meta?.done ?? 0, failed: meta?.failed ?? 0, currentSampleId: meta?.currentSampleId ?? null,
+    phase: meta?.phase ?? 'running elsewhere', engineQueueDepth: 0, error: null, createdAt: meta?.createdAt ?? held.claimed_at,
+    startedAt: meta?.startedAt ?? null, finishedAt: null, sampleIds: [], opts: undefined, events: [], listeners: new Set(),
+    controller: new AbortController(), owner: meta?.owner ?? { instance: held.instance, pid: 0 },
+  };
+}
+
+/** Why this process cannot cancel job `id`: another live process runs it.
+ *  null when it is ours, finished, unknown, or its owner is dead. */
+export function jobRunsElsewhere(id: string): string | null {
+  if (jobs.has(id)) return null;
+  const meta = readMeta(id);
+  if (!meta || (meta.status !== 'queued' && meta.status !== 'running')) return null;
+  if (isMine(meta.owner) || !ownerAlive(meta.owner)) return null;
+  return `This job is running in ${describeOwner(meta.owner)}; stop it there`;
+}
+
+/** Drop this job's dataset claim once the job no longer holds the dataset. */
+function releaseIfIdle(job: TrainingJob): void {
+  if (!job.datasetId || job.status === 'queued' || job.status === 'running' || job.cleanupPending) return;
+  release(datasetKey(job.datasetId), job.id);
 }
 
 /** Active jobs (memory) + finished jobs (disk `_meta.json`), newest first. */
@@ -331,7 +389,7 @@ export function attachStream(job: TrainingJob, res: Response): void {
 
 /** Replace a job's _meta.json through a temp file and a rename, so a write
  *  that fails part-way leaves the previous record whole, never truncated. */
-function writeMetaFile(metaPath: string, summary: TrainingJobSummary): void {
+function writeMetaFile(metaPath: string, summary: MetaFile): void {
   const temp = `${metaPath}.${randomUUID()}.tmp`;
   try {
     fs.writeFileSync(temp, JSON.stringify(summary, null, 2), 'utf-8');
@@ -346,14 +404,17 @@ function persistMeta(job: TrainingJob): void {
   try {
     const dir = path.join(jobsDir(), job.id);
     fs.mkdirSync(dir, { recursive: true });
-    writeMetaFile(path.join(dir, '_meta.json'), toSummary(job));
+    writeMetaFile(path.join(dir, '_meta.json'), { ...toSummary(job), owner: job.owner });
   } catch (err: any) {
     console.warn(`[Training] Could not persist job ${job.id}: ${err.message}`);
   }
 }
 
-/** A server restart loses running jobs — rewrite their meta so the list is honest. */
-function recoverStaleJobs(): void {
+/** A server restart loses running jobs — rewrite their meta so the list is
+ *  honest. Jobs another live process owns (the other copy of the app) are
+ *  left alone; no owner is a legacy record, whose process is gone. Called
+ *  once at startup, after the instance registry opens (index.ts). */
+export function recoverStaleJobs(): void {
   try {
     const base = jobsDir();
     if (!fs.existsSync(base)) return;
@@ -362,8 +423,9 @@ function recoverStaleJobs(): void {
       const metaPath = path.join(base, entry.name, '_meta.json');
       if (!fs.existsSync(metaPath)) continue;
       try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as TrainingJobSummary;
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as MetaFile;
         if (meta.status !== 'running' && meta.status !== 'queued') continue;
+        if (!isMine(meta.owner) && ownerAlive(meta.owner)) continue;
         meta.status = 'failed';
         meta.error = 'Server restarted';
         meta.finishedAt = Date.now();
@@ -372,7 +434,6 @@ function recoverStaleJobs(): void {
     }
   } catch { /* jobs dir unreadable */ }
 }
-recoverStaleJobs();
 
 // ── Queue + cancellation ─────────────────────────────────────────────────
 
@@ -538,6 +599,7 @@ export function cancelJob(id: string): boolean {
   // Finished metadata remains on disk. A graceful trainer keeps its admission
   // reservation until the child exits and the engine restart settles.
   if (!job.cleanupPending) jobs.delete(id);
+  releaseIfIdle(job);
   return true;
 }
 
@@ -548,6 +610,7 @@ export function isCancelled(job: TrainingJob): boolean {
 export function releaseJobCleanup(job: TrainingJob): void {
   job.cleanupPending = false;
   if (isCancelled(job)) jobs.delete(job.id);
+  releaseIfIdle(job);
 }
 
 export function finishJob(job: TrainingJob, status: TrainingJobStatus, error?: string): void {
@@ -563,6 +626,7 @@ export function finishJob(job: TrainingJob, status: TrainingJobStatus, error?: s
   pushEvent(job, { type: 'status', status, ...(error ? { error } : {}) });
   persistMeta(job);
   endStream(job);
+  releaseIfIdle(job);
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────

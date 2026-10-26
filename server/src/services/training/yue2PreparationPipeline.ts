@@ -14,6 +14,7 @@ import { hasActivePipeline, registerYue2PreparationActivity } from './pipelineRu
 import { hasActiveBatch } from './yue2BatchRunner.js';
 import { YUE2_CACHE_LUFS } from './yue2Train.js';
 import { pushDataset, workerFetch } from './trainingWorkers.js';
+import { describeOwner, isMine, owner, ownerAlive, type Owner } from '../instance.js';
 
 type Snapshot = TrainingSnapshot<Yue2PreparationPayload>;
 type Status = Yue2PreparationSummary['status'];
@@ -47,6 +48,10 @@ interface RecordFile {
   trainBodies: Partial<Record<Yue2PreparationStage, Record<string, unknown>>>;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  /** The process that last wrote the record, i.e. runs its loop (absent in
+   *  legacy files). The other copy of the app leaves a live owner's record
+   *  alone (services/instance.ts). */
+  owner?: Owner;
 }
 
 const ORDER: readonly Yue2PreparationStage[] = ['latents', 'codes', 'sheet', 'stems', 'align', 'nar', 'ar', 'joint'];
@@ -80,7 +85,7 @@ export class Yue2PreparationPipeline {
       try {
         const record = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as RecordFile;
         if (!record.summary?.id || !record.snapshot?.operation) { this.unreadableRecord = true; continue; }
-        if (active(record.summary.status)) {
+        if (active(record.summary.status) && (isMine(record.owner) || !ownerAlive(record.owner))) {
           // A submitted stage may still have been running when Node died. Its
           // recorded jobId is retained for reconciliation, never replayed.
           record.summary.status = 'interrupted';
@@ -96,6 +101,7 @@ export class Yue2PreparationPipeline {
 
   private write(record: RecordFile): void {
     record.summary.updatedAt = Date.now();
+    record.owner = owner();
     const file = path.join(this.dir, `${record.summary.id}.json`);
     const temp = `${file}.${randomUUID()}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(record, null, 2));
@@ -189,9 +195,17 @@ export class Yue2PreparationPipeline {
     return record.summary;
   }
 
+  /** Refuse to touch a record another live process is running. */
+  private ownedHere(r: RecordFile): void {
+    if (active(r.summary.status) && !isMine(r.owner) && ownerAlive(r.owner)) {
+      throw new Yue2PreparationConflict(`This preparation is running in ${describeOwner(r.owner)}; control it there`);
+    }
+  }
+
   pause(id: string): Yue2PreparationSummary | null {
     const r = this.records.get(id);
     if (!r) return null;
+    this.ownedHere(r);
     if (active(r.summary.status) && !r.cancelRequested) {
       r.pauseRequested = true;
       r.summary.status = 'pausing';
@@ -203,6 +217,7 @@ export class Yue2PreparationPipeline {
   resume(id: string): Yue2PreparationSummary | null {
     const r = this.records.get(id);
     if (!r) return null;
+    this.ownedHere(r);
     if (r.summary.status === 'paused' || r.summary.status === 'pausing') {
       r.pauseRequested = false;
       r.summary.status = 'running';
@@ -214,6 +229,7 @@ export class Yue2PreparationPipeline {
   async cancel(id: string): Promise<Yue2PreparationSummary | null> {
     const r = this.records.get(id);
     if (!r) return null;
+    this.ownedHere(r);
     if (active(r.summary.status) && !r.cancelRequested) {
       r.cancelRequested = true;
       r.pauseRequested = false;

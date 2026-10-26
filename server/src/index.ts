@@ -14,7 +14,11 @@ import { fileURLToPath } from 'url';
 
 import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT } from './config.js';
 import { initLogger, closeLogger } from './services/logger.js';
-import { initDb, closeDb } from './db/database.js';
+import os from 'node:os';
+import { initDb, closeDb, getDb } from './db/database.js';
+import { startInstance, stopInstance } from './services/instance.js';
+import { recoverStalePipelines } from './services/training/pipelineRunner.js';
+import { recoverStaleBatches } from './services/training/yue2BatchRunner.js';
 // lireekDb is now part of the unified hotstep.db — no separate init needed
 import authRoutes from './routes/auth.js';
 import songRoutes from './routes/songs.js';
@@ -85,6 +89,13 @@ console.log(`[Logger] Session logs: ${logDir}`);
 
 // Initialize databases
 initDb();
+// Register this process, then settle what earlier processes left behind.
+// Dev and prod can share this database and training folder: every sweep
+// below skips work a live process in the other copy owns (services/instance.ts).
+startInstance(getDb(), { copy: `${os.hostname()}:${config.server.port}` });
+recoverStaleJobs();
+recoverStalePipelines();
+recoverStaleBatches();
 reconcileYue2AitkRunsAtStartup();
 // Moves any old pulled ladders out of _remote, then copies each worker's runs here as they land.
 void startYue2Mirror();
@@ -218,7 +229,7 @@ import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
 import { onEngineRestarted, retryIfGaveUp, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
-import { killActiveChildren } from './services/training/labelingQueue.js';
+import { killActiveChildren, recoverStaleJobs } from './services/training/labelingQueue.js';
 
 // ── Required runtime DLL bootstrap ──────────────────────────────────
 // On first launch, the CUDA engine variant needs cuBLAS DLLs that aren't
@@ -515,7 +526,9 @@ function shutdown() {
     console.log('[Server] HTTP server closed');
   });
 
-  // Close DB and logger
+  // Close DB and logger. Marking this instance stopped first lets the other
+  // copy recover anything of ours at once rather than after the heartbeat lapses.
+  stopInstance();
   closeDb();
   closeLogger();
   console.log('[Server] Goodbye!');

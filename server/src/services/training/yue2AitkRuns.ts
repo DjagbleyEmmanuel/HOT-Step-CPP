@@ -5,7 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import { trainingBaseDir } from './paths.js';
+import { jobsDir, trainingBaseDir } from './paths.js';
+import { isMine, ownerAlive, type Owner } from '../instance.js';
 import { archiveYue2TrainLogs } from './datasetProfile.js';
 import { runStamp } from './adapterLayout.js';
 import { config } from '../../config.js';
@@ -423,16 +424,27 @@ function reconcileFromDisk(force = false): void {
   lastDatasetSet = datasetSetForSkipped();
 }
 
-/** At server start nothing is training, so every 'running' entry was killed
- *  with the previous process: mark it interrupted rather than lie forever. */
+/** True while the training job behind a run is alive in another process (the
+ *  other copy of the app on this training folder, services/instance.ts). */
+function trainingElsewhere(jobId: string): boolean {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(jobsDir(), jobId, '_meta.json'), 'utf8')) as { status?: string; owner?: Owner };
+    return (meta.status === 'queued' || meta.status === 'running') && !isMine(meta.owner) && ownerAlive(meta.owner);
+  } catch { return false; }
+}
+
+/** At server start nothing is training here, so every 'running' entry was
+ *  killed with the previous process: mark it interrupted rather than lie
+ *  forever. A run the other copy of the app is training stays running. */
 export function reconcileYue2AitkRunsAtStartup(): number {
   try {
     const index = readIndex();
     // A mirrored run's `running` means "still training on its worker", not
     // on this process — this machine restarting says nothing about that.
-    const stale = index.filter(r => r.status === 'running' && !r.origin);
+    const isStale = (r: Yue2AitkRunRecord) => r.status === 'running' && !r.origin && !trainingElsewhere(r.jobId);
+    const stale = index.filter(isStale);
     if (stale.length) {
-      const updated = index.map(r => r.status === 'running' && !r.origin ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
+      const updated = index.map(r => isStale(r) ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
       writeIndex(updated, updated.filter(r => r.status === 'interrupted' && stale.some(s => s.jobId === r.jobId)));
     }
     reconcileFromDisk(true);
