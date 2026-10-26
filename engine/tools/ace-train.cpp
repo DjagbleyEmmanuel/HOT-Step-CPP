@@ -412,6 +412,9 @@ static void print_usage(void) {
             "                [--lora-mlp] also train the backbone MLP (w1/w2/w3)\n"
             "                [--trigger <word>] stored in the adapter for generation to prepend\n"
             "                [--eos] train the end-of-song frame; [--crop-frames N] start-anchored crops\n"
+            "                [--cb0-weighted] loss factors CB0 2.0, CB1..7 0.7..0.1 (normalised)\n"
+            "                --eval base|<adapter.gguf> (repeatable) [--eval-samples id,id]: forward-only\n"
+            "                held-out CE of --data, no training (stdout: HMTRAIN eval events)\n"
             "                control/checkpoint-now: checkpoint after this step, exit 3;\n"
             "                control/cancel: stop now, exit 4. stdout: HMTRAIN {json} events.\n"
             "                [--selftest <fixture dir>] check contract section 5 against the oracle\n"
@@ -4860,6 +4863,9 @@ static int cmd_heartmula_train(int argc, char ** argv) {
         else if (!strcmp(o, "--trigger"))       a.trigger     = next(o);
         else if (!strcmp(o, "--eos"))           a.eos         = true;
         else if (!strcmp(o, "--crop-frames"))   a.crop_frames = atoll(next(o));
+        else if (!strcmp(o, "--cb0-weighted"))  a.cb0_weighted = true;
+        else if (!strcmp(o, "--eval"))          a.eval.push_back(next(o));
+        else if (!strcmp(o, "--eval-samples"))  a.eval_samples = next(o);
         else if (!strcmp(o, "--resume"))        a.resume      = true;
         else { fprintf(stderr, "ace-train heartmula-train: unknown option %s\n", o); return 2; }
     }

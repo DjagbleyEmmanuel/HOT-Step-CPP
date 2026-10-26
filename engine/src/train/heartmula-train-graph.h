@@ -40,6 +40,8 @@
 // The loss of a micro-step is (1/8) sum_k mean_t CE_k, divided by the number
 // of micro-steps in its optimizer step (contract §1, "Batch"). That factor is
 // baked into the CE scale (`wce`), so every loss node is seeded with 1.
+// `cbw[k]` multiplies codebook k's term on top: all 1 by default, the
+// --cb0-weighted factors otherwise (state.h hmt_cb_weights).
 //
 // ── G-rules (contract §6.2) as they appear here ────────────────────────────
 //
@@ -125,6 +127,7 @@ struct HmtGraphCtx {
     int                               attn  = 0;     // global attention: 0 exact, 1 flash (TF32), 2 flash BF16 q/k/v
     ggml_tensor *                     drop_pool = nullptr;  // F32 dropout mask pool, null at p = 0
     uint64_t                          drop_key  = 0;        // per micro-step: picks every site's mask window
+    float                             cbw[8]    = { 1, 1, 1, 1, 1, 1, 1, 1 };  // per-codebook loss factor
     const LmOptim *                   opt   = nullptr;
     HmtCkpt *                         ck    = nullptr;
     HmtSampleBuf *                    sb    = nullptr;
@@ -515,7 +518,7 @@ static ggml_cgraph * hmt_g_head_bwd(HmtGraphCtx & g, int cur, float wce, HmtHead
     ggml_cgraph *  gf;
     ggml_context * ctx = hmt_begin(g, &gf, true);
     ggml_tensor *  P   = hmt_head(ctx, g, hmt_cols(ctx, g.ck->C[28], 0, g.sb->L), out);
-    ggml_tensor *  Ls  = ggml_add(ctx, ggml_scale(ctx, out->ce0, wce),
+    ggml_tensor *  Ls  = ggml_add(ctx, ggml_scale(ctx, out->ce0, wce * g.cbw[0]),
                                   hmt_surrogate(ctx, P, hmt_cols(ctx, g.ck->Gl[cur], 0, 8 * g.sb->T)));
     ggml_set_output(out->ce0);
     if (taps) {
@@ -570,7 +573,7 @@ static ggml_cgraph * hmt_g_tail_bwd(HmtGraphCtx & g, int64_t f0, int64_t Tc, flo
         out->logits[i] = lg;
         ggml_set_output(out->ce[i]);
         if (taps) ggml_set_output(lg);
-        ggml_tensor * term = ggml_scale(ctx, out->ce[i], wce * (float) Tc / (float) T);
+        ggml_tensor * term = ggml_scale(ctx, out->ce[i], wce * g.cbw[i] * (float) Tc / (float) T);
         Ls                 = Ls ? ggml_add(ctx, Ls, term) : term;
     }
     if (taps) ggml_set_output(y);
@@ -600,7 +603,7 @@ static ggml_cgraph * hmt_g_kept_bwd(HmtGraphCtx & g, int k0, float wce, HmtHeadO
     ggml_tensor *          X   = hmt_cols(ctx, g.ck->C[(size_t) k0], 0, g.sb->L);
     for (int l = k0; l < 28; l++) X = hmt_global_block(ctx, g, l, X);
     ggml_tensor * Q  = hmt_head(ctx, g, X, head);
-    ggml_tensor * Ls = ggml_scale(ctx, head->ce0, wce);
+    ggml_tensor * Ls = ggml_scale(ctx, head->ce0, wce * g.cbw[0]);
     ggml_set_output(head->ce0);
     ggml_tensor * y = nullptr, * ce[8] = {};
     for (int64_t f0 = 0; f0 < T; f0 += cap) {
@@ -624,7 +627,7 @@ static ggml_cgraph * hmt_g_kept_bwd(HmtGraphCtx & g, int k0, float wce, HmtHeadO
     for (int i = 1; i < 8; i++) {
         tail->ce[i] = ce[i];
         ggml_set_output(ce[i]);
-        Ls = ggml_add(ctx, Ls, ggml_scale(ctx, ce[i], wce));
+        Ls = ggml_add(ctx, Ls, ggml_scale(ctx, ce[i], wce * g.cbw[i]));
     }
     if (taps) {
         ggml_set_output(y);
@@ -632,6 +635,36 @@ static ggml_cgraph * hmt_g_kept_bwd(HmtGraphCtx & g, int k0, float wce, HmtHeadO
         ggml_set_output(head->logits);
     }
     hmt_backward(g, ctx, gf, Ls, k0 > 0 ? g.ck->C[(size_t) k0] : nullptr, k0 > 0 ? g.ck->Gg[0] : nullptr);
+    return gf;
+}
+
+// Forward-only scoring (held-out CE, run.h hmt_eval): the head's CE 0 and Q[0],
+// then CE 1..7 of frames [f0, f0 + Tc) from Q[3]. No autodiff, no LoRA dropout.
+static ggml_cgraph * hmt_g_head_eval(HmtGraphCtx & g, HmtHeadOut * out) {
+    ggml_cgraph *  gf;
+    ggml_context * ctx = hmt_begin(g, &gf, false);
+    ggml_tensor *  P   = hmt_head(ctx, g, hmt_cols(ctx, g.ck->C[28], 0, g.sb->L), out);
+    ggml_set_output(out->ce0);
+    ggml_build_forward_expand(gf, out->ce0);
+    ggml_build_forward_expand(gf, ggml_cpy(ctx, P, hmt_cols(ctx, g.ck->Q[0], 0, 8 * g.sb->T)));
+    return gf;
+}
+
+static ggml_cgraph * hmt_g_tail_eval(HmtGraphCtx & g, int64_t f0, int64_t Tc, HmtTailOut * out) {
+    const HeartMuLaModel & m = *g.m;
+    const int64_t          H = m.local.cfg.n_embd, V = HEARTMULA_AUDIO_VOCAB;
+    ggml_cgraph *          gf;
+    ggml_context *         ctx = hmt_begin(g, &gf, false);
+    ggml_tensor * X = hmt_cols(ctx, g.ck->Q[3], 8 * f0, 8 * Tc);
+    ggml_tensor * y = ggml_reshape_3d(ctx, heartmula_rms(ctx, X, m.local.norm, m.local.cfg.rms_eps), H, 8, Tc);
+    for (int i = 1; i < 8; i++) {
+        ggml_tensor * yi  = ggml_cont(ctx, ggml_view_2d(ctx, y, H, Tc, y->nb[2], (size_t) i * y->nb[1]));
+        ggml_tensor * lab = ggml_view_2d(ctx, g.sb->labels, V, Tc, g.sb->labels->nb[1],
+                                         (size_t) i * g.sb->labels->nb[2] + (size_t) f0 * g.sb->labels->nb[1]);
+        out->ce[i] = ggml_cross_entropy_loss(ctx, ggml_mul_mat(ctx, m.audio_head[i - 1], yi), lab);
+        ggml_set_output(out->ce[i]);
+        ggml_build_forward_expand(gf, out->ce[i]);
+    }
     return gf;
 }
 

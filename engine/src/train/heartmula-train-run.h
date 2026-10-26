@@ -19,6 +19,7 @@
 //       [--trigger <word>]  the word the tags lead with, stored as heartmula.lora.trigger
 //       [--eos]        train the end-of-song frame after every window that reaches a song's end
 //       [--crop-frames N]  start-anchored windows of N frames, every 4th sample whole (state.h)
+//       [--cb0-weighted]  loss factors CB0 2.0, CB1..7 0.7..0.1, normalised (state.h hmt_cb_weights)
 //
 // Files under --out:
 //   hm_train_state.bin          the resumable checkpoint (latest only)
@@ -47,6 +48,21 @@
 //
 // A preview cycle is: --stop-after N (or checkpoint-now), render with
 // adapters/step-N.gguf, then the same command line plus --resume.
+//
+// ── Held-out scoring ───────────────────────────────────────────────────────
+//
+//   ace-train heartmula-train --data <dir> --models <dir> --eval base|<adapter.gguf> [--eval ...]
+//                             [--eval-samples id,id] [--eos] [--attn ...] [--local-chunk N]
+//
+// Forward only: no backward, no optimizer, no LoRA dropout, nothing written.
+// Each --eval model (base = no adapter) scores every sample of --data, or the
+// listed ids (manifest id or codes key), as whole songs; --eos appends the
+// end frame the way training does. Per sample and per model, on stdout:
+//   {"event":"eval_sample", model, sample, frames, loss, ce:[8]}
+//   {"event":"eval", model, samples, frames, loss, loss_cb0w, ce:[8]}
+// ce are mean CEs per codebook; the model line averages over every scored
+// frame (sum_s T_s ce_s / sum_s T_s, summed in --eval-samples order), loss is
+// their plain mean and loss_cb0w the --cb0-weighted objective.
 //
 // ── Selftest ───────────────────────────────────────────────────────────────
 //
@@ -78,6 +94,9 @@ struct HeartmulaTrainArgs {
     std::string trigger;           // --trigger: written to the adapter, not part of the run identity
     bool     eos = false;          // --eos
     int64_t  crop_frames = 0;      // --crop-frames
+    bool     cb0_weighted = false; // --cb0-weighted
+    std::vector<std::string> eval; // --eval base|<adapter>: score instead of training
+    std::string eval_samples;      // --eval-samples id,id
 };
 
 static std::string hmt_json_str(const std::string & s) {
@@ -363,6 +382,7 @@ static bool hmt_setup(HmtRun & R, const HeartmulaTrainArgs & a, std::string * er
     R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
     R.drop_p  = a.dropout;
     R.seed    = a.seed;
+    hmt_cb_weights(a.cb0_weighted, R.g.cbw);
     return true;
 }
 
@@ -543,6 +563,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     id.mlp = a.mlp;
     id.eos = a.eos;
     id.crop_frames = a.crop_frames;
+    id.cb0_weighted = a.cb0_weighted;
     id.seed = a.seed, id.data = data.fingerprint, id.max_frames = a.max_frames, id.base_fingerprint = R.m.base_fingerprint;
     id.weights = hmt_weights_id(a.global_path) + "|" + hmt_weights_id(a.local_path);
     const uint64_t ident = hmt_identity_hash(id);
@@ -565,6 +586,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                  ",\"grad_accum\":" + std::to_string(a.accum) + ",\"smax\":" + std::to_string((long long) Smax) +
                  ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) + ",\"keep_layers\":" + std::to_string(R.keep) + ",\"lora_dropout\":" + hmt_num(a.dropout) + ",\"lora_mlp\":" + (a.mlp ? "true" : "false") +
                  ",\"eos\":" + (a.eos ? "true" : "false") + ",\"crop_frames\":" + std::to_string((long long) a.crop_frames) +
+                 ",\"cb0_weighted\":" + (a.cb0_weighted ? "true" : "false") +
                  ",\"params\":" + std::to_string((long long) hmt_lora_param_count(R.lora)) +
                  ",\"alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_free_mib\":" + hmt_num(mem.free / 1048576.0) +
                  ",\"weights\":" + hmt_json_str(a.weights) + ",\"attention\":\"" + hmt_attn_name(R.g.attn) + "\",\"bwd\":\"mm\",\"global\":" +
@@ -668,6 +690,144 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     if (!hmt_exists(adapter_path(cnt.steps_done)) && !checkpoint("final")) { hmt_run_free(&R); return fail(err); }
     hmt_emit("\"event\":\"done\",\"step\":" + std::to_string((long long) cnt.steps_done) + ",\"adapter\":" +
              hmt_json_str(adapter_path(cnt.steps_done)));
+    hmt_run_free(&R);
+    return 0;
+}
+
+// ── Held-out scoring (--eval) ──────────────────────────────────────────────
+
+// One sample's eight mean CEs, forward only, from frame-major `codes` [T][8].
+static bool hmt_eval_sample(HmtRun & R, const HmtSample & s, const int32_t * codes, int64_t T, double ce[8], std::string * err) {
+    HmtGraphCtx & g = R.g;
+    if (!hmt_sample_alloc(&R.sb, R.m.bp.backend, (int64_t) s.prompt.size(), T, err)) return false;
+    hmt_sample_upload(&R.sb, s.prompt.data(), s.muq_idx, codes);
+    ggml_backend_buffer_clear(R.sb.lbuf, 0);
+    auto run = [&](ggml_cgraph * gf) { return hmt_compute(R, gf, err); };
+    if (!run(hmt_g_labels(g)) || !run(hmt_g_embed(g))) return false;
+    for (int l = 0; l < 28; l++) if (!run(hmt_g_global_fwd(g, l))) return false;
+    HmtHeadOut head;
+    if (!run(hmt_g_head_eval(g, &head))) return false;
+    ce[0] = hmt_read1(head.ce0);
+    for (int l = 0; l < 3; l++)
+        for (int64_t f0 = 0; f0 < T; f0 += R.chunk) if (!run(hmt_g_local_fwd(g, l, f0, std::min(R.chunk, T - f0)))) return false;
+    for (int k = 1; k < 8; k++) ce[k] = 0.0;
+    for (int64_t f0 = 0; f0 < T; f0 += R.chunk) {
+        const int64_t Tc = std::min(R.chunk, T - f0);
+        HmtTailOut    out;
+        if (!run(hmt_g_tail_eval(g, f0, Tc, &out))) return false;
+        for (int k = 1; k < 8; k++) ce[k] += (double) hmt_read1(out.ce[k]) * (double) Tc / (double) T;
+    }
+    return true;
+}
+
+static int hmt_eval(const HeartmulaTrainArgs & a_in) {
+    HeartmulaTrainArgs a = a_in;
+    std::string        err;
+    auto fail = [&](const std::string & msg) {
+        fprintf(stderr, "heartmula-train --eval: %s\n", msg.c_str());
+        hmt_emit("\"event\":\"error\",\"message\":" + hmt_json_str(msg));
+        return 1;
+    };
+    if (a.data_dir.empty()) { fprintf(stderr, "heartmula-train --eval: --data is required\n"); return 2; }
+    if (!hmt_resolve_models(&a, &err)) return fail(err);
+    HmtData data;
+    if (!hmt_data_load(a.data_dir, &data, &err)) return fail(err);
+    std::vector<const HmtSample *> picked;
+    for (size_t p = 0; p < a.eval_samples.size();) {
+        const size_t      c  = std::min(a.eval_samples.find(',', p), a.eval_samples.size());
+        const std::string id = a.eval_samples.substr(p, c - p);
+        p = c + 1;
+        if (id.empty()) continue;
+        const HmtSample * hit = nullptr;
+        for (const auto & s : data.samples) if (s.id == id || s.key == id) hit = &s;
+        if (!hit) return fail("no sample '" + id + "' in " + a.data_dir);
+        picked.push_back(hit);
+    }
+    if (a.eval_samples.empty()) for (const auto & s : data.samples) picked.push_back(&s);
+    if (picked.empty()) return fail("--eval-samples names no sample");
+
+    HmtRun R;
+    if (!hmt_model_load(&R.m, a.global_path.c_str(), a.local_path.c_str(), a.weights == "bf16", &err)) { hmt_run_free(&R); return fail(err); }
+    int64_t Smax = 0, Tmax = 0;
+    for (const HmtSample * s : picked) {
+        Smax = std::max<int64_t>(Smax, (int64_t) s->prompt.size());
+        Tmax = std::max<int64_t>(Tmax, s->frames + (a.eos ? 1 : 0));
+    }
+    ggml_backend_t gpu = R.m.bp.backend;
+    R.g.m     = &R.m;
+    R.g.ck    = &R.ck;
+    R.g.sb    = &R.sb;
+    R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
+    R.chunk   = std::min(Tmax, a.local_chunk > 0 ? a.local_chunk : (int64_t) 1024);  // fixed, so the sums reproduce
+    if (!hmt_sample_alloc(&R.sb, gpu, Smax, Tmax, &err) || !hmt_ckpt_alloc(&R.ck, gpu, Smax + Tmax - 1, Tmax, 29, true, &err)) {
+        hmt_run_free(&R);
+        return fail(err);
+    }
+    // Attention picked as training picks it, so a score compares with the run's loss.
+    std::vector<int> attns = a.attn == "auto" ? std::vector<int>{ 2, 1, 0 }
+                           : std::vector<int>{ a.attn == "flash-bf16" ? 2 : a.attn == "flash" ? 1 : 0 };
+    if (gpu == R.m.bp.cpu_backend && a.attn == "auto") attns = { 1, 0 };
+    for (size_t i = 0; i < attns.size(); i++) {
+        R.g.attn = attns[i];
+        std::string e;
+        if (gpu == R.m.bp.cpu_backend || hmt_probe_graph(gpu, hmt_g_global_fwd(R.g, 0), "global forward", &e)) break;
+        if (i + 1 == attns.size()) { hmt_run_free(&R); return fail(e); }
+    }
+    fprintf(stderr, "[hm-eval] %zu samples, %zu models, %s attention, local chunk %lld, %s\n", picked.size(), a.eval.size(),
+            hmt_attn_name(R.g.attn), (long long) R.chunk, a.eos ? "with the end frame" : "no end frame");
+
+    float cbw[8];
+    hmt_cb_weights(true, cbw);
+    std::vector<int32_t> codes;
+    for (const std::string & model : a.eval) {
+        HeartMuLaAdapter          ad;
+        std::vector<HmtLayerLora> lora;
+        R.g.lora  = nullptr;
+        R.g.scale = 1.0f;
+        if (model != "base") {
+            if (!heartmula_adapter_load(&ad, R.m, model.c_str(), &err)) { hmt_run_free(&R); return fail(err); }
+            lora.assign(ad.layers.size(), HmtLayerLora{});
+            for (size_t l = 0; l < ad.layers.size(); l++)
+                for (int s = 0; s < HMT_SITES; s++) {
+                    const QwLoraPair & p = ad.layers[l].p[heartmula_adapter_detail::proj_slot(s)];
+                    lora[l].s[s].A = p.A, lora[l].s[s].B = p.B;
+                }
+            R.g.lora  = &lora;
+            R.g.scale = ad.alpha / (float) ad.rank;
+        }
+        double  sum[8] = {};
+        int64_t frames = 0;
+        for (const HmtSample * s : picked) {
+            double ce[8];
+            if (!hmt_read_codes(*s, 0, s->frames, &codes, &err)) { heartmula_adapter_free(&ad); hmt_run_free(&R); return fail(err); }
+            if (a.eos) codes.insert(codes.end(), 8, HMT_EOS_CODE);
+            const int64_t T = s->frames + (a.eos ? 1 : 0);
+            if (!hmt_eval_sample(R, *s, codes.data(), T, ce, &err)) { heartmula_adapter_free(&ad); hmt_run_free(&R); return fail(err); }
+            std::string ces;
+            double      loss = 0.0;
+            for (int k = 0; k < 8; k++) {
+                ces += (k ? "," : "") + hmt_num(ce[k]);
+                loss += ce[k] / 8.0;
+                sum[k] += ce[k] * (double) T;
+            }
+            frames += T;
+            hmt_emit("\"event\":\"eval_sample\",\"model\":" + hmt_json_str(model) + ",\"sample\":" + hmt_json_str(s->id) +
+                     ",\"frames\":" + std::to_string((long long) T) + ",\"loss\":" + hmt_num(loss) + ",\"ce\":[" + ces + "]");
+        }
+        std::string ces;
+        double      loss = 0.0, loss_w = 0.0;
+        for (int k = 0; k < 8; k++) {
+            const double c = sum[k] / (double) frames;
+            ces += (k ? "," : "") + hmt_num(c);
+            loss += c / 8.0;
+            loss_w += c * cbw[k] / 8.0;
+        }
+        hmt_emit("\"event\":\"eval\",\"model\":" + hmt_json_str(model) + ",\"samples\":" + std::to_string(picked.size()) +
+                 ",\"frames\":" + std::to_string((long long) frames) + ",\"loss\":" + hmt_num(loss) + ",\"loss_cb0w\":" +
+                 hmt_num(loss_w) + ",\"ce\":[" + ces + "]");
+        fprintf(stderr, "[hm-eval] %s: loss %.4f over %lld frames\n", model.c_str(), loss, (long long) frames);
+        heartmula_adapter_free(&ad);
+    }
     hmt_run_free(&R);
     return 0;
 }
@@ -993,5 +1153,6 @@ static int heartmula_train_run(const HeartmulaTrainArgs & a) {
                         "--attn auto|flash-bf16|flash|exact; --keep-layers auto|-1..28; 0 <= --lora-dropout < 1)\n");
         return 2;
     }
+    if (!a.eval.empty()) return hmt_eval(a);
     return a.selftest.empty() ? hmt_train(a) : hmt_selftest(a);
 }

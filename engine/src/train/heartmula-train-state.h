@@ -354,6 +354,19 @@ struct HmtPick {
 #define HMT_FULL_EVERY 4
 #define HMT_EOS_CODE   8193
 
+// Per-codebook loss factors, graph.h HmtGraphCtx::cbw. Default: every factor 1,
+// so the loss is the plain mean (1/8) sum_k CE_k. --cb0-weighted: the SFT
+// weighting of the HeartMuLa paper, CB0 2.0 and CB1..7 0.7 down to 0.1,
+// normalised to sum to 1 (8 w_k / sum w, since wce already holds the 1/8):
+// loss = sum_k (w_k / 4.8) CE_k, so a run whose CEs are all equal reports the
+// same loss either way and the LR means the same thing.
+static void hmt_cb_weights(bool weighted, float out[8]) {
+    static const float w[8] = { 2.0f, 0.7f, 0.6f, 0.5f, 0.4f, 0.3f, 0.2f, 0.1f };
+    float sum = 0.0f;
+    for (float x : w) sum += x;
+    for (int k = 0; k < 8; k++) out[k] = weighted ? 8.0f * w[k] / sum : 1.0f;
+}
+
 // Optimizer step `step` (0-based). Epochs are a seeded shuffle; an epoch has
 // ceil(N / accum) steps and its last one may be short (contract §1: each
 // micro-loss is divided by the micro-steps actually in the step).
@@ -396,6 +409,7 @@ struct HmtIdentity {
     int32_t  mlp = 0;  // --lora-mlp
     int32_t  eos = 0;  // --eos
     int64_t  crop_frames = 0;  // --crop-frames
+    int32_t  cb0_weighted = 0;  // --cb0-weighted
     std::string base_fingerprint;
     std::string weights;  // hmt_weights_id of the global and local GGUFs actually loaded
 };
@@ -437,6 +451,7 @@ static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     if (id.mlp) h = hmt_fnv(h, "mlp", 3);  // attention-only keeps older states resumable
     if (id.eos) h = hmt_fnv(h, "eos", 3);  // off keeps older states resumable
     if (id.crop_frames) h = hmt_fnv(h, &id.crop_frames, sizeof(id.crop_frames));
+    if (id.cb0_weighted) h = hmt_fnv(h, "cbw", 3);  // off keeps older states resumable
     h = hmt_fnv(h, id.weights.data(), id.weights.size());
     return hmt_fnv(h, id.base_fingerprint.data(), id.base_fingerprint.size());
 }
