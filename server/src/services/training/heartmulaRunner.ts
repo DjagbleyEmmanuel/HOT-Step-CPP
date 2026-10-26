@@ -18,7 +18,7 @@ import { buildSamples } from './datasetScan.js';
 import {
   buildHeartmulaPrepareArgs, buildHeartmulaTrainArgs, findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels,
 } from './heartmulaTrain.js';
-import { HEARTMULA_PREPARE_MANIFEST, writeHeartmulaSamples, writeSkippedFingerprints } from './heartmulaPrepare.js';
+import { HEARTMULA_PREPARE_MANIFEST, snapshotSources, writeHeartmulaSamples, writeSkippedFingerprints } from './heartmulaPrepare.js';
 import {
   appendLoss, blankStatus, heartmulaAdapterFile, heartmulaPrepareDir, publishHeartmulaAdapter,
   readStoredStatus, saveHeartmulaRunRecord, writeStoredStatus, type HeartmulaRunRecord,
@@ -52,6 +52,7 @@ export async function runHeartmulaPrepareJob(job: TrainingJob): Promise<void> {
     if (!encoderDir) throw new Error(missingEncoderMessage());
     const samples = await buildSamples(ds);
     if (isCancelled(job)) return;
+    const before = snapshotSources(ds, samples);
     const list = writeHeartmulaSamples(ds, samples);
     if (list.count === 0) throw new Error('The dataset has no usable audio to prepare');
     const outDir = heartmulaPrepareDir(ds.slug);
@@ -72,7 +73,7 @@ export async function runHeartmulaPrepareJob(job: TrainingJob): Promise<void> {
       if ((m = RE_FATAL.exec(line))) state.fatalMessage ||= m[1];
     }, st);
     if (!isCancelled(job)) {
-      writeSkippedFingerprints(ds, samples);
+      writeSkippedFingerprints(ds.slug, before);
       finishJob(job, 'done');
     }
   } catch (err: any) {

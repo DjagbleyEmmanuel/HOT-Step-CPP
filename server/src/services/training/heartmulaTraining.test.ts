@@ -143,7 +143,7 @@ test('prepare status: correcting a skipped sample reads as stale, an untouched s
   }));
   // A cache with no skip record is treated as changed.
   assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, false);
-  prep.writeSkippedFingerprints(ds2, [okSample, sample]);
+  prep.writeSkippedFingerprints('demo2', prep.snapshotSources(ds2, [okSample, sample]));
   assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, true);
   // The user shortens the lyrics: the skipped sample is stale and Train must wait for Prepare.
   const fixed = prep.heartmulaPrepareStatus(ds2, [okSample, { ...(sample as object), lyrics: 'short' } as never]);
@@ -151,6 +151,15 @@ test('prepare status: correcting a skipped sample reads as stale, an untouched s
   assert.equal(fixed.staleSamples, 1);
   fs.writeFileSync(audio, 'different audio bytes');
   assert.equal(prep.heartmulaPrepareStatus(ds2, [okSample, sample]).cacheValid, false);
+  // Timing: the audio is replaced after the pre-Prepare snapshot but before the record is written.
+  // The record must hold the version that was skipped, so the replacement reads as stale.
+  fs.writeFileSync(audio, 'abcdefgh');
+  const snap = prep.snapshotSources(ds2, [okSample, sample]);
+  fs.writeFileSync(audio, 'replaced during prepare');
+  prep.writeSkippedFingerprints('demo2', snap);
+  const raced = prep.heartmulaPrepareStatus(ds2, [okSample, sample]);
+  assert.equal(raced.cacheValid, false);
+  assert.equal(raced.staleSamples, 1);
 });
 
 test('device gate: refuses a small, absent or unidentifiable selected GPU', async () => {

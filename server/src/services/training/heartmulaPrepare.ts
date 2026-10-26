@@ -79,16 +79,25 @@ const SKIPPED_FILE = 'skipped-sources.json';
  * sample reads as stale instead of staying hidden behind its skip. The runner
  * calls this after a successful prepare.
  */
-export function writeSkippedFingerprints(ds: Pick<TrainingDatasetRow, 'slug' | 'customTag'>, samples: TrainingSample[]): void {
-  const m = readHeartmulaManifest(ds.slug);
-  if (!m) return;
-  const skipped = new Set((m.skipped ?? []).map(s => s.id));
-  const out: Record<string, Fingerprint> = {};
+export type SourceSnapshot = Record<string, Fingerprint>;
+
+/** Every trainable sample's source now. The runner takes it BEFORE spawning Prepare, so a file replaced while Prepare runs cannot pass for the version it skipped. */
+export function snapshotSources(ds: Pick<TrainingDatasetRow, 'customTag'>, samples: TrainingSample[]): SourceSnapshot {
+  const out: SourceSnapshot = {};
   for (const s of trainableSamples(samples)) {
-    const fp = skipped.has(s.sampleId) ? fingerprint(heartmulaSampleInput(ds, s)) : null;
+    const fp = fingerprint(heartmulaSampleInput(ds, s));
     if (fp) out[s.sampleId] = fp;
   }
-  fs.writeFileSync(path.join(heartmulaPrepareDir(ds.slug), SKIPPED_FILE), JSON.stringify(out), 'utf8');
+  return out;
+}
+
+/** Keep the pre-Prepare fingerprints of the samples the completed manifest skipped. */
+export function writeSkippedFingerprints(slug: string, before: SourceSnapshot): void {
+  const m = readHeartmulaManifest(slug);
+  if (!m) return;
+  const out: SourceSnapshot = {};
+  for (const { id } of m.skipped ?? []) if (before[id]) out[id] = before[id];
+  fs.writeFileSync(path.join(heartmulaPrepareDir(slug), SKIPPED_FILE), JSON.stringify(out), 'utf8');
 }
 
 function readSkippedFingerprints(slug: string): Record<string, Fingerprint> {
