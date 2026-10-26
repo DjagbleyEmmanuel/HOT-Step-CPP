@@ -37,7 +37,8 @@ test('HeartMuLa recipe and start stay visible, with only optional settings folde
   })));
   const fields = [...document.querySelectorAll('input[type="number"]')];
   assert.equal(fields.filter(field => !field.closest('details')).length, 6);
-  assert.equal(fields.filter(field => field.closest('details')).length, 5);
+  // Preview cadence follows 'Save every', so the previews section has no step field of its own.
+  assert.equal(fields.filter(field => field.closest('details')).length, 4);
   // the preview section matches YuE2's: dataset-sourced prompt, a full-song length, no fixed fixture
   const text0 = document.documentElement.textContent;
   for (const label of ['Preview maximum seconds', 'Preview seed', 'Preview lyrics', 'Tags override', 'Lyrics override', 'Lyric Studio generation']) assert.ok(text0.includes(label), label);
@@ -68,6 +69,16 @@ test('HeartMuLa Train follows the preset and settings order and hides old run me
   }
   assert.doesNotMatch(old, /Peak VRAM|Checkpoint ladder/);
   assert.match(render('running', 0), /Peak VRAM/);
+  // ETA on a live run: 479 steps at 1 s plus 5 previews (100..400 and the final) at the base take's 60 s.
+  const live = renderToStaticMarkup(createElement(HeartmulaTrainCard, {
+    status: { ...status, run: { run: 'example/one', state: 'running', updatedAt: 0, step: 1, totalSteps: 480, loss: 2,
+      lossHistory: [{ step: 1, loss: 2 }], msPerStep: 1000, peakVramMiB: 10000, checkpointStep: 1, adapterFile: null, error: null, startedAt: 0 } },
+    previews: { run: 'example/one', settings: { ...HEARTMULA_PREVIEW_DEFAULTS, everySteps: 100 }, source: null,
+      previews: [{ id: 'b', run: 'example/one', kind: 'base', step: 0, settings: HEARTMULA_PREVIEW_DEFAULTS, status: 'done', audioUrl: null,
+        adapter: null, adapterSha256: null, renderMs: 60_000, pauseMs: null, error: null, createdAt: 0 }] },
+    slug: 'example', busy: true, trainStarted: true, onTrain() {}, onCheckpoint() {}, onCancel() {},
+  }));
+  assert.match(live, /ETA: 13 min \(incl\. 5 preview\(s\)\)/);
   assert.match(render('done', Date.now()), /Peak VRAM/);
 });
 

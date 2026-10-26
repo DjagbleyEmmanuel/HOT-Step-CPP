@@ -129,15 +129,21 @@ clearing other backends' data.
 ## Checkpoint previews
 
 The checkpoint ladder uses the same preview cards and players as YuE2 on
-Review. Train shows the live loss chart, step time and VRAM for an active run
+Review. Train shows the live loss chart, step time, VRAM and an ETA for an active run
 or a run that finished within 15 minutes of opening the page. Use its **Run** picker to compare checkpoints from an earlier
 run. HeartMuLa omits YuE2 scoring, alignment and decoder controls.
 
-With previews on (the default is every 100 steps), the server pauses training at
+With previews on, they render at every save (**Save every**, 100 steps by default;
+with Save every at 0, only the base and final takes render). The server pauses training at
 each preview step, renders a full song (up to 240 seconds, the engine's maximum) from
 the saved checkpoint, then resumes. Training never runs while a preview renders.
 Every take uses the same tags, lyrics, seed and sampler, so takes differ only by
 their weights.
+
+The ETA is the steps left at the run's mean step time plus the previews still to come
+(each checkpoint take and the final one). A preview is costed from this run: the base
+take's render time until the first mid-run take, then that take's full pause, which
+also counts stopping the trainer, the engine restart and the model reload.
 
 The prompt comes from the dataset, as in YuE2's previews. The tags are those of
 the dataset's first sung track (the first track when none is sung), which is what

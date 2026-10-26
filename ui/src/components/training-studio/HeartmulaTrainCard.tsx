@@ -1,9 +1,10 @@
 import { Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { HeartmulaPreviewSettings, HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
+import type { HeartmulaPreviewListResponse, HeartmulaPreviewSettings, HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { TrainingChart } from './TrainingChart';
+import { formatDuration, heartmulaEta } from './heartmulaEta';
 import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPresetChoice } from './TrainingPreviewPanel';
 import { TrainingBatchCard, TrainingAllStagesCard, TrainingRunPanel } from './Yue2StageCard';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -16,6 +17,8 @@ export interface HeartmulaTrainCardProps {
   status: HeartmulaStatusResponse;
   slug: string;
   busy: boolean;
+  /** The current run's preview takes (the controller's query), for the ETA. */
+  previews?: HeartmulaPreviewListResponse | null;
   /** True after the trainer's start event, when control files are accepted. */
   trainStarted: boolean;
   blockedReason?: string;
@@ -36,17 +39,17 @@ const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: n
   { key: 'gradAccum', label: 'Songs per update', info: 'Micro-batches per optimizer update. Higher values do more work per step without increasing the micro-batch size.', min: 1, max: 1024, step: 1 },
   { key: 'seed', label: 'Training seed', info: 'Seed for training randomness. Keep it fixed when comparing recipes.', min: 0, max: 0x7fffffff, step: 1 },
   { key: 'loraDropout', label: 'LoRA dropout', info: 'Randomly drops adapter inputs while training, which can reduce overfitting on a small dataset. 0 is off; 0.05 is a proven value that adds about 8% to each step and 1.3 GiB of memory.', min: 0, max: 0.9, step: 0.01 },
-  { key: 'checkpointEvery', label: 'Save every', info: 'Save resumable state every this many steps. Zero saves only when stopping or finishing. Preview cadence is separate.', min: 0, max: 1_000_000, step: 1 },
+  { key: 'checkpointEvery', label: 'Save every', info: 'Save resumable state every this many steps. Zero saves only when stopping or finishing. Checkpoint previews, when on, render at every save.', min: 0, max: 1_000_000, step: 1 },
 ];
 
-export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted, blockedReason, onTrain, onChain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
+export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: takes, trainStarted, blockedReason, onTrain, onChain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
   const { t } = useTranslation();
   const [edits, setEdits] = useState<Partial<HeartmulaRecipe>>({});
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [name, setName] = useState(slug);
   const [resumeRun, setResumeRun] = useState<string | null>(null);
-  const [previewEvery, setPreviewEvery] = useState<number | null>(null);
+  const [previewsOn, setPreviewsOn] = useState<boolean | null>(null);
   const [previewEdits, setPreviewEdits] = useState<Partial<HeartmulaPreviewSettings>>({});
   const [manualResume, setManualResume] = useState('');
   const [presetKey, setPresetKey] = useState('balanced');
@@ -72,7 +75,9 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const manualPath = manualResume.trim().replaceAll('\\', '/').replace(/\/$/, '');
   const selectedResume = resumeRun ?? status.runs.find(item => item.run === manualPath || manualPath.endsWith('/' + item.run))?.run ?? null;
   const recipe = selectedResume ? status.runs.find(run => run.run === selectedResume)?.recipe ?? status.defaults : { ...status.defaults, ...edits };
-  const cadence = previewEvery ?? status.previewDefaults.everySteps;
+  // Previews render at every save; with saving only at the end, just the base and final takes.
+  const cadence = (previewsOn ?? status.previewDefaults.everySteps > 0)
+    ? (recipe.checkpointEvery > 0 ? recipe.checkpointEvery : recipe.steps) : 0;
   const previewSettings = { ...status.previewDefaults, ...previewEdits };
   const setPreview = (patch: Partial<HeartmulaPreviewSettings>) => setPreviewEdits(previous => ({ ...previous, ...patch }));
   const resetPreview = (key: keyof HeartmulaPreviewSettings) => () => setPreviewEdits(previous => { const next = { ...previous }; delete next[key]; return next; });
@@ -84,6 +89,10 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const resume = resumeRun !== null || manualResume.trim() !== '';
   const resumable = status.runs.some(item => item.run === selectedResume && item.resumable) && !busy;
   const jobLog = useTrainingStore(s => s.jobLog);
+  // Time left: steps at the mean step time plus the previews still to come at their measured cost.
+  const runLive = !!run && (run.state === 'running' || run.state === 'previewing' || run.state === 'checkpointing');
+  const eta = runLive && run ? heartmulaEta({ step: run.step, totalSteps: run.totalSteps, msPerStep: run.msPerStep,
+    everySteps: takes?.settings.everySteps ?? 0, previews: takes?.previews ?? [] }) : null;
   const job = useTrainingStore(s => s.activeJob);
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
   const locked = busy || resume;
@@ -207,9 +216,6 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
       </div>
     </div>
     <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
-      <PreviewField label={t('trainingStudio.yue2.method.trainingGpu', 'Training GPU')} info={t('trainingStudio.heartmula.gpuInfo', 'The current HeartMuLa trainer selects its CUDA device automatically. Per-run GPU selection is not supported.')}>
-        <StyledSelect accent="amber" className="w-full" disabled value="auto" onChange={() => {}} options={[{ value: 'auto', label: t('trainingStudio.heartmula.gpuAuto', 'Automatic (CUDA)') }]} />
-      </PreviewField>
       <PreviewField label={t('trainingStudio.heartmula.baseVariant', 'Base model')}
         info={t('trainingStudio.heartmula.baseVariantInfo', 'The HeartMuLa variant the adapter is trained on. It plays natively on that variant and is re-based onto the others. Only variants with an installed global and local model are listed.')}>
         <StyledSelect accent="amber" className="w-full" disabled={locked} value={recipe.variant ?? '3B'}
@@ -224,6 +230,9 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         <StyledSelect accent="amber" className="w-full" disabled={locked} value={recipe.quant ?? 'F16'}
           onChange={value => setEdits(previous => ({ ...previous, quant: value }))}
           options={(status.bases?.find(b => b.variant === (recipe.variant ?? '3B'))?.quants ?? [recipe.quant ?? 'F16']).map(q => ({ value: q, label: q }))} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.yue2.method.trainingGpu', 'Training GPU')} info={t('trainingStudio.heartmula.gpuInfo', 'The current HeartMuLa trainer selects its CUDA device automatically. Per-run GPU selection is not supported.')}>
+        <StyledSelect accent="amber" className="w-full" disabled value="auto" onChange={() => {}} options={[{ value: 'auto', label: t('trainingStudio.heartmula.gpuAuto', 'Automatic (CUDA)') }]} />
       </PreviewField>
       <PreviewField label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')} info={t('trainingStudio.heartmula.adapterTypeInfo', 'The current HeartMuLa trainer supports backbone LoRA adapters.')}>
         <StyledSelect accent="amber" className="w-full" disabled value="lora" onChange={() => {}} options={[{ value: 'lora', label: 'LoRA' }]} />
@@ -259,15 +268,9 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
       )}
     </details>
     <TrainingPreviewSettings title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
-      enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewEvery(enabled ? status.previewDefaults.everySteps || 100 : 0)}
+      enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewsOn(enabled)}
       enableLabel={t('trainingStudio.heartmula.enablePreviews', 'Render a full-song preview at every checkpoint')}
       enableInfo={t('trainingStudio.heartmula.enablePreviewsInfo', 'The server pauses training, renders one full song from the dataset, then resumes. The base model is rendered first and the final adapter last. Keep previews enabled to hear how the adapter changes.')}>
-      <PreviewField label={t('trainingStudio.heartmula.previewEvery', 'Preview every, steps')}
-        info={t('trainingStudio.heartmula.previewEveryInfo', 'Steps between audible previews. More frequent previews add more pauses.')}
-        onReset={!locked && previewEvery !== null && cadence !== status.previewDefaults.everySteps ? () => setPreviewEvery(null) : undefined}>
-        <input className={INPUT} type="number" min={1} max={1_000_000} step={1} value={Number.isFinite(cadence) ? cadence : ''}
-          disabled={locked} onChange={event => setPreviewEvery(event.target.valueAsNumber)} />
-      </PreviewField>
       <PreviewField label={t('trainingStudio.heartmula.previewSeconds', 'Preview maximum seconds')}
         info={t('trainingStudio.heartmula.previewSecondsInfo', 'The longest a preview may run, from 5 to 240 seconds. A full song ends on its own before that. Longer previews pause training for longer at every checkpoint.')}
         meta={t('trainingStudio.heartmula.previewSecondsMeta', 'default 240')}
@@ -330,6 +333,13 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         <span>{t('trainingStudio.heartmula.loss', 'Loss')}: {run.loss?.toFixed(4) ?? '—'}</span>
         <span>{t('trainingStudio.heartmula.msPerStep', 'ms/step')}: {run.msPerStep?.toFixed(1) ?? '—'}</span>
         <span>{t('trainingStudio.heartmula.vram', 'Peak VRAM, MiB')}: {run.peakVramMiB?.toFixed(0) ?? '—'}</span>
+        {eta && <span title={eta.previewsLeft
+          ? t('trainingStudio.heartmula.etaPreviewsInfo', 'Includes {{n}} preview(s) at {{each}} each, measured from this run.', { n: eta.previewsLeft, each: eta.previewMs ? formatDuration(eta.previewMs) : '?' })
+          : undefined}>
+          {t('trainingStudio.heartmula.eta', 'ETA')}: {formatDuration(eta.ms)}
+          {eta.previewsLeft > 0 && ` (${t('trainingStudio.heartmula.etaPreviews', 'incl. {{n}} preview(s)', { n: eta.previewsLeft })})`}
+          {' · '}{t('trainingStudio.heartmula.etaDone', 'done ≈ {{time}}', { time: new Date(Date.now() + eta.ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+        </span>}
       </div>
     </div>}
     {ownLog.length > 0 && <details className="mt-2">
