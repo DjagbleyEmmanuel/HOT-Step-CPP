@@ -38,6 +38,15 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: Training
       : <p className="text-xs text-zinc-500">{t('trainingStudio.heartmula.reviewPickDataset', 'Open a dataset to review its checkpoint previews.')}</p>;
   }
 
+  // HeartMuLa owns readiness through its status route, including preparation
+  // from source audio. ACE capabilities and its built manifest are unrelated.
+  if (target === 'heartmula' && detail) {
+    const render = section === 'prepare' ? plugin.renderPrepare : plugin.renderTrain;
+    return <React.Fragment key={`${trainingWorker}:${detail.id}:${section}`}>
+      {render?.({ datasetId: detail.id, slug: detail.slug, trigger: detail.customTag || '', section })}
+    </React.Fragment>;
+  }
+
   const header = (
     <>
     <div className="flex items-start gap-3">

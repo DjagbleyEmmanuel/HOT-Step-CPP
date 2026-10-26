@@ -13,6 +13,8 @@ Training follows one **training target**: ACE-Step, MiniMax-Music3, YuE2, HeartM
 
 An external agent (Claude Code, Codex) can also drive the dataset and training pipeline through the `hotstep` MCP server. See [Driving HOT-Step with an agent](../mcp.md).
 
+HeartMuLa's Prepare and Train pages show its own preparation status and training readiness for the open dataset. They remain available without ACE-Step capabilities or a built ACE-Step manifest; missing HeartMuLa requirements are shown on the cards.
+
 ## Preparing your files
 
 The folder you point the studio at is the source of truth: audio files live there, and each track's metadata lives in a small text **sidecar** next to it. Nothing is cached — edit or delete a sidecar on disk and the studio reflects that change. On first scan a track with no usable caption shows as **unlabeled**; the Label step fills in captions, lyrics and BPM/key for you, but you can also author sidecars by hand to skip it.
