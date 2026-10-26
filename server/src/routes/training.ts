@@ -825,7 +825,7 @@ router.post('/yue2-batch/:id/pause', (req: Request, res: Response) => {
 router.post('/yue2-batch/:id/resume', (req: Request, res: Response) => {
   const r = resumeYue2Batch(req.params.id as string);
   if (r === 'not_found') { res.status(404).json({ error: 'Batch not found' }); return; }
-  if (r === 'busy') { res.status(409).json({ error: 'A YuE2 batch is already running' }); return; }
+  if (r === 'busy') { res.status(409).json({ error: 'A training batch is already running' }); return; }
   res.json({ ok: true });
 });
 
