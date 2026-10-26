@@ -67,3 +67,37 @@ test('a meta write that fails part-way leaves the previous record whole, and a r
   const meta = after.listJobs('ds-c').find(j => j.id === job.id);
   assert.deepEqual([meta?.status, meta?.error], ['failed', 'Server restarted']);
 });
+
+test('a preview and a GPU job exclude each other across datasets', async () => {
+  const fresh = await restart();
+  const gate = (): { wait: Promise<void>; open: () => void } => { let open!: () => void; return { wait: new Promise<void>(r => { open = r; }), open }; };
+
+  // A preview on dataset A is reserved: no second preview, no GPU job is admitted to run beside it.
+  assert.equal(fresh.reserveGpuForPreview(), true);
+  assert.equal(fresh.reserveGpuForPreview(), false);
+  assert.equal(fresh.gpuPreviewReserved(), true);
+  const render = gate();
+  const events: string[] = [];
+  const preview = fresh.runReservedPreview(async () => { events.push('preview start'); await render.wait; events.push('preview end'); });
+  // A trainer on dataset B queues behind it on the same chain: it must not start while the render runs.
+  const trainer = fresh.createJob('heartmula-train', 'ds-B', [], {});
+  const started = gate();
+  fresh.enqueue(trainer, async () => { events.push('train start'); started.open(); });
+  await new Promise(r => setTimeout(r, 30));
+  assert.deepEqual(events, ['preview start'], 'the trainer waits for the render');
+  render.open();
+  await preview;
+  await started.wait;
+  assert.deepEqual(events, ['preview start', 'preview end', 'train start']);
+  assert.equal(fresh.gpuPreviewReserved(), false, 'the reservation ends with the render');
+
+  // The other way round: a GPU job queued or running anywhere refuses a preview.
+  const busy = fresh.createJob('heartmula-train', 'ds-C', [], {});
+  assert.equal(fresh.gpuJobActive(), true);
+  assert.equal(fresh.reserveGpuForPreview(), false);
+  fresh.finishJob(busy, 'done');
+  fresh.finishJob(trainer, 'done');
+  assert.equal(fresh.gpuJobActive(), false);
+  assert.equal(fresh.reserveGpuForPreview(), true);
+  await fresh.runReservedPreview(async () => {});
+});

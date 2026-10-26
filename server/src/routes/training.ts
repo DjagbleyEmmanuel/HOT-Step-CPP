@@ -118,7 +118,7 @@ import {
   heartmulaCheckpointSteps, heartmulaRunById, HEARTMULA_RUN_ID, listHeartmulaRuns, resolveHeartmulaRun,
 } from '../services/training/heartmulaRuns.js';
 import {
-  heartmulaPreviewAudioPath, heartmulaPreviewBusy, heartmulaPreviewKind, listHeartmulaPreviewRecords, renderHeartmulaPreview,
+  heartmulaPreviewAudioPath, heartmulaPreviewKind, listHeartmulaPreviewRecords, renderHeartmulaPreview,
 } from '../services/training/heartmulaPreview.js';
 import { HEARTMULA_PREVIEW_DEFAULTS, type HeartmulaPreviewListResponse } from '../contracts/heartmulaTraining.js';
 import { requestHeartmulaCheckpoint, type HeartmulaTrainJobOpts } from '../services/training/heartmulaRunner.js';
@@ -6062,7 +6062,7 @@ router.get('/datasets/:id/heartmula-status', async (req: Request, res: Response)
 /** Shared admission for the two HeartMuLa starts; returns an error text, or null when the job may start. */
 function heartmulaBlocked(ds: TrainingDatasetRow, needEncoder: boolean): string | null {
   if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) return 'A job or pipeline is queued or running for this dataset.';
-  if (listHeartmulaRuns(ds.id, ds.slug).some(r => heartmulaPreviewBusy(r.dir))) return 'A checkpoint preview is rendering; training waits until it ends.';
+  if (queue.gpuPreviewReserved()) return 'A checkpoint preview is rendering; training waits until it ends.';
   const ready = heartmulaReadiness();
   if (ready.backend !== 'cuda') return `HeartMuLa training needs a CUDA engine build (this one is ${ready.backend}).`;
   if (!aceTrainExe()) return 'ace-train was not found next to ace-server — rebuild the engine';
@@ -6176,12 +6176,13 @@ router.post('/datasets/:id/heartmula-previews/render', async (req: Request, res:
     let settings;
     try { settings = resolveHeartmulaPreviewSettings(b.settings, heartmulaRunPreviewSettings(r)); }
     catch (err: any) { res.status(400).json({ error: err.message }); return; }
-    if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) { res.status(409).json({ error: 'A job is queued or running; previews wait until it ends.' }); return; }
-    if (heartmulaPreviewBusy(r.dir)) { res.status(409).json({ error: 'A preview of this run is already rendering.' }); return; }
+    if (hasActivePipeline()) { res.status(409).json({ error: 'A pipeline is queued or running; previews wait until it ends.' }); return; }
     if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }
-    await runOnGpuLane(async () => {
+    // One GPU owner for every dataset: refused while any trainer is queued or running, or another preview holds the GPU.
+    if (!queue.reserveGpuForPreview()) { res.status(409).json({ error: 'The GPU is busy with a training job or another preview; previews wait until it ends.' }); return; }
+    await queue.runReservedPreview(() => runOnGpuLane(async () => {
       await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings });
-    }, { label: 'heartmula checkpoint preview', family: 'heartmula' });
+    }, { label: 'heartmula checkpoint preview', family: 'heartmula' }));
     res.json(heartmulaPreviewList(ds, r));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

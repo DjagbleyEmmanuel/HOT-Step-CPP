@@ -178,8 +178,10 @@ as a preview pause. On resume, a cadence step with no take is rendered first. A 
 render is recorded and training goes on. A render that cannot leave the engine clean
 (the model did not unload) throws `HeartmulaPreviewCleanupError` and fails the run, with
 the checkpoints kept. Cancel marks the take `skipped` and cancels the engine job. A run
-never trains while it previews, and `POST .../heartmula-previews/render` and the train
-start each refuse while the other is active.
+never trains while it previews. A manual preview takes the trainers' GPU chain in
+`labelingQueue.ts` (`reserveGpuForPreview`, `runReservedPreview`): it is refused while any
+GPU job is queued or running, for any dataset, and while it holds the GPU the HeartMuLa
+starts are refused and other GPU jobs queue behind it.
 
 **Provenance.** Each take records its run, kind (`base`, `step`, `final`), step, the
 resolved fixture (tags, lyrics, seed, sampler), the adapter file relative to the run

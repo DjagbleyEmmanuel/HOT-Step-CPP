@@ -446,6 +446,35 @@ export function enqueue(job: TrainingJob, run: (j: TrainingJob) => Promise<void>
   }
 }
 
+// ── Checkpoint previews on the trainers' GPU chain ───────────────────────
+// A manual preview renders on the engine, which every GPU-lane trainer stops.
+// It therefore takes the same chain, and a reservation closes the gap between
+// the admission check and the chain reaching it: while one is held no GPU job
+// is admitted for any dataset, and it is refused while a GPU job is queued or running.
+let previewReserved = false;
+
+/** True while a GPU-lane job is queued or running, for any dataset. */
+export function gpuJobActive(): boolean {
+  for (const j of jobs.values()) if (laneFor(j) === 'gpu' && (j.status === 'queued' || j.status === 'running')) return true;
+  return false;
+}
+
+export const gpuPreviewReserved = (): boolean => previewReserved;
+
+/** Take the GPU for one preview; false when a GPU job is queued or running, or another preview holds it. */
+export function reserveGpuForPreview(): boolean {
+  if (previewReserved || gpuJobActive()) return false;
+  previewReserved = true;
+  return true;
+}
+
+/** Run a reserved preview at the head of the GPU chain and release the reservation when it settles. */
+export function runReservedPreview<T>(fn: () => Promise<T>): Promise<T> {
+  const run = gpuTail.then(fn);
+  gpuTail = run.then(() => {}, () => {}).finally(() => { previewReserved = false; });
+  return run;
+}
+
 /**
  * Kill a job's spawned child and everything it started.
  *
