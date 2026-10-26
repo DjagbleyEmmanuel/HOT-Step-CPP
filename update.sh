@@ -285,6 +285,19 @@ echo "  Checking for running server..."
 STATUS_CODE=$(curl --max-time 10 -s -o /dev/null -w "%{http_code}" "http://localhost:$SHUTDOWN_PORT/api/status" 2>/dev/null || true)
 
 if [ "$STATUS_CODE" = "200" ]; then
+    # A configured port alone does not establish process ownership.
+    listener_pids=$(lsof -nP -t -iTCP:"$SHUTDOWN_PORT" -sTCP:LISTEN 2>/dev/null || true)
+    if [ -z "$listener_pids" ]; then
+        echo "  ERROR: cannot verify listener ownership (lsof required)."
+        exit 1
+    fi
+    for listener_pid in $listener_pids; do
+        listener_cwd=$(lsof -a -p "$listener_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+        case "$listener_cwd" in
+            "$SCRIPT_DIR"|"$SCRIPT_DIR"/*) ;;
+            *) echo "  ERROR: configured server port belongs to another checkout."; exit 1 ;;
+        esac
+    done
     echo "  Server is running — requesting graceful shutdown..."
     curl --max-time 10 -s -X POST "http://localhost:$SHUTDOWN_PORT/api/shutdown" >/dev/null 2>&1 || true
 

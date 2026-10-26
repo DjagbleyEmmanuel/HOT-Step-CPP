@@ -1,5 +1,15 @@
 @echo off
 setlocal enabledelayedexpansion
+REM Serialize engine snapshots with rebuilds and updates in this checkout.
+if "%HOTSTEP_UPDATE_FROM_TEMP%"=="1" goto :engine_lock_held
+if /i not "%HOTSTEP_ENGINE_LOCK_ROOT%\"=="%~dp0" (
+    pwsh -NoProfile -File "%~dp0tools\prod\engine-lock.ps1" -Script "%~f0" %*
+    goto :engine_lock_result
+)
+goto :engine_lock_held
+:engine_lock_result
+exit /b %errorlevel%
+:engine_lock_held
 
 REM --- Self-copy workaround for CMD execution pointer corruption ---
 REM Windows CMD reads .bat files line-by-line from disk. If git pull modifies
@@ -175,7 +185,7 @@ if not defined HOTSTEP_SHUTDOWN_PORT (
     goto :fail
 )
 REM A trailing directory separator excludes sibling checkouts with a shared prefix.
-powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $root=[IO.Path]::GetFullPath($env:HOTSTEP_REPO_DIR).TrimEnd('\')+'\'; function OwnEngine { Get-CimInstance Win32_Process -Filter \"Name = 'ace-server.exe'\" | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) } }; try { Invoke-RestMethod -Method Post -Uri ('http://localhost:'+$env:HOTSTEP_SHUTDOWN_PORT+'/api/shutdown') -TimeoutSec 10 | Out-Null } catch {}; for($n=0; $n -lt 15; $n++) { if(-not (OwnEngine)) { exit 0 }; if($n -eq 10) { OwnEngine | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }; Start-Sleep -Seconds 1 }; if(OwnEngine) { Write-Error 'Could not stop this checkout''s ace-server'; exit 1 }"
+pwsh -NoProfile -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT%
 if errorlevel 1 goto :fail
 
 REM ── Phase 2: Code sync ─────────────────────────────────────────────

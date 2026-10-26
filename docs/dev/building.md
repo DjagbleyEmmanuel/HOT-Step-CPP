@@ -13,6 +13,9 @@ building the `runpod` Docker target and publishing it to your own registry.
 
 ## Prerequisites
 
+For a stable copy alongside active development, see
+[Stable production beside development](#stable-production-beside-development).
+
 Every platform needs Git and Node.js 20 to 24 LTS. Node 24 is recommended:
 `server/package.json` and `ui/package.json` both declare `"node": ">=20.0.0 <25.0.0"`.
 CMake 3.21 or later is required (`engine/CMakeLists.txt`).
@@ -554,3 +557,88 @@ CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, wit
 Every package ships `release/.env.example` as `.env.example`, the shared launcher, `profile-path.mjs` and `README.txt`. No assembler precreates app-root models or adapters. Bootstrap creates the sibling data layout. The release template leaves managed paths unset; the checkout template retains its existing values. Launchers use `profile-path.mjs` to resolve the stable profile restart marker, matching `dataroot/paths.ts`, including `HOT_STEP_PROFILE_DIR` fixtures. Dev wrappers retain the checkout `.restart-requested` marker.
 
 Run `node server/scripts/check-release-prereqs.mjs` before shipping. It checks all three CI platform sections and both local assemblers, then runs disposable layout fixtures. Fixtures cover profile defaults for each platform, release reuse and unchanged dev selection; they do not run native Linux or macOS binaries. See [Data folder and upgrades](../user/data-folder.md).
+
+## Stable production beside development
+
+On Windows, `tools/prod/promote.mjs` prepares a separate clone of local master
+at `D:\Ace-Step-Latest\hot-step-prod`. It serves the built UI on
+`http://localhost:3101`, with a separate engine on 8186. Development keeps its
+existing ports and binaries. No push or remote pull happens during promotion.
+
+Shared-data activation is disabled until the job-ownership and production
+slices have both passed review. The intended production pointer is
+`N:\HOT-Step Data`; validation uses a scratch root under the dev checkout's
+`.tmp` directory. The launcher refuses to run without that scratch root.
+Models are read from the shared models directory. Startup warming and
+keep-loaded are disabled. Do not submit generation or training while another
+job holds the GPU.
+
+From the development checkout, using PowerShell 7 and Node 20 to 24:
+
+```powershell
+node tools/prod/promote.mjs --scratch D:\Ace-Step-Latest\hot-step-cpp\.tmp\prod-scratch
+node tools/prod/promote.mjs --stop
+node tools/prod/promote.mjs --start
+```
+
+Promotion clones one recorded local master commit into a staging clone,
+installs server and UI dependencies with `npm ci`, and builds both packages.
+It checks that the engine tree is clean and matches that commit, and rejects
+an executable older than any tracked C/C++/CUDA/CMake input, including
+submodules. This freshness check supports existing prebuilt binaries; it is
+not a reproducible-build attestation. Rebuild first after any engine input
+change. Engine executables and DLLs are copied together and checked with
+SHA-256 before and after copying. `.prod/artifact.json` records the commit,
+engine source tree, executable timestamp and binary hashes.
+
+Windows `dev-rebuild.bat`, `update.bat` and promotion share an exclusive file
+handle for the entire operation. Promotion refuses during a rebuild, and
+rebuilds refuse during promotion. Never call the engine build script directly
+or bypass this lock. Source edits during promotion are also unsafe; leave the
+engine tree alone until the snapshot finishes.
+
+Before preparation and again before replacement, promotion checks
+`/api/settings/data-folder` and refuses if its blockers list is nonempty,
+missing, or a data move is pending. The managed launcher preloads a small
+HTTP admission gate. Just before the final idle check, promotion pauses new
+write requests and waits for previously admitted writes to finish. Read
+requests, including preview audio, can continue. Writes receive HTTP 503
+during the swap. If production is busy, the gate resumes it without shutdown.
+The gate requires a private token and expires after 60 seconds if the
+promoter disappears. A write still in progress after 15 seconds also aborts
+and resumes admission. This gate covers HTTP submissions; the application's
+busy checks must still cover every background job.
+
+Only after all preparation succeeds does promotion shut down the verified
+production PID through its own API. It waits for that process and its engine
+to exit, renames the previous clone aside, installs the staged clone, and
+starts it through `tools/detach.ps1`. It checks `/api/health` for the recorded
+commit. Startup failure restores and starts the previous clone. Previous and
+failed clones are retained for inspection; no automatic recursive cleanup
+runs. Review these folders before removing them.
+
+The launcher pins ports and scratch write paths in the process environment.
+This takes precedence over data-root `settings/.env` values. Its private
+profile contains separate intended-production and active-scratch pointers.
+Do not launch this clone with `LAUNCH.bat` or its in-app updater: use promotion
+to keep the server, UI and engine together.
+
+The service runs outside the agent's process lifetime through Task Scheduler,
+with best-effort survival and no automatic restart supervisor. Logs are
+`.prod/server.stdout.log`, `.prod/server.stderr.log`, and `logs/detached/`
+inside the production clone. `.prod/process.json` records the PID and start
+time. Stop with the command above; it verifies PID identity and checkout
+ownership. An unowned listener on either production port aborts the operation.
+
+Check process isolation without stopping development or using the GPU:
+
+```powershell
+& D:\Ace-Step-Latest\hot-step-cpp\dev-rebuild.bat --dry-run
+node --test tools/prod/prod.test.mjs
+```
+
+The test creates an inert second process named `ace-server.exe` outside the
+checkout and confirms that a rebuild dry run leaves it alive. It also checks
+that the artifact lock excludes a concurrent rebuild and that busy or
+unknown production state refuses promotion. These checks do not replace the
+later two-instance shared-data and playback-through-rebuild validation.

@@ -112,6 +112,12 @@ with `dev.bat`, not just relaunch the engine.
    `Start-Sleep`; after 10 seconds stop only those PIDs, and abort after 15 seconds if
    any remain. `update.bat` uses the same filter. `update.sh` resolves each candidate's
    executable via `/proc/<pid>/exe` on Linux or `lsof -d txt` on macOS before killing it.
+   The Windows implementation lives in `tools/prod/stop-checkout.ps1`. Before
+   requesting shutdown it verifies that the configured port's listener is a
+   Node process with a command line inside this checkout. An unknown listener
+   aborts the rebuild. `dev-rebuild.bat --dry-run` prints the scope without
+   stopping anything or building. `update.sh` verifies the listener's working
+   directory with `lsof`, and refuses when ownership cannot be established.
 3. Once ace-server is gone: `call "%~dp0engine\build.cmd"`.
 4. Checks the build's exit code: on failure prints `BUILD FAILED - the binaries on disk are
    STALE.` and exits 1; otherwise prints "Done." **No restart either way.**
@@ -146,6 +152,13 @@ OwnEngine | Select-Object ProcessId, ExecutablePath
 
 Never stop an engine by process name. Another checkout may be serving a separate
 instance on different ports. A path that cannot be inspected is excluded.
+
+Windows rebuilds, updates and production promotion hold the same exclusive
+`engine-artifact.lock` handle under the checkout's `.tmp` folder. If another
+operation holds it, the command refuses immediately. Do not bypass the lock
+or set `HOTSTEP_ENGINE_LOCK_ROOT` manually. A stable sibling clone on ports
+3101/8186 uses its own engine copy. See the stable production procedure in
+[building.md](../../../docs/dev/building.md#stable-production-beside-development).
 
 ### Errors in a header you never edited = broken literal in the file included *before* it
 
