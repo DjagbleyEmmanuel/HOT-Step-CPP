@@ -83,9 +83,9 @@ export const trainingQueries = {
     queryKey: serverKey(TD.lsGenerations, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getLsGenerations(id, { worker: workerOf(queryKey), signal }),
   }),
-  preparedData: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey(TD.preparedData, { worker, id }),
-    queryFn: ({ queryKey, signal }) => api.getPreparedData(id, { worker: workerOf(queryKey), signal }),
+  preparedData: (worker: Worker, id: string, target?: 'heartmula') => queryOptions({
+    queryKey: serverKey(TD.preparedData, { worker, id, filters: { target } }),
+    queryFn: ({ queryKey, signal }) => api.getPreparedData(id, { worker: workerOf(queryKey), signal }, target),
   }),
   pipelines: (worker: Worker) => queryOptions({
     queryKey: serverKey(TD.pipelines, { worker }),

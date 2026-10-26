@@ -1,5 +1,14 @@
 # Training System — Architecture & Continuation Guide
 
+HeartMuLa's `/api/training/heartmula-batch` starts the same durable runner as
+YuE2, with `family: heartmula` and Prepare/Train stages. Its `recipe` body is
+the ordinary HeartMuLa train request. Existing `/api/training/yue2-batch`
+list, pause, resume and cancel routes serve both families, and older snapshots
+without a family remain YuE2. Snapshots retain HeartMuLa run IDs to resume
+optimizer checkpoints after interruption. The prepared-data routes accept
+`target=heartmula` on GET and `target: heartmula` on DELETE to limit both
+inventory and deletion to `<dataset>/heartmula/prepare`.
+
 Resolve runtime paths first using the [data folder configuration](config.md#dev-checkouts).
 `<data root>/...` paths below describe the managed layout; environment overrides
 can place individual children elsewhere.

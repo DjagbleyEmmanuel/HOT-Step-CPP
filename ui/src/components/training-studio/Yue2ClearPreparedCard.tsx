@@ -13,6 +13,7 @@ import { Trash2 } from 'lucide-react';
 import { clearPreparedData } from '../../services/trainingApi';
 import { trainingQueries } from '../../queries/training-data/queries';
 import { queryManager } from '../../queries/invalidation';
+import { resourceKey } from '../../queries/keys';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
 import { useTranslation } from 'react-i18next';
@@ -25,7 +26,7 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   const worker = useTrainingStore(s => s.trainingWorker);
-  const prepared = trainingQueries.preparedData(worker, datasetId);
+  const prepared = trainingQueries.preparedData(worker, datasetId, target === 'heartmula' ? target : undefined);
   // A failed read shows nothing to clear, as before.
   const info = useQuery(prepared).data ?? null;
   const [clearing, setClearing] = useState(false);
@@ -45,7 +46,8 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
     if (!window.confirm(`Clear prepared data for ${info.slug}?\n\n${summary}${keptLine}\n\nSource tracks, sidecars, labels and adapters will remain.`)) return;
     setClearing(true); setNote('');
     try {
-      await clearPreparedData(datasetId, info.slug, allowCore, { worker });
+      await clearPreparedData(datasetId, info.slug, allowCore, { worker }, target === 'heartmula' ? target : undefined);
+      if (target === 'heartmula') void queryManager.keys(queryClient, resourceKey('training-data/heartmula-status', { worker }, datasetId));
       if (allowCore) {
         // The prepared manifest the form points at is gone with the core.
         try {
@@ -71,7 +73,7 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {target === 'yue2' ? <>Clears the vocal stems and this dataset&apos;s MM3 and ACE caches. The YuE2 latents, codes, lead sheets and prepared set are
         kept: they are small, slow to rebuild, and rebuilt anyway when the audio, captions or loudness change.
-        Source files, labels and adapters are always kept.</> : t('trainingStudio.heartmula.clearOtherCachesInfo', 'Clears other backends’ caches. HeartMuLa codes and YuE2 prepared data are kept. Use Rebuild all samples on the preparation stage to regenerate HeartMuLa codes. Source files, labels and adapters are always kept.')}
+        Source files, labels and adapters are always kept.</> : t('trainingStudio.heartmula.clearCachesInfo', "Clears only this dataset's prepared HeartMuLa audio. YuE2, ACE and MM3 caches, source files, labels and adapters are kept.")}
       </p>
       {target === 'yue2' && <div className="mb-3">
         <Toggle
@@ -86,7 +88,7 @@ export const Yue2ClearPreparedCard: React.FC<{ datasetId: string; disabled: bool
       <button type="button" onClick={() => void clear()}
         disabled={!targets.length || info?.busy || clearing || disabled}
         className="px-4 py-2 rounded-lg text-sm font-semibold border border-red-500/50 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40 flex items-center gap-2">
-        <Trash2 size={15} />{clearing ? 'Clearing…' : allowCore ? 'Clear all prepared data' : 'Clear stems and other caches'}
+        <Trash2 size={15} />{clearing ? 'Clearing…' : target === 'heartmula' ? t('trainingStudio.heartmula.clearCaches', 'Clear HeartMuLa caches') : allowCore ? 'Clear all prepared data' : 'Clear stems and other caches'}
       </button>
       {info && <p className="mt-2 text-[11px] text-zinc-500">{targets.length} cache folders · {mib(bytes)}{kept.length ? ` · keeps ${mib(kept.reduce((s, c) => s + c.bytes, 0))}` : ''}</p>}
       {note && <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">{note}</p>}

@@ -118,6 +118,7 @@ test('a rejected older-run preview retry stays visible after a successful list r
       return respond({ error: 'Preview retry rejected' }, 409);
     }
     if (url.includes('heartmula-status')) return respond(snapshot);
+    if (url.endsWith('/yue2-batch')) return respond({ batches: [] });
     if (url.includes('heartmula-previews')) {
       const run = new URL(url, 'http://localhost').searchParams.get('run');
       if (run === 'older') {
@@ -163,4 +164,30 @@ test('a rejected older-run preview retry stays visible after a successful list r
     await act(async () => { root.unmount(); });
     client.clear(); useTrainingStore.setState(savedStore); Object.assign(globalThis, saved);
   }
+});
+
+test('Perform all stages accepts stale preparation and a pasted resume path names its run', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  const root = createRoot(document.getElementById('root')!);
+  let request: unknown;
+  const run = 'example/2026-10-26_12-00-00';
+  try {
+    await act(async () => root.render(createElement(HeartmulaTrainCard, {
+      status: { ...status, prepare: { ...status.prepare, cacheValid: false, staleSamples: 1 },
+        runs: [{ run, adapterName: 'example', state: 'failed', step: 1, recipe: HEARTMULA_RECIPE_DEFAULTS, resumable: true, published: null }] },
+      slug: 'example', busy: false, trainStarted: false, onTrain() {}, onChain: value => { request = value; }, onCheckpoint() {}, onCancel() {},
+    })));
+    const chain = [...document.querySelectorAll('button')].find(button => button.textContent === 'Perform all stages')!;
+    assert.equal(chain.hasAttribute('disabled'), false);
+    await act(async () => chain.click());
+    assert.deepEqual((request as { recipe: unknown }).recipe, HEARTMULA_RECIPE_DEFAULTS);
+    const input = document.querySelector('input[placeholder="Or paste a run folder (optional)"]')!;
+    const props = (input as any)[Object.keys(input).find(key => key.startsWith('__reactProps'))!];
+    await act(async () => props.onChange({ target: { value: `D:/saved/${run}` } }));
+    assert.match(document.body.textContent!, new RegExp(`Resume ${run} with its saved recipe`));
+    await act(async () => chain.click());
+    assert.deepEqual(request, { resumeRun: run });
+  } finally { await act(async () => root.unmount()); Object.assign(globalThis, saved); }
 });

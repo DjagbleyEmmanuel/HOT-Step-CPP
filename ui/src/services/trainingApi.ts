@@ -2679,12 +2679,12 @@ export async function listYue2AitkRuns(
 
 /** `core`: YuE2's latents, codes, lead sheets and prepared set, kept by every clear unless asked. */
 export interface PreparedCache { name: string; path: string; files: number; bytes: number; core?: boolean }
-export async function getPreparedData(id: string, reqOpts?: TrainingReadOptions): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
-  return request(`/datasets/${encodeURIComponent(id)}/prepared-data`, undefined, reqOpts);
+export async function getPreparedData(id: string, reqOpts?: TrainingReadOptions, target?: 'heartmula'): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
+  return request(`/datasets/${encodeURIComponent(id)}/prepared-data${target ? '?target=heartmula' : ''}`, undefined, reqOpts);
 }
-export async function clearPreparedData(id: string, slug: string, includeYue2Core = false, reqOpts?: TrainingTarget): Promise<{ cleared: PreparedCache[] }> {
+export async function clearPreparedData(id: string, slug: string, includeYue2Core = false, reqOpts?: TrainingTarget, target?: 'heartmula'): Promise<{ cleared: PreparedCache[] }> {
   return request(`/datasets/${encodeURIComponent(id)}/prepared-data`,
-    { method: 'DELETE', ...jsonBody({ confirm: slug, includeYue2Core }) }, reqOpts);
+    { method: 'DELETE', ...jsonBody({ confirm: slug, includeYue2Core, target }) }, reqOpts);
 }
 
 /** Link a saved joint checkpoint's AR/NAR pair to this dataset's album preset. */
@@ -3208,11 +3208,12 @@ export async function resumePipeline(id: string, reqOpts?: TrainingTarget): Prom
 }
 
 // ── YuE2 batch (server-owned, resumable) ───────────────────────────────
-export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
+export type Yue2BatchStage = 'prepare' | 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
 export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null; refineRun?: string; pickStep?: number }
 export interface Yue2BatchSummary {
+  family?: 'yue2' | 'heartmula';
   id: string;
   status: 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
   items: Yue2BatchItem[];
@@ -3225,6 +3226,10 @@ export interface Yue2BatchSummary {
 }
 export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
   const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) }, reqOpts);
+  return data.batch;
+}
+export async function startHeartmulaBatch(datasetIds: string[], recipe: HeartmulaTrainRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/heartmula-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe }) }, reqOpts);
   return data.batch;
 }
 export async function listYue2Batches(reqOpts?: TrainingReadOptions): Promise<Yue2BatchSummary[]> {

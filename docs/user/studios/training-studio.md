@@ -13,7 +13,7 @@ Training follows one **training target**: ACE-Step, MiniMax-Music3, YuE2, HeartM
 
 An external agent (Claude Code, Codex) can also drive the dataset and training pipeline through the `hotstep` MCP server. See [Driving HOT-Step with an agent](../mcp.md).
 
-HeartMuLa uses YuE2's preparation cards, live progress panel and training form, including recipe cards and saved presets. Its checkpoint ladder lives on Review. Its Prepare and Train pages show its own preparation status and training readiness for the open dataset. They remain available without ACE-Step capabilities or a built ACE-Step manifest; missing HeartMuLa requirements are shown on the cards.
+HeartMuLa uses YuE2's preparation cards, live progress panel and training form, including recipe cards and saved presets. Train multiple queues datasets on the server, and Perform all stages prepares stale audio before training. Its cache-clear card deletes only HeartMuLa preparation. Its checkpoint ladder lives on Review. Its Prepare and Train pages show its own preparation status and training readiness for the open dataset. They remain available without ACE-Step capabilities or a built ACE-Step manifest; missing HeartMuLa requirements are shown on the cards.
 
 ## Preparing your files
 

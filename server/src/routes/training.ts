@@ -113,7 +113,7 @@ import {
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
 import { heartmulaReadiness, heartmulaStatus } from '../services/training/heartmulaStatus.js';
 import { heartmulaPrepareStatus } from '../services/training/heartmulaPrepare.js';
-import { missingEncoderMessage, resolveHeartmulaPreviewSettings } from '../services/training/heartmulaTrain.js';
+import { missingEncoderMessage, resolveHeartmulaPreviewSettings, resolveHeartmulaRecipe } from '../services/training/heartmulaTrain.js';
 import { ensureHeartmulaRunPreview } from '../services/training/heartmulaPreviewSource.js';
 import {
   heartmulaCheckpointSteps, heartmulaRunById, HEARTMULA_RUN_ID, listHeartmulaRuns, resolveHeartmulaRun,
@@ -196,7 +196,7 @@ import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
 import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
-import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
+import { appendToBatch as appendToYue2Batch, hasActiveBatch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -765,6 +765,28 @@ router.post('/yue2-batch', (req: Request, res: Response) => {
     res.status(202).json({ batch: result });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
+router.post('/heartmula-batch', (req: Request, res: Response) => {
+  try {
+    const b = req.body;
+    if (!b || !Array.isArray(b.datasetIds) || !b.datasetIds.length || b.datasetIds.some((id: unknown) => typeof id !== 'string' || !id)
+      || !b.recipe || typeof b.recipe !== 'object' || Array.isArray(b.recipe)) {
+      res.status(400).json({ error: 'Expected datasetIds and a HeartMuLa training request in recipe' }); return;
+    }
+    if (Object.keys(b.recipe).some(k => !['recipe', 'preview', 'adapterName', 'resumeRun'].includes(k))
+      || (b.recipe.recipe !== undefined && (!b.recipe.recipe || typeof b.recipe.recipe !== 'object' || Array.isArray(b.recipe.recipe)))
+      || (b.recipe.resumeRun !== undefined && (b.datasetIds.length !== 1 || typeof b.recipe.resumeRun !== 'string'))
+      || (b.recipe.resumeRun !== undefined && b.recipe.preview !== undefined)
+      || (b.recipe.adapterName !== undefined && (typeof b.recipe.adapterName !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(b.recipe.adapterName)))) {
+      res.status(400).json({ error: 'Invalid HeartMuLa training request; resume accepts one dataset' }); return;
+    }
+    const recipe = b.recipe.resumeRun === undefined
+      ? { ...b.recipe, recipe: resolveHeartmulaRecipe(b.recipe.recipe), preview: resolveHeartmulaPreviewSettings(b.recipe.preview) }
+      : b.recipe;
+    const result = startYue2Batch({ family: 'heartmula', datasetIds: b.datasetIds, lyricTiming: false, recipe });
+    if ('error' in result) { res.status(409).json(result); return; }
+    res.status(202).json({ batch: result });
+  } catch (err: any) { res.status(400).json({ error: err.message }); }
+});
 router.get('/yue2-batch', (_req: Request, res: Response) => {
   try { res.json({ batches: listYue2Batches() }); } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
@@ -1025,8 +1047,9 @@ router.get('/datasets/:id/prepared-data', (req: Request, res: Response) => {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     // Everything, with `core` marking YuE2's kept-by-default data, so the card can show both parts.
-    const caches = listPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: true }).map(c => ({ ...c, core: c.name === YUE2_CORE_CACHE }));
-    res.json({ slug: ds.slug, caches, busy: !!queue.activeJobForDataset(ds.id) || hasActivePipeline() });
+    if (req.query.target !== undefined && req.query.target !== 'heartmula') { res.status(400).json({ error: 'Invalid cache target' }); return; }
+    const caches = listPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: true, ...(req.query.target === 'heartmula' ? { target: 'heartmula' as const } : {}) }).map(c => ({ ...c, core: c.name === YUE2_CORE_CACHE }));
+    res.json({ slug: ds.slug, caches, busy: !!queue.activeJobForDataset(ds.id) || hasActivePipeline() || hasActiveBatch() });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
@@ -1035,10 +1058,12 @@ router.delete('/datasets/:id/prepared-data', (req: Request, res: Response) => {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     if (req.body?.confirm !== ds.slug) { res.status(400).json({ error: 'Confirm with the dataset slug shown in the dialog.' }); return; }
-    if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) {
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline() || hasActiveBatch()) {
       res.status(409).json({ error: 'A job or pipeline is queued or running for this dataset.' }); return;
     }
-    const cleared = clearPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: req.body?.includeYue2Core === true });
+    if (req.body?.target !== undefined && req.body.target !== 'heartmula') { res.status(400).json({ error: 'Invalid cache target' }); return; }
+    const cleared = clearPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: req.body?.includeYue2Core === true,
+      ...(req.body?.target === 'heartmula' ? { target: 'heartmula' as const } : {}) });
     console.log(`[Training] Cleared prepared caches for ${ds.slug}: ${cleared.map(c => c.name).join(', ') || 'none'}`);
     res.json({ cleared });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }

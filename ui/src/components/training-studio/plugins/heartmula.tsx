@@ -28,6 +28,7 @@ export interface HeartmulaTrainingView {
   trainBlockedReason?: string;
   onPrepare: HeartmulaPrepareCardProps['onPrepare'];
   onTrain: HeartmulaTrainCardProps['onTrain'];
+  onChain?: HeartmulaTrainCardProps['onChain'];
   onCheckpoint: HeartmulaTrainCardProps['onCheckpoint'];
   onCancel: HeartmulaTrainCardProps['onCancel'];
   previews: HeartmulaPreviewCardProps['previews'];
@@ -103,7 +104,7 @@ function HeartmulaPage({ context, useController, review = false }: {
         </>
         : <HeartmulaTrainCard key={view.scopeKey} datasetId={context.datasetId} status={view.status} slug={context.slug} busy={view.busy}
           trainStarted={view.trainStarted} blockedReason={view.trainBlockedReason}
-          onTrain={view.onTrain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} />)}
+          onTrain={view.onTrain} onChain={view.onChain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} />)}
   </div>;
 }
 

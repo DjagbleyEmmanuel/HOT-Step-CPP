@@ -11,7 +11,9 @@ import { useTranslation } from 'react-i18next';
 import type { HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest, HeartmulaStatusResponse } from '../../../../server/src/contracts/heartmulaTraining';
 import { pollWhile } from '../../queries/contract';
 import { scopeOf, serverKey } from '../../queries/keys';
-import { getHeartmulaPreviews, getHeartmulaStatus, renderHeartmulaPreview, type TrainingJobSummary } from '../../services/trainingApi';
+import { getHeartmulaPreviews, getHeartmulaStatus, renderHeartmulaPreview, startHeartmulaBatch, cancelYue2Batch, type TrainingJobSummary, type Yue2BatchSummary } from '../../services/trainingApi';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useRunJob } from '../../queries/training-runs/hooks';
 import { useTrainingStore } from '../../stores/trainingStore';
 import type { HeartmulaTrainingView } from './plugins/heartmula';
 import type { TrainingRenderContext } from './trainingPluginTypes';
@@ -43,7 +45,21 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
   const checkpoint = useTrainingStore(s => s.requestHeartmulaCheckpoint);
   const cancel = useTrainingStore(s => s.cancelJob);
   const mine = job?.datasetId === datasetId ? job : null;
-  const busy = live(mine);
+  const batchesQuery = useQuery({ ...trainingQueries.yue2Batches(worker),
+    refetchInterval: pollWhile<Yue2BatchSummary[]>(data => !data || data.some(b => b.status === 'running' || b.status === 'paused'), 3000) });
+  const batch = batchesQuery.data?.find(b => b.family === 'heartmula' && (b.status === 'running' || b.status === 'paused'));
+  const batchJobId = batch?.items.find(item => item.datasetId === datasetId)?.stages.find(stage => stage.status === 'running')?.jobId ?? '';
+  const batchJob = useRunJob(worker, batchJobId).data;
+  useEffect(() => {
+    const state = useTrainingStore.getState();
+    if (batchJob && state.trainingWorker === worker && state.selectedDatasetId === datasetId
+      && state.activeJob !== batchJob) useTrainingStore.setState({ activeJob: batchJob,
+        ...(state.activeJob?.id !== batchJob.id ? { jobLog: [] } : {}) });
+  }, [batchJob, datasetId, worker]);
+  const [submitting, setSubmitting] = useState(false);
+  const [chainError, setChainError] = useState<{ scope: string; message: string } | null>(null);
+  const scope = `${worker ?? ''}:${datasetId}`;
+  const busy = live(mine) || !!batch || submitting;
   const query = useQuery(heartmulaStatusOptions(worker, datasetId, busy));
   const status = query.data ?? null;
   const runId = status?.run?.run ?? null;
@@ -87,16 +103,22 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
     scopeKey: `${worker ?? ''}:${datasetId}`,
     status,
     loading: query.isPending,
-    error: query.error?.message ?? storeError,
+    error: query.error?.message ?? (chainError?.scope === scope ? chainError.message : null) ?? storeError,
     busy,
     preparing: busy && mine?.kind === 'heartmula-prepare',
-    trainStarted: busy && mine?.kind === 'heartmula-train' && status?.run?.state === 'running',
+    trainStarted: busy && !batch && mine?.kind === 'heartmula-train' && status?.run?.state === 'running',
     prepareBlockedReason,
     trainBlockedReason: blocked,
     onPrepare: request => { void startPrepare(request).then(refresh); },
     onTrain: request => { void startTrain(request).then(refresh); },
+    onChain: (request, datasetIds) => {
+      setSubmitting(true); setChainError(null);
+      void startHeartmulaBatch(datasetIds ?? [datasetId], request, { worker })
+        .catch(err => setChainError({ scope, message: err instanceof Error ? err.message : String(err) }))
+        .finally(() => { setSubmitting(false); void client.invalidateQueries({ queryKey: trainingQueries.yue2Batches(worker).queryKey }); });
+    },
     onCheckpoint: run => { void checkpoint(run); },
-    onCancel: () => { void cancel().then(refresh); },
+    onCancel: () => { void (batch ? cancelYue2Batch(batch.id, { worker }) : cancel()).then(refresh); },
     previews: runId !== null ? previewQuery.data ?? null : null,
     previewError: previewQuery.error?.message ?? null,
     previewCommandError: previewCommandError?.worker === worker && previewCommandError.datasetId === datasetId

@@ -8,6 +8,7 @@ import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPrese
 import { TrainingBatchCard, TrainingAllStagesCard, TrainingRunPanel } from './Yue2StageCard';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
 
 export interface HeartmulaTrainCardProps {
   datasetId?: string;
@@ -18,6 +19,7 @@ export interface HeartmulaTrainCardProps {
   trainStarted: boolean;
   blockedReason?: string;
   onTrain: (request: HeartmulaTrainRequest) => void;
+  onChain?: (request: HeartmulaTrainRequest, datasetIds?: string[]) => void;
   onCheckpoint: (run: string) => void;
   onCancel: () => void;
 }
@@ -35,9 +37,11 @@ const FIELDS: Array<{ key: keyof HeartmulaRecipe; label: string; info: string; m
   { key: 'checkpointEvery', label: 'Save every', info: 'Save resumable state every this many steps. Zero saves only when stopping or finishing. Preview cadence is separate.', min: 0, max: 1_000_000, step: 1 },
 ];
 
-export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted, blockedReason, onTrain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
+export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted, blockedReason, onTrain, onChain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
   const { t } = useTranslation();
   const [edits, setEdits] = useState<Partial<HeartmulaRecipe>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [name, setName] = useState(slug);
   const [resumeRun, setResumeRun] = useState<string | null>(null);
   const [previewEvery, setPreviewEvery] = useState<number | null>(null);
@@ -120,11 +124,17 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
     const link = document.createElement('a'); link.href = url; link.download = 'heartmula-training-preset.json'; link.click(); URL.revokeObjectURL(url);
   };
   const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe, preview: { ...previewEdits, everySteps: cadence } });
+  const chain = () => onChain?.(selectedResume ? { resumeRun: selectedResume }
+    : { ...(batchIds ? {} : { adapterName: name }), recipe, preview: { ...previewEdits, everySteps: cadence } }, batchIds ?? undefined);
   return <div className="flex flex-col gap-4">
-    <TrainingBatchCard disabled description={t('trainingStudio.heartmula.batchUnavailable', 'HeartMuLa currently trains one dataset at a time. Batch queue support is not available.')} />
-    <TrainingAllStagesCard disabled={busy || !ready || !!blockedReason || (resume ? !resumable : !valid)} onRun={start}
-      description={ready ? t('trainingStudio.heartmula.allPrepared', 'Preparation is complete. Starts training with the settings below.')
-        : t('trainingStudio.heartmula.chainUnavailable', 'Prepare this dataset first. Automatic preparation before training is not available.')} />
+    <TrainingBatchCard disabled={busy || !onChain} onOpen={() => setBatchOpen(true)} description={t('trainingStudio.heartmula.batchInfo', 'Choose datasets, then apply the recipe below to each in order. The queue survives closing the page and server restarts.')} />
+    {batchOpen && <Yue2AitkBatchWizard open family="heartmula" onClose={() => setBatchOpen(false)} onSelect={setBatchIds} />}
+    {batchIds && <div className="flex items-center gap-3 text-xs text-amber-600 dark:text-amber-400">
+      {t('trainingStudio.heartmula.batchSelected', 'Recipe applies to {{count}} datasets.', { count: batchIds.length })}
+      <button type="button" disabled={busy} onClick={() => setBatchIds(null)}>{t('common.cancel', 'Cancel')}</button>
+    </div>}
+    <TrainingAllStagesCard disabled={busy || !onChain || !!blockedReason || (!ready && status.ready.encoderMissing) || (resume ? !resumable || !!batchIds : !valid)} onRun={chain}
+      description={t('trainingStudio.heartmula.chainInfo', 'Prepares missing or stale HeartMuLa audio, then trains with the settings below. Unchanged prepared audio is reused.')} />
     <TrainingRunPanel title={t('trainingStudio.heartmula.selected', 'Backbone LoRA training is selected')}>
     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
       <div className="flex flex-col gap-1"><TrainingRunPicker label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
@@ -246,16 +256,16 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
       </PreviewField>
     </TrainingPreviewSettings>
     <p className="text-[11px] text-zinc-500 mt-2">{resume
-      ? t('trainingStudio.heartmula.resumeSummary', 'Resume {{run}} with its saved recipe and preview settings.', { run: resumeRun })
+      ? t('trainingStudio.heartmula.resumeSummary', 'Resume {{run}} with its saved recipe and preview settings.', { run: selectedResume })
       : t('trainingStudio.heartmula.recipeSummary', '3B backbone LoRA · rank {{rank}} · alpha {{alpha}} · {{steps}} steps', { ...recipe })}</p>
     <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.heartmula.adapterFolder', 'Adapters are saved in your global adapters folder under heartmula-lm-adapters/.')}</p>
     {!ready && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{t('trainingStudio.heartmula.prepareRequired', 'Prepare a non-empty dataset with no stale samples before training.')}</p>}
     {blockedReason && <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">{blockedReason}</p>}
     <div className="mt-4 flex items-center gap-3 flex-wrap">
-      <button type="button" className={BUTTON} disabled={busy || !ready || !!blockedReason || (resume ? !resumable : !valid)}
-        onClick={start}>
+      <button type="button" className={BUTTON} disabled={busy || (!batchIds && !ready) || !!blockedReason || (resume ? !resumable || !!batchIds : !valid)}
+        onClick={batchIds ? chain : start}>
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-        {resume ? t('trainingStudio.heartmula.resume', 'Resume run') : t('trainingStudio.heartmula.start', 'Start training')}
+        {batchIds ? t('trainingStudio.heartmula.startBatch', 'Start batch') : resume ? t('trainingStudio.heartmula.resume', 'Resume run') : t('trainingStudio.heartmula.start', 'Start training')}
       </button>
       {busy && run && trainStarted && run.state === 'running' && <button type="button" className="text-xs text-amber-600 dark:text-amber-400 hover:underline" onClick={() => onCheckpoint(run.run)}>
         {t('trainingStudio.heartmula.checkpoint', 'Save and pause')}

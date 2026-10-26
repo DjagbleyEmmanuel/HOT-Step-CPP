@@ -97,12 +97,21 @@ shown in the same row as YuE2, but fixed to 3B F16, automatic CUDA and LoRA by t
 trainer. Attention mode and layer residency are automatic, with no per-run
 controls exposed by this API.
 
-The current HeartMuLa API does not provide a multi-dataset queue or an automatic
-Prepare-then-Train command. **Train multiple** is unavailable; **Perform all
-stages** on Train starts training only after preparation is complete. When the
-cache is stale, use Prepare first. On Prepare, Perform all stages runs the
-single encoding stage. The adjacent cache-clear card clears other backends'
-caches while keeping HeartMuLa codes; **Rebuild all samples** regenerates them.
+**Perform all stages** on Train prepares missing or stale HeartMuLa audio,
+then trains with the settings below. Valid preparation is reused. **Train
+multiple** opens the dataset picker; configure the recipe, then use **Start
+batch** to prepare and train each selected dataset in order. Each dataset uses
+its own slug as the adapter name. The server saves the queue on every stage
+transition, so closing the page does not stop it. After a server restart the
+queue is paused. Resume it in the batch panel to keep completed stages and
+continue an interrupted run from its saved checkpoint. Pause takes effect
+after the current stage; Cancel stops the current job and the remaining queue.
+
+On Prepare, **Perform all stages** runs the single encoding stage. **Clear
+HeartMuLa caches** shows the folder count and size and deletes only this
+dataset's HeartMuLa preparation. Source files, labels, adapters and YuE2, ACE
+and MM3 caches remain. **Rebuild all samples** re-encodes HeartMuLa audio without
+clearing other backends' data.
 
 ## Checkpoint previews
 

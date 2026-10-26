@@ -1,4 +1,4 @@
-// yue2BatchRunner.ts — server-owned bulk YuE2 (AITK joint) training
+// yue2BatchRunner.ts — durable YuE2 joint and HeartMuLa training queues.
 //
 // The AS1.5 batch pipeline (pipelineRunner.ts) is the model: the batch is a
 // record on disk under <training>/yue2-batches/<id>.json, re-persisted on
@@ -30,8 +30,9 @@ import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
+import type { HeartmulaStatusResponse } from '../../contracts/heartmulaTraining.js';
 
-export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
+export type Yue2BatchStage = 'prepare' | 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -46,6 +47,8 @@ export interface Yue2BatchStageResult {
    *  stage continues from that run's last optimizer checkpoint instead of
    *  starting over. */
   resumeJobId?: string;
+  /** HeartMuLa's immutable run identity, retained across job retries. */
+  runId?: string;
 }
 
 export interface Yue2BatchItem {
@@ -65,6 +68,8 @@ export interface Yue2BatchItem {
 }
 
 export interface Yue2BatchSummary {
+  /** Absent in older snapshots, which are all YuE2. */
+  family?: 'yue2' | 'heartmula';
   id: string;
   status: Yue2BatchStatus;
   items: Yue2BatchItem[];
@@ -168,21 +173,21 @@ export function getBatch(id: string): Yue2BatchSummary | undefined {
   return live ? toSummary(live) : readSnapshots().find(s => s.id === id);
 }
 
-export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
-  if (hasActiveBatch()) return { error: 'A YuE2 batch is already running' };
+export function startBatch(input: { datasetIds: string[]; family?: 'yue2' | 'heartmula'; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
+  if (hasActiveBatch()) return { error: 'A training batch is already running' };
   // A captured YuE2 preparation may not have queued a job yet, so check it too.
   if (hasActivePipeline()) return { error: 'A training pipeline or YuE2 preparation is already running' };
   const items: Yue2BatchItem[] = [];
-  for (const id of input.datasetIds) {
+  for (const id of new Set(input.datasetIds)) {
     const ds = repo.getDataset(id);
     if (!ds) return { error: `Dataset not found: ${id}` };
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(input.lyricTiming, wantsRefine(input.recipe), !!input.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: (input.family === 'heartmula' ? ['prepare', 'train'] as const : stagesFor(input.lyricTiming, wantsRefine(input.recipe), !!input.recipe.autoCaption)).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
   const recipe: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input.recipe)) if (!RECIPE_STRIP.has(k) && v !== undefined) recipe[k] = v;
-  const state: BatchState = { id: randomUUID(), status: 'running', items, currentDatasetId: null, lyricTiming: input.lyricTiming,
+  const state: BatchState = { id: randomUUID(), family: input.family ?? 'yue2', status: 'running', items, currentDatasetId: null, lyricTiming: input.lyricTiming,
     ...(input.clearCache ? { clearCache: true } : {}),
     recipe, createdAt: Date.now(), finishedAt: null, pauseRequested: false, cancelRequested: false };
   batches.set(state.id, state);
@@ -196,12 +201,13 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
 export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummary | { error: string } {
   const state = batches.get(id);
   if (!state || !isActive(state.status)) return { error: 'Batch is not running' };
+  if (state.family === 'heartmula' && state.recipe.resumeRun !== undefined) return { error: 'A resumed HeartMuLa run belongs to one dataset; start a new batch for other datasets' };
   for (const dsId of datasetIds) {
     if (state.items.some(i => i.datasetId === dsId)) continue;
     const ds = repo.getDataset(dsId);
     if (!ds) return { error: `Dataset not found: ${dsId}` };
     state.items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(state.lyricTiming, wantsRefine(state.recipe), !!state.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: (state.family === 'heartmula' ? ['prepare', 'train'] as const : stagesFor(state.lyricTiming, wantsRefine(state.recipe), !!state.recipe.autoCaption)).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   persist(state);
   return toSummary(state);
@@ -244,6 +250,7 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
   }
   if (!items.length) return { error: 'Nothing to finish' };
   const live = [...batches.values()].find(b => isActive(b.status));
+  if (live?.family === 'heartmula') return { error: 'A HeartMuLa batch is already running' };
   if (live) {
     for (const item of items) if (!live.items.some(i => i.refineRun === item.refineRun)) live.items.push(item);
     persist(live);
@@ -371,6 +378,7 @@ function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2B
 }
 
 const STAGE_PATH: Record<Yue2BatchStage, string> = {
+  prepare: 'heartmula-prepare',
   captions: 'yue2-captions-missing',
   nar: 'yue2-joint-train',
   finish: '',
@@ -409,8 +417,8 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
       // YuE2 caches only: this dataset's ACE and MM3 caches belong to other backends.
       // The core (latents, codes, lead sheets, prepared set) is kept: stale
       // parts are rebuilt by the stages' own checks, so this clears the stems.
-      for (const cache of listPreparedCaches(ds.slug, ds.sourceDir)) {
-        if (cache.name.startsWith('yue2-')) fs.rmSync(cache.path, { recursive: true, force: false });
+      for (const cache of listPreparedCaches(ds.slug, ds.sourceDir, state.family === 'heartmula' ? { target: 'heartmula' } : {})) {
+        if (state.family === 'heartmula' || cache.name.startsWith('yue2-')) fs.rmSync(cache.path, { recursive: true, force: false });
       }
     } catch (err) {
       item.status = 'failed'; item.error = `Clearing cached data failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -447,7 +455,7 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
       return;
     }
   }
-  item.status = 'done'; item.currentStage = null; persist(state);
+  item.status = state.cancelRequested ? 'cancelled' : 'done'; item.currentStage = null; persist(state);
 }
 
 interface ArStatus {
@@ -476,6 +484,21 @@ async function errorTextOf(r: Response): Promise<string> {
  *  `null` body = the stage is already done for this dataset. */
 async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2BatchStageResult): Promise<Record<string, unknown> | null> {
   const stage = result.stage;
+  if (state.family === 'heartmula') {
+    const response = await fetch(`${self()}/api/training/datasets/${encodeURIComponent(item.datasetId)}/heartmula-status`);
+    if (!response.ok) throw new Error(await errorTextOf(response));
+    const status = await response.json() as HeartmulaStatusResponse;
+    if (stage === 'prepare') return status.prepare.cacheValid && status.prepare.preparedSamples > 0 && status.prepare.staleSamples === 0 ? null : {};
+    if (stage !== 'train') throw new Error(`Unsupported HeartMuLa batch stage: ${stage}`);
+    if (result.runId) {
+      const run = status.runs.find(r => r.run === result.runId);
+      if (!run) throw new Error('The interrupted HeartMuLa run is missing');
+      if (run.state === 'done') return null;
+      if (run.resumable) return { resumeRun: run.run };
+      throw new Error('The interrupted HeartMuLa run has no checkpoint to resume');
+    }
+    return state.recipe;
+  }
   if (stage === 'train' && result.resumeJobId) {
     const resumed = resumeTrainingBody(state, item, result.resumeJobId);
     if (resumed !== undefined) return resumed;
@@ -518,6 +541,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   }
   const st = await readStatus(item.datasetId);
   switch (stage) {
+    case 'prepare': throw new Error('HeartMuLa preparation requires a HeartMuLa batch');
     case 'cache': {
       // Every method trains on a -14 LUFS cache. A cache at another level is
       // re-cut: the key changes, so codes, sheet and alignment are dropped and
@@ -589,15 +613,17 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
 
   let response: Response;
   try {
-    response = await fetch(`${self()}/api/training/datasets/${encodeURIComponent(item.datasetId)}/${STAGE_PATH[result.stage]}`,
+    const route = state.family === 'heartmula' && result.stage === 'train' ? 'heartmula-train' : STAGE_PATH[result.stage];
+    response = await fetch(`${self()}/api/training/datasets/${encodeURIComponent(item.datasetId)}/${route}`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   } catch (err: any) { finishStage(state, result, 'failed', err?.message || String(err)); return; }
   if (!response.ok) { finishStage(state, result, 'failed', await errorTextOf(response)); return; }
 
   let jobId = '', skipped = '';
   try {
-    const payload = await response.json() as { jobId?: unknown; skipped?: unknown };
+    const payload = await response.json() as { jobId?: unknown; skipped?: unknown; run?: unknown };
     if (typeof payload?.jobId === 'string') jobId = payload.jobId;
+    if (state.family === 'heartmula' && typeof payload?.run === 'string') result.runId = payload.run;
     if (typeof payload?.skipped === 'string') skipped = payload.skipped;
   } catch { /* handled below */ }
   if (!jobId && skipped) { finishStage(state, result, 'done', null); return; }
