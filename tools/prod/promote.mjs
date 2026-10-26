@@ -4,9 +4,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const upstream = 'https://github.com/scragnog/HOT-Step-CPP.git';
+const { parse: parseEnv } = createRequire(new URL('../../server/package.json', import.meta.url))('dotenv');
 export function run(command, args, cwd = source, options = {}) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 900_000, ...options });
   if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message ?? result.stderr ?? result.status}`);
@@ -22,6 +24,16 @@ export function inside(parent, child) {
 export function assertIdle(report) {
   if (!Array.isArray(report?.blockers) || report.pending || report.blockers.length) {
     throw new Error(`Production is busy or its idle state is unknown: ${JSON.stringify(report?.blockers)}`);
+  }
+}
+export function assertScratchEnv(text, scratch) {
+  const values = parseEnv(text);
+  for (const key of ['DATA_DIR', 'TRAINING_DIR', 'ACESTEPCPP_ADAPTERS', 'LYRICS_EXPORT_DIR', 'MUSCRIPTOR_MODELS_DIR']) {
+    if (!values[key]) continue;
+    const resolved = path.resolve(scratch, values[key]);
+    if (resolved !== path.resolve(scratch) && !inside(scratch, resolved)) {
+      throw new Error(`Scratch .env redirects ${key} outside its data root.`);
+    }
   }
 }
 async function request(endpoint) {
@@ -145,9 +157,7 @@ async function main(args) {
   if (!inside(path.join(source, '.tmp'), scratch)) throw new Error('Scratch root must be under the dev checkout .tmp directory.');
   fs.mkdirSync(scratch, { recursive: true });
   const scratchEnv = path.join(scratch, 'settings/.env');
-  if (fs.existsSync(scratchEnv) && /^(?:DATA_DIR|TRAINING_DIR|ACESTEPCPP_ADAPTERS|LYRICS_EXPORT_DIR|MUSCRIPTOR_MODELS_DIR)=/m.test(fs.readFileSync(scratchEnv, 'utf8'))) {
-    throw new Error('Scratch .env has path overrides. Use a fresh scratch root.');
-  }
+  if (fs.existsSync(scratchEnv)) assertScratchEnv(fs.readFileSync(scratchEnv, 'utf8'), scratch);
   if (git(source, 'branch', '--show-current') !== 'master') throw new Error('Source must be on master.');
   const commit = git(source, 'rev-parse', 'refs/heads/master');
   const existing = fs.existsSync(prod);

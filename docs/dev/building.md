@@ -620,6 +620,8 @@ runs. Review these folders before removing them.
 The launcher pins ports and scratch write paths in the process environment.
 This takes precedence over data-root `settings/.env` values. Its private
 profile contains separate intended-production and active-scratch pointers.
+Other writable path overrides in the scratch `.env` must resolve inside that
+scratch root. Generated relative paths are accepted on subsequent promotions.
 Do not launch this clone with `LAUNCH.bat` or its in-app updater: use promotion
 to keep the server, UI and engine together.
 

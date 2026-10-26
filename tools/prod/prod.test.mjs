@@ -4,7 +4,7 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertIdle, inside } from './promote.mjs';
+import { assertIdle, assertScratchEnv, inside } from './promote.mjs';
 import { maintenanceHandler } from './runtime.mjs';
 
 test('promotion fails closed for busy, unknown, or moving data', () => {
@@ -17,6 +17,12 @@ test('path boundary excludes a sibling with the same prefix', () => {
   assert.equal(inside('D:/app', 'D:/app/engine/a.exe'), true);
   assert.equal(inside('D:/app', 'D:/app-other/engine/a.exe'), false);
   assert.equal(inside('D:/app', 'D:/app'), false);
+});
+test('repeat promotion accepts generated relative paths and rejects escaped scratch writes', () => {
+  const scratch = path.resolve('scratch-data');
+  assert.doesNotThrow(() => assertScratchEnv('LYRICS_EXPORT_DIR=./data/lyrics\n', scratch));
+  assert.throws(() => assertScratchEnv('LYRICS_EXPORT_DIR=../real-data\n', scratch));
+  assert.throws(() => assertScratchEnv(`DATA_DIR="${path.resolve('real-data')}"\n`, scratch));
 });
 test('maintenance drains existing submissions and rejects new work until resumed', async () => {
   let release;
