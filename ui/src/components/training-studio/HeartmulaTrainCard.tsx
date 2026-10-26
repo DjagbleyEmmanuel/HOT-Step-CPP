@@ -113,9 +113,13 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
     if (key === 'cropSeconds') return v ? `${v} s` : 'off';
     return typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v);
   };
+  // Saving presets never touches a run, so it stays open while one trains. During a run it saves
+  // what that run is training with, which survives a page reload where the form does not.
+  const liveRecipe = busy && status.run ? status.runs.find(item => item.run === status.run?.run)?.recipe : undefined;
+  const presetRecipe: HeartmulaRecipe = liveRecipe ? { ...status.defaults, ...({ trainMlp: false, cropSeconds: 0 } as Partial<HeartmulaRecipe>), ...liveRecipe } : recipe;
   const savePreset = () => {
-    if (!presetName.trim() || !validRecipe(recipe)) return;
-    persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...recipe } }].slice(-32));
+    if (!presetName.trim() || !validRecipe(presetRecipe)) return;
+    persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...presetRecipe } }].slice(-32));
     setPresetName('');
   };
   const importPresets = async (file: File) => {
@@ -182,15 +186,15 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         {presets.map(preset => <span key={preset.name} className={`inline-flex items-center gap-1 rounded-lg border-2 pl-3 pr-1 py-1 text-xs ${FIELDS.every(field => preset.recipe[field.key] === recipe[field.key])
           ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300' : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100'}`}>
           <button type="button" disabled={locked} onClick={() => { setEdits({ ...preset.recipe }); setPresetKey('custom'); }} className="font-semibold hover:underline disabled:opacity-40">{preset.name}</button>
-          <button type="button" disabled={locked || !validRecipe(recipe)} onClick={() => persist(presets.map(item => item.name === preset.name ? { ...item, recipe: { ...recipe } } : item))}
+          <button type="button" disabled={!validRecipe(presetRecipe)} onClick={() => persist(presets.map(item => item.name === preset.name ? { ...item, recipe: { ...presetRecipe } } : item))}
             title={t('trainingStudio.yue2.method.presetUpdate', 'Overwrite this preset with the current settings')} className="rounded p-0.5 text-zinc-400 hover:text-amber-600 disabled:opacity-40"><Save size={12} /></button>
           <button type="button" onClick={() => exportPreset(preset)} title={t('trainingStudio.yue2.method.presetExport', 'Download this preset as a .json file to share or back up')} className="rounded p-0.5 text-zinc-400 hover:text-amber-600"><Download size={12} /></button>
-          <button type="button" disabled={locked} onClick={() => persist(presets.filter(item => item.name !== preset.name))} title={t('trainingStudio.yue2.method.presetRemove', 'Delete this preset')} className="rounded p-0.5 text-zinc-400 hover:text-red-600 disabled:opacity-40"><X size={12} /></button>
+          <button type="button" onClick={() => persist(presets.filter(item => item.name !== preset.name))} title={t('trainingStudio.yue2.method.presetRemove', 'Delete this preset')} className="rounded p-0.5 text-zinc-400 hover:text-red-600 disabled:opacity-40"><X size={12} /></button>
         </span>)}
         <input className={`${INPUT} !w-48 !py-1 !text-xs`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
-          maxLength={64} value={presetName} disabled={locked} onChange={event => setPresetName(event.target.value)} />
-        <button type="button" disabled={locked || !presetName.trim() || !validRecipe(recipe)} onClick={savePreset} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{t('trainingStudio.yue2.method.presetSave', 'Save current settings')}</button>
-        <button type="button" disabled={locked} onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}</button>
+          maxLength={64} value={presetName} onChange={event => setPresetName(event.target.value)} />
+        <button type="button" disabled={!presetName.trim() || !validRecipe(presetRecipe)} onClick={savePreset} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{t('trainingStudio.yue2.method.presetSave', 'Save current settings')}</button>
+        <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}</button>
         <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPresets(file); }} />
       </div>
       {presetError && <p role="alert" className="mt-1 text-xs text-red-500">{presetError}</p>}
