@@ -205,6 +205,9 @@ full-size deltas. It has been checked by ear in Merge mode only. It is skipped w
 per-section directives or Active phase windows are in use. It cannot move an adapter
 between model sizes (XL and 2B): nothing in the app does that.
 
+HeartMuLa does the same for its LM adapters without a home-base picker, because each
+adapter records the variant it was trained on. See [HeartMuLa](backends.md#heartmula).
+
 ### Per-section adapters
 
 With two or more adapters stacked in Advanced mode, you can give each lyric section its own

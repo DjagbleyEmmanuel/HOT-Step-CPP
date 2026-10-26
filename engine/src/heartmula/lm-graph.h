@@ -75,20 +75,43 @@ static ggml_tensor * heartmula_attn_manual(ggml_context * ctx, ggml_tensor * q, 
     return ggml_cont(ctx, ggml_permute(ctx, ggml_mul_mat(ctx, vt, scores), 0, 2, 1, 3));
 }
 
+// One projection with the adapter. With home weights (adapter.h, basin re-base) the
+// base term is (1 - beta) W x + beta S x; HeartMuLa adapters are plain LoRA, so the
+// factor term is qwen3_linear_lora's.
+static ggml_tensor * heartmula_linear(ggml_context * ctx, ggml_tensor * w, ggml_tensor * home, float beta,
+                                      const QwLoraPair * p, ggml_tensor * x) {
+    if (!home || beta == 0.0f) {
+        return qwen3_linear_lora(ctx, w, p, x);
+    }
+    ggml_tensor * y = ggml_mul_mat(ctx, home, x);
+    if (beta != 1.0f) {
+        y = ggml_add(ctx, ggml_scale(ctx, ggml_mul_mat(ctx, w, x), 1.0f - beta), ggml_scale(ctx, y, beta));
+    }
+    if (p && p->A && p->B && p->scale != 0.0f) {
+        y = ggml_add(ctx, y, ggml_mul_mat(ctx, p->B, ggml_scale(ctx, ggml_mul_mat(ctx, p->A, x), p->scale)));
+    }
+    return y;
+}
+
 // One llama block. h [H, T, B]. KV writes are expanded first so they are ordered
 // before this layer's cache read (a view carries no dependency on the write).
 static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const HeartMuLaStack & s,
                                      const HeartMuLaLayer & w, ggml_tensor * h, ggml_tensor * pos, ggml_tensor * mask,
                                      ggml_tensor * rows, ggml_tensor * kc, ggml_tensor * vc, int64_t n_kv, bool flash,
-                                     const QwLoraLayer * lora = nullptr) {
+                                     const QwLoraLayer * lora = nullptr,
+                                     const std::array<ggml_tensor *, 7> * home = nullptr, float beta = 0.0f) {
+    // Site order is adapter.h's proj_name: q, k, v, o, w1, w2, w3.
+    auto lin = [&](ggml_tensor * W, int site, QwLoraSlot slot, ggml_tensor * x) {
+        return heartmula_linear(ctx, W, home ? (*home)[(size_t) site] : nullptr, beta, qwen3_lora_slot(lora, slot), x);
+    };
     const HeartMuLaLmConfig & c   = s.cfg;
     const int64_t             D   = c.head_dim;
     const int64_t             T   = h->ne[1];
     const int64_t             B   = h->ne[2];
     ggml_tensor *             n   = heartmula_rms(ctx, h, w.sa_norm, c.rms_eps);
-    ggml_tensor *             q   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.q, qwen3_lora_slot(lora, QW_LORA_Q), n), D, c.n_head, T, B);
-    ggml_tensor *             k   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.k, qwen3_lora_slot(lora, QW_LORA_K), n), D, c.n_head_kv, T, B);
-    ggml_tensor *             v   = ggml_reshape_4d(ctx, qwen3_linear_lora(ctx, w.v, qwen3_lora_slot(lora, QW_LORA_V), n), D, c.n_head_kv, T, B);
+    ggml_tensor *             q   = ggml_reshape_4d(ctx, lin(w.q, 0, QW_LORA_Q, n), D, c.n_head, T, B);
+    ggml_tensor *             k   = ggml_reshape_4d(ctx, lin(w.k, 1, QW_LORA_K, n), D, c.n_head_kv, T, B);
+    ggml_tensor *             v   = ggml_reshape_4d(ctx, lin(w.v, 2, QW_LORA_V, n), D, c.n_head_kv, T, B);
     q = heartmula_rope(ctx, q, pos, s);
     k = heartmula_rope(ctx, k, pos, s);
 
@@ -107,12 +130,12 @@ static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const
         attn = heartmula_attn_manual(ctx, q4, kw, vw, mask, scale);
     }
     attn = ggml_reshape_3d(ctx, attn, D * c.n_head, T, B);
-    h    = ggml_add(ctx, h, qwen3_linear_lora(ctx, w.o, qwen3_lora_slot(lora, QW_LORA_O), attn));
+    h    = ggml_add(ctx, h, lin(w.o, 3, QW_LORA_O, attn));
 
     ggml_tensor * n2   = heartmula_rms(ctx, h, w.mlp_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, qwen3_linear_lora(ctx, w.w1, qwen3_lora_slot(lora, QW_LORA_GATE), n2));
-    ggml_tensor * up   = qwen3_linear_lora(ctx, w.w3, qwen3_lora_slot(lora, QW_LORA_UP), n2);
-    return ggml_add(ctx, h, qwen3_linear_lora(ctx, w.w2, qwen3_lora_slot(lora, QW_LORA_DOWN), ggml_mul(ctx, gate, up)));
+    ggml_tensor * gate = ggml_silu(ctx, lin(w.w1, 4, QW_LORA_GATE, n2));
+    ggml_tensor * up   = lin(w.w3, 6, QW_LORA_UP, n2);
+    return ggml_add(ctx, h, lin(w.w2, 5, QW_LORA_DOWN, ggml_mul(ctx, gate, up)));
 }
 
 // One cached graph with its own scheduler (sched_alloc_graph owns the allocation).
@@ -323,7 +346,7 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
     std::vector<QwLoraLayer> lora;
     if (g->key_id) {
         const HeartMuLaAdapter * ad = g->adapter;
-        if (!ad || ad->id != g->key_id || ad->variant != m.variant || ad->base_fingerprint != m.base_fingerprint ||
+        if (!ad || ad->id != g->key_id || ad->attached != m.variant + "|" + m.base_fingerprint ||
             ad->layers.size() != (size_t) st.cfg.n_layer) {
             if (err) {
                 *err = "HeartMuLa adapter does not belong to the loaded model";
@@ -364,7 +387,9 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
 
     for (int i = 0; i < st.cfg.n_layer; i++) {
         h = heartmula_block(ctx, gf, st, st.layers[(size_t) i], h, s->in_pos, s->in_mask, s->in_rows, g->kv_k[i],
-                            g->kv_v[i], n_kv, g->flash, lora.empty() ? nullptr : &lora[(size_t) i]);
+                            g->kv_v[i], n_kv, g->flash, lora.empty() ? nullptr : &lora[(size_t) i],
+                            lora.empty() || g->adapter->home.empty() ? nullptr : &g->adapter->home[(size_t) i],
+                            g->key_scale.rebase);
     }
     ggml_tensor * last = ggml_view_3d(ctx, h, H, 1, B, h->nb[1], h->nb[2], (size_t) (T - 1) * h->nb[1]);
     s->out_hidden      = heartmula_rms(ctx, ggml_cont(ctx, last), st.norm, st.cfg.rms_eps);

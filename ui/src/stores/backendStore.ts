@@ -221,6 +221,8 @@ export interface BackendModelCatalogue {
     bytes?: number;
     /** HeartMuLa: the adapter carries MLP factors, so its MLP dial does something. */
     mlp?: boolean;
+    /** HeartMuLa: the variant the adapter was trained on (its home base for re-base). */
+    variant?: string;
     dataset?: string;
     final?: boolean;
     /** Mean of the last 20 logged step losses up to this checkpoint. */

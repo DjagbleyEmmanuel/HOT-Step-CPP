@@ -206,6 +206,7 @@ job system plus `GET /heartmula/job`.
 | `codec_guidance` | 1.25 | 1 to 10 | Flow guidance scale |
 | `variant`, `global_type`, `local_type`, `flow_type`, `scalar_decoder_type`, `adapter`, `adapter_scale` | absent | as select-model | The job's own pick, applied when the job starts. Absent keeps the current pick |
 | `adapter_scale_attn`, `adapter_scale_mlp`, `adapter_scale_early`, `adapter_scale_mid`, `adapter_scale_late` | 1.0 | 0 to 2 | Per-group adapter dials, synth only. A site's scale is `adapter_scale` x (attn or mlp) x its depth third: layers [0, n/3), [n/3, 2n/3) and the rest (0-8, 9-17, 18-27 on 28 layers). A change rebuilds the LM graphs and drops the KV rows, nothing reloads |
+| `adapter_rebase` | 0.75 | 0 to 1 | Basin re-base beta, used only by an adapter trained on another variant (below) |
 | `infer_method`, `scheduler`, `guidance_mode` | `""` | plugin names, or null | Lua sampler plugins on the HeartCodec flow decode (`heartmula/codec-plugins.h`), ACE's field names. All empty runs the native Euler loop unchanged. Unknown names and full-loop solvers warn and fall back to native. Guidance plugins run only when `codec_guidance` is above 1 |
 | `flow_shift` | 1.0 | 0.01 to 20 | Shift handed to a scheduler plugin |
 | `apg_norm_threshold` | 2.5 | 0 to 100 | APG norm threshold for `apg` and plugins that call it |
@@ -447,6 +448,15 @@ dimension order as usual. Applied at runtime as
 `W x + (alpha / rank) x scale x B (A x)`, over any base quant, where scale is
 `adapter_scale` times the site's group dials (request table above); the base
 weights are never modified.
+
+Basin re-base. An adapter whose variant or base fingerprint differs from the loaded
+global is accepted when its home global is installed: a compatible global file with
+the adapter's `heartmula.variant` and `heartmula.base_fingerprint`, the loaded global's
+quant first, then F16, then any. The home weights S of the targeted projections load
+with the factors (charged to admission), and each targeted projection computes
+`(1 - adapter_rebase) W x + adapter_rebase S x` plus the LoRA term: ACE's
+`W + beta (S - W)` nudge applied at runtime, so any quant of either base works.
+Without an installed home global the pick is refused with the variant to install.
 
 Tools. `engine/tools/convert-heartmula-lora.py --lora X.pt --alpha A --base <global GGUF> --out Y.gguf [--negatives DIR]`
 converts a torchtune LoRA state dict (alpha is not stored in the `.pt`, so it is required) and checks every

@@ -17,6 +17,7 @@ export interface HeartmulaRequest extends HeartmulaPick {
   adapter_scale_early?: number;
   adapter_scale_mid?: number;
   adapter_scale_late?: number;
+  adapter_rebase?: number;
   infer_method?: string;
   scheduler?: string;
   guidance_mode?: string;

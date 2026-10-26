@@ -246,15 +246,20 @@ struct HeartMuLaResolved {
     std::string   variant;
     HeartMuLaFile file[HM_TOKENIZER + 1];  // global, local, flow, scalar, rvq, tokenizer
     std::string   adapter;                  // "" = none
+    std::string   adapter_home;             // re-base: the adapter's home global, "" = trained on this base
     float         adapter_scale = 1.0f;
-    uint64_t      adapter_bytes = 0;
+    uint64_t      adapter_bytes = 0;        // factors, plus the home weights when re-basing
 };
 
 namespace heartmula_pipeline_detail {
 
 // Load-time check 5 from the header; shapes against the base are adapter.h's.
-inline bool check_adapter(const std::string & path, const HeartMuLaFile & global, uint64_t * bytes, int * status,
-                          std::string * err) {
+// An adapter trained on another variant attaches through basin re-base (adapter.h) when
+// its home global is installed: same fingerprint and variant as the adapter. Prefers the
+// loaded global's quant, then F16, then any; `home` gets its path and `bytes` also
+// counts the home weights of the targeted projections.
+inline bool check_adapter(const std::string & path, const HeartMuLaFile & global, const HeartMuLaCatalogue & cat,
+                          uint64_t * bytes, std::string * home, int * status, std::string * err) {
     std::error_code ec;
     *bytes = (uint64_t) std::filesystem::file_size(path, ec);
     ggml_context * meta = nullptr;
@@ -268,10 +273,38 @@ inline bool check_adapter(const std::string & path, const HeartMuLaFile & global
     *status                = 409;
     if (kv_str(g, "heartmula.component") != "lora" || kv_str(g, "heartmula.lora.target_component") != "global") {
         *err = name + ": not a HeartMuLa LoRA for the global LM";
-    } else if (kv_str(g, "heartmula.base_fingerprint") != global.fingerprint) {
-        *err = name + ": base_fingerprint differs from " + global.filename;
-    } else if (lower(kv_str(g, "heartmula.variant")) != lower(global.variant)) {
-        *err = name + ": variant differs from " + global.filename;
+    } else if (kv_str(g, "heartmula.base_fingerprint") != global.fingerprint ||
+               lower(kv_str(g, "heartmula.variant")) != lower(global.variant)) {
+        const std::string fp = kv_str(g, "heartmula.base_fingerprint"), variant = kv_str(g, "heartmula.variant");
+        const auto home_of = [&](const HeartMuLaFile & f) {
+            return f.role == HM_GLOBAL && f.compatible && f.fingerprint == fp && lower(f.variant) == lower(variant);
+        };
+        const HeartMuLaFile * hit = nullptr;
+        for (const std::string & pref : { global.type, std::string("F16"), std::string() }) {
+            for (const auto & f : cat.files) {
+                if (!hit && home_of(f) && (pref.empty() || f.type == pref)) hit = &f;
+            }
+        }
+        std::vector<std::string> targets;
+        if (!hit) {
+            *err = name + ": trained on the " + variant + " model; install a " + variant +
+                   " global model to re-base it onto " + global.variant;
+        } else if (!heartmula_adapter_detail::parse_targets(kv_str(g, "heartmula.lora.targets"), &targets)) {
+            *err = name + ": heartmula.lora.targets is missing or not a JSON array of names";
+        } else {
+            ggml_context * hmeta = nullptr;
+            gguf_context * hg    = gguf_init_from_file(hit->path.c_str(), { true, &hmeta });
+            if (!hg) {
+                *err = hit->filename + ": cannot read the home model";
+            } else {
+                for (const auto & t : targets) {
+                    if (ggml_tensor * w = ggml_get_tensor(hmeta, t.c_str())) *bytes += ggml_nbytes(w);
+                }
+                *home = hit->path;
+                gguf_free(hg);
+                ggml_free(hmeta);
+            }
+        }
     }
     gguf_free(g);
     ggml_free(meta);
@@ -340,9 +373,10 @@ static bool heartmula_resolve(const HeartMuLaCatalogue & cat, const HeartMuLaPic
     out->adapter       = pick.adapter;
     out->adapter_scale = pick.adapter_scale;
     out->adapter_bytes = 0;
+    out->adapter_home.clear();
     err->clear();
-    return pick.adapter.empty() ||
-           heartmula_pipeline_detail::check_adapter(pick.adapter, g, &out->adapter_bytes, status, err);
+    return pick.adapter.empty() || heartmula_pipeline_detail::check_adapter(pick.adapter, g, cat, &out->adapter_bytes,
+                                                                            &out->adapter_home, status, err);
 }
 
 // ── Request ─────────────────────────────────────────────────────────────────
@@ -466,6 +500,9 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
         } else if (k == "adapter_scale") {
             if (!get_num(v, 0, 2, false, &d)) return bad("adapter_scale must be a number from 0 to 2");
             r->adapter_scale = (float) d;
+        } else if (k == "adapter_rebase") {
+            if (!get_num(v, 0, 1, false, &d)) return bad("adapter_rebase must be a number from 0 to 1");
+            r->adapter_groups.rebase = (float) d;
         } else if (k == "adapter_scale_attn" || k == "adapter_scale_mlp" || k == "adapter_scale_early" ||
                    k == "adapter_scale_mid" || k == "adapter_scale_late") {
             if (!get_num(v, 0, 2, false, &d)) return bad(k + " must be a number from 0 to 2");
@@ -727,15 +764,20 @@ static bool heartmula_load_lm(HeartMuLaRuntime * rt, const HeartMuLaResolved & p
     return true;
 }
 
+// The pick's adapter, with the same home weights, is already loaded.
+static bool heartmula_adapter_resident(const HeartMuLaRuntime & rt, const HeartMuLaResolved & p) {
+    return rt.adapter.loaded() && rt.adapter.path == p.adapter && rt.adapter.home_path == p.adapter_home;
+}
+
 // The pick's adapter over the resident LM (adapter.h repeats check 5 with the shapes).
 static bool heartmula_load_adapter(HeartMuLaRuntime * rt, const HeartMuLaResolved & p, std::string * err) {
-    if (p.adapter.empty() || (rt->adapter.loaded() && rt->adapter.path == p.adapter)) return true;
-    return heartmula_adapter_load(&rt->adapter, rt->lm, p.adapter.c_str(), err);
+    if (p.adapter.empty() || heartmula_adapter_resident(*rt, p)) return true;
+    return heartmula_adapter_load(&rt->adapter, rt->lm, p.adapter.c_str(), err, p.adapter_home.c_str());
 }
 
 static uint64_t heartmula_lm_need(const HeartMuLaRuntime & rt, const HeartMuLaResolved & p) {
     const bool resident = rt.lm.loaded && rt.lm_key == p.file[HM_GLOBAL].path + "|" + p.file[HM_LOCAL].path;
-    const bool adapter  = p.adapter.empty() || (resident && rt.adapter.loaded() && rt.adapter.path == p.adapter);
+    const bool adapter  = p.adapter.empty() || (resident && heartmula_adapter_resident(rt, p));
     return (resident ? 0 : p.file[HM_GLOBAL].gpu_bytes + p.file[HM_LOCAL].gpu_bytes) + (adapter ? 0 : p.adapter_bytes);
 }
 
@@ -750,7 +792,7 @@ static void heartmula_drop_stale(HeartMuLaRuntime * rt, const HeartMuLaResolved 
     if (rt->lm.loaded && (!p || rt->lm_key != p->file[HM_GLOBAL].path + "|" + p->file[HM_LOCAL].path)) {
         heartmula_free_lm(rt);
     }
-    if (rt->adapter.loaded() && (!p || rt->adapter.path != p->adapter)) heartmula_adapter_free(&rt->adapter);
+    if (rt->adapter.loaded() && (!p || !heartmula_adapter_resident(*rt, *p))) heartmula_adapter_free(&rt->adapter);
     const std::string codec = p ? p->file[HM_RVQ].path + "|" + p->file[HM_FLOW].path + "|" + p->file[HM_SCALAR].path : "";
     if (!rt->codec_key.empty() && rt->codec_key != codec) heartmula_free_codec(rt);
 }

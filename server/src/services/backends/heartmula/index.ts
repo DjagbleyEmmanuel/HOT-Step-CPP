@@ -22,6 +22,9 @@ const extensions: BackendExtensionParam[] = [
   { key: 'heartmulaAdapterStrength', group: 'adapter', label: 'Strength', hint: 'Overall strength of the selected HeartMuLa LoRA. Zero uses the base model.', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },
   { key: 'heartmulaAdapterScaleAttn', group: 'adapter', label: 'Attention', hint: 'Scales the adapter on the attention projections (q, k, v, output).', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },
   { key: 'heartmulaAdapterScaleMlp', group: 'adapter', label: 'MLP', hint: 'Scales the adapter on the feed-forward layers. Only changes adapters trained with "Train MLP layers".', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },
+  { key: 'heartmulaAdapterRebase', group: 'adapter', label: 'Re-base strength (β)', type: 'slider', min: 0, max: 1, step: 0.05, default: 0.75,
+    hint: 'For an adapter trained on another variant: blends the weights it targets toward that home model, which needs to be installed. '
+      + '1 runs those layers as the home model, 0 applies the adapter to the loaded model unchanged.' },
   { key: 'heartmulaAdapterScaleEarly', group: 'adapter', section: 'Depth thirds', section_hint: 'Scale the adapter by layer depth: early, middle and late thirds of the 28 backbone layers.', label: 'Early', hint: 'Backbone layers 0 to 8.', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },
   { key: 'heartmulaAdapterScaleMid', group: 'adapter', section: 'Depth thirds', label: 'Mid', hint: 'Backbone layers 9 to 17.', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },
   { key: 'heartmulaAdapterScaleLate', group: 'adapter', section: 'Depth thirds', label: 'Late', hint: 'Backbone layers 18 to 27.', type: 'slider', min: 0, max: 2, step: 0.05, default: 1 },

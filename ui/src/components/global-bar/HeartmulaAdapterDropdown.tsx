@@ -20,7 +20,12 @@ export function HeartmulaAdapterDropdown() {
   const adapters = data?.lmAdapters ?? [];
   // A pick whose file was deleted or renamed: shown, not silently read as None (YuE2 does the same).
   const missing = !!selected && !isPending && !error && !adapters.includes(selected);
-  const hasMlp = !!data?.lmAdapterMeta?.[selected]?.mlp;
+  const meta = data?.lmAdapterMeta?.[selected];
+  const hasMlp = !!meta?.mlp;
+  // Trained on another variant: the engine re-bases it onto the loaded one (needs the home model installed).
+  const loadedVariant = String(data?.defaults?.variant || '3B');
+  const home = meta?.variant && meta.variant.toLowerCase() !== loadedVariant.toLowerCase() ? meta.variant : '';
+  const hidden = [...(hasMlp ? [] : ['heartmulaAdapterScaleMlp']), ...(home ? [] : ['heartmulaAdapterRebase'])];
   return (
     <div className="space-y-3">
       <ParamLabel label={t('globalBar.heartmulaAdapter', 'HeartMuLa adapter')}
@@ -31,7 +36,11 @@ export function HeartmulaAdapterDropdown() {
         options={[
           { value: '', label: t('globalBar.heartmulaAdapterNone', 'None, base model') },
           ...(missing ? [{ value: selected, label: `${fileName(selected)} ${t('globalBar.fileNotFound', '(file not found)')}` }] : []),
-          ...adapters.map(value => ({ value, label: data?.lmAdapterMeta?.[value]?.mlp ? `${fileName(value)} · MLP` : fileName(value) })),
+          ...adapters.map(value => {
+            const m = data?.lmAdapterMeta?.[value];
+            const tags = [m?.variant && m.variant.toLowerCase() !== loadedVariant.toLowerCase() ? m.variant : '', m?.mlp ? 'MLP' : ''].filter(Boolean);
+            return { value, label: [fileName(value), ...tags].join(' · ') };
+          }),
         ]}
         onChange={async value => {
           setBusy(true);
@@ -44,7 +53,8 @@ export function HeartmulaAdapterDropdown() {
         <p className="text-xs text-zinc-500">{t('globalBar.heartmulaNoAdapters', 'No HeartMuLa adapters installed yet. Train one on the Train page, or convert a PEFT LoRA with engine/tools/convert-heartmula-lora.py into the heartmula-lm-adapters folder.')}</p>
       )}
       {selected && !missing && <>
-        <BackendExtensionControls group="adapter" accentColor="emerald" hide={hasMlp ? [] : ['heartmulaAdapterScaleMlp']} />
+        {home && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{t('globalBar.heartmulaAdapterRebased', 'Trained on {{home}}: re-based onto {{loaded}}. Re-base strength sets how far its layers move toward {{home}}.', { home, loaded: loadedVariant })}</p>}
+        <BackendExtensionControls group="adapter" accentColor="emerald" hide={hidden} />
         {!hasMlp && <p className="text-[11px] text-zinc-500">{t('globalBar.heartmulaAdapterNoMlp', 'MLP: this adapter was trained on attention only, so it has no MLP dial. Turn on "Train MLP layers" when training to get one.')}</p>}
       </>}
     </div>

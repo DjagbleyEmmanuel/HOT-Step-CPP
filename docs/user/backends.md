@@ -439,7 +439,12 @@ plugins only run while codec guidance is above 1.
 One GGUF LM LoRA can be selected in the **Adapters** tab. Its dials follow YuE2's layout:
 Strength (0 to 2), Attention and MLP, and Early, Mid and Late for the three depth thirds of
 the 28 backbone layers. The MLP dial only appears for adapters trained with **Train MLP
-layers**. If the selected file is deleted, the picker shows it as not found and renders are
+layers**. An adapter trained on another variant (a 3B adapter on happy-new-year, say)
+is re-based onto the loaded one, as ACE-Step's Basin Re-base does: the picker tags it
+with its home variant, and **Re-base strength (β)**, default 0.75, sets how far the
+layers it trained move toward that home model. 1 runs them as the home model, 0
+applies the adapter to the loaded model unchanged. The home variant's global model
+has to be installed, in any quant. If the selected file is deleted, the picker shows it as not found and renders are
 refused until another adapter, or None, is picked. Put converted adapters
 under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Training Studio
 trains and publishes GGUF adapters there directly, see [HeartMuLa training](training/heartmula.md);

@@ -66,6 +66,7 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
     adapter_scale_early: number(params.heartmulaAdapterScaleEarly, 'adapter early scale', 1, 0, 2),
     adapter_scale_mid: number(params.heartmulaAdapterScaleMid, 'adapter mid scale', 1, 0, 2),
     adapter_scale_late: number(params.heartmulaAdapterScaleLate, 'adapter late scale', 1, 0, 2),
+    adapter_rebase: number(params.heartmulaAdapterRebase, 'adapter re-base strength', 0.75, 0, 1),
   } : {};
   const mainSeed = seed(params.seed, 'seed');
   const noiseSeed = seed(params.heartmulaNoiseSeed, 'noise seed');

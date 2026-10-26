@@ -146,7 +146,7 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       const sent = calls.find(c => c.route === '/heartmula/synth').body;
       assert.deepEqual(sent, {variant: '3B', global_type: 'Q8_0', local_type: 'Q4_K_M', flow_type: 'Q8_0', scalar_decoder_type: 'F16',
         adapter, adapter_scale: 0, adapter_scale_attn: 1, adapter_scale_mlp: 1, adapter_scale_early: 1, adapter_scale_mid: 1,
-        adapter_scale_late: 1, tags: raw.caption, lyrics: raw.lyrics, duration_s: 240, seed: raw.seed, noise_seed: 17,
+        adapter_scale_late: 1, adapter_rebase: 0.75, tags: raw.caption, lyrics: raw.lyrics, duration_s: 240, seed: raw.seed, noise_seed: 17,
         temperature: 1, topk: 50, cfg_scale: 1.5, codec_steps: 10, codec_guidance: 1.25});
       const row = getDb().prepare('SELECT * FROM songs WHERE id=?').get(outcome.songIds[0]);
       assert.equal(row.backend, 'heartmula');

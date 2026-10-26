@@ -203,6 +203,8 @@ export interface BackendModels {
     bytes?: number;
     /** HeartMuLa: the adapter carries MLP factors, so its MLP dial does something. */
     mlp?: boolean;
+    /** HeartMuLa: the variant the adapter was trained on (its home base for re-base). */
+    variant?: string;
     dataset?: string;
     /** The run's final export rather than a mid-run snapshot. */
     final?: boolean;

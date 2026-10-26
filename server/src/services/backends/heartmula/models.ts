@@ -44,17 +44,26 @@ export function resolveHeartmulaAdapter(ref: unknown): string {
   return target;
 }
 
-/** True when the adapter carries MLP factors (trained with --lora-mlp). The target
- *  list and the tensor names sit in the GGUF header, ahead of the tensor data. */
-// ponytail: byte scan of the header, not a GGUF parser; read heartmula.lora.targets properly if the layout changes.
-export function heartmulaAdapterHasMlp(file: string): boolean {
+/** What the picker shows about an adapter: whether it carries MLP factors (trained with
+ *  --lora-mlp) and the variant it was trained on, which decides whether the engine
+ *  re-bases it onto the loaded one. Both sit in the GGUF header, ahead of the tensor data. */
+// ponytail: byte scan of the header, not a GGUF parser; read the KVs properly if the layout changes.
+export function heartmulaAdapterInfo(file: string): { mlp: boolean; variant?: string } {
   let fd: number | undefined;
   try {
     fd = fs.openSync(file, 'r');
-    const head = Buffer.alloc(512 * 1024);
-    const n = fs.readSync(fd, head, 0, head.length, 0);
-    return head.subarray(0, n).includes('.mlp.w1.weight');
-  } catch { return false; }
+    const buf = Buffer.alloc(512 * 1024);
+    const head = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0));
+    // A GGUF string KV: u64 key length, key, u32 type (8 = string), u64 length, bytes.
+    const key = Buffer.from('heartmula.variant');
+    const at = head.indexOf(key);
+    let variant: string | undefined;
+    if (at >= 8 && head.readBigUInt64LE(at - 8) === BigInt(key.length) && head.readUInt32LE(at + key.length) === 8) {
+      const len = Number(head.readBigUInt64LE(at + key.length + 4));
+      if (len > 0 && len < 64) variant = head.toString('utf8', at + key.length + 12, at + key.length + 12 + len);
+    }
+    return { mlp: head.includes('.mlp.w1.weight'), variant };
+  } catch { return { mlp: false }; }
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
@@ -85,7 +94,7 @@ export async function heartmulaModels(): Promise<BackendModels> {
   const lmAdapterMeta = Object.fromEntries(lmAdapters.map(file => {
     let bytes: number | undefined;
     try { bytes = fs.statSync(file).size; } catch { /* listed a moment ago */ }
-    return [file, { label: path.basename(file, '.gguf'), bytes, mlp: heartmulaAdapterHasMlp(file) }];
+    return [file, { label: path.basename(file, '.gguf'), bytes, ...heartmulaAdapterInfo(file) }];
   }));
   return { buckets, meta, defaults: selection, lmAdapters, lmAdapterMeta };
 }
