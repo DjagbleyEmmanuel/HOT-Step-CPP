@@ -4,22 +4,23 @@ import { useTranslation } from 'react-i18next';
 import { backendModelsOptions } from '../../queries/global-models/options';
 import { useBackendStore } from '../../stores/backendStore';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { useCapabilities } from '../../hooks/useCapabilities';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
-import { Slider } from '../shared/Slider';
+import { BackendExtensionControls } from './BackendExtensionControls';
+
+const fileName = (value: string) => value.split(/[\\/]/).pop() || value;
 
 export function HeartmulaAdapterDropdown() {
   const { t } = useTranslation();
   const backend = useBackendStore(s => s.activeBackendId);
   const selectModels = useBackendStore(s => s.selectModels);
   const { data, error, isPending } = useQuery(backendModelsOptions(backend));
-  const { capabilities } = useCapabilities();
-  const params = useGlobalParamsStore(s => s.backendParams);
-  const setParam = useGlobalParamsStore(s => s.setBackendParam);
   const [busy, setBusy] = useState(false);
   const selected = String(data?.defaults?.lmAdapter ?? '');
-  const strength = capabilities?.extensions.find(p => p.key === 'heartmulaAdapterStrength');
+  const adapters = data?.lmAdapters ?? [];
+  // A pick whose file was deleted or renamed: shown, not silently read as None (YuE2 does the same).
+  const missing = !!selected && !isPending && !error && !adapters.includes(selected);
+  const hasMlp = !!data?.lmAdapterMeta?.[selected]?.mlp;
   return (
     <div className="space-y-3">
       <ParamLabel label={t('globalBar.heartmulaAdapter', 'HeartMuLa adapter')}
@@ -29,7 +30,8 @@ export function HeartmulaAdapterDropdown() {
         disabled={busy || isPending || !!error || !data?.selectable}
         options={[
           { value: '', label: t('globalBar.heartmulaAdapterNone', 'None, base model') },
-          ...(data?.lmAdapters ?? []).map(value => ({ value, label: value.split(/[\\/]/).pop() || value })),
+          ...(missing ? [{ value: selected, label: `${fileName(selected)} ${t('globalBar.fileNotFound', '(file not found)')}` }] : []),
+          ...adapters.map(value => ({ value, label: data?.lmAdapterMeta?.[value]?.mlp ? `${fileName(value)} · MLP` : fileName(value) })),
         ]}
         onChange={async value => {
           setBusy(true);
@@ -37,14 +39,14 @@ export function HeartmulaAdapterDropdown() {
           finally { setBusy(false); }
         }} />
       {error && <p className="text-xs text-amber-500">{error.message}</p>}
-      {!isPending && !error && !data?.lmAdapters?.length && (
-        <p className="text-xs text-zinc-500">{t('globalBar.heartmulaNoAdapters', 'No HeartMuLa GGUF adapters installed.')}</p>
+      {missing && <p className="text-xs text-amber-500">{t('globalBar.heartmulaAdapterMissing', 'This adapter file is no longer installed. Pick another one, or None, before generating.')}</p>}
+      {!isPending && !error && !adapters.length && (
+        <p className="text-xs text-zinc-500">{t('globalBar.heartmulaNoAdapters', 'No HeartMuLa adapters installed yet. Train one on the Train page, or convert a PEFT LoRA with engine/tools/convert-heartmula-lora.py into the heartmula-lm-adapters folder.')}</p>
       )}
-      {strength && <Slider label={strength.label} info={strength.hint}
-        value={Number(params?.heartmulaAdapterStrength ?? strength.default ?? 1)}
-        min={strength.min ?? 0} max={strength.max ?? 2} step={strength.step ?? 0.05}
-        defaultValue={Number(strength.default ?? 1)}
-        onChange={value => setParam('heartmulaAdapterStrength', value)} />}
+      {selected && !missing && <>
+        <BackendExtensionControls group="adapter" accentColor="emerald" hide={hasMlp ? [] : ['heartmulaAdapterScaleMlp']} />
+        {!hasMlp && <p className="text-[11px] text-zinc-500">{t('globalBar.heartmulaAdapterNoMlp', 'MLP: this adapter was trained on attention only, so it has no MLP dial. Turn on "Train MLP layers" when training to get one.')}</p>}
+      </>}
     </div>
   );
 }
@@ -54,6 +56,6 @@ export function HeartmulaAdapterBadge() {
   const strength = useGlobalParamsStore(s => s.backendParams?.heartmulaAdapterStrength ?? 1);
   const { t } = useTranslation();
   return <span className="text-[10px] text-zinc-500 font-mono truncate">{selected
-    ? `${String(selected).split(/[\\/]/).pop()} · ${strength}`
+    ? `${fileName(String(selected))} · ${strength}`
     : t('globalBar.heartmulaAdapterNone', 'None, base model')}</span>;
 }

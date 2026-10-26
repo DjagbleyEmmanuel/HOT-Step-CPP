@@ -141,7 +141,7 @@ export interface BackendFeatureCapabilities {
  *  thing keeping a backend's planner-LM knobs out of the Generation panel.
  *  Absent means 'generation' — the behaviour before groups existed, and the
  *  right default for a backend that never thinks about it. */
-export type BackendExtensionGroup = 'generation' | 'lm';
+export type BackendExtensionGroup = 'generation' | 'lm' | 'adapter';
 
 /** A backend-declared knob. Same schema the Lua plugins use (so one renderer
  *  serves both), plus the cluster it belongs to. */
@@ -201,6 +201,8 @@ export interface BackendModels {
     rank?: number;
     steps?: number;
     bytes?: number;
+    /** HeartMuLa: the adapter carries MLP factors, so its MLP dial does something. */
+    mlp?: boolean;
     dataset?: string;
     /** The run's final export rather than a mid-run snapshot. */
     final?: boolean;

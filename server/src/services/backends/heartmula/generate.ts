@@ -28,6 +28,25 @@ function seed(value: unknown, name: string): number | string | undefined {
   throw new Error(`${name} must be a non-negative safe integer or uint64 decimal string`);
 }
 
+/** The shared solver/scheduler/guidance picks, only while this backend's toggle is on: the
+ *  pickers always hold ACE's defaults (euler + APG), so forwarding them unasked would move
+ *  every render off the native decode. */
+function samplerPlugins(params: Readonly<Record<string, unknown>>): Partial<HeartmulaRequest> {
+  if (params.samplerPluginsEnabled !== true) return {};
+  const out: Partial<HeartmulaRequest> = {};
+  for (const [from, to] of [['inferMethod', 'infer_method'], ['scheduler', 'scheduler'], ['guidanceMode', 'guidance_mode']] as const) {
+    if (typeof params[from] === 'string' && params[from]) out[to] = params[from] as string;
+  }
+  if (!Object.keys(out).length) return {};
+  out.flow_shift = number(params.heartmulaFlowShift, 'schedule shift', 1, 0.01, 20);
+  const apg = Number(params.apgNormThreshold);
+  if (params.apgNormThreshold !== undefined && Number.isFinite(apg) && apg >= 0 && apg <= 100) out.apg_norm_threshold = apg;
+  if (params.pluginParams && typeof params.pluginParams === 'object' && Object.keys(params.pluginParams).length) {
+    out.plugin_params = params.pluginParams as Record<string, unknown>;
+  }
+  return out;
+}
+
 /** Validate at enqueue time, before the job can enter the shared GPU lane. */
 export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, models: BackendModelSelection): HeartmulaRequest {
   const tags = params.heartmulaTags ?? params.tags ?? params.caption ?? params.prompt ?? params.songDescription ?? params.style;
@@ -40,10 +59,18 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
     if (typeof models[key] !== 'string') throw new Error(`Invalid HeartMuLa model selection: ${key}`);
   }
   const pick = heartmulaPick(models, number(params.heartmulaAdapterStrength, 'adapter strength', 1, 0, 2));
+  // The group dials only mean something with an adapter, so a base render's wire stays as it was.
+  const groups = pick.adapter ? {
+    adapter_scale_attn: number(params.heartmulaAdapterScaleAttn, 'adapter attention scale', 1, 0, 2),
+    adapter_scale_mlp: number(params.heartmulaAdapterScaleMlp, 'adapter MLP scale', 1, 0, 2),
+    adapter_scale_early: number(params.heartmulaAdapterScaleEarly, 'adapter early scale', 1, 0, 2),
+    adapter_scale_mid: number(params.heartmulaAdapterScaleMid, 'adapter mid scale', 1, 0, 2),
+    adapter_scale_late: number(params.heartmulaAdapterScaleLate, 'adapter late scale', 1, 0, 2),
+  } : {};
   const mainSeed = seed(params.seed, 'seed');
   const noiseSeed = seed(params.heartmulaNoiseSeed, 'noise seed');
   return {
-    ...pick, tags, lyrics,
+    ...pick, ...groups, tags, lyrics,
     // Create's Auto duration uses -1. Let audio EOS end the song within
     // HeartMuLa's maximum duration, while an omitted duration keeps 120 s.
     duration_s: number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
@@ -54,6 +81,7 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
     cfg_scale: number(params.heartmulaCfgScale, 'cfg scale', 1.5, 1, 10),
     codec_steps: number(params.heartmulaCodecSteps, 'codec steps', 10, 1, 100, true),
     codec_guidance: number(params.heartmulaCodecGuidance, 'codec guidance', 1.25, 1, 10),
+    ...samplerPlugins(params),
   };
 }
 

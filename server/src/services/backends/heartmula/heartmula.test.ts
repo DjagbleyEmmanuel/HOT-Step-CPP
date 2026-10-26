@@ -112,6 +112,25 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       ]) assert.throws(() => heartmulaBackend.resolveRequest({...raw, ...bad}), undefined, JSON.stringify(bad));
       assert.throws(() => buildEnvelope({...raw, backendOverride: 'heartmula', taskType: 'cover'}, 'fixture-user', 'other', Date.now()), /does not support/);
       assert.equal(heartmulaBackend.resolveRequest({...raw, instrumental: true}).common.lyrics, '');
+      // Adapter dials ride on the wire only with an adapter; plugin picks only with the toggle on.
+      const dialled = heartmulaBackend.resolveRequest({...raw, heartmulaAdapter: adapter, heartmulaAdapterScaleMlp: 0, heartmulaAdapterScaleLate: 1.5}).options;
+      assert.equal(dialled.adapter_scale_mlp, 0);
+      assert.equal(dialled.adapter_scale_late, 1.5);
+      assert.equal(heartmulaBackend.resolveRequest({...raw, heartmulaAdapter: ''}).options.adapter_scale_attn, undefined);
+      assert.throws(() => heartmulaBackend.resolveRequest({...raw, heartmulaAdapter: adapter, heartmulaAdapterScaleAttn: 2.5}), /attention scale/);
+      const picks = {inferMethod: 'heun', scheduler: 'linear', guidanceMode: 'apg', pluginParams: {'heun:x': 1}};
+      assert.equal(heartmulaBackend.resolveRequest({...raw, ...picks}).options.infer_method, undefined);
+      const plugged = heartmulaBackend.resolveRequest({...raw, ...picks, samplerPluginsEnabled: true}).options;
+      assert.deepEqual([plugged.infer_method, plugged.scheduler, plugged.guidance_mode, plugged.flow_shift, plugged.plugin_params],
+        ['heun', 'linear', 'apg', 1, {'heun:x': 1}]);
+      // A deleted adapter file fails the render with a clear message and does not block other picks.
+      const doomed = path.join(adapterDir, 'doomed.gguf');
+      fs.writeFileSync(doomed, 'fixture');
+      await heartmulaBackend.selectModel({lmAdapter: doomed});
+      fs.rmSync(doomed);
+      assert.throws(() => heartmulaBackend.resolveRequest({...raw, heartmulaAdapter: undefined}), /no longer installed/);
+      await heartmulaBackend.selectModel({global: 'Q8_0'});
+      assert.equal((await heartmulaBackend.models()).defaults.lmAdapter, '');
       const makeJob = () => ({id: 'fixture-job', userId: 'fixture-user', envelope, params: {...raw}, attempts: [], status: 'pending', createdAt: Date.now()});
       const makeContext = () => {
         controller = new AbortController();
@@ -126,7 +145,8 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       assert.deepEqual(ctx.attempt.engineJobIds, ['engine-fixture']);
       const sent = calls.find(c => c.route === '/heartmula/synth').body;
       assert.deepEqual(sent, {variant: '3B', global_type: 'Q8_0', local_type: 'Q4_K_M', flow_type: 'Q8_0', scalar_decoder_type: 'F16',
-        adapter, adapter_scale: 0, tags: raw.caption, lyrics: raw.lyrics, duration_s: 240, seed: raw.seed, noise_seed: 17,
+        adapter, adapter_scale: 0, adapter_scale_attn: 1, adapter_scale_mlp: 1, adapter_scale_early: 1, adapter_scale_mid: 1,
+        adapter_scale_late: 1, tags: raw.caption, lyrics: raw.lyrics, duration_s: 240, seed: raw.seed, noise_seed: 17,
         temperature: 1, topk: 50, cfg_scale: 1.5, codec_steps: 10, codec_guidance: 1.25});
       const row = getDb().prepare('SELECT * FROM songs WHERE id=?').get(outcome.songIds[0]);
       assert.equal(row.backend, 'heartmula');

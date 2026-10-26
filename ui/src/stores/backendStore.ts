@@ -159,7 +159,7 @@ export interface BackendFeatureCapabilities {
 /** Which top-bar cluster a declared knob belongs in. Absent means
  *  'generation' — the behaviour before groups existed, and what a manifest
  *  cached from an older server will look like. */
-export type BackendExtensionGroup = 'generation' | 'lm';
+export type BackendExtensionGroup = 'generation' | 'lm' | 'adapter';
 
 export interface BackendExtensionParam {
   key: string;
@@ -219,6 +219,8 @@ export interface BackendModelCatalogue {
     rank?: number;
     steps?: number;
     bytes?: number;
+    /** HeartMuLa: the adapter carries MLP factors, so its MLP dial does something. */
+    mlp?: boolean;
     dataset?: string;
     final?: boolean;
     /** Mean of the last 20 logged step losses up to this checkpoint. */

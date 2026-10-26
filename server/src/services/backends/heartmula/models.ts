@@ -35,10 +35,27 @@ export function resolveHeartmulaAdapter(ref: unknown): string {
   const root = path.resolve(config.aceServer.adapters, 'heartmula-lm-adapters');
   const target = path.resolve(root, ref);
   const relative = path.relative(root, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative) || !listHeartmulaAdapters().includes(target)) {
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('heartmulaAdapter must be an installed HeartMuLa LoRA GGUF');
   }
+  if (!listHeartmulaAdapters().includes(target)) {
+    throw new Error(`The HeartMuLa adapter ${path.basename(target)} is no longer installed. Pick another in the Adapters tab.`);
+  }
   return target;
+}
+
+/** True when the adapter carries MLP factors (trained with --lora-mlp). The target
+ *  list and the tensor names sit in the GGUF header, ahead of the tensor data. */
+// ponytail: byte scan of the header, not a GGUF parser; read heartmula.lora.targets properly if the layout changes.
+export function heartmulaAdapterHasMlp(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(512 * 1024);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    return head.subarray(0, n).includes('.mlp.w1.weight');
+  } catch { return false; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
 export function heartmulaPick(selection: BackendModelSelection, scale = 1): HeartmulaPick {
@@ -64,7 +81,13 @@ export async function heartmulaModels(): Promise<BackendModels> {
       label: f.type, bytes: f.bytes, ...(f.compatible ? {} : { disabledReason: f.error || 'Incompatible component' }),
     }]));
   }
-  return { buckets, meta, defaults: selection, lmAdapters: listHeartmulaAdapters() };
+  const lmAdapters = listHeartmulaAdapters();
+  const lmAdapterMeta = Object.fromEntries(lmAdapters.map(file => {
+    let bytes: number | undefined;
+    try { bytes = fs.statSync(file).size; } catch { /* listed a moment ago */ }
+    return [file, { label: path.basename(file, '.gguf'), bytes, mlp: heartmulaAdapterHasMlp(file) }];
+  }));
+  return { buckets, meta, defaults: selection, lmAdapters, lmAdapterMeta };
 }
 
 export async function selectHeartmulaModel(update: BackendModelSelection): Promise<{ changed: boolean }> {
@@ -73,6 +96,10 @@ export async function selectHeartmulaModel(update: BackendModelSelection): Promi
     if (!(key in previous) || typeof update[key] !== 'string') throw new Error(`Unknown HeartMuLa model bucket: ${key}`);
   }
   const next = { ...previous, ...update };
+  // A pick whose file was deleted must not block changing any other bucket.
+  if (update.lmAdapter === undefined && next.lmAdapter) {
+    try { resolveHeartmulaAdapter(next.lmAdapter); } catch { next.lmAdapter = ''; }
+  }
   await heartmulaClient.select(heartmulaPick(next));
   setSetting(SETTING, JSON.stringify(next));
   return { changed: Object.keys(next).some(k => previous[k] !== next[k]) };

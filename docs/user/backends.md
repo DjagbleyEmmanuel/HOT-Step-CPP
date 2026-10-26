@@ -429,7 +429,18 @@ codec encoder files are not needed for generation. The engine checks component
 compatibility and available VRAM before loading weights. A refusal preserves the
 requested settings and reports the required and available memory.
 
-One GGUF LM LoRA can be selected, with strength from 0 to 2. Put converted adapters
+The **LM** tab holds the language model's sampling settings: temperature, top-k and CFG
+scale, defaulting to the reference values (1.0, 50 and 1.5). The **Generation** tab holds
+the codec settings (10 steps, guidance 1.25) and the **Sampler Plugins** switch. With it on,
+the shared Lua solvers, schedulers and guidance modes drive the codec's flow decode instead
+of its own Euler loop. Plugins that take over the whole loop are refused, and guidance
+plugins only run while codec guidance is above 1.
+
+One GGUF LM LoRA can be selected in the **Adapters** tab. Its dials follow YuE2's layout:
+Strength (0 to 2), Attention and MLP, and Early, Mid and Late for the three depth thirds of
+the 28 backbone layers. The MLP dial only appears for adapters trained with **Train MLP
+layers**. If the selected file is deleted, the picker shows it as not found and renders are
+refused until another adapter, or None, is picked. Put converted adapters
 under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Training Studio
 trains and publishes GGUF adapters there directly, see [HeartMuLa training](training/heartmula.md);
 Safetensors training exports from other tools must be converted before runtime use. Queued jobs retain their
@@ -441,16 +452,20 @@ component and adapter choices when the picker changes or another backend is sele
 | Duration | Model-ended, requested ceiling up to 240 s |
 | Songs per request | 1 |
 | Independent component quants | Global, local, flow, scalar decoder |
-| Generation adapters | One GGUF LM LoRA, strength 0 to 2 |
+| Generation adapters | One GGUF LM LoRA: strength, attention, MLP and depth-third dials, 0 to 2 |
 | Post-processing | Shared chain, including VST, mastering and StableStep |
-| PP-VAE, Spectral Lifter, shared Lua sampler plugins | No |
+| Shared Lua sampler plugins | Solvers, schedulers and guidance on the codec decode, opt-in |
+| PP-VAE, Spectral Lifter | No |
 | Covers, repaint, streaming, training, lyric alignment | No |
 | Output | 48 kHz stereo |
 
 The server maps `heartmulaTags` or the shared caption to `tags`. Optional request
 fields are `heartmulaTemperature`, `heartmulaTopK`, `heartmulaCfgScale`,
-`heartmulaCodecSteps`, `heartmulaCodecGuidance`, `heartmulaNoiseSeed` and
-`heartmulaAdapterStrength`. Per-request model overrides are `heartmulaVariant`,
+`heartmulaCodecSteps`, `heartmulaCodecGuidance`, `heartmulaNoiseSeed`,
+`heartmulaAdapterStrength`, `heartmulaAdapterScaleAttn`, `heartmulaAdapterScaleMlp`,
+`heartmulaAdapterScaleEarly`, `heartmulaAdapterScaleMid`, `heartmulaAdapterScaleLate`,
+and, with `samplerPluginsEnabled`, the shared `inferMethod`, `scheduler`, `guidanceMode`,
+`pluginParams` and `apgNormThreshold` plus `heartmulaFlowShift`. Per-request model overrides are `heartmulaVariant`,
 `heartmulaGlobalModel`, `heartmulaLocalModel`, `heartmulaFlowModel`,
 `heartmulaScalarDecoderModel` and `heartmulaAdapter`. Engine request fields and
 validation bounds are defined in the [engine contract](../../engine/docs/HEARTMULA_CONTRACT.md).

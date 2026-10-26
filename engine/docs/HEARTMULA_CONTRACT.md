@@ -205,6 +205,11 @@ job system plus `GET /heartmula/job`.
 | `codec_steps` | 10 | integer, 1 to 100 | Flow Euler steps per chunk |
 | `codec_guidance` | 1.25 | 1 to 10 | Flow guidance scale |
 | `variant`, `global_type`, `local_type`, `flow_type`, `scalar_decoder_type`, `adapter`, `adapter_scale` | absent | as select-model | The job's own pick, applied when the job starts. Absent keeps the current pick |
+| `adapter_scale_attn`, `adapter_scale_mlp`, `adapter_scale_early`, `adapter_scale_mid`, `adapter_scale_late` | 1.0 | 0 to 2 | Per-group adapter dials, synth only. A site's scale is `adapter_scale` x (attn or mlp) x its depth third: layers [0, n/3), [n/3, 2n/3) and the rest (0-8, 9-17, 18-27 on 28 layers). A change rebuilds the LM graphs and drops the KV rows, nothing reloads |
+| `infer_method`, `scheduler`, `guidance_mode` | `""` | plugin names, or null | Lua sampler plugins on the HeartCodec flow decode (`heartmula/codec-plugins.h`), ACE's field names. All empty runs the native Euler loop unchanged. Unknown names and full-loop solvers warn and fall back to native. Guidance plugins run only when `codec_guidance` is above 1 |
+| `flow_shift` | 1.0 | 0.01 to 20 | Shift handed to a scheduler plugin |
+| `apg_norm_threshold` | 2.5 | 0 to 100 | APG norm threshold for `apg` and plugins that call it |
+| `plugin_params` | `{}` | object of `"<plugin>:<key>": value` | Declared plugin params, coerced to strings as on MM3 |
 | `codes` | none | array of frames, each 8 integers 0 to 8191, 1 to 3000 frames | Skip the LM and decode these codes. Validation and round-trip use |
 | `codes_only` | false | bool, not with `codes` | Stop after the LM; result is the codes as JSON, no codec load |
 | `id` | `"heartmula"` | string | Request label for logs |
@@ -434,13 +439,14 @@ manifest, not the GGUF, holds the source and imatrix SHA-256.
 | `heartmula.lora.target_component` | `global` (the only target in v1) |
 | `heartmula.lora.rank` | u32 |
 | `heartmula.lora.alpha` | f32 |
-| `heartmula.lora.targets` | JSON array of base tensor names, e.g. the q, k, v and output projections of each backbone layer |
+| `heartmula.lora.targets` | JSON array of base tensor names: the q, k, v and output projections of each backbone layer, plus `mlp.w1`, `mlp.w2` and `mlp.w3` for adapters trained with `--lora-mlp` |
 
 Tensors: `<base tensor name>.lora_a` with shape [rank, in] and
 `<base tensor name>.lora_b` with shape [out, rank], in the GGUF's reversed
 dimension order as usual. Applied at runtime as
-`W x + (alpha / rank) x adapter_scale x B (A x)`, over any base quant; the
-base weights are never modified.
+`W x + (alpha / rank) x scale x B (A x)`, over any base quant, where scale is
+`adapter_scale` times the site's group dials (request table above); the base
+weights are never modified.
 
 Tools. `engine/tools/convert-heartmula-lora.py --lora X.pt --alpha A --base <global GGUF> --out Y.gguf [--negatives DIR]`
 converts a torchtune LoRA state dict (alpha is not stored in the `.pt`, so it is required) and checks every

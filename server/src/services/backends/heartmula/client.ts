@@ -12,6 +12,17 @@ export interface HeartmulaPick {
   adapter_scale: number;
 }
 export interface HeartmulaRequest extends HeartmulaPick {
+  adapter_scale_attn?: number;
+  adapter_scale_mlp?: number;
+  adapter_scale_early?: number;
+  adapter_scale_mid?: number;
+  adapter_scale_late?: number;
+  infer_method?: string;
+  scheduler?: string;
+  guidance_mode?: string;
+  flow_shift?: number;
+  apg_norm_threshold?: number;
+  plugin_params?: Record<string, unknown>;
   tags: string;
   lyrics: string;
   duration_s: number;
