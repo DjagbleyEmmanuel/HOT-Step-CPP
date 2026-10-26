@@ -29,6 +29,9 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.equal(train.resolveHeartmulaRecipe({ loraDropout: 0.05 }).loraDropout, 0.05);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: 1 }), /loraDropout/);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: -0.1 }), /loraDropout/);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.trainMlp, false);
+  assert.equal(train.resolveHeartmulaRecipe({ trainMlp: true }).trainMlp, true);
+  assert.throws(() => train.resolveHeartmulaRecipe({ trainMlp: 'yes' }), /trainMlp/);
 });
 
 test('preview settings: defaults, overrides, and every bad value refused', () => {
@@ -63,6 +66,9 @@ test('argv matches the trainer CLI contract', () => {
   assert.ok(!args.includes('--stop-after'));
   const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
   assert.ok(seg.join(' ').includes('--lora-dropout 0.05 --name a --stop-after 100'));
+  const mlp = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: true }, name: 'a', resume: false });
+  assert.ok(mlp.join(' ').includes('--lora-dropout 0 --lora-mlp --name a'));
+  assert.ok(!args.includes('--lora-mlp'), 'attention-only runs keep their old command line');
   const prepare = train.buildHeartmulaPrepareArgs({ samplesJson: 'S', outDir: 'O', modelsDir: 'M', encoderDir: 'E', force: true });
   assert.deepEqual(prepare, ['heartmula-prepare', '--dataset', 'S', '--out', 'O', '--models', 'M', '--encoder', 'E', '--force']);
 });

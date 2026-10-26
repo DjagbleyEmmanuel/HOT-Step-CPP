@@ -5,16 +5,19 @@
 // (engine/docs/HEARTMULA_CONTRACT.md, "LoRA adapter"). The factors stay apart from the
 // base weights, so one adapter works over any quant of its base:
 //
-//   y = W x + (alpha / rank) x adapter_scale x B (A x)
+//   y = W x + (alpha / rank) x scale x B (A x)
+//
+// where scale is the master dial x the attention or MLP dial x the dial of the
+// layer's depth third (HeartMuLaAdapterScales, YuE2's grouping).
 //
 // The factor math is qwen3-lora.h's (qwen3_linear_lora); this file only loads and
-// checks. Targets are backbone q/k/v/output projections; the local decoder is never
-// adapted. Accepted only when the variant and base fingerprint equal the loaded
+// checks. Targets are backbone q/k/v/output projections and, for adapters trained
+// with --lora-mlp, the backbone mlp w1/w2/w3; the local decoder is never adapted. Accepted only when the variant and base fingerprint equal the loaded
 // model's, the component is a global-targeting LoRA, `heartmula.lora.targets` is
 // exactly the set of factor tensors present, and every shape fits its base weight.
 //
 // Every load takes a new id. The LM graph (lm-graph.h) keys its built graphs and its
-// KV rows on (id, scale), so switching, reloading or re-scaling the adapter drops them.
+// KV rows on (id, scales), so switching, reloading or re-scaling the adapter drops them.
 
 #include "heartmula/model.h"
 #include "qwen3-lora.h"
@@ -25,12 +28,29 @@
 #include <string>
 #include <vector>
 
+// Per-group dials. The effective scale of a site is global x (attn or mlp) x its third.
+struct HeartMuLaAdapterScales {
+    float global = 1.0f, attn = 1.0f, mlp = 1.0f, early = 1.0f, mid = 1.0f, late = 1.0f;
+
+    bool operator==(const HeartMuLaAdapterScales & o) const {
+        return global == o.global && attn == o.attn && mlp == o.mlp && early == o.early && mid == o.mid && late == o.late;
+    }
+    bool operator!=(const HeartMuLaAdapterScales & o) const { return !(*this == o); }
+
+    // Thirds as YuE2 splits them: [0, n/3), [n/3, 2n/3), the rest (28 layers: 0-8, 9-17, 18-27).
+    float site(int layer, int n_layer, bool mlp_site) const {
+        const float third = layer < n_layer / 3 ? early : layer < 2 * n_layer / 3 ? mid : late;
+        return global * (mlp_site ? mlp : attn) * third;
+    }
+};
+
 struct HeartMuLaAdapter {
     WeightCtx                wctx = {};
-    std::vector<QwLoraLayer> layers;  // per backbone layer; slots Q/K/V/O, scale = alpha / rank
+    std::vector<QwLoraLayer> layers;  // per backbone layer; slots Q/K/V/O[/GATE/DOWN/UP], scale = alpha / rank
     int                      rank  = 0;
     float                    alpha = 0.0f;
     uint64_t                 id    = 0;  // 0 = not loaded
+    bool                     has_mlp = false;
     std::string              path, variant, base_fingerprint;
     bool                     loaded() const { return id != 0; }
 };
@@ -49,9 +69,16 @@ inline bool fail(std::string * err, const std::string & msg) {
     return false;
 }
 
+// The trainer's site order (train/heartmula-train-graph.h HmtLayerLora).
 inline const char * proj_name(int slot) {
-    static const char * names[4] = { "q_proj", "k_proj", "v_proj", "output_proj" };
+    static const char * names[7] = { "attn.q_proj", "attn.k_proj", "attn.v_proj", "attn.output_proj",
+                                     "mlp.w1", "mlp.w2", "mlp.w3" };
     return names[slot];
+}
+
+inline QwLoraSlot proj_slot(int slot) {
+    static const QwLoraSlot slots[7] = { QW_LORA_Q, QW_LORA_K, QW_LORA_V, QW_LORA_O, QW_LORA_GATE, QW_LORA_DOWN, QW_LORA_UP };
+    return slots[slot];
 }
 
 // `["a", "b"]` of plain strings (the converter writes json.dumps of tensor names).
@@ -156,14 +183,14 @@ static bool heartmula_adapter_load(HeartMuLaAdapter * a, const HeartMuLaModel & 
     const int                n_layer = m.global.cfg.n_layer;
     std::set<std::string>    allowed, listed(targets.begin(), targets.end());
     for (int i = 0; i < n_layer; i++) {
-        for (int s = 0; s < 4; s++) {
-            allowed.insert("backbone.layers." + std::to_string(i) + ".attn." + proj_name(s) + ".weight");
+        for (int s = 0; s < 7; s++) {
+            allowed.insert("backbone.layers." + std::to_string(i) + "." + proj_name(s) + ".weight");
         }
     }
     for (const auto & t : targets) {
         if (!allowed.count(t)) {
             done(false);
-            return bad("target '" + t + "' is not a backbone q/k/v/output projection of this model");
+            return bad("target '" + t + "' is not a backbone attention or MLP projection of this model");
         }
     }
     if (listed.size() != targets.size()) {
@@ -180,9 +207,9 @@ static bool heartmula_adapter_load(HeartMuLaAdapter * a, const HeartMuLaModel & 
     const float scale = alpha / (float) rank;
     for (int i = 0; i < n_layer; i++) {
         const HeartMuLaLayer & base = m.global.layers[(size_t) i];
-        ggml_tensor * const    w[4] = { base.q, base.k, base.v, base.o };
-        for (int s = 0; s < 4; s++) {
-            const std::string name = "backbone.layers." + std::to_string(i) + ".attn." + proj_name(s) + ".weight";
+        ggml_tensor * const    w[7] = { base.q, base.k, base.v, base.o, base.w1, base.w2, base.w3 };
+        for (int s = 0; s < 7; s++) {
+            const std::string name = "backbone.layers." + std::to_string(i) + "." + proj_name(s) + ".weight";
             if (!listed.count(name)) {
                 continue;
             }
@@ -201,7 +228,8 @@ static bool heartmula_adapter_load(HeartMuLaAdapter * a, const HeartMuLaModel & 
                 done(false);
                 return bad("'" + name + "' factors do not fit the base weight at rank " + std::to_string(rank));
             }
-            QwLoraPair & p = a->layers[(size_t) i].p[s == 0 ? QW_LORA_Q : s == 1 ? QW_LORA_K : s == 2 ? QW_LORA_V : QW_LORA_O];
+            QwLoraPair & p = a->layers[(size_t) i].p[proj_slot(s)];
+            a->has_mlp |= s >= 4;
             p.A     = gf_load_tensor(&a->wctx, gf, name + ".lora_a");
             p.B     = gf_load_tensor(&a->wctx, gf, name + ".lora_b");
             p.scale = scale;

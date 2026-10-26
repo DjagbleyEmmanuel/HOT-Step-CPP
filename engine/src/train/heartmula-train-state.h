@@ -26,7 +26,8 @@
 //
 // <out>/adapters/step-NNNNNN.gguf, the layout of convert-heartmula-lora.py
 // (engine/docs/HEARTMULA_CONTRACT.md "LoRA adapter"): F32 A [in, r] and
-// B [r, out] per backbone q/k/v/output projection, keyed to the base model's
+// B [r, out] per backbone q/k/v/output projection (plus mlp w1/w2/w3 with
+// --lora-mlp), keyed to the base model's
 // variant and fingerprint. Immutable: written once through .tmp + rename and
 // never overwritten.
 
@@ -157,20 +158,17 @@ static bool hmt_model_load(HeartMuLaModel * m, const char * gpath, const char * 
 
 // ── Trainable factors ──────────────────────────────────────────────────────
 
-static const char * hmt_proj(int s) {
-    static const char * n[4] = { "q_proj", "k_proj", "v_proj", "output_proj" };
-    return n[s];
-}
-
 static std::string hmt_target(int layer, int s) {
-    return "backbone.layers." + std::to_string(layer) + ".attn." + hmt_proj(s) + ".weight";
+    static const char * n[HMT_SITES] = { "attn.q_proj", "attn.k_proj", "attn.v_proj", "attn.output_proj",
+                                         "mlp.w1", "mlp.w2", "mlp.w3" };
+    return "backbone.layers." + std::to_string(layer) + "." + n[s] + ".weight";
 }
 
 struct HmtLora {
     ggml_context *             ctx = nullptr;
     ggml_backend_buffer_t      buf = nullptr;
     std::vector<HmtLayerLora>  layers;
-    std::vector<ggml_tensor *> params;  // A, B per site, layer-major (q, k, v, o)
+    std::vector<ggml_tensor *> params;  // A, B per site, layer-major (q, k, v, o[, w1, w2, w3])
     ggml_tensor * t_adamw = nullptr, * t_lossgrad = nullptr, * t_clip = nullptr, * t_eps = nullptr, * t_gnorm2 = nullptr;
     int   rank  = 0;
     float alpha = 0.0f;
@@ -183,18 +181,20 @@ static void hmt_lora_free(HmtLora * l) {
 }
 
 // Kaiming-uniform A (bound 1/sqrt(in), torchtune's a = sqrt 5), zero B (contract §1).
-static bool hmt_lora_init(HmtLora * L, const HeartMuLaModel & m, int rank, float alpha, uint64_t seed, std::string * err) {
+static bool hmt_lora_init(HmtLora * L, const HeartMuLaModel & m, int rank, float alpha, uint64_t seed, bool mlp,
+                          std::string * err) {
     hmt_lora_free(L);
     const int n_layer = m.global.cfg.n_layer;
-    ggml_init_params ip = { (size_t) (8 * n_layer + 16) * ggml_tensor_overhead(), nullptr, true };
+    const int n_sites = mlp ? HMT_SITES : 4;
+    ggml_init_params ip = { (size_t) (2 * HMT_SITES * n_layer + 16) * ggml_tensor_overhead(), nullptr, true };
     L->ctx   = ggml_init(ip);
     L->rank  = rank;
     L->alpha = alpha;
     L->layers.resize((size_t) n_layer);
     for (int i = 0; i < n_layer; i++) {
         const HeartMuLaLayer & b    = m.global.layers[(size_t) i];
-        ggml_tensor * const    w[4] = { b.q, b.k, b.v, b.o };
-        for (int s = 0; s < 4; s++) {
+        ggml_tensor * const    w[HMT_SITES] = { b.q, b.k, b.v, b.o, b.w1, b.w2, b.w3 };
+        for (int s = 0; s < n_sites; s++) {
             HmtSite & site = L->layers[(size_t) i].s[s];
             site.A = ggml_new_tensor_2d(L->ctx, GGML_TYPE_F32, w[s]->ne[0], rank);
             site.B = ggml_new_tensor_2d(L->ctx, GGML_TYPE_F32, rank, w[s]->ne[1]);
@@ -223,6 +223,7 @@ static bool hmt_lora_init(HmtLora * L, const HeartMuLaModel & m, int rank, float
     std::vector<float> a;
     for (auto & layer : L->layers) {
         for (auto & site : layer.s) {
+            if (!site.A) continue;
             const float bound = 1.0f / sqrtf((float) site.A->ne[0]);
             std::uniform_real_distribution<float> u(-bound, bound);
             a.resize((size_t) ggml_nelements(site.A));
@@ -364,6 +365,7 @@ struct HmtIdentity {
     float    alpha = 0, lr = 0, wd = 0, beta1 = 0, beta2 = 0, eps = 0, clip = 0, dropout = 0;
     uint64_t seed = 0, data = 0;
     int64_t  max_frames = 0;
+    int32_t  mlp = 0;  // --lora-mlp
     std::string base_fingerprint;
     std::string weights;  // hmt_weights_id of the global and local GGUFs actually loaded
 };
@@ -402,6 +404,7 @@ static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     h = hmt_fnv(h, &id.data, sizeof(id.data));
     h = hmt_fnv(h, &id.max_frames, sizeof(id.max_frames));
     if (id.dropout != 0.0f) h = hmt_fnv(h, &id.dropout, sizeof(id.dropout));  // p = 0 keeps older states resumable
+    if (id.mlp) h = hmt_fnv(h, "mlp", 3);  // attention-only keeps older states resumable
     h = hmt_fnv(h, id.weights.data(), id.weights.size());
     return hmt_fnv(h, id.base_fingerprint.data(), id.base_fingerprint.size());
 }
@@ -515,7 +518,9 @@ static bool hmt_export(const std::string & path, const std::string & name, int64
     data.reserve(L.params.size());
     std::string targets = "[";
     for (size_t i = 0; i < L.layers.size(); i++) {
-        for (int s = 0; s < 4; s++) targets += std::string(targets.size() > 1 ? ", " : "") + "\"" + hmt_target((int) i, s) + "\"";
+        for (int s = 0; s < HMT_SITES; s++) {
+            if (L.layers[i].s[s].A) targets += std::string(targets.size() > 1 ? ", " : "") + "\"" + hmt_target((int) i, s) + "\"";
+        }
     }
     targets += "]";
     const std::string source = "{\"producer\": \"ace-train " + std::string(ACE_VERSION) + " heartmula-train\", \"step\": " + std::to_string((long long) step) + "}";

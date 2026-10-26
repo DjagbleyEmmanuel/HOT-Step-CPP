@@ -91,6 +91,10 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
     if (!Number.isFinite(n) || n < 0 || n >= 1) throw new Error('loraDropout must be at least 0 and below 1');
     r.loraDropout = n;
   }
+  if (src.trainMlp !== undefined) {
+    if (typeof src.trainMlp !== 'boolean') throw new Error('trainMlp must be a boolean');
+    r.trainMlp = src.trainMlp;
+  }
   return r;
 }
 
@@ -160,5 +164,6 @@ export function buildHeartmulaTrainArgs(o: {
     // auto picks the fastest attention the card has and keeps as many blocks un-recomputed as the free VRAM allows,
     // so the same run fits a small card and is quick on a big one. Losses are identical in every mode.
     '--attn', 'auto', '--keep-layers', 'auto', '--lora-dropout', String(r.loraDropout ?? 0),
+    ...(r.trainMlp ? ['--lora-mlp'] : []),
     '--name', o.name, ...(o.stopAfter ? ['--stop-after', String(o.stopAfter)] : []), ...(o.resume ? ['--resume'] : [])];
 }

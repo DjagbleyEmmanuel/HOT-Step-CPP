@@ -15,6 +15,7 @@
 //       [--save-every 100] [--stop-after N] [--resume] [--name <adapter name>]
 //       [--weights f16|bf16] [--local-chunk 0] [--lora-dropout 0]
 //       [--attn auto|flash-bf16|flash|exact] [--keep-layers auto|-1|0..28]
+//       [--lora-mlp]   also train the backbone MLP (w1/w2/w3), not only attention
 //
 // Files under --out:
 //   hm_train_state.bin          the resumable checkpoint (latest only)
@@ -70,6 +71,7 @@ struct HeartmulaTrainArgs {
     std::string attn = "auto";     // --attn auto|flash-bf16|flash|exact
     uint64_t seed = 0;
     bool     resume = false;
+    bool     mlp    = false;       // --lora-mlp
 };
 
 static std::string hmt_json_str(const std::string & s) {
@@ -327,7 +329,7 @@ static bool hmt_resolve_models(HeartmulaTrainArgs * a, std::string * err) {
 // Model, factors, optimizer. The optimizer runs constant-LR AdamW (contract §1).
 static bool hmt_setup(HmtRun & R, const HeartmulaTrainArgs & a, std::string * err) {
     if (!hmt_model_load(&R.m, a.global_path.c_str(), a.local_path.c_str(), a.weights == "bf16", err)) return false;
-    if (!hmt_lora_init(&R.lora, R.m, a.rank, a.alpha, a.seed, err)) return false;
+    if (!hmt_lora_init(&R.lora, R.m, a.rank, a.alpha, a.seed, a.mlp, err)) return false;
     LmOptim & o = R.opt;
     o.optimizer    = "adamw";
     o.t_adamw      = R.lora.t_adamw;
@@ -531,6 +533,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     id.rank = a.rank, id.accum = a.accum, id.bf16 = a.weights == "bf16";
     id.alpha = a.alpha, id.lr = a.lr, id.wd = a.wd, id.beta1 = a.beta1, id.beta2 = a.beta2, id.eps = a.eps, id.clip = a.clip;
     id.dropout = a.dropout;
+    id.mlp = a.mlp;
     id.seed = a.seed, id.data = data.fingerprint, id.max_frames = a.max_frames, id.base_fingerprint = R.m.base_fingerprint;
     id.weights = hmt_weights_id(a.global_path) + "|" + hmt_weights_id(a.local_path);
     const uint64_t ident = hmt_identity_hash(id);
@@ -551,7 +554,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                  std::to_string((long long) a.steps) + ",\"samples\":" + std::to_string(data.samples.size()) +
                  ",\"rank\":" + std::to_string(a.rank) + ",\"alpha\":" + hmt_num(a.alpha) + ",\"lr\":" + hmt_num(a.lr) +
                  ",\"grad_accum\":" + std::to_string(a.accum) + ",\"smax\":" + std::to_string((long long) Smax) +
-                 ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) + ",\"keep_layers\":" + std::to_string(R.keep) + ",\"lora_dropout\":" + hmt_num(a.dropout) +
+                 ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) + ",\"keep_layers\":" + std::to_string(R.keep) + ",\"lora_dropout\":" + hmt_num(a.dropout) + ",\"lora_mlp\":" + (a.mlp ? "true" : "false") +
                  ",\"params\":" + std::to_string((long long) hmt_lora_param_count(R.lora)) +
                  ",\"alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_free_mib\":" + hmt_num(mem.free / 1048576.0) +
                  ",\"weights\":" + hmt_json_str(a.weights) + ",\"attention\":\"" + hmt_attn_name(R.g.attn) + "\",\"bwd\":\"mm\",\"global\":" +

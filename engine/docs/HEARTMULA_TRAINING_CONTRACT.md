@@ -215,6 +215,7 @@ of this slice); the trainer's own init probe (section 6.3) replaces it.
 | frame slice of the backbone output | VIEW, CONT | yes |
 | codebook-0 head and CE | MUL_MAT, CROSS_ENTROPY_LOSS | yes: CROSS_ENTROPY_LOSS_BACK |
 | local input `[last_h, emb(c0..c6)]` | ACC into a frozen embedding canvas | yes (ACC); see 6.2 for CONCAT |
+| global mlp w1/w2/w3, with `--lora-mlp` | as global q/k/v/o; w2's A branch reads the SwiGLU output | yes |
 | projection, local q/k/v/o (no LoRA) | MUL_MAT (frozen) | yes: activation grad only |
 | local attention, head dim 384, 8 q / 4 kv heads, 8 positions | MUL_MAT, SOFT_MAX, MUL_MAT | yes |
 | local heads 1..7 and CEs, loss mean | VIEW, CONT, MUL_MAT, CROSS_ENTROPY_LOSS, ADD, SCALE | yes |

@@ -45,6 +45,8 @@ export interface HeartmulaRecipe {
   checkpointEvery: number;
   /** LoRA dropout on the adapter inputs, 0 <= p < 1. Advanced: 0.05 is the proven recipe (+8% step time, +1.3 GiB). */
   loraDropout: number;
+  /** Also LoRA the backbone MLP (w1/w2/w3), not only attention. Bigger adapter, more VRAM; unlocks the MLP dial. */
+  trainMlp: boolean;
 }
 
 /** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
@@ -57,6 +59,7 @@ export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   seed: 0,
   checkpointEvery: 100,
   loraDropout: 0,
+  trainMlp: false,
 };
 
 // ── Prepare ──────────────────────────────────────────────────────────────

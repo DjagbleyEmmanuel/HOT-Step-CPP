@@ -397,7 +397,7 @@ static void print_usage(void) {
             "                [--encoder <dir>] HeartCodec encoder pack; default <models>/heartmula\n"
             "                [--ffmpeg <path>] decodes non-WAV audio; default ffmpeg on PATH\n"
             "                [--force]         re-encode samples whose codes are cached\n"
-            "  heartmula-train  HeartMuLa backbone LoRA (global q/k/v/o) on a heartmula-prepare\n"
+            "  heartmula-train  HeartMuLa backbone LoRA (global q/k/v/o[, mlp]) on a heartmula-prepare\n"
             "                cache. Contract: engine/docs/HEARTMULA_TRAINING_CONTRACT.md.\n"
             "                --data <dir>      the heartmula-prepare --out directory\n"
             "                --out <dir>       state, adapters/step-N.gguf, control/\n"
@@ -409,6 +409,7 @@ static void print_usage(void) {
             "                [--attn auto|flash-bf16|flash|exact] global attention (auto: best the GPU runs)\n"
             "                [--keep-layers auto|-1|0..28] global blocks trained without recompute\n"
             "                (auto: most that fit; -1 recomputes every block and the local decoder)\n"
+            "                [--lora-mlp] also train the backbone MLP (w1/w2/w3)\n"
             "                control/checkpoint-now: checkpoint after this step, exit 3;\n"
             "                control/cancel: stop now, exit 4. stdout: HMTRAIN {json} events.\n"
             "                [--selftest <fixture dir>] check contract section 5 against the oracle\n"
@@ -4853,6 +4854,7 @@ static int cmd_heartmula_train(int argc, char ** argv) {
         else if (!strcmp(o, "--keep-layers"))   { const char * v = next(o); a.keep = strcmp(v, "auto") ? atoi(v) : -2; }
         else if (!strcmp(o, "--attn"))          a.attn        = next(o);
         else if (!strcmp(o, "--lora-dropout"))  a.dropout     = (float) atof(next(o));
+        else if (!strcmp(o, "--lora-mlp"))      a.mlp         = true;
         else if (!strcmp(o, "--resume"))        a.resume      = true;
         else { fprintf(stderr, "ace-train heartmula-train: unknown option %s\n", o); return 2; }
     }

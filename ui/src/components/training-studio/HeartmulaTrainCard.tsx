@@ -8,6 +8,7 @@ import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPrese
 import { TrainingBatchCard, TrainingAllStagesCard, TrainingRunPanel } from './Yue2StageCard';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
 
 export interface HeartmulaTrainCardProps {
@@ -26,7 +27,8 @@ export interface HeartmulaTrainCardProps {
 
 const BUTTON = 'px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2';
 const INPUT = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
-const FIELDS: Array<{ key: keyof HeartmulaRecipe; label: string; info: string; min: number; max: number; step: number }> = [
+type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp'>;
+const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: number; max: number; step: number }> = [
   { key: 'steps', label: 'Updates', info: 'Number of optimizer updates. More steps take longer and can overfit the dataset.', min: 1, max: 1_000_000, step: 1 },
   { key: 'rank', label: 'Rank', info: 'Adapter capacity. Higher ranks use more memory. The starting recipe uses rank 64.', min: 1, max: 256, step: 1 },
   { key: 'alpha', label: 'Alpha', info: 'Adapter scaling relative to rank. The starting recipe pairs alpha 64 with rank 64.', min: 0.001, max: 1024, step: 0.001 },
@@ -59,7 +61,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const [presets, setPresets] = useState<Array<{ name: string; recipe: HeartmulaRecipe }>>(() => {
     try {
       const stored: unknown = JSON.parse(localStorage.getItem('hs-heartmula-training-presets') ?? '[]');
-      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])) as unknown as HeartmulaRecipe })) : [];
+      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true } as unknown as HeartmulaRecipe })) : [];
     } catch { return []; }
   });
   const persist = (next: typeof presets) => {
@@ -115,7 +117,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         || !data.presets.every((item: { name?: unknown; recipe?: unknown }) => typeof item.name === 'string'
           && item.name.trim().length > 0 && item.name.length <= 64 && validRecipe(item.recipe))) throw new Error('Invalid HeartMuLa presets');
       const merged = new Map(presets.map(item => [item.name, item]));
-      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])) as unknown as HeartmulaRecipe });
+      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true } as unknown as HeartmulaRecipe });
       persist([...merged.values()].slice(-32));
     } catch { setPresetError(t('trainingStudio.heartmula.presetImportError', 'Import a valid HeartMuLa preset file of up to 100 KB.')); }
   };
@@ -208,6 +210,10 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
     <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
       <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.advanced', 'Advanced')}</summary>
       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">{[FIELDS[6], FIELDS[4]].map(numberField)}</div>
+      <Toggle className="mt-3" accent="amber" disabled={locked} checked={recipe.trainMlp === true}
+        onChange={value => setEdits(previous => ({ ...previous, trainMlp: value }))}
+        label={t('trainingStudio.heartmula.field.trainMlp', 'Train MLP layers')}
+        info={t('trainingStudio.heartmula.field.trainMlpInfo', 'Also trains the MLP (feed-forward) layers of every backbone block, not only attention. The adapter is bigger, steps take longer and use more memory. Lets the MLP dial in the Adapters panel change the sound.')} />
     </details>
     <TrainingPreviewSettings title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
       enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewEvery(enabled ? status.previewDefaults.everySteps || 100 : 0)}

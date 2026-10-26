@@ -110,8 +110,9 @@ static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const
     h    = ggml_add(ctx, h, qwen3_linear_lora(ctx, w.o, qwen3_lora_slot(lora, QW_LORA_O), attn));
 
     ggml_tensor * n2   = heartmula_rms(ctx, h, w.mlp_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, ggml_mul_mat(ctx, w.w1, n2));
-    return ggml_add(ctx, h, ggml_mul_mat(ctx, w.w2, ggml_mul(ctx, gate, ggml_mul_mat(ctx, w.w3, n2))));
+    ggml_tensor * gate = ggml_silu(ctx, qwen3_linear_lora(ctx, w.w1, qwen3_lora_slot(lora, QW_LORA_GATE), n2));
+    ggml_tensor * up   = qwen3_linear_lora(ctx, w.w3, qwen3_lora_slot(lora, QW_LORA_UP), n2);
+    return ggml_add(ctx, h, qwen3_linear_lora(ctx, w.w2, qwen3_lora_slot(lora, QW_LORA_DOWN), ggml_mul(ctx, gate, up)));
 }
 
 // One cached graph with its own scheduler (sched_alloc_graph owns the allocation).
@@ -200,9 +201,9 @@ struct HeartMuLaLmGraph {
 
     // Note F. The binding is set by the caller; the key is what the graphs and KV rows were made with.
     const HeartMuLaAdapter * adapter       = nullptr;
-    float                    adapter_scale = 1.0f;
+    HeartMuLaAdapterScales   adapter_scale;
     uint64_t                 key_id        = 0;  // 0 = base graph
-    float                    key_scale     = 0.0f;
+    HeartMuLaAdapterScales   key_scale{ 0.0f };  // global 0 = the base key
 
     HeartMuLaSlot prefill;
     HeartMuLaSlot decode;
@@ -244,7 +245,7 @@ static bool heartmula_lm_reserve(const HeartMuLaModel & m, HeartMuLaLmGraph * g,
     }
     if (g->n_ctx < want || g->B != cfg_rows) {
         const HeartMuLaAdapter * adapter = g->adapter;
-        const float              scale   = g->adapter_scale;
+        const HeartMuLaAdapterScales scale = g->adapter_scale;
         heartmula_lm_free(g);
         g->adapter       = adapter;
         g->adapter_scale = scale;
@@ -276,18 +277,26 @@ static bool heartmula_lm_reserve(const HeartMuLaModel & m, HeartMuLaLmGraph * g,
     return true;
 }
 
-// Bind an adapter (nullptr = base) and a scale. The graphs follow on the next step.
-static void heartmula_lm_set_adapter(HeartMuLaLmGraph * g, const HeartMuLaAdapter * adapter, float scale) {
+// Bind an adapter (nullptr = base) and its dials. The graphs follow on the next step.
+static void heartmula_lm_set_adapter(HeartMuLaLmGraph * g, const HeartMuLaAdapter * adapter,
+                                     const HeartMuLaAdapterScales & scales) {
     g->adapter       = adapter;
-    g->adapter_scale = scale;
+    g->adapter_scale = scales;
+}
+
+static void heartmula_lm_set_adapter(HeartMuLaLmGraph * g, const HeartMuLaAdapter * adapter, float scale) {
+    HeartMuLaAdapterScales s;
+    s.global = scale;
+    heartmula_lm_set_adapter(g, adapter, s);
 }
 
 // Make the graphs and KV rows match the live binding (note F). Reads the adapter's id
 // every time, so a reload of the same struct counts as a new adapter.
 static void heartmula_lm_sync_adapter(HeartMuLaLmGraph * g) {
-    const bool     on  = g->adapter && g->adapter->loaded() && g->adapter_scale != 0.0f;
-    const uint64_t id  = on ? g->adapter->id : 0;
-    const float    sc  = on ? g->adapter_scale : 0.0f;
+    const bool             on = g->adapter && g->adapter->loaded() && g->adapter_scale.global != 0.0f;
+    const uint64_t         id = on ? g->adapter->id : 0;
+    HeartMuLaAdapterScales sc = on ? g->adapter_scale : HeartMuLaAdapterScales{};
+    if (!on) sc.global = 0.0f;
     if (id == g->key_id && sc == g->key_scale) {
         return;
     }
@@ -310,7 +319,7 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
     const int64_t          N  = T * B;
     ggml_cgraph *          gf = nullptr;
 
-    // Note F: the factors, scaled by alpha / rank x the dial, for the live key only.
+    // Note F: the factors, scaled by alpha / rank x the site's dials, for the live key only.
     std::vector<QwLoraLayer> lora;
     if (g->key_id) {
         const HeartMuLaAdapter * ad = g->adapter;
@@ -322,9 +331,10 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
             return false;
         }
         lora = ad->layers;
-        for (auto & layer : lora) {
-            for (auto & p : layer.p) {
-                p.scale *= g->key_scale;
+        for (int i = 0; i < st.cfg.n_layer; i++) {
+            for (int slot = 0; slot < QW_LORA_NSLOTS; slot++) {
+                const bool mlp = slot == QW_LORA_GATE || slot == QW_LORA_UP || slot == QW_LORA_DOWN;
+                lora[(size_t) i].p[slot].scale *= g->key_scale.site(i, st.cfg.n_layer, mlp);
             }
         }
     }

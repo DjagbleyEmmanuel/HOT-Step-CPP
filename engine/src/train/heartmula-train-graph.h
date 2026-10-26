@@ -71,9 +71,11 @@ struct HmtSite {
     ggml_tensor * B = nullptr;
 };
 
-// Per backbone layer: q, k, v, output (the order adapter.h's proj_name uses).
+// Per backbone layer: q, k, v, output, then the MLP's w1 (gate), w2 (down), w3 (up),
+// the order adapter.h's proj_name uses. An attention-only run leaves 4..6 empty.
+#define HMT_SITES 7
 struct HmtLayerLora {
-    HmtSite s[4];
+    HmtSite s[HMT_SITES];
 };
 
 // Sample inputs, one buffer per micro-step shape (rebuilt when L or T change).
@@ -301,7 +303,9 @@ static ggml_tensor * hmt_drop(ggml_context * ctx, const HmtGraphCtx & g, ggml_te
     if (!g.drop_pool) return x;
     const int64_t n     = ggml_nelements(x);
     const int64_t slots = (ggml_nelements(g.drop_pool) - n) / 16;
-    uint64_t      z     = g.drop_key + 0x9E3779B97F4A7C15ull * (uint64_t) (l * 4 + site + 1);
+    // Attention sites keep their original index so older dropout runs resume unchanged.
+    const uint64_t id   = site < 4 ? (uint64_t) (l * 4 + site + 1) : (uint64_t) (28 * 4 + l * 3 + site - 3);
+    uint64_t      z     = g.drop_key + 0x9E3779B97F4A7C15ull * id;
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
     z ^= z >> 31;
@@ -320,8 +324,14 @@ static ggml_tensor * hmt_linear(ggml_context * ctx, ggml_tensor * w, const HmtSi
     return y;
 }
 
-static ggml_tensor * hmt_mlp(ggml_context * ctx, const HeartMuLaLayer & w, ggml_tensor * x, float eps) {
+// `lin(W, site, in)` applies the site's LoRA when the run trains the MLP; null = frozen.
+static ggml_tensor * hmt_mlp(ggml_context * ctx, const HeartMuLaLayer & w, ggml_tensor * x, float eps,
+                             const std::function<ggml_tensor *(ggml_tensor *, int, ggml_tensor *)> & lin = nullptr) {
     ggml_tensor * n = heartmula_rms(ctx, x, w.mlp_norm, eps);
+    if (lin) {
+        ggml_tensor * g = ggml_swiglu_split(ctx, lin(w.w1, 4, n), lin(w.w3, 6, n));
+        return ggml_add(ctx, x, lin(w.w2, 5, g));
+    }
     // Split SwiGLU: its backward keeps only the two GEMM outputs and recomputes the
     // silu, so the [ffn, rows] silu output is never retained.
     ggml_tensor * g = ggml_swiglu_split(ctx, ggml_mul_mat(ctx, w.w1, n), ggml_mul_mat(ctx, w.w3, n));
@@ -368,6 +378,7 @@ static ggml_tensor * hmt_global_block(ggml_context * ctx, const HmtGraphCtx & g,
         o = ggml_reshape_2d(ctx, o, D * c.n_head, L);
     }
     x = ggml_add(ctx, x, lin(w.o, 3, o));
+    if (lr && lr->s[4].A) return hmt_mlp(ctx, w, x, c.rms_eps, lin);
     return hmt_mlp(ctx, w, x, c.rms_eps);
 }
 
