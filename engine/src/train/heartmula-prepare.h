@@ -58,6 +58,7 @@
 // <out>/heartmula_prepare.json is written atomically at the end; codes files no
 // manifest row names are removed then.
 #include "heartmula/codec-encode.h"
+#include <memory>
 
 #include "audio-io.h"
 #include "hot-step-fsutf8.h"
@@ -215,6 +216,8 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
     std::vector<HeartmulaPrepareSkip>   skipped;
     BackendPair bp = {};
     bool        bp_up = false;
+    // Encoder weights for the whole run; freed before the backend they live on.
+    auto        encoders = std::make_unique<heartcodec::Encoders>();
     double      enc_seconds = 0, enc_audio = 0;
     int         encoded = 0;
     fprintf(stderr, "[HeartMuLa-Prepare] stage encoding %zu sample(s)\n", samples.size());
@@ -242,10 +245,12 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
             s.reused = true;
         } else {
             int T = 0, sr = 0;
+            const auto td = std::chrono::steady_clock::now();
             float * planar = hp_decode(a, s.audio, (fs::u8path(a.out_dir) / (s.key + ".tmp.wav")).u8string(), &T, &sr, &err);
             if (!planar) { skip(s, "no-audio", err); continue; }
             std::vector<float> audio(planar, planar + (size_t) 2 * T);
             free(planar);
+            const double decode_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - td).count();
             // encode()'s own frame count, before spending an encode on a sample that cannot fit.
             const int64_t est = (int64_t) (double(T) / sr * 12.5) + 1;
             if (est < 2) { skip(s, "invalid", "audio shorter than 2 frames"); continue; }
@@ -257,28 +262,31 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
             const auto t0 = std::chrono::steady_clock::now();
             heartcodec::EncodeResult r;
             try {
-                r = heartcodec::encode(paths, bp.backend, audio, 2, T, sr);
+                r = heartcodec::encode(paths, bp.backend, audio, 2, T, sr, {}, {}, encoders.get());
             } catch (const std::exception & e) {
                 if (strstr(e.what(), "not enough free memory")) {
                     fprintf(stderr, "heartmula-prepare: %s\n", e.what());
-                    backend_release(bp.backend, bp.cpu_backend);
+                    { encoders.reset(); backend_release(bp.backend, bp.cpu_backend); }
                     return 1;
                 }
+                if (!encoders->loaded) encoders = std::make_unique<heartcodec::Encoders>();  // a failed load starts over
                 skip(s, "encode-failed", e.what());
                 continue;
             }
             const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             if (!hp_write_codes(codes_path, r)) {
                 fprintf(stderr, "heartmula-prepare: cannot write %s\n", codes_path.c_str());
-                backend_release(bp.backend, bp.cpu_backend);
+                { encoders.reset(); backend_release(bp.backend, bp.cpu_backend); }
                 return 1;
             }
             s.frames = r.frames;
             enc_seconds += dt;
             enc_audio += double(T) / sr;
             encoded++;
-            fprintf(stderr, "[HeartMuLa-Prepare] %zu/%zu %s: %.1f s of audio encoded in %.1f s\n", i + 1, samples.size(),
-                    s.id.c_str(), double(T) / sr, dt);
+            fprintf(stderr, "[HeartMuLa-Prepare] %zu/%zu %s: %.1f s of audio encoded in %.1f s (decode %.1f s;",
+                    i + 1, samples.size(), s.id.c_str(), double(T) / sr, dt, decode_s);
+            for (const auto & kv : r.seconds) fprintf(stderr, " %s %.1f", kv.first.c_str(), kv.second);
+            fprintf(stderr, ")\n");
         }
         s.seconds = double(s.frames) / HEARTMULA_FRAME_RATE;
         if (s.frames < 2) { skip(s, "invalid", "audio shorter than 2 frames"); continue; }
@@ -290,7 +298,7 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
                 s.reused ? "cached" : "encoded", (long long) S, (long long) s.frames);
         ok.push_back(std::move(s));
     }
-    if (bp_up) backend_release(bp.backend, bp.cpu_backend);
+    if (bp_up) { encoders.reset(); backend_release(bp.backend, bp.cpu_backend); }
 
     // Manifest.
     yyjson_mut_doc * doc  = yyjson_mut_doc_new(nullptr);

@@ -241,8 +241,13 @@ inline std::vector<double> power_stft(const float * x, int64_t n, int n_fft, int
 // MusicFM mel for MuEncoder: power mel (2048/240, 128 bins, the GGUF's own Hann
 // window and filterbank), 10 log10, last frame dropped, (x - mean) / std.
 // Returns time-major [128][frames] (ne0 = time) for the 2D convolutions.
-inline std::vector<float> muencoder_mel(const Weights & w, const float * x, int64_t n, double mean, double std_dev,
-                                        int64_t * frames_out) {
+// The MuEncoder mel's Hann window and filterbank, read off the device once.
+struct MuMelBuffers {
+    std::vector<double> window;
+    std::vector<float>  fb;
+};
+
+inline MuMelBuffers muencoder_mel_buffers(const Weights & w) {
     const std::string p = "encoder.feature_extractors.muencoder.preprocessor_melspec_2048.mel_stft.";
     auto fetch = [&](const std::string & name) {
         auto t = w.get(name);
@@ -253,7 +258,14 @@ inline std::vector<float> muencoder_mel(const Weights & w, const float * x, int6
     };
     auto window_f = fetch(p + "spectrogram.window"), fb = fetch(p + "mel_scale.fb");
     require(window_f.size() == 2048 && fb.size() == size_t(1025 * 128), "MuEncoder mel buffers have unexpected shapes");
-    std::vector<double> window(window_f.begin(), window_f.end());
+    return { std::vector<double>(window_f.begin(), window_f.end()), std::move(fb) };
+}
+
+// Host-only, so chunks can run on worker threads (codec-encode.h).
+inline std::vector<float> muencoder_mel(const MuMelBuffers & b, const float * x, int64_t n, double mean, double std_dev,
+                                        int64_t * frames_out) {
+    const std::vector<double> & window = b.window;
+    const std::vector<float> &  fb     = b.fb;
     int64_t frames = 0;
     auto power = power_stft(x, n, 2048, 240, window, &frames);
     const int64_t kept = frames - 1;
@@ -266,6 +278,11 @@ inline std::vector<float> muencoder_mel(const Weights & w, const float * x, int6
     }
     *frames_out = kept;
     return mel;
+}
+
+inline std::vector<float> muencoder_mel(const Weights & w, const float * x, int64_t n, double mean, double std_dev,
+                                        int64_t * frames_out) {
+    return muencoder_mel(muencoder_mel_buffers(w), x, n, mean, std_dev, frames_out);
 }
 
 // transformers' mel_filter_bank(201, 80, 0, 8000, 16000, slaney, slaney): [201][80].
@@ -461,10 +478,14 @@ constexpr int64_t mu_window = 128, mu_margin = 4;
 // One channel's 24 kHz chunk (with tail) -> acoustic and semantic [1024, 744] each.
 inline void muencoder_run(const Weights & w, ggml_backend_t backend, const float * audio, double mean, double std_dev,
                           std::vector<float> & acoustic, std::vector<float> & semantic, const Cancel & cancelled,
-                          std::vector<float> * mel_out = nullptr) {
-    int64_t mel_frames = 0;
-    auto mel = muencoder_mel(w, audio, (enc_chunk_samples + enc_tail) / 960 * 960, mean, std_dev, &mel_frames);
-    require(mel_frames == enc_frames * 4, "unexpected MuEncoder mel length");
+                          std::vector<float> * mel_out = nullptr, const std::vector<float> * mel_in = nullptr) {
+    int64_t mel_frames = enc_frames * 4;
+    std::vector<float> computed;
+    if (!mel_in) {
+        computed = muencoder_mel(w, audio, (enc_chunk_samples + enc_tail) / 960 * 960, mean, std_dev, &mel_frames);
+        require(mel_frames == enc_frames * 4, "unexpected MuEncoder mel length");
+    }
+    const std::vector<float> & mel = mel_in ? *mel_in : computed;
     if (mel_out) *mel_out = mel;
     std::vector<float> hidden(size_t(1024 * enc_frames));
     for (int64_t s = 0; s < enc_frames; s += mu_window) {
