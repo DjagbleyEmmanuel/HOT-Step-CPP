@@ -38,10 +38,15 @@ test('preview settings: defaults, overrides, and every bad value refused', () =>
   assert.equal(train.resolveHeartmulaPreviewSettings({ everySteps: 0 }).everySteps, 0);
   assert.equal(train.resolveHeartmulaPreviewSettings({ seed: 7, seconds: 60 }).seconds, 60);
   for (const bad of [{ nope: 1 }, { everySteps: -1 }, { everySteps: 1.5 }, { seconds: 1 }, { seconds: 241 }, { temperature: 0 }, { topk: 0 },
-    { cfgScale: 0.5 }, { codecSteps: 0 }, { codecGuidance: 11 }, { tags: ' ' }, { tags: 5 }, { seed: -1 }, { seed: true }]) {
+    { cfgScale: 0.5 }, { codecSteps: 0 }, { codecGuidance: 11 }, { tags: 5 }, { lyricsSource: 'nope' }, { seed: -1 }, { seed: true }]) {
     assert.throws(() => train.resolveHeartmulaPreviewSettings(bad), /preview|Unsupported/, JSON.stringify(bad));
   }
   assert.throws(() => train.resolveHeartmulaPreviewSettings([]), /object/);
+  // full-song length and blank (= from the dataset) prompt by default; lyricsSource only ever stores 'dataset'
+  assert.equal(D.seconds, 240);
+  assert.equal(D.tags, '');
+  assert.equal(train.resolveHeartmulaPreviewSettings({ lyricsSource: 'dataset' }).lyricsSource, 'dataset');
+  assert.equal(train.resolveHeartmulaPreviewSettings({ lyricsSource: 'generated' }, { ...D, lyricsSource: 'dataset' }).lyricsSource, undefined);
   // a new run stores the resolved fixture, and a bad one refuses the start
   const made = runs.resolveHeartmulaRun(ds, { preview: { everySteps: 50 } });
   assert.equal((made.record.preview as typeof D).everySteps, 50);
@@ -204,4 +209,26 @@ test('a missing encoder pack is described with the file names and the install st
   for (const role of ['muencoder', 'wavlm', 'whisper', 'query']) assert.ok(message.includes(`heartcodec-${role}-F16.gguf`), role);
   assert.ok(message.includes('convert-heartmula.py'));
   assert.ok(message.includes('--only encoder'));
+});
+
+test('preview prompt: tags from the first sung track, lyrics from Lyric Studio then the track, overrides win', async () => {
+  const { resolveHeartmulaPreviewPrompt } = await import('./heartmulaPreviewSource.js');
+  const sourceDir = path.join(root, 'pushed');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  const dsx = { customTag: 'trig', lyricsSetId: undefined, sourceDir } as never;
+  const mk = (sampleId: string, over: object) => ({ sampleId, filename: sampleId + '.wav', caption: 'rock', genre: '', lyrics: '', isInstrumental: false, excluded: false, fileMissing: false, ...over }) as never;
+  const samples = [mk('intro', { isInstrumental: true }), mk('song', { caption: 'folk', lyrics: 'own words' }), mk('gone', { lyrics: 'x', excluded: true })];
+  const D = HEARTMULA_PREVIEW_DEFAULTS;
+  // no Lyric Studio generation: the dataset track gives both, and the instrumental intro is skipped
+  let r = resolveHeartmulaPreviewPrompt(dsx, samples, D);
+  assert.deepEqual([r.settings.tags, r.settings.lyrics, r.source.lyrics, r.source.sampleId], ['trig, folk', 'own words', 'dataset', 'song']);
+  // a pushed generation wins, unless lyricsSource is 'dataset' or lyrics are overridden
+  fs.writeFileSync(path.join(sourceDir, '_hotstep-preview-lyrics.json'), JSON.stringify({ id: 7, title: 'New', lyrics: 'fresh words' }));
+  r = resolveHeartmulaPreviewPrompt(dsx, samples, D);
+  assert.deepEqual([r.settings.lyrics, r.source.lyrics, r.source.generationId, r.source.generationTitle], ['fresh words', 'lyric-studio', 7, 'New']);
+  assert.equal(resolveHeartmulaPreviewPrompt(dsx, samples, { ...D, lyricsSource: 'dataset' }).settings.lyrics, 'own words');
+  r = resolveHeartmulaPreviewPrompt(dsx, samples, { ...D, tags: 'jazz', lyrics: 'mine' });
+  assert.deepEqual([r.settings.tags, r.settings.lyrics, r.source.tags, r.source.lyrics, r.source.generationId], ['jazz', 'mine', 'override', 'override', null]);
+  // nothing usable and no override: refused with a clear message
+  assert.throws(() => resolveHeartmulaPreviewPrompt(dsx, [], D), /needs tags/);
 });

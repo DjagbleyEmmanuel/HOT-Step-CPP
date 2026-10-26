@@ -94,7 +94,7 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
   return r;
 }
 
-const PREVIEW_KEYS = Object.keys(HEARTMULA_PREVIEW_DEFAULTS);
+const PREVIEW_KEYS = [...Object.keys(HEARTMULA_PREVIEW_DEFAULTS), 'lyricsSource'];
 
 function num(v: unknown, key: string, min: number, max: number, integer: boolean): number {
   const n = Number(v);
@@ -105,7 +105,8 @@ function num(v: unknown, key: string, min: number, max: number, integer: boolean
 }
 
 /**
- * Preview settings over `base`; unknown keys and out-of-range values throw.
+ * Preview settings over `base`; unknown keys and out-of-range values throw. Blank tags
+ * and lyrics are legal here: the run resolves them from the dataset (heartmulaPreviewSource).
  * Ranges are the engine request's (mapHeartmulaRequest), so a saved fixture
  * can never be refused at render time.
  */
@@ -123,7 +124,10 @@ export function resolveHeartmulaPreviewSettings(
     if (typeof src[key] !== 'string' || Buffer.byteLength(src[key]) > limit) throw new Error(`preview ${key} must be text of at most ${limit} bytes`);
     r[key] = src[key];
   }
-  if (!r.tags.trim()) throw new Error('preview tags must not be empty');
+  if (src.lyricsSource !== undefined) {
+    if (src.lyricsSource !== 'dataset' && src.lyricsSource !== 'generated' && src.lyricsSource !== null) throw new Error("preview lyricsSource must be 'dataset' or 'generated'");
+    if (src.lyricsSource === 'dataset') r.lyricsSource = 'dataset'; else delete r.lyricsSource;
+  }
   if (src.everySteps !== undefined) r.everySteps = num(src.everySteps, 'everySteps', 0, 100_000, true);
   if (src.seconds !== undefined) r.seconds = num(src.seconds, 'seconds', 5, 240, true);
   if (src.seed !== undefined) r.seed = num(src.seed, 'seed', 0, 0xffffffff, true);

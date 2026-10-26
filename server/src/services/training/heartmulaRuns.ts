@@ -18,7 +18,7 @@ import { datasetDir, slugify } from './paths.js';
 import { newRunDir } from './adapterLayout.js';
 import { resolveHeartmulaPreviewSettings, resolveHeartmulaRecipe } from './heartmulaTrain.js';
 import type {
-  HeartmulaAdapterAsset, HeartmulaLossPoint, HeartmulaRecipe, HeartmulaRunId, HeartmulaRunState, HeartmulaRunStatus,
+  HeartmulaAdapterAsset, HeartmulaLossPoint, HeartmulaPreviewSource, HeartmulaRecipe, HeartmulaRunId, HeartmulaRunState, HeartmulaRunStatus,
 } from '../../contracts/heartmulaTraining.js';
 
 /** `<adapterName>/<timestamp>`, the id the routes and `resumeRun` take. */
@@ -40,6 +40,8 @@ export interface HeartmulaRunRecord {
   createdAt: string;
   /** Resolved checkpoint-preview settings the run started with (HeartmulaPreviewSettings); absent on runs made before previews. */
   preview?: unknown;
+  /** Where `preview`'s tags and lyrics came from (HeartmulaPreviewSource); set when the run resolved them, absent before. */
+  previewSource?: HeartmulaPreviewSource;
   /** Published adapter, relative to the adapter root; set once the run finished. */
   published?: string;
 }

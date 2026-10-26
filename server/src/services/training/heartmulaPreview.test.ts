@@ -26,6 +26,7 @@ function fakeAdapter(step: number): string {
   return file;
 }
 
+const source = { tags: 'dataset', lyrics: 'lyric-studio', sampleId: 's1', sampleName: 's1.wav', generationId: 3, generationTitle: 'T' } as const;
 const wav = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVE'), Buffer.alloc(40)]);
 
 function deps(over: Partial<import('./heartmulaPreview.js').HeartmulaPreviewDeps> & { wires?: any[]; unloads?: number[] } = {}) {
@@ -46,12 +47,13 @@ function deps(over: Partial<import('./heartmulaPreview.js').HeartmulaPreviewDeps
 
 test('a base take renders with no adapter, a step take with its checkpoint, both with provenance', async () => {
   const wires: any[] = []; const unloads: number[] = [];
-  const base = await pv.renderHeartmulaPreview({ runDir: run.dir, runId: run.id, step: 0, kind: 'base', settings: HEARTMULA_PREVIEW_DEFAULTS, deps: deps({ wires, unloads }) });
+  const base = await pv.renderHeartmulaPreview({ runDir: run.dir, runId: run.id, step: 0, kind: 'base', settings: HEARTMULA_PREVIEW_DEFAULTS, source, deps: deps({ wires, unloads }) });
   assert.equal(base.status, 'done');
+  assert.deepEqual(base.source, source);
   assert.equal(base.adapter, null);
   assert.equal(base.adapterSha256, null);
   assert.equal(wires[0].adapter, '');
-  assert.equal(wires[0].duration_s, 30);
+  assert.equal(wires[0].duration_s, HEARTMULA_PREVIEW_DEFAULTS.seconds);
   assert.equal(wires[0].seed, HEARTMULA_PREVIEW_DEFAULTS.seed);
   assert.equal(wires[0].cfg_scale, HEARTMULA_PREVIEW_DEFAULTS.cfgScale);
 

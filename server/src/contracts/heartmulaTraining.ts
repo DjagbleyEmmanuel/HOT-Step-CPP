@@ -96,10 +96,16 @@ export interface HeartmulaPrepareStatus {
 export interface HeartmulaPreviewSettings {
   /** Render every N training steps; 0 turns checkpoint previews off. */
   everySteps: number;
-  /** One fixed fixture so takes are comparable across steps. */
+  /** Tags override. Blank = the tags of the dataset's first sung track (what training saw), resolved once per run. */
   tags: string;
+  /** Lyrics override. Blank = per `lyricsSource`. */
   lyrics: string;
-  /** Seconds of audio per render (v1 default 30). */
+  /**
+   * Where blank lyrics come from, same meaning as YuE2's preview. Absent: the newest Lyric Studio generation for
+   * the dataset's artist, falling back to the dataset track's lyrics. 'dataset': the track's own lyrics.
+   */
+  lyricsSource?: 'dataset';
+  /** Longest a take may run, in seconds. A full song ends earlier on the model's own end-of-audio; 240 is the engine's maximum. */
   seconds: number;
   seed: number;
   /** Sampler, same keys and meaning as the HeartMuLa engine request. */
@@ -110,15 +116,12 @@ export interface HeartmulaPreviewSettings {
   codecGuidance: number;
 }
 
-/**
- * Fixed preview fixture. Placeholder conditioning until the acceptance
- * tester's neutral pick replaces it; sampler values are the generation defaults.
- */
+/** Blank tags and lyrics mean "take them from the dataset" (HeartmulaPreviewSource); sampler values are the generation defaults. */
 export const HEARTMULA_PREVIEW_DEFAULTS: HeartmulaPreviewSettings = {
   everySteps: 100,
-  tags: 'pop, piano, warm, gentle',
-  lyrics: '[verse]\nSoft light on the window\nMorning comes slow\n[chorus]\nHold on, we are moving\nSlowly, we go',
-  seconds: 30,
+  tags: '',
+  lyrics: '',
+  seconds: 240,
   seed: 42,
   temperature: 1,
   topk: 50,
@@ -248,6 +251,18 @@ export type HeartmulaPreviewKind = 'base' | 'step' | 'final';
 
 export type HeartmulaPreviewStatus = 'queued' | 'rendering' | 'done' | 'failed' | 'skipped';
 
+/** Where a run's preview prompt came from. Resolved once at the start of a run, so every take sings the same words. */
+export interface HeartmulaPreviewSource {
+  tags: 'override' | 'dataset';
+  lyrics: 'override' | 'lyric-studio' | 'dataset';
+  /** The dataset track the tags (and dataset lyrics) came from; null when none qualified. */
+  sampleId: string | null;
+  sampleName: string | null;
+  /** The Lyric Studio generation the lyrics came from; null otherwise. */
+  generationId: number | null;
+  generationTitle: string | null;
+}
+
 export interface HeartmulaPreviewRecord {
   run: HeartmulaRunId;
   kind: HeartmulaPreviewKind;
@@ -255,6 +270,8 @@ export interface HeartmulaPreviewRecord {
   step: number;
   /** The resolved settings this take was rendered with (conditioning, seed, sampler). Per take: a retry with overrides can differ from its neighbours. */
   settings: HeartmulaPreviewSettings;
+  /** Where the tags and lyrics in `settings` came from; absent on takes rendered before sources existed. */
+  source?: HeartmulaPreviewSource;
   status: HeartmulaPreviewStatus;
   /** Server-validated URL under the audio route; null until `status` is 'done'. */
   audioUrl: string | null;
@@ -276,6 +293,8 @@ export interface HeartmulaPreviewListResponse {
   run: HeartmulaRunId | null;
   /** The run's current defaults for new takes; each record carries its own resolved `settings`. */
   settings: HeartmulaPreviewSettings;
+  /** Where `settings` tags and lyrics came from; null until the run has resolved them. */
+  source: HeartmulaPreviewSource | null;
   previews: HeartmulaPreviewRecord[];
 }
 

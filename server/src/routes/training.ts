@@ -114,6 +114,7 @@ import { getTrainingDefaults, setTrainingDefaults } from '../services/training/t
 import { heartmulaReadiness, heartmulaStatus } from '../services/training/heartmulaStatus.js';
 import { heartmulaPrepareStatus } from '../services/training/heartmulaPrepare.js';
 import { missingEncoderMessage, resolveHeartmulaPreviewSettings } from '../services/training/heartmulaTrain.js';
+import { ensureHeartmulaRunPreview } from '../services/training/heartmulaPreviewSource.js';
 import {
   heartmulaCheckpointSteps, heartmulaRunById, HEARTMULA_RUN_ID, listHeartmulaRuns, resolveHeartmulaRun,
 } from '../services/training/heartmulaRuns.js';
@@ -6141,21 +6142,27 @@ function heartmulaRunPreviewSettings(r: HeartmulaPreviewRun): ReturnType<typeof 
   try { return resolveHeartmulaPreviewSettings(r.record.preview, HEARTMULA_PREVIEW_DEFAULTS); } catch { return HEARTMULA_PREVIEW_DEFAULTS; }
 }
 
-function heartmulaPreviewList(ds: TrainingDatasetRow, r: HeartmulaPreviewRun | null): HeartmulaPreviewListResponse {
-  if (!r) return { run: null, settings: HEARTMULA_PREVIEW_DEFAULTS, previews: [] };
-  return { run: r.id, settings: heartmulaRunPreviewSettings(r),
+/** The run's settings with the prompt resolved from the dataset (saved on the run the first time), or the unresolved ones when that fails. */
+async function heartmulaResolvedPreview(ds: TrainingDatasetRow, r: HeartmulaPreviewRun) {
+  try { return await ensureHeartmulaRunPreview(ds, r); }
+  catch { return { settings: heartmulaRunPreviewSettings(r), source: null }; }
+}
+
+function heartmulaPreviewList(ds: TrainingDatasetRow, r: HeartmulaPreviewRun | null, resolved?: Awaited<ReturnType<typeof heartmulaResolvedPreview>>): HeartmulaPreviewListResponse {
+  if (!r) return { run: null, settings: HEARTMULA_PREVIEW_DEFAULTS, source: null, previews: [] };
+  return { run: r.id, settings: resolved?.settings ?? heartmulaRunPreviewSettings(r), source: resolved?.source ?? null,
     previews: listHeartmulaPreviewRecords(r.dir).map(({ file, id: _id, ...p }) => ({ ...p,
       audioUrl: p.status === 'done' && file && heartmulaPreviewAudioPath(r.dir, file)
         ? `/api/training/datasets/${encodeURIComponent(ds.id)}/heartmula-previews/audio?run=${encodeURIComponent(r.id)}&file=${encodeURIComponent(file)}`
         : null })) };
 }
 
-router.get('/datasets/:id/heartmula-previews', (req: Request, res: Response) => {
+router.get('/datasets/:id/heartmula-previews', async (req: Request, res: Response) => {
   const ds = repo.getDataset(String(req.params.id));
   if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
   try {
     const r = heartmulaPreviewRun(ds, req.query.run, res);
-    if (r !== undefined) res.json(heartmulaPreviewList(ds, r));
+    if (r !== undefined) res.json(heartmulaPreviewList(ds, r, r ? await heartmulaResolvedPreview(ds, r) : undefined));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6173,17 +6180,23 @@ router.post('/datasets/:id/heartmula-previews/render', async (req: Request, res:
     if (!Number.isSafeInteger(step) || (step !== 0 && !heartmulaCheckpointSteps(r.dir).includes(step))) {
       res.status(400).json({ error: 'That run has no saved checkpoint at that step' }); return;
     }
-    let settings;
-    try { settings = resolveHeartmulaPreviewSettings(b.settings, heartmulaRunPreviewSettings(r)); }
-    catch (err: any) { res.status(400).json({ error: err.message }); return; }
+    let settings, source;
+    try {
+      const run = await ensureHeartmulaRunPreview(ds, r);
+      settings = resolveHeartmulaPreviewSettings(b.settings, run.settings);
+      // A take's own tags or lyrics replace the run's, and say so.
+      const given = (b.settings && typeof b.settings === 'object' ? b.settings : {}) as Record<string, unknown>;
+      source = { ...run.source, ...(typeof given.tags === 'string' && given.tags.trim() ? { tags: 'override' as const } : {}),
+        ...(typeof given.lyrics === 'string' && given.lyrics.trim() ? { lyrics: 'override' as const } : {}) };
+    } catch (err: any) { res.status(400).json({ error: err.message }); return; }
     if (hasActivePipeline()) { res.status(409).json({ error: 'A pipeline is queued or running; previews wait until it ends.' }); return; }
     if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }
     // One GPU owner for every dataset: refused while any trainer is queued or running, or another preview holds the GPU.
     if (!queue.reserveGpuForPreview()) { res.status(409).json({ error: 'The GPU is busy with a training job or another preview; previews wait until it ends.' }); return; }
     await queue.runReservedPreview(() => runOnGpuLane(async () => {
-      await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings });
+      await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings, source });
     }, { label: 'heartmula checkpoint preview', family: 'heartmula' }));
-    res.json(heartmulaPreviewList(ds, r));
+    res.json(heartmulaPreviewList(ds, r, await heartmulaResolvedPreview(ds, r)));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

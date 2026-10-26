@@ -250,17 +250,21 @@ export interface ResolvedYue2JointTrainOptions {
  *  with no Lyric Studio set or no generations keeps its own lyrics. */
 function withGeneratedPreviewLyrics<T extends { lyrics?: string; lyricsSource?: 'dataset' }>(job: TrainingJob, preview: T | undefined): T | undefined {
   if (!preview || preview.lyrics || preview.lyricsSource === 'dataset') return preview;
-  const ds = getDataset(job.datasetId);
-  // A dataset pushed to a training worker has no Lyric Studio set here; the
-  // controlling machine resolved its generation and sent it alongside.
-  const row = ds?.lyricsSetId ? latestGenerationLyrics(ds.lyricsSetId) : readPushedPreviewLyrics(ds?.sourceDir);
+  const row = datasetGenerationLyrics(getDataset(job.datasetId));
   if (!row) return preview;
   log(job, 'info', `Preview lyrics: Lyric Studio generation #${row.id}${row.title ? ` "${row.title}"` : ''} (caption from the dataset)`);
   return { ...preview, lyrics: row.lyrics };
 }
 
+/** The newest Lyric Studio generation for a dataset's artist. A dataset pushed to a training worker has no
+ *  Lyric Studio set here; the controlling machine resolved its generation and sent it alongside. HeartMuLa's
+ *  checkpoint previews use the same lookup. */
+export function datasetGenerationLyrics(ds: { lyricsSetId?: number; sourceDir?: string } | null | undefined): GenerationLyrics | undefined {
+  return ds?.lyricsSetId ? latestGenerationLyrics(ds.lyricsSetId) : readPushedPreviewLyrics(ds?.sourceDir);
+}
+
 export const PUSHED_PREVIEW_LYRICS = '_hotstep-preview-lyrics.json';
-type GenerationLyrics = { id: number; title: string; lyrics: string };
+export type GenerationLyrics = { id: number; title: string; lyrics: string };
 
 /** The newest Lyric Studio generation with lyrics for a lyrics set. */
 export function latestGenerationLyrics(setId: number): GenerationLyrics | undefined {

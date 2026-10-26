@@ -28,10 +28,11 @@ import {
   appendLoss, blankStatus, heartmulaAdapterFile, heartmulaCheckpointSteps, heartmulaPrepareDir, publishHeartmulaAdapter,
   readStoredStatus, saveHeartmulaRunRecord, writeStoredStatus, type HeartmulaRunRecord,
 } from './heartmulaRuns.js';
+import { ensureHeartmulaRunPreview } from './heartmulaPreviewSource.js';
 import {
   heartmulaPreviewDone, heartmulaPreviewKind, renderHeartmulaPreview, setHeartmulaPreviewPauseMs,
 } from './heartmulaPreview.js';
-import { HEARTMULA_PREVIEW_DEFAULTS, type HeartmulaPreviewSettings } from '../../contracts/heartmulaTraining.js';
+import { HEARTMULA_PREVIEW_DEFAULTS, type HeartmulaPreviewSettings, type HeartmulaPreviewSource } from '../../contracts/heartmulaTraining.js';
 import type { HeartmulaRecipe, HeartmulaRunState } from '../../contracts/heartmulaTraining.js';
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import {
@@ -231,7 +232,8 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as HeartmulaTrainJobOpts | undefined;
   if (!opts?.runDir || !opts.record) { finishJob(job, 'failed', 'heartmula-train job is missing its run'); return; }
   const recipe: HeartmulaRecipe = opts.record.recipe;
-  const preview = previewOf(opts.record);
+  let preview = previewOf(opts.record);
+  let previewSource: HeartmulaPreviewSource | undefined;
   const state = (s: HeartmulaRunState, extra: Partial<ReturnType<typeof blankStatus>> = {}) => setStatus(opts, { state: s, ...extra });
   const st: HmState = {
     fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: recipe.steps, started: false,
@@ -250,9 +252,9 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
   const takePreview = async (step: number): Promise<string> => {
     const kind = heartmulaPreviewKind(step, recipe.steps);
     state('previewing'); job.phase = 'preview'; emitProgress(job);
-    log(job, 'info', `Rendering the ${kind === 'base' ? 'base model' : kind === 'final' ? 'final adapter' : `step ${step}`} preview (${preview.seconds} s).`);
+    log(job, 'info', `Rendering the ${kind === 'base' ? 'base model' : kind === 'final' ? 'final adapter' : `step ${step}`} preview (up to ${preview.seconds} s).`);
     const take = await renderHeartmulaPreview({
-      runDir: opts.runDir, runId: opts.runId, step, kind, settings: preview, signal: job.controller.signal,
+      runDir: opts.runDir, runId: opts.runId, step, kind, settings: preview, source: previewSource, signal: job.controller.signal,
     });
     if (take.status === 'done') log(job, 'info', `Preview rendered in ${((take.renderMs ?? 0) / 1000).toFixed(1)} s.`);
     else if (take.status === 'failed') log(job, 'warn', `Preview at step ${step} failed; training goes on: ${take.error}`);
@@ -266,9 +268,17 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
     if (!fs.existsSync(path.join(dataDir, HEARTMULA_PREPARE_MANIFEST))) {
       throw new Error('The HeartMuLa prepare cache is gone — run Prepare again');
     }
+    const ds = getDataset(job.datasetId);
+    if (preview.everySteps > 0 && ds) {
+      // Resolved once and saved to the run, so every take (and a resume) sings the same words.
+      ({ settings: preview, source: previewSource } = await ensureHeartmulaRunPreview(ds, { dir: opts.runDir, record: opts.record }));
+      const s = previewSource;
+      log(job, 'info', `Preview prompt: tags from ${s.tags === 'override' ? 'the override' : `"${s.sampleName}"`}; lyrics from `
+        + `${s.lyrics === 'override' ? 'the override' : s.lyrics === 'lyric-studio' ? `Lyric Studio generation #${s.generationId}` : `"${s.sampleName}"`}.`);
+    }
     state('queued');
     log(job, 'info', `${opts.resume ? 'Resuming' : 'Starting'}: ${recipe.steps} steps at rank ${recipe.rank}/alpha ${recipe.alpha}`
-      + `${preview.everySteps > 0 ? `, a ${preview.seconds} s preview every ${preview.everySteps} steps` : ', no checkpoint previews'}.`);
+      + `${preview.everySteps > 0 ? `, a full-song preview (up to ${preview.seconds} s) every ${preview.everySteps} steps` : ', no checkpoint previews'}.`);
 
     let resume = opts.resume;
     for (;;) {

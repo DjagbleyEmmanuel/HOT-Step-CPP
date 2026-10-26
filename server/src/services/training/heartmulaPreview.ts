@@ -9,8 +9,9 @@
 // together because the runner (heartmulaRunner) only calls this between
 // trainer segments, with the engine back up.
 //
-// Every take uses the run's fixed fixture (tags, lyrics, seed, sampler), so
-// base, step and final takes differ only by their weights.
+// Every take uses the run's resolved prompt (tags, lyrics, seed, sampler; the
+// source is heartmulaPreviewSource), so base, step and final takes differ only
+// by their weights.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +20,7 @@ import { aceClient } from '../aceClient.js';
 import { heartmulaClient, type HeartmulaRequest } from '../backends/heartmula/client.js';
 import { heartmulaPick, heartmulaSelection } from '../backends/heartmula/models.js';
 import type {
-  HeartmulaPreviewKind, HeartmulaPreviewRecord, HeartmulaPreviewSettings, HeartmulaRunId,
+  HeartmulaPreviewKind, HeartmulaPreviewRecord, HeartmulaPreviewSettings, HeartmulaPreviewSource, HeartmulaRunId,
 } from '../../contracts/heartmulaTraining.js';
 import { heartmulaAdapterFile, isGgufAdapter } from './heartmulaRuns.js';
 
@@ -155,6 +156,8 @@ export interface HeartmulaPreviewInput {
   step: number;
   kind: HeartmulaPreviewKind;
   settings: HeartmulaPreviewSettings;
+  /** Where `settings` tags and lyrics came from; kept on the record. */
+  source?: HeartmulaPreviewSource;
   signal?: AbortSignal;
   deps?: Partial<HeartmulaPreviewDeps>;
 }
@@ -171,7 +174,7 @@ export async function renderHeartmulaPreview(input: HeartmulaPreviewInput): Prom
   const started = Date.now();
   const adapterFile = input.kind === 'base' ? null : heartmulaAdapterFile(input.runDir, input.step);
   let record: HeartmulaStoredPreview = {
-    id: randomUUID(), run: input.runId, kind: input.kind, step: input.step, settings: input.settings, status: 'rendering',
+    id: randomUUID(), run: input.runId, kind: input.kind, step: input.step, settings: input.settings, ...(input.source ? { source: input.source } : {}), status: 'rendering',
     adapter: adapterFile ? path.relative(input.runDir, adapterFile).split(path.sep).join('/') : null, adapterSha256: null,
     renderMs: null, pauseMs: null, error: null, createdAt: started,
   };
