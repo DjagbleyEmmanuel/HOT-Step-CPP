@@ -329,16 +329,36 @@ static uint64_t hmt_mix(uint64_t seed, uint64_t a, uint64_t b) {
     return z ^ (z >> 31);
 }
 
-// One micro-step of an optimizer step: which sample, which window.
+// One micro-step of an optimizer step: which sample, which window, and whether an
+// end-of-song frame follows it.
 struct HmtPick {
     int     sample = 0;
     int64_t w0 = 0, T = 0;
+    bool    eos = false;
 };
+
+// Song structure in training (--eos, --crop-frames):
+//
+// EOS. Inference ends a song at the first frame holding a code >= 8193 (pipeline.h).
+// A window that reaches the real end of its song gets one more frame of 8193 in all
+// eight codebooks, so the last real frame becomes an input that predicts the end. The
+// labels are 8197 wide already, so nothing else changes.
+//
+// Crop. The model is causal: the loss on frames [0, N) of a song is the same whether
+// the rest of the song follows or not. A window anchored at the start is therefore the
+// full sequence with its tail's loss left out, and teaches nothing false. A window from
+// the middle would teach that songs start mid-song, since the model can only know where
+// it is from what came before. So crop windows start at frame 0, and one sample in
+// HMT_FULL_EVERY trains the whole song (with its EOS frame), so later sections and
+// endings are still learned. --max-frames keeps the older random windows (selftest).
+#define HMT_FULL_EVERY 4
+#define HMT_EOS_CODE   8193
 
 // Optimizer step `step` (0-based). Epochs are a seeded shuffle; an epoch has
 // ceil(N / accum) steps and its last one may be short (contract §1: each
 // micro-loss is divided by the micro-steps actually in the step).
-static std::vector<HmtPick> hmt_schedule(const HmtData & d, int accum, int64_t max_frames, uint64_t seed, int64_t step) {
+static std::vector<HmtPick> hmt_schedule(const HmtData & d, int accum, int64_t max_frames, uint64_t seed, int64_t step,
+                                         int64_t crop_frames = 0, bool eos = false, int64_t ctx_limit = 8192) {
     const int64_t N = (int64_t) d.samples.size(), per = (N + accum - 1) / accum;
     const int64_t epoch = step / per, j = step % per;
     std::vector<int> order((size_t) N);
@@ -350,8 +370,16 @@ static std::vector<HmtPick> hmt_schedule(const HmtData & d, int accum, int64_t m
         HmtPick p;
         p.sample = order[(size_t) k];
         const int64_t F = d.samples[(size_t) p.sample].frames;
-        p.T  = max_frames > 0 ? std::min(F, max_frames) : F;
-        p.w0 = F > p.T ? (int64_t) (hmt_mix(seed, (uint64_t) step, (uint64_t) (k + 2)) % (uint64_t) (F - p.T + 1)) : 0;
+        if (crop_frames > 0) {
+            const bool full = F <= crop_frames || hmt_mix(seed, (uint64_t) step, (uint64_t) (k + 2)) % HMT_FULL_EVERY == 0;
+            p.T  = full ? F : crop_frames;
+            p.w0 = 0;
+        } else {
+            p.T  = max_frames > 0 ? std::min(F, max_frames) : F;
+            p.w0 = F > p.T ? (int64_t) (hmt_mix(seed, (uint64_t) step, (uint64_t) (k + 2)) % (uint64_t) (F - p.T + 1)) : 0;
+        }
+        // The end frame needs one more position: S + (T + 1) - 1 within the context.
+        p.eos = eos && p.w0 + p.T == F && (int64_t) d.samples[(size_t) p.sample].prompt.size() + p.T <= ctx_limit;
         out.push_back(p);
     }
     return out;
@@ -366,6 +394,8 @@ struct HmtIdentity {
     uint64_t seed = 0, data = 0;
     int64_t  max_frames = 0;
     int32_t  mlp = 0;  // --lora-mlp
+    int32_t  eos = 0;  // --eos
+    int64_t  crop_frames = 0;  // --crop-frames
     std::string base_fingerprint;
     std::string weights;  // hmt_weights_id of the global and local GGUFs actually loaded
 };
@@ -405,6 +435,8 @@ static uint64_t hmt_identity_hash(const HmtIdentity & id) {
     h = hmt_fnv(h, &id.max_frames, sizeof(id.max_frames));
     if (id.dropout != 0.0f) h = hmt_fnv(h, &id.dropout, sizeof(id.dropout));  // p = 0 keeps older states resumable
     if (id.mlp) h = hmt_fnv(h, "mlp", 3);  // attention-only keeps older states resumable
+    if (id.eos) h = hmt_fnv(h, "eos", 3);  // off keeps older states resumable
+    if (id.crop_frames) h = hmt_fnv(h, &id.crop_frames, sizeof(id.crop_frames));
     h = hmt_fnv(h, id.weights.data(), id.weights.size());
     return hmt_fnv(h, id.base_fingerprint.data(), id.base_fingerprint.size());
 }

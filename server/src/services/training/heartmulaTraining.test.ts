@@ -31,6 +31,8 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: -0.1 }), /loraDropout/);
   assert.equal(HEARTMULA_RECIPE_DEFAULTS.trainMlp, true);
   assert.equal(HEARTMULA_RECIPE_DEFAULTS.cropSeconds, 0);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.eos, true);
+  assert.throws(() => train.resolveHeartmulaRecipe({ eos: 'yes' }), /eos/);
   assert.equal(train.resolveHeartmulaRecipe({ cropSeconds: 120 }).cropSeconds, 120);
   for (const bad of [5, 601, -1, 'x']) assert.throws(() => train.resolveHeartmulaRecipe({ cropSeconds: bad }), /cropSeconds/);
   assert.equal(train.resolveHeartmulaRecipe({ trainMlp: true }).trainMlp, true);
@@ -65,7 +67,7 @@ test('preview settings: defaults, overrides, and every bad value refused', () =>
 });
 
 test('argv matches the trainer CLI contract', () => {
-  const plain = { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: false };
+  const plain = { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: false, eos: false };
   assert.ok(train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false })
     .includes('--lora-mlp'), 'MLP layers train by default');
   const args = train.buildHeartmulaTrainArgs({
@@ -77,7 +79,12 @@ test('argv matches the trainer CLI contract', () => {
   const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...plain, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
   assert.ok(seg.join(' ').includes('--lora-dropout 0.05 --name a --stop-after 100'));
   const crop = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...plain, cropSeconds: 120 }, name: 'a', resume: false });
-  assert.ok(crop.join(' ').includes('--max-frames 1500'), '120 s at 12.5 frames per second');
+  assert.ok(crop.join(' ').includes('--max-frames 1500'), 'a run from before the end frame keeps its random windows');
+  const modern = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, cropSeconds: 120 }, name: 'a', resume: false }).join(' ');
+  assert.ok(modern.includes('--crop-frames 1500 --eos'), 'new runs: start-anchored crops (120 s at 12.5 frames per second) and the end frame');
+  assert.ok(!modern.includes('--max-frames'));
+  assert.ok(train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false })
+    .includes('--eos'), 'the end-of-song frame trains by default');
   assert.ok(!args.includes('--max-frames'), 'no crop, no flag');
   const mlp = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: true }, name: 'a', resume: false });
   assert.ok(mlp.join(' ').includes('--lora-dropout 0 --lora-mlp --name a'));
@@ -124,10 +131,11 @@ test('runs: new run, resume rules, foreign dataset refused', () => {
   // A run saved before trainMlp and cropSeconds existed trained attention-only on whole songs.
   const recordFile = path.join(first.dir, 'run.json');
   const legacy = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
-  delete legacy.recipe.trainMlp; delete legacy.recipe.cropSeconds;
+  delete legacy.recipe.trainMlp; delete legacy.recipe.cropSeconds; delete legacy.recipe.eos;
   fs.writeFileSync(recordFile, JSON.stringify(legacy));
   assert.equal(runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { trainMlp: false, cropSeconds: 0 } }).resume, true);
   assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { trainMlp: true } }), /cannot change trainMlp/);
+  assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { eos: true } }), /cannot change eos/);
   assert.equal(again.dir, first.dir);
   assert.throws(() => runs.resolveHeartmulaRun({ id: 'other', slug: 'demo' }, { resumeRun: first.id }), /another dataset/);
   assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: '../../x/1' }), /Invalid/);

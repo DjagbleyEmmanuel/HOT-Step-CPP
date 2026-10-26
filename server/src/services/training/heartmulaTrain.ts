@@ -152,6 +152,10 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
     if (!Number.isFinite(n) || n !== 0 && (n < 10 || n > 600)) throw new Error('cropSeconds must be 0 (off) or 10 to 600 seconds');
     r.cropSeconds = n;
   }
+  if (src.eos !== undefined) {
+    if (typeof src.eos !== 'boolean') throw new Error('eos must be a boolean');
+    r.eos = src.eos;
+  }
   if (src.trainMlp !== undefined) {
     if (typeof src.trainMlp !== 'boolean') throw new Error('trainMlp must be a boolean');
     r.trainMlp = src.trainMlp;
@@ -225,8 +229,10 @@ export function buildHeartmulaTrainArgs(o: {
     '--variant', r.variant ?? '3B', '--type', r.quant ?? 'F16',
     '--steps', String(r.steps), '--rank', String(r.rank), '--alpha', String(r.alpha), '--lr', String(r.learningRate),
     '--grad-accum', String(r.gradAccum), '--seed', String(r.seed), '--save-every', String(r.checkpointEvery),
-    // 12.5 codec frames per second; the trainer cuts a seeded window per step from longer songs.
-    ...(r.cropSeconds ? ['--max-frames', String(Math.round(r.cropSeconds * 12.5))] : []),
+    // 12.5 codec frames per second. Runs from before the end-of-song frame keep the random
+    // windows they were trained with; newer ones crop from each song's start (heartmula-train-state.h).
+    ...(r.cropSeconds ? [r.eos ? '--crop-frames' : '--max-frames', String(Math.round(r.cropSeconds * 12.5))] : []),
+    ...(r.eos ? ['--eos'] : []),
     // auto picks the fastest attention the card has and keeps as many blocks un-recomputed as the free VRAM allows,
     // so the same run fits a small card and is quick on a big one. Losses are identical in every mode.
     '--attn', 'auto', '--keep-layers', 'auto', '--lora-dropout', String(r.loraDropout ?? 0),

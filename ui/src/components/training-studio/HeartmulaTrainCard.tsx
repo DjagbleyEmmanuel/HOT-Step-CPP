@@ -30,7 +30,7 @@ export interface HeartmulaTrainCardProps {
 
 const BUTTON = 'px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2';
 const INPUT = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
-type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp' | 'variant' | 'quant' | 'cropSeconds'>;
+type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp' | 'variant' | 'quant' | 'cropSeconds' | 'eos'>;
 const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: number; max: number; step: number }> = [
   { key: 'steps', label: 'Updates', info: 'Number of optimizer updates. More steps take longer and can overfit the dataset.', min: 1, max: 1_000_000, step: 1 },
   { key: 'rank', label: 'Rank', info: 'Adapter capacity. Higher ranks use more memory. The starting recipe uses rank 64.', min: 1, max: 256, step: 1 },
@@ -125,7 +125,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   // Saving presets never touches a run, so it stays open while one trains. During a run it saves
   // what that run is training with, which survives a page reload where the form does not.
   const liveRecipe = busy && status.run ? status.runs.find(item => item.run === status.run?.run)?.recipe : undefined;
-  const presetRecipe: HeartmulaRecipe = liveRecipe ? { ...status.defaults, ...({ trainMlp: false, cropSeconds: 0 } as Partial<HeartmulaRecipe>), ...liveRecipe } : recipe;
+  const presetRecipe: HeartmulaRecipe = liveRecipe ? { ...status.defaults, ...({ trainMlp: false, cropSeconds: 0, eos: false } as Partial<HeartmulaRecipe>), ...liveRecipe } : recipe;
   const savePreset = () => {
     if (!presetName.trim() || !validRecipe(presetRecipe)) return;
     persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...presetRecipe } }].slice(-32));
@@ -251,11 +251,11 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
       <Toggle className="mt-3" accent="amber" disabled={locked} checked={(recipe.cropSeconds ?? 0) > 0}
         onChange={value => setEdits(previous => ({ ...previous, cropSeconds: value ? cropDraft : 0 }))}
         label={t('trainingStudio.heartmula.field.crop', 'Crop songs')}
-        info={t('trainingStudio.heartmula.field.cropInfo', 'Trains on a window of each song instead of the whole track, a different window every step, so the run still covers every part of a song. Steps are faster and use less memory; long songs benefit most. Songs shorter than the window train whole.')} />
+        info={t('trainingStudio.heartmula.field.cropInfo', 'Trains on the opening stretch of each song instead of the whole track, so starts stay right, and trains every fourth song whole so later sections and endings are still learned. Steps are faster on long songs; peak memory still follows the longest song, because whole songs are still trained. Songs shorter than the window always train whole.')} />
       {(recipe.cropSeconds ?? 0) > 0 && (
         <div className="mt-2 max-w-[16rem]">
           <PreviewField label={t('trainingStudio.heartmula.field.cropSeconds', 'Window (seconds)')}
-            info={t('trainingStudio.heartmula.field.cropSecondsInfo', 'Longest stretch of a song trained on per step, 10 to 600 seconds. 120 is a good start.')}>
+            info={t('trainingStudio.heartmula.field.cropSecondsInfo', 'How much of the start of each song a cropped step trains on, 10 to 600 seconds. 120 is a good start.')}>
             <input className={INPUT} type="number" min={10} max={600} step={1} disabled={locked}
               value={recipe.cropSeconds ?? cropDraft}
               onChange={event => {

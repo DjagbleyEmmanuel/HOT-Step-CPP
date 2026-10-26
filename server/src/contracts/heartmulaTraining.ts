@@ -47,9 +47,13 @@ export interface HeartmulaRecipe {
   loraDropout: number;
   /** Also LoRA the backbone MLP (w1/w2/w3), not only attention. Bigger adapter, more VRAM; unlocks the MLP dial. */
   trainMlp: boolean;
-  /** Train on a window of at most this many seconds of each song, a fresh seeded window
-   *  every step; 0 = whole songs. Shorter windows train faster and use less memory. */
+  /** Train on the first this-many seconds of each song (start-anchored, so starts stay right),
+   *  with every 4th sample trained whole so endings are learned too; 0 = whole songs. Faster steps;
+   *  peak memory still follows the longest song. */
   cropSeconds: number;
+  /** Train the end-of-song frame after every song's last frame, so the adapter learns to end.
+   *  Always on for new runs; false only on runs saved before it existed. */
+  eos: boolean;
   /** The base model trained on: its variant (as the GGUF names it) and the quant of its global+local pair. */
   variant: string;
   quant: string;
@@ -64,7 +68,7 @@ export interface HeartmulaTrainBase {
 /** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
 /** What a run saved before a recipe key existed actually trained with, where that is not
  *  today's default (resume checks and trainer arguments read a missing key as this). */
-export const HEARTMULA_RECIPE_LEGACY: Partial<HeartmulaRecipe> = { trainMlp: false, cropSeconds: 0 };
+export const HEARTMULA_RECIPE_LEGACY: Partial<HeartmulaRecipe> = { trainMlp: false, cropSeconds: 0, eos: false };
 
 export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   rank: 64,
@@ -77,6 +81,7 @@ export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   loraDropout: 0,
   trainMlp: true,
   cropSeconds: 0,
+  eos: true,
   variant: '3B',
   quant: 'F16',
 };

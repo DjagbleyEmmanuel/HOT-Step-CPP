@@ -67,8 +67,15 @@ For one sample with prompt length S and T audio frames, codes `c[t][k]`
    Every frame, every codebook, no sampling, no masking, no label smoothing.
    Logits are 8197 wide; codes never reach the special ids above 8191.
 
-No audio EOS frame is appended. Training clips are windows cut from longer
-songs, so their last frame is not the end of a song.
+By default no audio EOS frame is appended: the reference fixtures are windows cut
+from longer songs, so their last frame is not the end of a song. With `--eos`, a
+window that reaches its song's real end gets one more frame of 8193 in all eight
+codebooks, the frame the base model itself samples when it ends a song (logged as
+`end of song at frame N` by the engine). The labels are 8197 wide, so only the data
+changes. `--crop-frames N` trains frames [0, N) of longer songs (the loss on a prefix
+of a causal model equals that prefix's loss inside the whole song) and every fourth
+sample whole, with its EOS frame. `--max-frames` keeps random windows for the
+selftest.
 
 ### Prompt
 

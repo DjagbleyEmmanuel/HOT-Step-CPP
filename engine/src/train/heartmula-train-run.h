@@ -17,6 +17,8 @@
 //       [--attn auto|flash-bf16|flash|exact] [--keep-layers auto|-1|0..28]
 //       [--lora-mlp]   also train the backbone MLP (w1/w2/w3), not only attention
 //       [--trigger <word>]  the word the tags lead with, stored as heartmula.lora.trigger
+//       [--eos]        train the end-of-song frame after every window that reaches a song's end
+//       [--crop-frames N]  start-anchored windows of N frames, every 4th sample whole (state.h)
 //
 // Files under --out:
 //   hm_train_state.bin          the resumable checkpoint (latest only)
@@ -74,6 +76,8 @@ struct HeartmulaTrainArgs {
     bool     resume = false;
     bool     mlp    = false;       // --lora-mlp
     std::string trigger;           // --trigger: written to the adapter, not part of the run identity
+    bool     eos = false;          // --eos
+    int64_t  crop_frames = 0;      // --crop-frames
 };
 
 static std::string hmt_json_str(const std::string & s) {
@@ -527,7 +531,8 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     int64_t Smax = 0, Tmax = 0;
     for (const auto & s : data.samples) {
         Smax = std::max<int64_t>(Smax, (int64_t) s.prompt.size());
-        Tmax = std::max<int64_t>(Tmax, a.max_frames > 0 ? std::min(s.frames, a.max_frames) : s.frames);
+        // Crop windows still train some songs whole, so they do not lower the ceiling; EOS adds a frame.
+        Tmax = std::max<int64_t>(Tmax, (a.max_frames > 0 && a.crop_frames <= 0 ? std::min(s.frames, a.max_frames) : s.frames) + (a.eos ? 1 : 0));
     }
     if (!hmt_admit(R, Smax, Tmax, a.local_chunk, a.attn, a.keep, &err)) { hmt_run_free(&R); return fail(err); }
 
@@ -536,6 +541,8 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     id.alpha = a.alpha, id.lr = a.lr, id.wd = a.wd, id.beta1 = a.beta1, id.beta2 = a.beta2, id.eps = a.eps, id.clip = a.clip;
     id.dropout = a.dropout;
     id.mlp = a.mlp;
+    id.eos = a.eos;
+    id.crop_frames = a.crop_frames;
     id.seed = a.seed, id.data = data.fingerprint, id.max_frames = a.max_frames, id.base_fingerprint = R.m.base_fingerprint;
     id.weights = hmt_weights_id(a.global_path) + "|" + hmt_weights_id(a.local_path);
     const uint64_t ident = hmt_identity_hash(id);
@@ -557,6 +564,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                  ",\"rank\":" + std::to_string(a.rank) + ",\"alpha\":" + hmt_num(a.alpha) + ",\"lr\":" + hmt_num(a.lr) +
                  ",\"grad_accum\":" + std::to_string(a.accum) + ",\"smax\":" + std::to_string((long long) Smax) +
                  ",\"tmax\":" + std::to_string((long long) Tmax) + ",\"local_chunk\":" + std::to_string((long long) R.chunk) + ",\"keep_layers\":" + std::to_string(R.keep) + ",\"lora_dropout\":" + hmt_num(a.dropout) + ",\"lora_mlp\":" + (a.mlp ? "true" : "false") +
+                 ",\"eos\":" + (a.eos ? "true" : "false") + ",\"crop_frames\":" + std::to_string((long long) a.crop_frames) +
                  ",\"params\":" + std::to_string((long long) hmt_lora_param_count(R.lora)) +
                  ",\"alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_free_mib\":" + hmt_num(mem.free / 1048576.0) +
                  ",\"weights\":" + hmt_json_str(a.weights) + ",\"attention\":\"" + hmt_attn_name(R.g.attn) + "\",\"bwd\":\"mm\",\"global\":" +
@@ -584,7 +592,8 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
     auto      mem_at = std::chrono::steady_clock::now();
     while (cnt.steps_done < a.steps) {
         const auto t0 = std::chrono::steady_clock::now();
-        const std::vector<HmtPick> picks = hmt_schedule(data, a.accum, a.max_frames, a.seed, cnt.steps_done);
+        const std::vector<HmtPick> picks = hmt_schedule(data, a.accum, a.max_frames, a.seed, cnt.steps_done, a.crop_frames, a.eos,
+                                                        heartmula_global_config().n_ctx);
         const float wce = 1.0f / (8.0f * (float) picks.size());
         double ce_sum[8] = {}, loss = 0.0;
         bool   finite = true;
@@ -599,8 +608,9 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
             }
             const HmtSample & s = data.samples[(size_t) p.sample];
             double ce[8];
-            if (!hmt_read_codes(s, p.w0, p.T, &codes, &err) ||
-                !hmt_micro_step(R, s.prompt.data(), (int64_t) s.prompt.size(), s.muq_idx, codes.data(), p.T, wce, ce, &err)) {
+            if (!hmt_read_codes(s, p.w0, p.T, &codes, &err)) { hmt_run_free(&R); return fail(err); }
+            if (p.eos) codes.insert(codes.end(), 8, HMT_EOS_CODE);
+            if (!hmt_micro_step(R, s.prompt.data(), (int64_t) s.prompt.size(), s.muq_idx, codes.data(), p.T + (p.eos ? 1 : 0), wce, ce, &err)) {
                 hmt_run_free(&R);
                 return fail(err);
             }
@@ -978,7 +988,7 @@ run_fail:
 
 static int heartmula_train_run(const HeartmulaTrainArgs & a) {
     if (a.rank < 1 || a.accum < 1 || a.steps < 1 || !(a.lr > 0) || !(a.alpha > 0) || a.wd < 0 || a.clip < 0 ||
-        a.keep < -2 || a.keep > 28 || !(a.dropout >= 0.0f && a.dropout < 1.0f) || (a.attn != "auto" && a.attn != "exact" && a.attn != "flash" && a.attn != "flash-bf16") || (a.weights != "bf16" && a.weights != "f16")) {
+        a.keep < -2 || a.keep > 28 || a.crop_frames < 0 || !(a.dropout >= 0.0f && a.dropout < 1.0f) || (a.attn != "auto" && a.attn != "exact" && a.attn != "flash" && a.attn != "flash-bf16") || (a.weights != "bf16" && a.weights != "f16")) {
         fprintf(stderr, "heartmula-train: invalid settings (rank, grad-accum, steps >= 1; lr, alpha > 0; --weights bf16|f16; "
                         "--attn auto|flash-bf16|flash|exact; --keep-layers auto|-1..28; 0 <= --lora-dropout < 1)\n");
         return 2;

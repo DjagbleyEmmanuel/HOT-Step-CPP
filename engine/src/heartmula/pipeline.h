@@ -965,6 +965,10 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
                 return finish("vram_alloc_failed", err);
             }
             if (*std::max_element(codes, codes + HEARTMULA_CODEBOOKS) >= HEARTMULA_AUDIO_EOS) {
+                // The frame that ended the song, as sampled: which codebooks carried the end token.
+                fprintf(stderr, "[HeartMuLa] end of song at frame %lld: codes %d %d %d %d %d %d %d %d\n",
+                        (long long) (res->codes.size() / HEARTMULA_CODEBOOKS), codes[0], codes[1], codes[2], codes[3],
+                        codes[4], codes[5], codes[6], codes[7]);
                 res->end_reason = "completed";
                 break;
             }
