@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import {
-  HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS, type HeartmulaPreviewSettings, type HeartmulaRecipe,
+  HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS, heartmulaDefaultSteps, type HeartmulaPreviewSettings, type HeartmulaRecipe,
   type HeartmulaTrainBase,
 } from '../../contracts/heartmulaTraining.js';
 
@@ -120,7 +120,7 @@ function int(v: unknown, key: string, min: number, max: number): number {
 }
 
 /** Defaults under any given keys; unknown keys and out-of-range values throw. */
-export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefined): HeartmulaRecipe {
+export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefined, preparedSamples = 0): HeartmulaRecipe {
   const src = input ?? {};
   for (const key of Object.keys(src)) {
     if (!(HEARTMULA_RECIPE_KEYS as string[]).includes(key)) throw new Error(`Unsupported HeartMuLa recipe key: ${key}`);
@@ -160,7 +160,15 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
     if (typeof src.trainMlp !== 'boolean') throw new Error('trainMlp must be a boolean');
     r.trainMlp = src.trainMlp;
   }
+  if (src.steps === undefined) r.steps = heartmulaDefaultSteps(preparedSamples, r.gradAccum);
   return r;
+}
+
+/** Validate now, but defer an omitted update budget until each dataset is prepared. */
+export function resolveHeartmulaBatchRecipe(input: Record<string, unknown> | undefined): Partial<HeartmulaRecipe> {
+  const recipe: Partial<HeartmulaRecipe> = resolveHeartmulaRecipe(input);
+  if (input?.steps === undefined) delete recipe.steps;
+  return recipe;
 }
 
 const PREVIEW_KEYS = [...Object.keys(HEARTMULA_PREVIEW_DEFAULTS), 'lyricsSource'];

@@ -113,7 +113,7 @@ import {
 import { getTrainingDefaults, setTrainingDefaults } from '../services/training/trainingDefaults.js';
 import { heartmulaReadiness, heartmulaStatus } from '../services/training/heartmulaStatus.js';
 import { heartmulaPrepareStatus } from '../services/training/heartmulaPrepare.js';
-import { missingEncoderMessage, resolveHeartmulaPreviewSettings, resolveHeartmulaRecipe } from '../services/training/heartmulaTrain.js';
+import { missingEncoderMessage, resolveHeartmulaPreviewSettings, resolveHeartmulaBatchRecipe } from '../services/training/heartmulaTrain.js';
 import { ensureHeartmulaRunPreview } from '../services/training/heartmulaPreviewSource.js';
 import {
   heartmulaCheckpointSteps, heartmulaRunById, HEARTMULA_RUN_ID, listHeartmulaRuns, resolveHeartmulaRun,
@@ -800,7 +800,7 @@ router.post('/heartmula-batch', (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid HeartMuLa training request; resume accepts one dataset' }); return;
     }
     const recipe = b.recipe.resumeRun === undefined
-      ? { ...b.recipe, recipe: resolveHeartmulaRecipe(b.recipe.recipe), preview: resolveHeartmulaPreviewSettings(b.recipe.preview) }
+      ? { ...b.recipe, recipe: resolveHeartmulaBatchRecipe(b.recipe.recipe), preview: resolveHeartmulaPreviewSettings(b.recipe.preview) }
       : b.recipe;
     const result = startYue2Batch({ family: 'heartmula', datasetIds: b.datasetIds, lyricTiming: false, recipe });
     if ('error' in result) { res.status(409).json(result); return; }

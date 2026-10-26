@@ -55,8 +55,9 @@ the recent log remain visible while the settings are folded away.
 
 ## Train
 
-The starting recipe is rank 64, alpha 64, learning rate 1e-4, 480 steps and four
-micro-batches per step. The Train page uses YuE2's amber training panel. Choose
+The starting recipe is rank 64, alpha 64, learning rate 1e-4, dropout 0.05 and four
+micro-batches per step, with at most 30 epochs or 480 updates by default.
+The Train page uses YuE2's amber training panel. Choose
 **Resume a previous run** or enter an adapter name, then set the steps, save
 interval, seed, rank, alpha and learning rate in the visible parameter row.
 Dropout, songs per update, **Train MLP layers** and **Crop songs** sit under **Advanced**.
@@ -67,7 +68,7 @@ controls stay below the form:
 |---|---|
 | Rank, Alpha | Adapter size and scaling. Higher ranks use more memory. |
 | Learning rate, Gradient accumulation, Training seed | Usual meanings. Keep the seed fixed to compare recipes. |
-| LoRA dropout | 0 turns it off (the default). 0.05 is a proven value; it adds about 8% to each step and 1.3 GiB of memory. |
+| LoRA dropout | 0.05 by default; 0 turns it off. Dropout adds about 8% to each step and 1.3 GiB of memory. |
 | Train MLP layers | On by default: also trains each backbone block's MLP, not only the attention projections, which unlocks the MLP dial in the Adapters tab. At rank 64 the adapter is about 97M parameters (389 MB) instead of 37M, and steps need more memory and time. Runs started before it was the default resume as attention-only. |
 | Crop songs | Off by default. On trains the opening stretch of each longer song (the given seconds, 10 to 600, 120 to start), so songs still start at their start, and trains every fourth song whole so later sections and endings are learned too. Steps get faster on long songs; peak memory still follows the longest song. Runs started before this change used random windows from the middle of songs, which taught previews to start mid-track. |
 | Save every, steps | Resumable checkpoint interval. 0 saves only when stopping or finishing. |
@@ -86,13 +87,24 @@ card with less free memory keeps fewer blocks resident and takes longer per step
 ### Presets and resume
 
 The recipe cards follow YuE2's layout. **HOT-Approved** selects the current
-server recipe; **Fast** uses 240 updates with four songs per update;
+server recipe, with dropout 0.05 and four songs per update. Its default budget is
+`min(480, 30 * ceil(prepared songs / songs per update))`, so small sets stop at
+30 epochs. The trainer's last update in each epoch may contain fewer songs.
+Before preparation, the form shows 480; the budget is resolved when the prepared
+set is known, separately for each dataset in a batch. This is a reversible
+mitigation for overfitting; improved sound quality has not been established.
+**Fast** uses 240 updates with four songs per update;
 **Balanced** uses 480 with four; **Thorough** uses 720 with eight. These change
 the training budget, not the model or loss function. Save your own settings in
 **Your presets**, or import and export HeartMuLa preset JSON files. Browser
 presets store only recipe values, never dataset, adapter name or resume paths.
 The changed-settings row shows differences from the server defaults and resets
 each field independently.
+
+Explicit update counts, including Fast, Balanced, Thorough and saved presets,
+keep their values. A resume keeps the original recipe, including older runs
+with dropout off. Reset all to defaults or choose HOT-Approved to restore the
+automatic budget.
 
 Resume from the picker or paste a known run ID or run-folder path from this
 dataset. The saved recipe is restored, including its base model and quant.
@@ -152,8 +164,11 @@ the dataset's first sung track (the first track when none is sung), which is wha
 training saw. The lyrics are the newest Lyric Studio generation for the dataset's
 artist, falling back to that track's own lyrics; set **Preview lyrics** to
 **Dataset lyrics** to skip the generation. **Tags override** and **Lyrics
-override** replace either. The prompt is worked out once when the run starts and
-saved with the run, so every take, retry and resume sings the same words. **Preview
+override** replace either. Checkpoint renders prepend the adapter's trigger to overridden tags too, using
+the same handling as normal generation. A trigger already present as a comma-separated
+tag is kept without duplication. The base take uses the saved tags as supplied.
+The prompt is worked out once when the run starts and saved with the run, so
+every take, retry and resume sings the same words. **Preview
 maximum seconds** (5 to 240) caps the length; a song ends on its own before that.
 On Review, each take lists the track and generation its tags and lyrics came from.
 

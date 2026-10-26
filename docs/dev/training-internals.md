@@ -163,6 +163,19 @@ Checkpoints stay outside `heartmula-lm-adapters`, so only a finished run reaches
 generation picker. A stored live state with no job behind it reads as failed and
 stays resumable. A resume keeps the saved recipe and preview settings.
 
+New HeartMuLa runs use dropout 0.05 and accumulation 4. With no explicit `steps`,
+the budget is `min(480, 30 * ceil(preparedSamples / gradAccum))`, matching the
+trainer's short final update per epoch. `heartmulaStatus` reports dataset-sized
+defaults, and `resolveHeartmulaRun` resolves the budget from the prepared manifest
+at admission. Batch validation and the UI retain omitted steps until then, so
+each prepared dataset gets its own budget. Explicit steps and saved recipes are
+unchanged; `HEARTMULA_RECIPE_LEGACY.loraDropout` remains 0 for old resume checks.
+These defaults mitigate possible overfitting; listening tests must establish quality.
+
+Checkpoint preview requests read the trigger from their adapter and call
+`withHeartmulaTrigger`, as normal generation does, before checking the 4096-byte
+tag limit. The saved prompt stays intact; base takes use it without adapter metadata.
+
 **Readiness.** CUDA build, `ace-train` present, the four base files, and a selected
 GPU of at least `HEARTMULA_MIN_VRAM_MB`. That floor is the trainer's measured
 smallest mode (10.41 GiB allocated, every block recomputed) plus 1.5 GiB for the CUDA

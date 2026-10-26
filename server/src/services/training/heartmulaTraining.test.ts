@@ -17,7 +17,7 @@ after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 const ds = { id: 'ds1', slug: 'demo', customTag: 'trig' };
 
-test('recipe: defaults are the proven recipe, bad values and unknown keys throw', () => {
+test('recipe: defaults, bad values and unknown keys throw', () => {
   assert.equal(HEARTMULA_RECIPE_DEFAULTS.gradAccum, 4);
   assert.deepEqual(train.resolveHeartmulaRecipe({}), HEARTMULA_RECIPE_DEFAULTS);
   assert.equal(train.resolveHeartmulaRecipe({ steps: 50, learningRate: 2e-4 }).steps, 50);
@@ -25,7 +25,7 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.throws(() => train.resolveHeartmulaRecipe({ rank: 1.5 }), /rank/);
   assert.throws(() => train.resolveHeartmulaRecipe({ learningRate: -1 }), /learningRate/);
   assert.throws(() => train.resolveHeartmulaRecipe({ nope: 1 }), /Unsupported/);
-  assert.equal(HEARTMULA_RECIPE_DEFAULTS.loraDropout, 0);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.loraDropout, 0.05);
   assert.equal(train.resolveHeartmulaRecipe({ loraDropout: 0.05 }).loraDropout, 0.05);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: 1 }), /loraDropout/);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: -0.1 }), /loraDropout/);
@@ -41,6 +41,36 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.equal(train.resolveHeartmulaRecipe({ variant: '3B-happy-new-year', quant: 'Q8_0' }).variant, '3B-happy-new-year');
   assert.throws(() => train.resolveHeartmulaRecipe({ variant: '../x' }), /variant/);
   assert.throws(() => train.resolveHeartmulaRecipe({ quant: 8 }), /quant/);
+});
+
+test('new run defaults cap at 30 epochs using actual updates, with an overall 480 ceiling', () => {
+  for (const [samples, accum, steps] of [[1, 4, 30], [4, 4, 30], [5, 4, 60], [12, 4, 90], [60, 4, 450], [61, 4, 480], [64, 4, 480], [65, 4, 480], [5, 1, 150], [5, 8, 30]]) {
+    assert.equal(train.resolveHeartmulaRecipe({ gradAccum: accum }, samples).steps, steps);
+  }
+  assert.equal(train.resolveHeartmulaRecipe({ steps: 2000, loraDropout: 0, gradAccum: 1 }, 1).steps, 2000);
+  const batch = train.resolveHeartmulaBatchRecipe({ gradAccum: 4 });
+  assert.equal(batch.steps, undefined);
+  assert.equal(train.resolveHeartmulaRecipe(batch, 12).steps, 90);
+  assert.equal(train.resolveHeartmulaBatchRecipe({ steps: 480 }).steps, 480);
+});
+
+test('API starts use prepared sample count; a legacy resume retains its recipe', () => {
+  const dsCap = { id: 'cap', slug: 'cap' };
+  const dir = runs.heartmulaPrepareDir(dsCap.slug);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'heartmula_prepare.json'), JSON.stringify({ samples: Array.from({ length: 5 }, (_, id) => ({ id })) }));
+  const fresh = runs.resolveHeartmulaRun(dsCap, {});
+  assert.equal(fresh.record.recipe.steps, 60);
+  const oldRecipe = { ...HEARTMULA_RECIPE_DEFAULTS, steps: 2000, loraDropout: 0, gradAccum: 8 };
+  const old = runs.createHeartmulaRun(dsCap.id, dsCap.slug, 'legacy', oldRecipe);
+  fs.writeFileSync(path.join(old.dir, 'hm_train_state.bin'), 'checkpoint');
+  const saved = JSON.parse(fs.readFileSync(path.join(old.dir, 'run.json'), 'utf8'));
+  delete saved.recipe.trainMlp; delete saved.recipe.cropSeconds; delete saved.recipe.eos; delete saved.recipe.loraDropout;
+  fs.writeFileSync(path.join(old.dir, 'run.json'), JSON.stringify(saved));
+  const resumed = runs.resolveHeartmulaRun(dsCap, { resumeRun: old.id, recipe: { loraDropout: 0, gradAccum: 8 } });
+  assert.deepEqual(resumed.record.recipe, saved.recipe);
+  assert.equal(resumed.record.recipe.steps, 2000);
+  assert.throws(() => runs.resolveHeartmulaRun(dsCap, { resumeRun: old.id, recipe: { loraDropout: 0.05 } }), /cannot change loraDropout/);
 });
 
 test('preview settings: defaults, overrides, and every bad value refused', () => {
@@ -67,7 +97,7 @@ test('preview settings: defaults, overrides, and every bad value refused', () =>
 });
 
 test('argv matches the trainer CLI contract', () => {
-  const plain = { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: false, eos: false };
+  const plain = { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: false, eos: false, loraDropout: 0 };
   assert.ok(train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false })
     .includes('--lora-mlp'), 'MLP layers train by default');
   const args = train.buildHeartmulaTrainArgs({
@@ -87,7 +117,7 @@ test('argv matches the trainer CLI contract', () => {
     .includes('--eos'), 'the end-of-song frame trains by default');
   assert.ok(!args.includes('--max-frames'), 'no crop, no flag');
   const mlp = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: true }, name: 'a', resume: false });
-  assert.ok(mlp.join(' ').includes('--lora-dropout 0 --lora-mlp --name a'));
+  assert.ok(mlp.join(' ').includes('--lora-dropout 0.05 --lora-mlp --name a'));
   const trig = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: plain, name: 'a', resume: false, trigger: ' zx9 ' });
   assert.ok(trig.join(' ').includes('--trigger zx9 --name a'));
   assert.ok(!args.includes('--trigger'), 'no dataset trigger, no flag');

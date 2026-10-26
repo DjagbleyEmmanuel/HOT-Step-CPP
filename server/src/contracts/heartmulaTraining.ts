@@ -68,7 +68,7 @@ export interface HeartmulaTrainBase {
 /** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
 /** What a run saved before a recipe key existed actually trained with, where that is not
  *  today's default (resume checks and trainer arguments read a missing key as this). */
-export const HEARTMULA_RECIPE_LEGACY: Partial<HeartmulaRecipe> = { trainMlp: false, cropSeconds: 0, eos: false };
+export const HEARTMULA_RECIPE_LEGACY: Partial<HeartmulaRecipe> = { trainMlp: false, cropSeconds: 0, eos: false, loraDropout: 0 };
 
 export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   rank: 64,
@@ -78,13 +78,20 @@ export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   gradAccum: 4,
   seed: 0,
   checkpointEvery: 100,
-  loraDropout: 0,
+  loraDropout: 0.05,
   trainMlp: true,
   cropSeconds: 0,
   eos: true,
   variant: '3B',
   quant: 'F16',
 };
+
+/** The trainer ends each epoch with a short update: ceil(samples / accumulation). */
+export function heartmulaDefaultSteps(preparedSamples: number, gradAccum = HEARTMULA_RECIPE_DEFAULTS.gradAccum): number {
+  if (!Number.isSafeInteger(preparedSamples) || preparedSamples < 1
+    || !Number.isSafeInteger(gradAccum) || gradAccum < 1) return HEARTMULA_RECIPE_DEFAULTS.steps;
+  return Math.min(HEARTMULA_RECIPE_DEFAULTS.steps, 30 * Math.ceil(preparedSamples / gradAccum));
+}
 
 // ── Prepare ──────────────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { aceClient } from '../aceClient.js';
 import { heartmulaClient, type HeartmulaRequest } from '../backends/heartmula/client.js';
-import { heartmulaPick, heartmulaSelection } from '../backends/heartmula/models.js';
+import { heartmulaAdapterInfo, heartmulaPick, heartmulaSelection, withHeartmulaTrigger } from '../backends/heartmula/models.js';
 import type {
   HeartmulaPreviewKind, HeartmulaPreviewRecord, HeartmulaPreviewSettings, HeartmulaPreviewSource, HeartmulaRunId,
 } from '../../contracts/heartmulaTraining.js';
@@ -197,9 +197,11 @@ export async function renderHeartmulaPreview(input: HeartmulaPreviewInput): Prom
     }
     await deps.beforeRender();
     const s = input.settings;
+    const tags = adapterFile ? withHeartmulaTrigger(s.tags, heartmulaAdapterInfo(adapterFile).trigger) : s.tags;
+    if (Buffer.byteLength(tags) > 4096) throw new Error('tags with the adapter trigger exceed 4096 bytes');
     const wire: HeartmulaRequest = {
       ...deps.pick(input.base ?? HEARTMULA_TRAIN_BASE), adapter: adapterFile ?? '', adapter_scale: 1,
-      tags: s.tags, lyrics: s.lyrics, duration_s: s.seconds, seed: s.seed,
+      tags, lyrics: s.lyrics, duration_s: s.seconds, seed: s.seed,
       temperature: s.temperature, topk: s.topk, cfg_scale: s.cfgScale, codec_steps: s.codecSteps, codec_guidance: s.codecGuidance,
     };
     engineJob = await deps.synth(wire);

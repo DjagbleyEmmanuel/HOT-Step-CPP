@@ -17,12 +17,19 @@ after(() => fs.rmSync(root, { recursive: true, force: true }));
 const run = runs.createHeartmulaRun('ds1', 'demo', 'demo', { ...HEARTMULA_RECIPE_DEFAULTS, steps: 250 });
 
 /** A header-only GGUF v3 with one tensor: all isGgufAdapter reads. */
-function fakeAdapter(step: number): string {
+function fakeAdapter(step: number, trigger?: string): string {
   const file = runs.heartmulaAdapterFile(run.dir, step);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const h = Buffer.alloc(32);
   h.write('GGUF', 0, 'ascii'); h.writeUInt32LE(3, 4); h.writeBigUInt64LE(1n, 8);
-  fs.writeFileSync(file, h);
+  if (trigger !== undefined) {
+    const key = Buffer.from('heartmula.lora.trigger');
+    const value = Buffer.from(trigger);
+    const kv = Buffer.alloc(8 + key.length + 4 + 8 + value.length);
+    kv.writeBigUInt64LE(BigInt(key.length)); key.copy(kv, 8); kv.writeUInt32LE(8, 8 + key.length);
+    kv.writeBigUInt64LE(BigInt(value.length), 12 + key.length); value.copy(kv, 20 + key.length);
+    fs.writeFileSync(file, Buffer.concat([h, kv]));
+  } else fs.writeFileSync(file, h);
   return file;
 }
 
@@ -71,6 +78,31 @@ test('a base take renders with no adapter, a step take with its checkpoint, both
   assert.deepEqual(list.map(r => [r.kind, r.step]), [['base', 0], ['step', 100]], 'base first, then by step');
   assert.ok(pv.heartmulaPreviewDone(run.dir, 100));
   assert.ok(!pv.heartmulaPreviewDone(run.dir, 200));
+});
+
+test('checkpoint tags match normal render trigger handling, including overrides and byte limits', async () => {
+  const { withHeartmulaTrigger } = await import('../backends/heartmula/models.js');
+  for (const [index, tags] of ['folk', 'ZX9, folk', 'folk, zx9', '', 'é'.repeat(2044)].entries()) {
+    const step = 300 + index;
+    fakeAdapter(step, 'zx9');
+    const wires: any[] = [];
+    const take = await pv.renderHeartmulaPreview({ runDir: run.dir, runId: run.id, step, kind: 'step',
+      settings: { ...HEARTMULA_PREVIEW_DEFAULTS, tags }, deps: deps({ wires }) });
+    assert.equal(take.status, 'done');
+    assert.equal(wires[0].tags, withHeartmulaTrigger(tags, 'zx9'));
+    assert.equal(take.settings.tags, tags, 'saved settings retain the original override');
+  }
+  fakeAdapter(310, 'zx9');
+  const wires: any[] = [];
+  const failed = await pv.renderHeartmulaPreview({ runDir: run.dir, runId: run.id, step: 310, kind: 'step',
+    settings: { ...HEARTMULA_PREVIEW_DEFAULTS, tags: 'é'.repeat(2046) }, deps: deps({ wires }) });
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error ?? '', /4096 bytes/);
+  assert.equal(wires.length, 0);
+  const base = await pv.renderHeartmulaPreview({ runDir: run.dir, runId: run.id, step: 0, kind: 'base',
+    settings: { ...HEARTMULA_PREVIEW_DEFAULTS, tags: 'folk' }, deps: deps({ wires }) });
+  assert.equal(base.status, 'done');
+  assert.equal(wires[0].tags, 'folk');
 });
 
 test('audio is served by the file name of a done record only', async () => {

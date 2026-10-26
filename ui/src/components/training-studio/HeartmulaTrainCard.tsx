@@ -2,6 +2,7 @@ import { Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-reac
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { HeartmulaPreviewListResponse, HeartmulaPreviewSettings, HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
+import { HEARTMULA_RECIPE_LEGACY, heartmulaDefaultSteps } from '../../../../server/src/contracts/heartmulaTraining';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { TrainingChart } from './TrainingChart';
 import { formatDuration, heartmulaEta } from './heartmulaEta';
@@ -52,7 +53,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   const [previewsOn, setPreviewsOn] = useState<boolean | null>(null);
   const [previewEdits, setPreviewEdits] = useState<Partial<HeartmulaPreviewSettings>>({});
   const [manualResume, setManualResume] = useState('');
-  const [presetKey, setPresetKey] = useState('balanced');
+  const [presetKey, setPresetKey] = useState('approved');
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
   const [cropDraft, setCropDraft] = useState(120);
@@ -74,7 +75,8 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   };
   const manualPath = manualResume.trim().replaceAll('\\', '/').replace(/\/$/, '');
   const selectedResume = resumeRun ?? status.runs.find(item => item.run === manualPath || manualPath.endsWith('/' + item.run))?.run ?? null;
-  const recipe = selectedResume ? status.runs.find(run => run.run === selectedResume)?.recipe ?? status.defaults : { ...status.defaults, ...edits };
+  const defaults = { ...status.defaults, steps: heartmulaDefaultSteps(status.prepare.preparedSamples, edits.gradAccum ?? status.defaults.gradAccum) };
+  const recipe = selectedResume ? status.runs.find(run => run.run === selectedResume)?.recipe ?? status.defaults : { ...defaults, ...edits };
   // Previews render at every save; with saving only at the end, just the base and final takes.
   const cadence = (previewsOn ?? status.previewDefaults.everySteps > 0)
     ? (recipe.checkpointEvery > 0 ? recipe.checkpointEvery : recipe.steps) : 0;
@@ -107,7 +109,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   const numberField = (field: typeof FIELDS[number]) => <PreviewField key={field.key}
     label={t(`trainingStudio.heartmula.field.${field.key}`, field.label)}
     info={t(`trainingStudio.heartmula.field.${field.key}Info`, field.info)}
-    onReset={!locked && edits[field.key] !== undefined && edits[field.key] !== status.defaults[field.key] ? () => setEdits(previous => {
+    onReset={!locked && edits[field.key] !== undefined && edits[field.key] !== defaults[field.key] ? () => setEdits(previous => {
       const next = { ...previous }; delete next[field.key]; return next;
     }) : undefined}>
     <input className={INPUT} type="number" min={field.min} max={field.max} step={field.step}
@@ -116,7 +118,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   </PreviewField>;
   // Every recipe key, not just the number fields: the toggles, the crop and the base count as changes too.
   const recipeKeys: Array<keyof HeartmulaRecipe> = [...FIELDS.map(field => field.key), 'variant', 'quant', 'trainMlp', 'cropSeconds'];
-  const changed = recipeKeys.filter(key => (recipe[key] ?? status.defaults[key]) !== status.defaults[key]).map(key => ({ key }));
+  const changed = recipeKeys.filter(key => (recipe[key] ?? defaults[key]) !== defaults[key]).map(key => ({ key }));
   const shown = (key: keyof HeartmulaRecipe) => {
     const v = recipe[key];
     if (key === 'cropSeconds') return v ? `${v} s` : 'off';
@@ -125,7 +127,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   // Saving presets never touches a run, so it stays open while one trains. During a run it saves
   // what that run is training with, which survives a page reload where the form does not.
   const liveRecipe = busy && status.run ? status.runs.find(item => item.run === status.run?.run)?.recipe : undefined;
-  const presetRecipe: HeartmulaRecipe = liveRecipe ? { ...status.defaults, ...({ trainMlp: false, cropSeconds: 0, eos: false } as Partial<HeartmulaRecipe>), ...liveRecipe } : recipe;
+  const presetRecipe: HeartmulaRecipe = liveRecipe ? { ...status.defaults, ...HEARTMULA_RECIPE_LEGACY, ...liveRecipe } : recipe;
   const savePreset = () => {
     if (!presetName.trim() || !validRecipe(presetRecipe)) return;
     persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...presetRecipe } }].slice(-32));
@@ -147,9 +149,12 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
     const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, target: 'heartmula', presets: [preset] }, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = 'heartmula-training-preset.json'; link.click(); URL.revokeObjectURL(url);
   };
-  const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe, preview: { ...previewEdits, everySteps: cadence } });
+  // Keep the dataset-dependent budget omitted for API admission, including a batch prepared later.
+  const requestRecipe: Partial<HeartmulaRecipe> = { ...recipe };
+  if (edits.steps === undefined) delete requestRecipe.steps;
+  const start = () => onTrain(selectedResume ? { resumeRun: selectedResume } : { adapterName: name, recipe: requestRecipe, preview: { ...previewEdits, everySteps: cadence } });
   const chain = () => onChain?.(selectedResume ? { resumeRun: selectedResume }
-    : { ...(batchIds ? {} : { adapterName: name }), recipe, preview: { ...previewEdits, everySteps: cadence } }, batchIds ?? undefined);
+    : { ...(batchIds ? {} : { adapterName: name }), recipe: requestRecipe, preview: { ...previewEdits, everySteps: cadence } }, batchIds ?? undefined);
   return <div className="flex flex-col gap-4">
     <TrainingBatchCard disabled={busy || !onChain} onOpen={() => setBatchOpen(true)} description={t('trainingStudio.heartmula.batchInfo', 'Choose datasets, then apply the recipe below to each in order. The queue survives closing the page and server restarts.')} />
     {batchOpen && <Yue2AitkBatchWizard open family="heartmula" onClose={() => setBatchOpen(false)} onSelect={setBatchIds} />}
@@ -178,13 +183,13 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
     </div>
     <div className="mt-4">
       <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-        info={t('trainingStudio.heartmula.presetInfo', 'Presets change the update budget and songs per update. Balanced uses the current 480 by 4 recipe. Fast halves the updates; Thorough uses 720 updates averaging eight songs. HOT-Approved uses the current server recipe.')} />
+        info={t('trainingStudio.heartmula.defaultBudgetInfo', 'HOT-Approved caps the default budget at 30 epochs or 480 updates, with four songs per update and 0.05 dropout. Fast, Balanced and Thorough set explicit update budgets. Saved presets and update edits keep their values.')} />
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2">
         {[{ key: 'approved', label: 'HOT-Approved', steps: status.defaults.steps, gradAccum: status.defaults.gradAccum },
           { key: 'fast', label: 'Fast', steps: 240, gradAccum: 4 }, { key: 'balanced', label: 'Balanced', steps: 480, gradAccum: 4 },
           { key: 'thorough', label: 'Thorough', steps: 720, gradAccum: 8 }].map(preset => <TrainingPresetChoice key={preset.key} disabled={locked}
             selected={presetKey === preset.key && FIELDS.every(field => recipe[field.key] === ({ ...status.defaults, steps: preset.steps, gradAccum: preset.gradAccum })[field.key])}
-            onClick={() => { setPresetKey(preset.key); setEdits({ ...status.defaults, steps: preset.steps, gradAccum: preset.gradAccum }); }}>
+            onClick={() => { setPresetKey(preset.key); setEdits(preset.key === 'approved' ? {} : { ...status.defaults, steps: preset.steps, gradAccum: preset.gradAccum }); }}>
             <span className="text-base font-bold">{t(`trainingStudio.heartmula.preset.${preset.key}`, preset.label)}</span>
             <span className="text-xs text-zinc-500">{t('trainingStudio.heartmula.presetBudget', '{{steps}} × {{songs}} songs', { steps: preset.steps, songs: preset.gradAccum })}</span>
           </TrainingPresetChoice>)}

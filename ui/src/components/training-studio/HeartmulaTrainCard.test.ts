@@ -198,12 +198,52 @@ test('Perform all stages accepts stale preparation and a pasted resume path name
     const chain = [...document.querySelectorAll('button')].find(button => button.textContent === 'Perform all stages')!;
     assert.equal(chain.hasAttribute('disabled'), false);
     await act(async () => chain.click());
-    assert.deepEqual((request as { recipe: unknown }).recipe, HEARTMULA_RECIPE_DEFAULTS);
+    const { steps: _steps, ...automaticRecipe } = HEARTMULA_RECIPE_DEFAULTS;
+    assert.deepEqual((request as { recipe: unknown }).recipe, automaticRecipe, 'each prepared dataset resolves its own default updates');
     const input = document.querySelector('input[placeholder="Or paste a run folder (optional)"]')!;
     const props = (input as any)[Object.keys(input).find(key => key.startsWith('__reactProps'))!];
     await act(async () => props.onChange({ target: { value: `D:/saved/${run}` } }));
     assert.match(document.body.textContent!, new RegExp(`Resume ${run} with its saved recipe`));
     await act(async () => chain.click());
     assert.deepEqual(request, { resumeRun: run });
+  } finally { await act(async () => root.unmount()); Object.assign(globalThis, saved); }
+});
+
+test('default updates follow accumulation, while an explicit update edit survives submission', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  const root = createRoot(document.getElementById('root')!);
+  let request: any;
+  const numeric = () => [...document.querySelectorAll('input[type="number"]')];
+  const change = async (input: Element, value: number) => {
+    const props = (input as any)[Object.keys(input).find(key => key.startsWith('__reactProps'))!];
+    await act(async () => props.onChange({ target: { value: String(value), valueAsNumber: value } }));
+  };
+  const start = async () => {
+    const button = [...document.querySelectorAll('button')].find(button => button.textContent!.includes('Start training'))!;
+    await act(async () => button.click());
+  };
+  try {
+    await act(async () => root.render(createElement(HeartmulaTrainCard, {
+      status: { ...status, prepare: { ...status.prepare, preparedSamples: 5 } }, slug: 'example', busy: false,
+      trainStarted: false, onTrain: value => { request = value; }, onCheckpoint() {}, onCancel() {},
+    })));
+    assert.equal(numeric()[0].getAttribute('value'), '60');
+    await start();
+    assert.equal(request.recipe.steps, undefined);
+    const accum = numeric().find(input => input.getAttribute('value') === '4')!;
+    await change(accum, 1);
+    assert.equal(numeric()[0].getAttribute('value'), '150');
+    await change(numeric()[0], 777);
+    await change(accum, 8);
+    assert.equal(numeric()[0].getAttribute('value'), '777');
+    await start();
+    assert.equal(request.recipe.steps, 777);
+    assert.equal(request.recipe.gradAccum, 8);
+    await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Reset all to defaults')!.click());
+    assert.equal(numeric()[0].getAttribute('value'), '60');
+    await start();
+    assert.equal(request.recipe.steps, undefined);
   } finally { await act(async () => root.unmount()); Object.assign(globalThis, saved); }
 });

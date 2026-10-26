@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS,
+  HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS, heartmulaDefaultSteps,
   type HeartmulaDatasetAssets, type HeartmulaReadiness, type HeartmulaStatusResponse,
 } from '../../contracts/heartmulaTraining.js';
 import { aceTrainExe, engineGpuBackend } from './aceTrain.js';
@@ -73,12 +73,13 @@ export async function heartmulaStatus(ds: TrainingDatasetRow): Promise<Heartmula
     };
   });
   const current = runs.find(r => r.id === live) ?? runs[0];
+  const prepare = heartmulaPrepareStatus(ds, await buildSamples(ds));
   return {
     ready: heartmulaReadiness(), runs: summaries, base: '3B', bases: heartmulaTrainBases(),
-    prepare: heartmulaPrepareStatus(ds, await buildSamples(ds)),
+    prepare,
     run: current ? heartmulaRunStatus(current, current.id === live) : null,
     adapter: latestHeartmulaAdapter(ds.id, ds.slug),
-    defaults: HEARTMULA_RECIPE_DEFAULTS, previewDefaults: HEARTMULA_PREVIEW_DEFAULTS,
+    defaults: { ...HEARTMULA_RECIPE_DEFAULTS, steps: heartmulaDefaultSteps(prepare.preparedSamples) }, previewDefaults: HEARTMULA_PREVIEW_DEFAULTS,
   };
 }
 
