@@ -11,7 +11,7 @@ import { aceTrainExe, engineGpuBackend } from './aceTrain.js';
 import { listGpusSync, selectedGpuMemoryMB, type NvidiaGpu } from '../gpuDevices.js';
 import { buildSamples } from './datasetScan.js';
 import { activeJobForDataset } from './labelingQueue.js';
-import { findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels } from './heartmulaTrain.js';
+import { findHeartmulaEncoderDir, heartmulaTrainBases, missingEncoderMessage, missingHeartmulaModels } from './heartmulaTrain.js';
 import { heartmulaPrepareStatus, readHeartmulaManifest } from './heartmulaPrepare.js';
 import {
   heartmulaRunStatus, latestHeartmulaAdapter, listHeartmulaRuns,
@@ -74,7 +74,7 @@ export async function heartmulaStatus(ds: TrainingDatasetRow): Promise<Heartmula
   });
   const current = runs.find(r => r.id === live) ?? runs[0];
   return {
-    ready: heartmulaReadiness(), runs: summaries, base: '3B',
+    ready: heartmulaReadiness(), runs: summaries, base: '3B', bases: heartmulaTrainBases(),
     prepare: heartmulaPrepareStatus(ds, await buildSamples(ds)),
     run: current ? heartmulaRunStatus(current, current.id === live) : null,
     adapter: latestHeartmulaAdapter(ds.id, ds.slug),

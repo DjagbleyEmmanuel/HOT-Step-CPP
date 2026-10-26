@@ -6247,7 +6247,8 @@ router.post('/datasets/:id/heartmula-previews/render', async (req: Request, res:
     // One GPU owner for every dataset: refused while any trainer is queued or running, or another preview holds the GPU.
     if (!queue.reserveGpuForPreview()) { res.status(409).json({ error: 'The GPU is busy with a training job or another preview; previews wait until it ends.' }); return; }
     await queue.runReservedPreview(() => runOnGpuLane(async () => {
-      await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings, source });
+      await renderHeartmulaPreview({ runDir: r.dir, runId: r.id, step, kind: heartmulaPreviewKind(step, r.record.recipe.steps), settings, source,
+        base: { variant: r.record.recipe.variant ?? '3B', quant: r.record.recipe.quant ?? 'F16' } });
     }, { label: 'heartmula checkpoint preview', family: 'heartmula' }));
     res.json(heartmulaPreviewList(ds, r, await heartmulaResolvedPreview(ds, r)));
   } catch (err: any) { res.status(500).json({ error: err.message }); }

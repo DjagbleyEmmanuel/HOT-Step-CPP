@@ -47,6 +47,15 @@ export interface HeartmulaRecipe {
   loraDropout: number;
   /** Also LoRA the backbone MLP (w1/w2/w3), not only attention. Bigger adapter, more VRAM; unlocks the MLP dial. */
   trainMlp: boolean;
+  /** The base model trained on: its variant (as the GGUF names it) and the quant of its global+local pair. */
+  variant: string;
+  quant: string;
+}
+
+/** An installed base the trainer can load: a variant and the quants it has a global+local pair in. */
+export interface HeartmulaTrainBase {
+  variant: string;
+  quants: string[];
 }
 
 /** r64/alpha64 as decided; the rest is the proven recipe (contract section 1: four micro-batches per step). */
@@ -60,6 +69,8 @@ export const HEARTMULA_RECIPE_DEFAULTS: HeartmulaRecipe = {
   checkpointEvery: 100,
   loraDropout: 0,
   trainMlp: false,
+  variant: '3B',
+  quant: 'F16',
 };
 
 // ── Prepare ──────────────────────────────────────────────────────────────
@@ -230,6 +241,8 @@ export interface HeartmulaStatusResponse {
   ready: HeartmulaReadiness;
   runs: HeartmulaRunSummary[];
   base: HeartmulaBase;
+  /** Installed variants and quants the trainer can load, F16 first. */
+  bases: HeartmulaTrainBase[];
   prepare: HeartmulaPrepareStatus;
   /** The active or newest run, null when the dataset has none. */
   run: HeartmulaRunStatus | null;

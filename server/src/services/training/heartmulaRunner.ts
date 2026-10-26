@@ -20,7 +20,7 @@ import { config } from '../../config.js';
 import { getDataset } from './datasetsRepo.js';
 import { buildSamples } from './datasetScan.js';
 import {
-  buildHeartmulaPrepareArgs, buildHeartmulaTrainArgs, findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels,
+  buildHeartmulaPrepareArgs, buildHeartmulaTrainArgs, findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaBase, missingHeartmulaModels,
   resolveHeartmulaPreviewSettings,
 } from './heartmulaTrain.js';
 import { HEARTMULA_PREPARE_MANIFEST, snapshotSources, writeHeartmulaSamples, writeSkippedFingerprints } from './heartmulaPrepare.js';
@@ -255,6 +255,7 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
     log(job, 'info', `Rendering the ${kind === 'base' ? 'base model' : kind === 'final' ? 'final adapter' : `step ${step}`} preview (up to ${preview.seconds} s).`);
     const take = await renderHeartmulaPreview({
       runDir: opts.runDir, runId: opts.runId, step, kind, settings: preview, source: previewSource, signal: job.controller.signal,
+      base: { variant: recipe.variant ?? '3B', quant: recipe.quant ?? 'F16' },
     });
     if (take.status === 'done') log(job, 'info', `Preview rendered in ${((take.renderMs ?? 0) / 1000).toFixed(1)} s.`);
     else if (take.status === 'failed') log(job, 'warn', `Preview at step ${step} failed; training goes on: ${take.error}`);
@@ -264,6 +265,8 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
   try {
     const missing = missingHeartmulaModels();
     if (missing.length) throw new Error(`HeartMuLa models are missing: ${missing.join(', ')}`);
+    const baseMissing = missingHeartmulaBase({ variant: recipe.variant ?? '3B', quant: recipe.quant ?? 'F16' });
+    if (baseMissing) throw new Error(baseMissing);
     const dataDir = heartmulaPrepareDir(getDataset(job.datasetId)?.slug ?? '');
     if (!fs.existsSync(path.join(dataDir, HEARTMULA_PREPARE_MANIFEST))) {
       throw new Error('The HeartMuLa prepare cache is gone — run Prepare again');

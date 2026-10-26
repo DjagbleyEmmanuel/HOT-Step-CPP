@@ -27,7 +27,7 @@ export interface HeartmulaTrainCardProps {
 
 const BUTTON = 'px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2';
 const INPUT = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
-type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp'>;
+type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp' | 'variant' | 'quant'>;
 const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: number; max: number; step: number }> = [
   { key: 'steps', label: 'Updates', info: 'Number of optimizer updates. More steps take longer and can overfit the dataset.', min: 1, max: 1_000_000, step: 1 },
   { key: 'rank', label: 'Rank', info: 'Adapter capacity. Higher ranks use more memory. The starting recipe uses rank 64.', min: 1, max: 256, step: 1 },
@@ -61,7 +61,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const [presets, setPresets] = useState<Array<{ name: string; recipe: HeartmulaRecipe }>>(() => {
     try {
       const stored: unknown = JSON.parse(localStorage.getItem('hs-heartmula-training-presets') ?? '[]');
-      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true } as unknown as HeartmulaRecipe })) : [];
+      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe })) : [];
     } catch { return []; }
   });
   const persist = (next: typeof presets) => {
@@ -117,7 +117,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         || !data.presets.every((item: { name?: unknown; recipe?: unknown }) => typeof item.name === 'string'
           && item.name.trim().length > 0 && item.name.length <= 64 && validRecipe(item.recipe))) throw new Error('Invalid HeartMuLa presets');
       const merged = new Map(presets.map(item => [item.name, item]));
-      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true } as unknown as HeartmulaRecipe });
+      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe });
       persist([...merged.values()].slice(-32));
     } catch { setPresetError(t('trainingStudio.heartmula.presetImportError', 'Import a valid HeartMuLa preset file of up to 100 KB.')); }
   };
@@ -193,12 +193,24 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
           </span>)}<button type="button" disabled={locked} onClick={() => setEdits({})} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}</button></>}
       </div>
     </div>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-      <PreviewField label={t('trainingStudio.yue2.method.base', 'Base model')} info={t('trainingStudio.heartmula.baseInfo', 'HeartMuLa training uses the 3B F16 backbone.')}>
-        <StyledSelect accent="amber" className="w-full" disabled value="3b-f16" onChange={() => {}} options={[{ value: '3b-f16', label: '3B · F16' }]} />
-      </PreviewField>
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
       <PreviewField label={t('trainingStudio.yue2.method.trainingGpu', 'Training GPU')} info={t('trainingStudio.heartmula.gpuInfo', 'The current HeartMuLa trainer selects its CUDA device automatically. Per-run GPU selection is not supported.')}>
         <StyledSelect accent="amber" className="w-full" disabled value="auto" onChange={() => {}} options={[{ value: 'auto', label: t('trainingStudio.heartmula.gpuAuto', 'Automatic (CUDA)') }]} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.heartmula.baseVariant', 'Base model')}
+        info={t('trainingStudio.heartmula.baseVariantInfo', 'The HeartMuLa variant the adapter is trained on. It plays natively on that variant and is re-based onto the others. Only variants with an installed global and local model are listed.')}>
+        <StyledSelect accent="amber" className="w-full" disabled={locked} value={recipe.variant ?? '3B'}
+          onChange={value => setEdits(previous => {
+            const quants = status.bases?.find(b => b.variant === value)?.quants ?? [];
+            return { ...previous, variant: value, quant: quants.includes(recipe.quant ?? 'F16') ? recipe.quant : quants[0] ?? 'F16' };
+          })}
+          options={(status.bases?.length ? status.bases : [{ variant: recipe.variant ?? '3B', quants: [] }]).map(b => ({ value: b.variant, label: b.variant }))} />
+      </PreviewField>
+      <PreviewField label={t('trainingStudio.heartmula.baseQuant', 'Base quant')}
+        info={t('trainingStudio.heartmula.baseQuantInfo', 'The precision of the frozen base weights during training. F16 is the reference. Smaller quants use less VRAM and train on what you will generate with, but their rounding is baked into what the adapter learns.')}>
+        <StyledSelect accent="amber" className="w-full" disabled={locked} value={recipe.quant ?? 'F16'}
+          onChange={value => setEdits(previous => ({ ...previous, quant: value }))}
+          options={(status.bases?.find(b => b.variant === (recipe.variant ?? '3B'))?.quants ?? [recipe.quant ?? 'F16']).map(q => ({ value: q, label: q }))} />
       </PreviewField>
       <PreviewField label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')} info={t('trainingStudio.heartmula.adapterTypeInfo', 'The current HeartMuLa trainer supports backbone LoRA adapters.')}>
         <StyledSelect accent="amber" className="w-full" disabled value="lora" onChange={() => {}} options={[{ value: 'lora', label: 'LoRA' }]} />

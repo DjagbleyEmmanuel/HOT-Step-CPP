@@ -32,6 +32,10 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.equal(HEARTMULA_RECIPE_DEFAULTS.trainMlp, false);
   assert.equal(train.resolveHeartmulaRecipe({ trainMlp: true }).trainMlp, true);
   assert.throws(() => train.resolveHeartmulaRecipe({ trainMlp: 'yes' }), /trainMlp/);
+  assert.deepEqual([HEARTMULA_RECIPE_DEFAULTS.variant, HEARTMULA_RECIPE_DEFAULTS.quant], ['3B', 'F16']);
+  assert.equal(train.resolveHeartmulaRecipe({ variant: '3B-happy-new-year', quant: 'Q8_0' }).variant, '3B-happy-new-year');
+  assert.throws(() => train.resolveHeartmulaRecipe({ variant: '../x' }), /variant/);
+  assert.throws(() => train.resolveHeartmulaRecipe({ quant: 8 }), /quant/);
 });
 
 test('preview settings: defaults, overrides, and every bad value refused', () => {
@@ -61,7 +65,7 @@ test('argv matches the trainer CLI contract', () => {
   const args = train.buildHeartmulaTrainArgs({
     dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: true,
   });
-  assert.deepEqual(args.slice(0, 7), ['heartmula-train', '--data', 'D', '--out', 'R', '--models', 'M']);
+  assert.deepEqual(args.slice(0, 11), ['heartmula-train', '--data', 'D', '--out', 'R', '--models', 'M', '--variant', '3B', '--type', 'F16']);
   assert.ok(args.join(' ').includes('--grad-accum 4 --seed 0 --save-every 100 --attn auto --keep-layers auto --lora-dropout 0 --name a --resume'));
   assert.ok(!args.includes('--stop-after'));
   const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
@@ -75,7 +79,7 @@ test('argv matches the trainer CLI contract', () => {
 
 test('models and encoder pack are found under the models folder only', () => {
   const models = config.aceServer.models;
-  assert.equal(train.missingHeartmulaModels(models).length, 4);
+  assert.equal(train.missingHeartmulaModels(models).length, 3);
   assert.equal(train.findHeartmulaEncoderDir(models), null);
   const dir = path.join(models, 'heartmula');
   fs.mkdirSync(dir, { recursive: true });
@@ -84,6 +88,13 @@ test('models and encoder pack are found under the models folder only', () => {
   }
   assert.deepEqual(train.missingHeartmulaModels(models), []);
   assert.equal(train.findHeartmulaEncoderDir(models), null);
+  // Train bases: global+local pairs only, F16 first; the variant falls back to the filename without a header.
+  fs.writeFileSync(path.join(dir, 'heartmula-3b-global-Q8_0.gguf'), 'x');
+  assert.deepEqual(train.heartmulaTrainBases(models), [{ variant: '3b', quants: ['F16'] }], 'a global without its local is not a base');
+  fs.writeFileSync(path.join(dir, 'heartmula-3b-local-Q8_0.gguf'), 'x');
+  assert.deepEqual(train.heartmulaTrainBases(models), [{ variant: '3b', quants: ['F16', 'Q8_0'] }]);
+  assert.equal(train.missingHeartmulaBase({ variant: '3B', quant: 'q8_0' }, models), '');
+  assert.match(train.missingHeartmulaBase({ variant: '3B-RL', quant: 'F16' }, models), /3B-RL F16 .* not installed/);
   for (const r of ['muencoder', 'wavlm', 'whisper', 'query']) fs.writeFileSync(path.join(dir, `heartcodec-${r}-F16.gguf`), 'x');
   assert.equal(train.findHeartmulaEncoderDir(models), dir);
 });

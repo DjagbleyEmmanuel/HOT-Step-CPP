@@ -124,16 +124,17 @@ export interface HeartmulaPreviewDeps {
   unload: () => Promise<void>;
   /** Free the other backends' VRAM before the model loads. */
   beforeRender: () => Promise<void>;
-  /** The model pick the render uses; the adapter fields are replaced per take. */
-  pick: () => HeartmulaRequest;
+  /** The model pick the render uses, on the run's base; the adapter fields are replaced per take. */
+  pick: (base: HeartmulaTrainBasePick) => HeartmulaRequest;
 }
 
 /**
- * The base the trainer loads (`--variant 3B --type F16`, heartmula-train-run.h).
- * An adapter is bound to that exact base by fingerprint, so every take renders on
- * it whatever the user generates with; the codec stages follow their own picks.
+ * The base the trainer loaded (the run's `--variant` and `--type`, heartmula-train-run.h).
+ * An adapter is bound to that base by fingerprint, so every take renders on it
+ * whatever the user generates with; the codec stages follow their own picks.
  */
-export const HEARTMULA_TRAIN_BASE = { variant: '3B', global: 'F16', local: 'F16' } as const;
+export interface HeartmulaTrainBasePick { variant: string; quant: string }
+export const HEARTMULA_TRAIN_BASE: HeartmulaTrainBasePick = { variant: '3B', quant: 'F16' };
 
 function defaultDeps(): HeartmulaPreviewDeps {
   return {
@@ -145,7 +146,7 @@ function defaultDeps(): HeartmulaPreviewDeps {
     unload: () => heartmulaClient.unload(),
     beforeRender: async () => { await (await import('../generation/residency.js')).evictOtherFamilies('heartmula'); },
     // The trainer's base and no generation adapter: a take carries only the run's weights.
-    pick: () => ({ ...heartmulaPick({ ...heartmulaSelection(), ...HEARTMULA_TRAIN_BASE, lmAdapter: '' }) } as HeartmulaRequest),
+    pick: base => ({ ...heartmulaPick({ ...heartmulaSelection(), variant: base.variant, global: base.quant, local: base.quant, lmAdapter: '' }) } as HeartmulaRequest),
   };
 }
 
@@ -158,6 +159,8 @@ export interface HeartmulaPreviewInput {
   settings: HeartmulaPreviewSettings;
   /** Where `settings` tags and lyrics came from; kept on the record. */
   source?: HeartmulaPreviewSource;
+  /** The run's base; absent = HEARTMULA_TRAIN_BASE, what every run used before the choice existed. */
+  base?: HeartmulaTrainBasePick;
   signal?: AbortSignal;
   deps?: Partial<HeartmulaPreviewDeps>;
 }
@@ -195,7 +198,7 @@ export async function renderHeartmulaPreview(input: HeartmulaPreviewInput): Prom
     await deps.beforeRender();
     const s = input.settings;
     const wire: HeartmulaRequest = {
-      ...deps.pick(), adapter: adapterFile ?? '', adapter_scale: 1,
+      ...deps.pick(input.base ?? HEARTMULA_TRAIN_BASE), adapter: adapterFile ?? '', adapter_scale: 1,
       tags: s.tags, lyrics: s.lyrics, duration_s: s.seconds, seed: s.seed,
       temperature: s.temperature, topk: s.topk, cfg_scale: s.cfgScale, codec_steps: s.codecSteps, codec_guidance: s.codecGuidance,
     };

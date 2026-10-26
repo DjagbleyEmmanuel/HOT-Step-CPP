@@ -10,14 +10,13 @@ import path from 'node:path';
 import { config } from '../../config.js';
 import {
   HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS, type HeartmulaPreviewSettings, type HeartmulaRecipe,
+  type HeartmulaTrainBase,
 } from '../../contracts/heartmulaTraining.js';
 
 export const HEARTMULA_RECIPE_KEYS = Object.keys(HEARTMULA_RECIPE_DEFAULTS) as (keyof HeartmulaRecipe)[];
 
-const MODEL_FILES = [
-  /^heartmula-3b-global-F16\.gguf$/i, /^heartmula-3b-local-F16\.gguf$/i, /^heartmula-tokenizer\.gguf$/i,
-  /^heartcodec-rvq-.+\.gguf$/i,
-];
+// Prepare needs only these; the LM pair is the run's own choice (heartmulaTrainBases).
+const MODEL_FILES = [/^heartmula-tokenizer\.gguf$/i, /^heartcodec-rvq-.+\.gguf$/i];
 const ENCODER_FILES = ['muencoder', 'wavlm', 'whisper', 'query'].map(role => `heartcodec-${role}-F16.gguf`);
 
 /** Where the engine looks for models: `<models>/heartmula`, then `<models>`. */
@@ -32,8 +31,60 @@ function namesIn(dir: string): string[] {
 /** Human names of the base-model files that are not installed (empty = ready). */
 export function missingHeartmulaModels(modelsDir = config.aceServer.models): string[] {
   const names = heartmulaModelDirs(modelsDir).flatMap(namesIn);
-  return ['heartmula-3b-global-F16.gguf', 'heartmula-3b-local-F16.gguf', 'heartmula-tokenizer.gguf', 'heartcodec-rvq-<quant>.gguf']
-    .filter((_, i) => !names.some(n => MODEL_FILES[i].test(n)));
+  const missing = ['heartmula-tokenizer.gguf', 'heartcodec-rvq-<quant>.gguf'].filter((_, i) => !names.some(n => MODEL_FILES[i].test(n)));
+  return heartmulaTrainBases(modelsDir).length ? missing : [...missing, 'a heartmula-<variant>-global/local-<quant>.gguf pair'];
+}
+
+const variantCache = new Map<string, { mtimeMs: number; variant: string }>();
+
+/** `heartmula.variant` from a model's GGUF header, cached by mtime (the status route polls). */
+function ggufVariant(file: string): string {
+  let mtimeMs = 0;
+  try { mtimeMs = fs.statSync(file).mtimeMs; } catch { return ''; }
+  const hit = variantCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.variant;
+  let variant = '', fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(64 * 1024);
+    const head = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0));
+    // A GGUF string KV: u64 key length, key, u32 type (8 = string), u64 length, bytes.
+    const key = Buffer.from('heartmula.variant');
+    const at = head.indexOf(key);
+    if (at >= 8 && head.readBigUInt64LE(at - 8) === BigInt(key.length) && head.readUInt32LE(at + key.length) === 8) {
+      const len = Number(head.readBigUInt64LE(at + key.length + 4));
+      if (len > 0 && len < 64) variant = head.toString('utf8', at + key.length + 12, at + key.length + 12 + len);
+    }
+  } catch { /* unreadable: not offered */ }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+  variantCache.set(file, { mtimeMs, variant });
+  return variant;
+}
+
+/** Variants with a global+local pair installed, and the quants each pair exists in (F16 first). */
+export function heartmulaTrainBases(modelsDir = config.aceServer.models): HeartmulaTrainBase[] {
+  const pairs = new Map<string, Set<string>>();
+  for (const dir of heartmulaModelDirs(modelsDir)) {
+    const names = namesIn(dir);
+    for (const n of names) {
+      const m = /^heartmula-(.+)-global-([A-Za-z0-9_]+)\.gguf$/.exec(n);
+      if (!m || !names.some(l => l.toLowerCase() === `heartmula-${m[1]}-local-${m[2]}.gguf`.toLowerCase())) continue;
+      const variant = ggufVariant(path.join(dir, n)) || m[1];
+      if (!pairs.has(variant)) pairs.set(variant, new Set());
+      pairs.get(variant)!.add(m[2]);
+    }
+  }
+  const rank = (q: string) => q === 'F16' ? 0 : q === 'BF16' ? 1 : 2;
+  return [...pairs].map(([variant, q]) => ({ variant, quants: [...q].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) }))
+    .sort((a, b) => a.variant.localeCompare(b.variant));
+}
+
+/** Why the run's base cannot load, or '' when its global+local pair is installed. */
+export function missingHeartmulaBase(recipe: Pick<HeartmulaRecipe, 'variant' | 'quant'>, modelsDir = config.aceServer.models): string {
+  const lower = (s: string) => s.toLowerCase();
+  const base = heartmulaTrainBases(modelsDir).find(b => lower(b.variant) === lower(recipe.variant));
+  return base?.quants.some(q => lower(q) === lower(recipe.quant)) ? ''
+    : `The HeartMuLa ${recipe.variant} ${recipe.quant} global+local model pair is not installed`;
 }
 
 /**
@@ -90,6 +141,11 @@ export function resolveHeartmulaRecipe(input: Record<string, unknown> | undefine
     const n = Number(src.loraDropout);
     if (!Number.isFinite(n) || n < 0 || n >= 1) throw new Error('loraDropout must be at least 0 and below 1');
     r.loraDropout = n;
+  }
+  for (const key of ['variant', 'quant'] as const) {
+    if (src[key] === undefined) continue;
+    if (typeof src[key] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$/.test(src[key] as string)) throw new Error(`${key} must be a model ${key} name`);
+    r[key] = src[key] as string;
   }
   if (src.trainMlp !== undefined) {
     if (typeof src.trainMlp !== 'boolean') throw new Error('trainMlp must be a boolean');
@@ -159,6 +215,7 @@ export function buildHeartmulaTrainArgs(o: {
 }): string[] {
   const r = o.recipe;
   return ['heartmula-train', '--data', o.dataDir, '--out', o.runDir, '--models', o.modelsDir,
+    '--variant', r.variant ?? '3B', '--type', r.quant ?? 'F16',
     '--steps', String(r.steps), '--rank', String(r.rank), '--alpha', String(r.alpha), '--lr', String(r.learningRate),
     '--grad-accum', String(r.gradAccum), '--seed', String(r.seed), '--save-every', String(r.checkpointEvery),
     // auto picks the fastest attention the card has and keeps as many blocks un-recomputed as the free VRAM allows,

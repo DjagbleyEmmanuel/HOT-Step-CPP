@@ -27,8 +27,9 @@ the dataset) and **Adapter** (the newest published adapter).
 - A card with at least 11.9 GB of memory. The trainer measured 10.4 GiB at its
   smallest setting and 15.4 GiB at its fastest. It picks the fastest setting that
   fits the free memory on its own, so a smaller card trains slower, not worse.
-- The HeartMuLa 3B global and local F16 models, the tokenizer and the HeartCodec
-  RVQ file, installed as for generation. See [Models](../models.md).
+- A HeartMuLa global and local model pair of the variant and quant you train on,
+  the tokenizer and the HeartCodec RVQ file, installed as for generation. See
+  [Models](../models.md). Prepare needs only the tokenizer and the RVQ file.
 - The HeartCodec encoder pack for Prepare: `heartcodec-muencoder-F16.gguf`,
   `heartcodec-wavlm-F16.gguf`, `heartcodec-whisper-F16.gguf` and
   `heartcodec-query-F16.gguf`. Generation does not need them. The Prepare card
@@ -93,9 +94,16 @@ The changed-settings row shows differences from the server defaults and resets
 each field independently.
 
 Resume from the picker or paste a known run ID or run-folder path from this
-dataset. The saved recipe is restored. Base model, GPU and adapter type are
-shown in the same row as YuE2, but fixed to 3B F16, automatic CUDA and LoRA by the current
-trainer. Attention mode and layer residency are automatic, with no per-run
+dataset. The saved recipe is restored, including its base model and quant.
+
+**Base model** and **Base quant** pick what the adapter trains on. The lists show only
+the variants and quants with both a global and a local model installed. F16 is the
+reference. Smaller quants use less memory (the frozen weights measured 8.4 GiB at F16,
+4.9 GiB at Q8_0 and 3.3 GiB at Q4_K_M), and train against the rounding you will
+generate with. The adapter records its variant: it plays natively on that variant and
+is re-based onto the others (see [HeartMuLa](../backends.md#heartmula)). Checkpoint
+previews render on the run's own base. GPU and adapter type are fixed to automatic
+CUDA and LoRA by the current trainer. Attention mode and layer residency are automatic, with no per-run
 controls exposed by this API.
 
 **Perform all stages** on Train prepares missing or stale HeartMuLa audio,
