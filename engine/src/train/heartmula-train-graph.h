@@ -567,32 +567,53 @@ static ggml_cgraph * hmt_g_tail_bwd(HmtGraphCtx & g, int64_t f0, int64_t Tc, flo
     return gf;
 }
 
+// Most frames one local segment may hold. The local GQA backward sums the
+// Nh * Tc broadcast heads with REPEAT_BACK, and CUDA takes at most 1 << 15 in
+// its source's ne2 * ne3, so 4096 frames at 8 heads.
+static int64_t hmt_local_frames_max(const HmtGraphCtx & g) {
+    return (int64_t) (1 << 15) / g.m->local.cfg.n_head;
+}
+
 // Kept tail: global blocks k0..27, the head, the whole local decoder and all
 // eight CEs in ONE graph with its backward, so none of it is recomputed. The
 // graph's dX for C[k0] lands in Gg[0]; blocks below k0 keep the per-layer
 // recompute. Outputs and taps as hmt_g_head_bwd / hmt_g_tail_bwd (Tc = T).
+// Past hmt_local_frames_max the local decoder and tail run as frame chunks
+// inside the graph, each CE weighted Tc / T; the taps then hold the last chunk.
 static ggml_cgraph * hmt_g_kept_bwd(HmtGraphCtx & g, int k0, float wce, HmtHeadOut * head, HmtTailOut * tail, bool taps) {
     const HeartMuLaModel & m = *g.m;
     const int64_t          H = m.local.cfg.n_embd, T = g.sb->T, V = HEARTMULA_AUDIO_VOCAB;
+    const int64_t          cap = hmt_local_frames_max(g);
     ggml_cgraph *          gf;
     ggml_context *         ctx = hmt_begin(g, &gf, true);
     ggml_tensor *          X   = hmt_cols(ctx, g.ck->C[(size_t) k0], 0, g.sb->L);
     for (int l = k0; l < 28; l++) X = hmt_global_block(ctx, g, l, X);
-    ggml_tensor * Q = hmt_head(ctx, g, X, head);
-    for (int l = 0; l < 3; l++) Q = hmt_local_block(ctx, g, l, Q);
-    ggml_tensor * y  = ggml_reshape_3d(ctx, heartmula_rms(ctx, Q, m.local.norm, m.local.cfg.rms_eps), H, 8, T);
+    ggml_tensor * Q  = hmt_head(ctx, g, X, head);
     ggml_tensor * Ls = ggml_scale(ctx, head->ce0, wce);
     ggml_set_output(head->ce0);
+    ggml_tensor * y = nullptr, * ce[8] = {};
+    for (int64_t f0 = 0; f0 < T; f0 += cap) {
+        const int64_t Tc = std::min(cap, T - f0);
+        ggml_tensor * Qc = hmt_cols(ctx, Q, 8 * f0, 8 * Tc);
+        for (int l = 0; l < 3; l++) Qc = hmt_local_block(ctx, g, l, Qc);
+        y = ggml_reshape_3d(ctx, heartmula_rms(ctx, Qc, m.local.norm, m.local.cfg.rms_eps), H, 8, Tc);
+        for (int i = 1; i < 8; i++) {
+            ggml_tensor * yi  = ggml_cont(ctx, ggml_view_2d(ctx, y, H, Tc, y->nb[2], (size_t) i * y->nb[1]));
+            ggml_tensor * lg  = ggml_mul_mat(ctx, m.audio_head[i - 1], yi);
+            ggml_tensor * lab = ggml_view_2d(ctx, g.sb->labels, V, Tc, g.sb->labels->nb[1],
+                                             (size_t) i * g.sb->labels->nb[2] + (size_t) f0 * g.sb->labels->nb[1]);
+            ggml_tensor * c   = ggml_cross_entropy_loss(ctx, lg, lab);
+            if (Tc < T) c = ggml_scale(ctx, c, (float) Tc / (float) T);
+            ce[i]           = ce[i] ? ggml_add(ctx, ce[i], c) : c;
+            tail->logits[i] = lg;
+            if (taps) ggml_set_output(lg);
+        }
+    }
     tail->dec = y;
     for (int i = 1; i < 8; i++) {
-        ggml_tensor * yi  = ggml_cont(ctx, ggml_view_2d(ctx, y, H, T, y->nb[2], (size_t) i * y->nb[1]));
-        ggml_tensor * lg  = ggml_mul_mat(ctx, m.audio_head[i - 1], yi);
-        ggml_tensor * lab = ggml_view_2d(ctx, g.sb->labels, V, T, g.sb->labels->nb[1], (size_t) i * g.sb->labels->nb[2]);
-        tail->ce[i]     = ggml_cross_entropy_loss(ctx, lg, lab);
-        tail->logits[i] = lg;
-        ggml_set_output(tail->ce[i]);
-        if (taps) ggml_set_output(lg);
-        Ls = ggml_add(ctx, Ls, ggml_scale(ctx, tail->ce[i], wce));
+        tail->ce[i] = ce[i];
+        ggml_set_output(ce[i]);
+        Ls = ggml_add(ctx, Ls, ggml_scale(ctx, ce[i], wce));
     }
     if (taps) {
         ggml_set_output(y);

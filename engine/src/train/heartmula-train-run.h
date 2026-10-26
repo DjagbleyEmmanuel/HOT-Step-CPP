@@ -432,7 +432,8 @@ static bool hmt_admit(HmtRun & R, int64_t Smax, int64_t Tmax, int64_t chunk_arg,
         const DitGpuMem mem    = dit_gpu_mem_query(gpu);
         const size_t    margin = (size_t) 768 << 20;
         budget                 = mem.free > margin ? mem.free - margin : 0;
-        for (int64_t chunk = chunk_arg > 0 ? std::min(chunk_arg, Tmax) : Tmax;; chunk = (chunk + 1) / 2) {
+        const int64_t chunk0 = std::min(chunk_arg > 0 ? chunk_arg : Tmax, std::min(Tmax, hmt_local_frames_max(R.g)));
+        for (int64_t chunk = chunk0;; chunk = (chunk + 1) / 2) {
             if (R.g.sched) ggml_backend_sched_free(R.g.sched);
             R.g.sched = backend_sched_new(R.m.bp, HMT_MAX_NODES);
             HmtTailOut tail;
