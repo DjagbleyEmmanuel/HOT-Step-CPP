@@ -594,6 +594,19 @@ Contract section 8.1 has the per-setting table; on an RTX 5090 the default step 
 84.7-second clip, four micro-batches, takes 908 ms against the Python recipe's
 1336 ms.
 
+Two opt-in options exist for recipe experiments, and the server passes neither.
+`--cb0-weighted` scales codebook k's CE by `w_k / 4.8`, with w = 2.0 for CB0 and
+0.7 down to 0.1 for CB1-7. The step event's `loss` is then that weighted objective,
+and `loss_mean` carries the plain mean; with equal CEs the two are the same.
+`--eval base|<adapter.gguf>` (repeatable), with `--eval-samples id,id`, scores
+instead of training. It runs the training forward pass only (no backward, optimizer
+or dropout, nothing written) over whole songs. With `--eos` it adds the end frame
+where training would, that is, only when it fits the context. It prints
+`eval_sample` and `eval` events: mean CE per codebook, a frame-weighted mean per
+model, `loss` and `loss_cb0w`. Repeated runs print identical numbers. The base
+model, a run's `step-N.gguf` checkpoints and published adapters can all be scored
+after the fact, for example on songs held out of training.
+
 The converter `engine/tools/convert-heartmula.py --only encoder` builds the four
 HeartCodec encoder files Prepare needs. Besides `HeartCodec-oss` and
 `HeartCodec-oss-encoder` under `--src`, it also reads the root `tokenizer.json` and
@@ -775,7 +788,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-optim-check` | Optimizer self-check |
 | `yue2-batch-check` | CPU self-check of the AR sequence layouts the joint trainer builds, no model needed |
 | `heartmula-prepare` | Sample list (audio, tags, lyrics) to HeartCodec codes and prompt ids, one sample per track, none cut ([HeartMuLa training](#heartmula-training)) |
-| `heartmula-train` | Train a HeartMuLa backbone LoRA from a prepared cache; `--stop-after` and `--resume` drive checkpoint previews ([HeartMuLa training](#heartmula-training)) |
+| `heartmula-train` | Train a HeartMuLa backbone LoRA from a prepared cache; `--stop-after` and `--resume` drive checkpoint previews; `--eval` scores the base or adapters on held-out samples instead ([HeartMuLa training](#heartmula-training)) |
 | `spike` | Phase-0 evidence runs |
 
 `yue2-prepare-aitk --caption-dropout-trigger <text>` sets the exact style text

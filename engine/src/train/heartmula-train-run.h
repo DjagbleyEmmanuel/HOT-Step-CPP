@@ -37,6 +37,8 @@
 //                     alloc_mib, device_free_mib, weights, attention, bwd}
 //   {"event":"step", step, total, loss, ce:[8], lr, grad_norm, ms_step,
 //                    ms_micro, micro, peak_alloc_mib, device_used_mib}
+//                   loss is the objective; with --cb0-weighted it is sum_k (w_k / 4.8) ce_k
+//                   and loss_mean adds the plain (1/8) sum_k ce_k
 //   {"event":"skip", step, reason}       non-finite loss or gradient, no update
 //   {"event":"checkpoint", step, state, adapter, reason: every|now|stop|final}
 //   {"event":"done", step, adapter}
@@ -57,8 +59,8 @@
 // Forward only: no backward, no optimizer, no LoRA dropout, nothing written.
 // Each --eval model (base = no adapter) scores every sample of --data, or the
 // listed ids (manifest id or codes key), as whole songs; --eos appends the
-// end frame the way training does. Per sample and per model, on stdout:
-//   {"event":"eval_sample", model, sample, frames, loss, ce:[8]}
+// end frame where training would (hmt_eos_fits). Per sample and per model, on stdout:
+//   {"event":"eval_sample", model, sample, frames, eos, loss, ce:[8]}
 //   {"event":"eval", model, samples, frames, loss, loss_cb0w, ce:[8]}
 // ce are mean CEs per codebook; the model line averages over every scored
 // frame (sum_s T_s ce_s / sum_s T_s, summed in --eval-samples order), loss is
@@ -617,7 +619,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         const std::vector<HmtPick> picks = hmt_schedule(data, a.accum, a.max_frames, a.seed, cnt.steps_done, a.crop_frames, a.eos,
                                                         heartmula_global_config().n_ctx);
         const float wce = 1.0f / (8.0f * (float) picks.size());
-        double ce_sum[8] = {}, loss = 0.0;
+        double ce_sum[8] = {}, loss = 0.0, loss_mean = 0.0;  // loss: the objective (cbw-weighted)
         bool   finite = true;
         for (const HmtPick & p : picks) {
             R.g.drop_key = hmt_mix(a.seed, (uint64_t) cnt.steps_done, (uint64_t) (&p - picks.data()));
@@ -636,10 +638,15 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
                 hmt_run_free(&R);
                 return fail(err);
             }
-            double l = 0.0;
-            for (int k = 0; k < 8; k++) { l += ce[k] / 8.0; ce_sum[k] += ce[k] / (double) picks.size(); }
+            double l = 0.0, lm = 0.0;
+            for (int k = 0; k < 8; k++) {
+                l += ce[k] * R.g.cbw[k] / 8.0;
+                lm += ce[k] / 8.0;
+                ce_sum[k] += ce[k] / (double) picks.size();
+            }
             finite = finite && std::isfinite(l);
             loss += l / (double) picks.size();
+            loss_mean += lm / (double) picks.size();
         }
         double gn2 = 0.0;
         if (!hmt_grad_norm2(R, &gn2, &err)) { hmt_run_free(&R); return fail(err); }
@@ -664,7 +671,8 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         std::string     ces;
         for (int k = 0; k < 8; k++) ces += (k ? "," : "") + hmt_num(ce_sum[k]);
         hmt_emit("\"event\":\"step\",\"step\":" + std::to_string((long long) cnt.steps_done) + ",\"total\":" +
-                 std::to_string((long long) a.steps) + ",\"loss\":" + hmt_num(loss) + ",\"ce\":[" + ces + "],\"lr\":" +
+                 std::to_string((long long) a.steps) + ",\"loss\":" + hmt_num(loss) +
+                 (a.cb0_weighted ? ",\"loss_mean\":" + hmt_num(loss_mean) : std::string()) + ",\"ce\":[" + ces + "],\"lr\":" +
                  hmt_num(a.lr) + ",\"grad_norm\":" + hmt_num(std::sqrt(gn2)) + ",\"ms_step\":" + hmt_num(ms) +
                  ",\"ms_micro\":" + hmt_num(ms / (double) picks.size()) + ",\"micro\":" + std::to_string(picks.size()) +
                  ",\"peak_alloc_mib\":" + hmt_num(hmt_alloc_bytes(R) / 1048576.0) + ",\"device_used_mib\":" + hmt_num(mem.used / 1048576.0));
@@ -748,10 +756,14 @@ static int hmt_eval(const HeartmulaTrainArgs & a_in) {
 
     HmtRun R;
     if (!hmt_model_load(&R.m, a.global_path.c_str(), a.local_path.c_str(), a.weights == "bf16", &err)) { hmt_run_free(&R); return fail(err); }
+    // The end frame follows training's rule: only where it still fits the context.
+    auto eos_of = [&](const HmtSample & s) {
+        return a.eos && hmt_eos_fits((int64_t) s.prompt.size(), s.frames, heartmula_global_config().n_ctx);
+    };
     int64_t Smax = 0, Tmax = 0;
     for (const HmtSample * s : picked) {
         Smax = std::max<int64_t>(Smax, (int64_t) s->prompt.size());
-        Tmax = std::max<int64_t>(Tmax, s->frames + (a.eos ? 1 : 0));
+        Tmax = std::max<int64_t>(Tmax, s->frames + (eos_of(*s) ? 1 : 0));
     }
     ggml_backend_t gpu = R.m.bp.backend;
     R.g.m     = &R.m;
@@ -800,8 +812,9 @@ static int hmt_eval(const HeartmulaTrainArgs & a_in) {
         for (const HmtSample * s : picked) {
             double ce[8];
             if (!hmt_read_codes(*s, 0, s->frames, &codes, &err)) { heartmula_adapter_free(&ad); hmt_run_free(&R); return fail(err); }
-            if (a.eos) codes.insert(codes.end(), 8, HMT_EOS_CODE);
-            const int64_t T = s->frames + (a.eos ? 1 : 0);
+            const bool eos = eos_of(*s);
+            if (eos) codes.insert(codes.end(), 8, HMT_EOS_CODE);
+            const int64_t T = s->frames + (eos ? 1 : 0);
             if (!hmt_eval_sample(R, *s, codes.data(), T, ce, &err)) { heartmula_adapter_free(&ad); hmt_run_free(&R); return fail(err); }
             std::string ces;
             double      loss = 0.0;
@@ -812,7 +825,8 @@ static int hmt_eval(const HeartmulaTrainArgs & a_in) {
             }
             frames += T;
             hmt_emit("\"event\":\"eval_sample\",\"model\":" + hmt_json_str(model) + ",\"sample\":" + hmt_json_str(s->id) +
-                     ",\"frames\":" + std::to_string((long long) T) + ",\"loss\":" + hmt_num(loss) + ",\"ce\":[" + ces + "]");
+                     ",\"frames\":" + std::to_string((long long) T) + ",\"eos\":" + (eos ? "true" : "false") +
+                     ",\"loss\":" + hmt_num(loss) + ",\"ce\":[" + ces + "]");
         }
         std::string ces;
         double      loss = 0.0, loss_w = 0.0;

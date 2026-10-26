@@ -69,6 +69,10 @@ int main(int argc, char ** argv) {
             if (p.sample == 0 && p.T == big.samples[0].frames) CHECK(p.eos, "S + T == ctx must keep the end frame");
             if (p.sample == 1) CHECK(!p.eos, "S + T > ctx must drop the end frame");
         }
+    // The shared rule hmt_eval scores with: S 400, F 7792 keeps the end frame (L = 8192),
+    // F 7793 drops it rather than scoring L = 8193 past the context.
+    CHECK(hmt_eos_fits(400, 7792, 8192) && !hmt_eos_fits(400, 7793, 8192), "hmt_eos_fits boundary");
+    printf("eos boundary: S 400 + F 7792 keeps the end frame, S 400 + F 7793 drops it (context 8192)\n");
     // Without --eos nothing gets an end frame; without --crop-frames windows are whole songs.
     for (int64_t step = 0; step < 20; step++) {
         for (const HmtPick & p : hmt_schedule(d, 4, 0, 7, step, 750, false, 8192)) CHECK(!p.eos, "end frame without --eos");

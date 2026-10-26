@@ -354,6 +354,13 @@ struct HmtPick {
 #define HMT_FULL_EVERY 4
 #define HMT_EOS_CODE   8193
 
+// Whether a window of T frames that reaches its song's end can carry the end frame:
+// the backbone then holds S + (T + 1) - 1 rows, which must fit the context. Training
+// (hmt_schedule) and scoring (run.h hmt_eval) both decide with this.
+static bool hmt_eos_fits(int64_t S, int64_t T, int64_t ctx_limit) {
+    return S + T <= ctx_limit;
+}
+
 // Per-codebook loss factors, graph.h HmtGraphCtx::cbw. Default: every factor 1,
 // so the loss is the plain mean (1/8) sum_k CE_k. --cb0-weighted: the SFT
 // weighting of the HeartMuLa paper, CB0 2.0 and CB1..7 0.7 down to 0.1,
@@ -391,8 +398,7 @@ static std::vector<HmtPick> hmt_schedule(const HmtData & d, int accum, int64_t m
             p.T  = max_frames > 0 ? std::min(F, max_frames) : F;
             p.w0 = F > p.T ? (int64_t) (hmt_mix(seed, (uint64_t) step, (uint64_t) (k + 2)) % (uint64_t) (F - p.T + 1)) : 0;
         }
-        // The end frame needs one more position: S + (T + 1) - 1 within the context.
-        p.eos = eos && p.w0 + p.T == F && (int64_t) d.samples[(size_t) p.sample].prompt.size() + p.T <= ctx_limit;
+        p.eos = eos && p.w0 + p.T == F && hmt_eos_fits((int64_t) d.samples[(size_t) p.sample].prompt.size(), p.T, ctx_limit);
         out.push_back(p);
     }
     return out;

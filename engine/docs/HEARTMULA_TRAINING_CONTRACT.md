@@ -66,6 +66,9 @@ For one sample with prompt length S and T audio frames, codes `c[t][k]`
 4. **Loss** = (1/8) x sum over k of mean over t of `CE(logits_k[t], c[t][k])`.
    Every frame, every codebook, no sampling, no masking, no label smoothing.
    Logits are 8197 wide; codes never reach the special ids above 8191.
+   `--cb0-weighted` (off by default, outside the frozen fixtures) replaces the
+   1/8 with `w_k / 4.8`, w = (2.0, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1), the
+   paper's SFT weighting normalised to sum to 1.
 
 By default no audio EOS frame is appended: the reference fixtures are windows cut
 from longer songs, so their last frame is not the end of a song. With `--eos`, a
@@ -75,7 +78,8 @@ codebooks, the frame the base model itself samples when it ends a song (logged a
 changes. `--crop-frames N` trains frames [0, N) of longer songs (the loss on a prefix
 of a causal model equals that prefix's loss inside the whole song) and every fourth
 sample whole, with its EOS frame. `--max-frames` keeps random windows for the
-selftest.
+selftest. The EOS frame is added only while S + T stays within the context
+(`hmt_eos_fits`), in training and in `--eval` scoring alike.
 
 ### Prompt
 
