@@ -40,7 +40,12 @@ import {
 
 // ── prepare ──────────────────────────────────────────────────────────────
 
-/** `[HeartMuLa-Prepare] %zu/%zu <id>: …` and `… skip <id>: <reason> (<detail>)`, heartmula-prepare.h. */
+/**
+ * The tool's lines (heartmula-prepare.h): `stage <what>`, `%zu/%zu <id>: working` before a
+ * sample, `%zu/%zu <id>: <result>` after it, and `skip <id>: <reason> (<detail>)`.
+ */
+const RE_PREP_STAGE = /^\[HeartMuLa-Prepare\]\s+stage\s+(.+)$/;
+const RE_PREP_WORK = /^\[HeartMuLa-Prepare\]\s+(\d+)\/(\d+)\s+(\S+):\s+working$/;
 const RE_PREP_FILE = /^\[HeartMuLa-Prepare\]\s+(\d+)\/(\d+)\s/;
 const RE_PREP_SKIP = /^\[HeartMuLa-Prepare\]\s+skip\s+(\S+):\s+(.+)$/;
 /** The tool's own fatal sentences: `heartmula-prepare: <message>`. */
@@ -68,13 +73,25 @@ export async function runHeartmulaPrepareJob(job: TrainingJob): Promise<void> {
     const args = buildHeartmulaPrepareArgs({
       samplesJson: list.file, outDir, modelsDir: config.aceServer.models, encoderDir, force: opts.force,
     });
-    job.total = list.count;
+    job.total = list.count; job.done = 0; job.failed = 0; job.currentSampleId = null;
     log(job, 'info', `Encoding ${list.count} sample(s) to HeartCodec codes.`);
+    let at = 0;  // the 1-based sample the tool is on
     await runYue2AceTrain(job, 'heartmula-prepare', args, YUE2_IDLE_MS, () =>
       fs.existsSync(path.join(outDir, HEARTMULA_PREPARE_MANIFEST)) ? null : 'heartmula-prepare finished but wrote no manifest',
     (line, state) => {
       let m: RegExpExecArray | null;
-      if ((m = RE_PREP_SKIP.exec(line))) { log(job, 'warn', `Skipped ${m[1]}: ${m[2]}`); return; }
+      if ((m = RE_PREP_STAGE.exec(line))) { job.phase = m[1].startsWith('encoding') ? 'encoding' : 'loading-models'; emitProgress(job); log(job, 'info', `Prepare: ${m[1]}.`); return; }
+      if ((m = RE_PREP_WORK.exec(line))) {
+        at = Number(m[1]); job.done = at - 1; job.total = Number(m[2]) || job.total; job.phase = 'encoding';
+        job.currentSampleId = m[3]; emitProgress(job);
+        return;
+      }
+      if ((m = RE_PREP_SKIP.exec(line))) {
+        // A skipped sample is finished work that will not train: count it done and failed.
+        job.failed++; job.done = at; emitProgress(job);
+        log(job, 'warn', `Skipped ${m[1]}: ${m[2]}`);
+        return;
+      }
       if ((m = RE_PREP_FILE.exec(line))) {
         job.done = Number(m[1]); job.total = Number(m[2]) || job.total; job.phase = 'encoding'; emitProgress(job);
         return;

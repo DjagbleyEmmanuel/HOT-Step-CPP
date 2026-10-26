@@ -195,6 +195,7 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
     if (enc_dir.empty()) enc_dir = fs::exists(fs::u8path(a.models_dir) / "heartmula") ? (fs::u8path(a.models_dir) / "heartmula").u8string() : a.models_dir;
     heartcodec::EncoderPaths paths = heartcodec::encoder_paths(enc_dir);
     paths.rvq = rvq_file->path;
+    fprintf(stderr, "[HeartMuLa-Prepare] stage hashing the encoder pack\n");
     std::string identity;
     for (const std::string * p : { &paths.muencoder, &paths.wavlm, &paths.whisper, &paths.query }) {
         yue2_aitk::sha256::digest digest;
@@ -216,12 +217,14 @@ static int heartmula_prepare_run(const HeartmulaPrepareArgs & a) {
     bool        bp_up = false;
     double      enc_seconds = 0, enc_audio = 0;
     int         encoded = 0;
+    fprintf(stderr, "[HeartMuLa-Prepare] stage encoding %zu sample(s)\n", samples.size());
     auto skip = [&](const HeartmulaPrepareSample & s, const char * reason, const std::string & detail) {
         fprintf(stderr, "[HeartMuLa-Prepare] skip %s: %s (%s)\n", s.id.c_str(), reason, detail.c_str());
         skipped.push_back({ s.id, reason, detail });
     };
     for (size_t i = 0; i < samples.size(); ++i) {
         HeartmulaPrepareSample s = samples[i];
+        fprintf(stderr, "[HeartMuLa-Prepare] %zu/%zu %s: working\n", i + 1, samples.size(), s.id.c_str());
         if (!pm_stat_file(s.audio, &s.bytes, &s.mtime_s)) { skip(s, "no-audio", "file not found"); continue; }
         s.mtime_s /= 1000;
         if (pm_trim(s.tags).empty() || s.tags.size() > 4096) { skip(s, "invalid", "tags must be non-empty text of at most 4096 bytes"); continue; }
