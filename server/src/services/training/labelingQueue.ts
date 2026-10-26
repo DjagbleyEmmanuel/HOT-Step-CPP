@@ -126,8 +126,9 @@ export interface TrainingJob {
   owner?: Owner;
 }
 
-/** What _meta.json holds: the summary plus the owner (absent in legacy files). */
-type MetaFile = TrainingJobSummary & { owner?: Owner };
+/** What _meta.json holds: the summary plus the owner (absent in legacy files)
+ *  and, while a stopped trainer is still exiting, cleanupPending. */
+type MetaFile = TrainingJobSummary & { owner?: Owner; cleanupPending?: boolean };
 
 const jobs = new Map<string, TrainingJob>();
 const datasetKey = (datasetId: string) => `dataset:${datasetId}`;
@@ -205,11 +206,12 @@ function readMeta(id: string): MetaFile | null {
   catch { return null; }
 }
 
-/** A claimed job is still going: its record says queued or running (or it
- *  has no record yet). A claim its owner forgot to release frees itself. */
+/** A claimed job is still going: its record says queued or running, a
+ *  cancelled trainer is still exiting (cleanupPending), or it has no record
+ *  yet. A claim its owner forgot to release frees itself. */
 function jobStillActive(id: string): boolean {
   const meta = readMeta(id);
-  return !meta || meta.status === 'queued' || meta.status === 'running';
+  return !meta || meta.status === 'queued' || meta.status === 'running' || meta.cleanupPending === true;
 }
 
 export function activeJobForDataset(datasetId: string): TrainingJob | undefined {
@@ -404,7 +406,9 @@ function persistMeta(job: TrainingJob): void {
   try {
     const dir = path.join(jobsDir(), job.id);
     fs.mkdirSync(dir, { recursive: true });
-    writeMetaFile(path.join(dir, '_meta.json'), { ...toSummary(job), owner: job.owner });
+    writeMetaFile(path.join(dir, '_meta.json'), {
+      ...toSummary(job), owner: job.owner, ...(job.cleanupPending ? { cleanupPending: true } : {}),
+    });
   } catch (err: any) {
     console.warn(`[Training] Could not persist job ${job.id}: ${err.message}`);
   }
@@ -610,6 +614,9 @@ export function isCancelled(job: TrainingJob): boolean {
 export function releaseJobCleanup(job: TrainingJob): void {
   job.cleanupPending = false;
   if (isCancelled(job)) jobs.delete(job.id);
+  // The record stops saying cleanupPending before the claim goes, so the
+  // other copy never sees a released claim on a job it still thinks is busy.
+  if (job.status !== 'queued' && job.status !== 'running') persistMeta(job);
   releaseIfIdle(job);
 }
 

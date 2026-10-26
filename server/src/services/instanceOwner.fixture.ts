@@ -39,6 +39,15 @@ for (const [kind, dataset] of [['train-dit', 'ds-train'], ['label', 'ds-label']]
   training.emitJob(job);
   jobs[kind] = job.id;
 }
+// A graceful trainer that was cancelled but has not exited yet: the job is
+// over, the dataset is not free until its cleanup releases it.
+const stopping = training.createJob('heartmula-train', 'ds-cleanup', [], {});
+stopping.status = 'running';
+stopping.cleanupPending = true;
+stopping.cancelChild = () => {};
+training.emitJob(stopping);
+training.cancelJob(stopping.id);
+jobs.stopping = stopping.id;
 
 console.log(JSON.stringify({ owner: owner(), audio: item.id, workflow: workflow.id, jobs }));
 setInterval(() => {}, 60_000);

@@ -91,6 +91,11 @@ test('a live owner in another process is left alone by every sweep, poll, claim 
   assert.throws(() => training.createJob('build', 'ds-label', [], {}), /busy in the other HOT-Step copy \(child:1/);
   assert.match(training.jobRunsElsewhere(made.jobs['train-dit']) ?? '', /running in the other HOT-Step copy/);
 
+  // A cancelled trainer still exiting keeps its dataset until cleanup ends.
+  assert.deepEqual([meta(made.jobs.stopping).status, meta(made.jobs.stopping).cleanupPending], ['cancelled', true]);
+  assert.equal(training.activeJobForDataset('ds-cleanup')?.id, made.jobs.stopping);
+  assert.throws(() => training.createJob('build', 'ds-cleanup', [], {}), /busy in the other HOT-Step copy/);
+
   // Legacy rule: a running record with no owner predates ownership, so its
   // process is gone. It is recovered even while another copy is alive.
   const legacy = path.join(process.env.TRAINING_DIR!, 'jobs', 'legacy-job');
@@ -123,6 +128,7 @@ test('once the owner is dead, polling and startup sweeps recover its jobs', asyn
     assert.deepEqual([meta(made.jobs[kind]).status, meta(made.jobs[kind]).error], ['failed', 'Server restarted'], kind);
   }
   assert.equal(training.activeJobForDataset('ds-train'), undefined);
+  assert.equal(training.activeJobForDataset('ds-cleanup'), undefined, 'the pending cleanup of a dead owner frees the dataset');
   assert.equal(training.jobRunsElsewhere(made.jobs['train-dit']), null);
   const job = training.createJob('build', 'ds-train', [], {});
   assert.equal(training.activeJobForDataset('ds-train')?.id, job.id);
