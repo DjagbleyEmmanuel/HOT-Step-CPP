@@ -200,6 +200,8 @@ export interface HeartmulaReadiness {
   deviceProblem: string | null;
   /** The HeartCodec encoder pack is not installed (Prepare needs it). */
   encoderMissing: boolean;
+  /** Missing file names and the install step, null when the pack is installed. */
+  encoderHelp: string | null;
 }
 
 /** One run for the run picker. */

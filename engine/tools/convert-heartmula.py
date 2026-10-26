@@ -4,6 +4,13 @@
 Requires numpy, torch, safetensors and gguf==0.17.1. No model code is imported.
 Example:
   python engine/tools/convert-heartmula.py --src <checkpoint-root> --out <gguf-dir>
+  python engine/tools/convert-heartmula.py --src <checkpoint-root> --out <gguf-dir> --only encoder
+
+--only encoder writes just what training's Prepare needs: the four HeartCodec
+encoder files (muencoder, wavlm, whisper, query) plus heartcodec-rvq-F32.gguf,
+which they pin by hash. It needs only HeartCodec-oss and HeartCodec-oss-encoder
+under --src. Copy the four encoder files next to the generation packs; the RVQ
+file must be byte-identical to the one already installed, or the pack is refused.
 
 Both 3B variants are mandatory and retain distinct identities. Source names are
 kept except audio_head -> audio_head.0..6.weight, each transposed to [8197,3072],
@@ -247,6 +254,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--src", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--only", choices=("encoder",), help="write the HeartCodec encoder pack (and its RVQ) only")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     tempfile.tempdir = str(args.out)
@@ -257,8 +265,11 @@ def main():
     manifest = dict(version=VERSION, converter_sha256=sha256(__file__), tokenizer=tokenizer, components=[])
     rvq_hash = None
     # Shared codec first supplies an exact RVQ dependency to every other component.
-    for kind, directory in (("codec", "HeartCodec-oss"), ("encoder", "HeartCodec-oss-encoder"),
-                            *((v, "HeartMuLa-oss-" + v) for v in VARIANTS)):
+    kinds = (("codec", "HeartCodec-oss"), ("encoder", "HeartCodec-oss-encoder"),
+             *((v, "HeartMuLa-oss-" + v) for v in VARIANTS))
+    if args.only == "encoder":
+        kinds = kinds[:2]
+    for kind, directory in kinds:
         checkpoint = Checkpoint(args.src / directory)
         count = sum(math.prod(t["shape"]) for t in checkpoint.tensors.values())
         if count != TOTALS[kind]:
@@ -268,6 +279,8 @@ def main():
         for name in checkpoint.tensors:
             groups.setdefault(component(name, kind), []).append(name)
         for part in sorted(groups, key=lambda name: (name != "rvq", name)):
+            if args.only == "encoder" and kind == "codec" and part != "rvq":
+                continue
             dependencies = dict(tokenizer=tokenizer, rvq_sha256=rvq_hash)
             result = convert(checkpoint, kind, part, groups[part], identity, dependencies, args.out)
             if part == "rvq":

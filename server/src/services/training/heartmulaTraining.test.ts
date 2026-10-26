@@ -164,3 +164,10 @@ test('device gate: refuses a small, absent or unidentifiable selected GPU', asyn
   config.aceServer.cudaVisibleDevices = 'GPU-1';
   try { assert.match(heartmulaDeviceProblem(two) ?? '', /needs at least 20 GB/); } finally { config.aceServer.cudaVisibleDevices = ''; }
 });
+
+test('a missing encoder pack is described with the file names and the install step', () => {
+  const message = train.missingEncoderMessage(config.aceServer.models);
+  for (const role of ['muencoder', 'wavlm', 'whisper', 'query']) assert.ok(message.includes(`heartcodec-${role}-F16.gguf`), role);
+  assert.ok(message.includes('convert-heartmula.py'));
+  assert.ok(message.includes('--only encoder'));
+});

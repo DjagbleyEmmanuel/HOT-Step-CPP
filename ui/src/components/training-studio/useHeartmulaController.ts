@@ -57,9 +57,7 @@ export function useHeartmulaController({ datasetId }: TrainingRenderContext): He
         ? t('trainingStudio.heartmula.missingModels', 'HeartMuLa models are missing: {{files}}.', { files: ready.missingModels.join(', ') })
         : t('trainingStudio.heartmula.noTrainer', 'ace-train was not found next to the engine. Rebuild the engine.')
     : undefined;
-  const prepareBlockedReason = blocked ?? (ready?.encoderMissing
-    ? t('trainingStudio.heartmula.encoderMissing', 'The HeartCodec encoder pack is not installed, so audio cannot be prepared.')
-    : undefined);
+  const prepareBlockedReason = blocked ?? (ready?.encoderMissing ? ready.encoderHelp ?? undefined : undefined);
 
   return {
     scopeKey: `${worker ?? ''}:${datasetId}`,

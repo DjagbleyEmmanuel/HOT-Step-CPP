@@ -39,8 +39,7 @@ export function missingHeartmulaModels(modelsDir = config.aceServer.models): str
 /**
  * The directory holding the HeartCodec encoder pack (all four F16 files), or
  * null. Only the models folder is searched: the oracle checkout is never a
- * source. Nothing downloads the pack today (the model registry has no
- * HeartMuLa entries), so a missing pack is reported with the file names.
+ * source. Readiness reports a missing pack before Prepare is offered.
  */
 export function findHeartmulaEncoderDir(modelsDir = config.aceServer.models): string | null {
   for (const dir of heartmulaModelDirs(modelsDir)) {
@@ -50,8 +49,16 @@ export function findHeartmulaEncoderDir(modelsDir = config.aceServer.models): st
   return null;
 }
 
+/**
+ * What the user is told when the pack is missing: the exact files and the one
+ * install step. Packs reach users the way the generation packs do, by running
+ * the offline converter on the upstream weights (engine/tools/convert-heartmula.py).
+ */
 export const missingEncoderMessage = (modelsDir = config.aceServer.models): string =>
-  `The HeartCodec encoder pack is not installed. Put ${ENCODER_FILES.join(', ')} in ${path.join(modelsDir, 'heartmula')}.`;
+  `The HeartCodec encoder pack is not installed (missing: ${ENCODER_FILES.join(', ')}). `
+  + 'Build it from the upstream HeartCodec weights with '
+  + '`python engine/tools/convert-heartmula.py --src <checkpoint-root> --out <dir> --only encoder`, '
+  + `then copy the four heartcodec-*-F16.gguf files into ${path.join(modelsDir, 'heartmula')}. See engine/docs/HEARTMULA_CONTRACT.md (Files and discovery).`;
 
 // ── Recipe ───────────────────────────────────────────────────────────────
 

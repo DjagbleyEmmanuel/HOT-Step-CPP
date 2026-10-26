@@ -11,7 +11,7 @@ import { aceTrainExe, engineGpuBackend } from './aceTrain.js';
 import { listGpusSync, selectedGpuMemoryMB, type NvidiaGpu } from '../gpuDevices.js';
 import { buildSamples } from './datasetScan.js';
 import { activeJobForDataset } from './labelingQueue.js';
-import { findHeartmulaEncoderDir, missingHeartmulaModels } from './heartmulaTrain.js';
+import { findHeartmulaEncoderDir, missingEncoderMessage, missingHeartmulaModels } from './heartmulaTrain.js';
 import { heartmulaPrepareStatus, readHeartmulaManifest } from './heartmulaPrepare.js';
 import {
   heartmulaRunStatus, latestHeartmulaAdapter, listHeartmulaRuns,
@@ -40,9 +40,10 @@ export function heartmulaReadiness(gpus?: NvidiaGpu[]): HeartmulaReadiness {
   const backend = engineGpuBackend();
   const missingModels = missingHeartmulaModels();
   const deviceProblem = backend === 'cuda' ? heartmulaDeviceProblem(gpus) : null;
+  const encoderMissing = findHeartmulaEncoderDir() === null;
   return {
     available: backend === 'cuda' && deviceProblem === null && missingModels.length === 0 && !!aceTrainExe(),
-    backend, missingModels, deviceProblem, encoderMissing: findHeartmulaEncoderDir() === null,
+    backend, missingModels, deviceProblem, encoderMissing, encoderHelp: encoderMissing ? missingEncoderMessage() : null,
   };
 }
 
