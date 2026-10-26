@@ -160,6 +160,11 @@ test('a rejected older-run preview retry stays visible after a successful list r
     await act(async () => { await client.invalidateQueries({ queryKey: heartmulaPreviewOptions(null, 'one', 'older', false).queryKey }); });
     await until(() => document.body.textContent!.includes('Preview list unavailable'));
     assert.match(document.body.textContent!, /Preview retry rejected/);
+    // the Train page lists the run's previews under the card, as YuE2's does
+    await act(async () => { root.render(createElement(QueryClientProvider, { client },
+      plugin.renderTrain!({ datasetId: 'one', slug: 'example', trigger: '', section: 'train' }))); });
+    await until(() => document.body.textContent!.includes('Checkpoint ladder'));
+    assert.ok(document.body.textContent!.indexOf('Start training') < document.body.textContent!.indexOf('Checkpoint ladder'));
   } finally {
     await act(async () => { root.unmount(); });
     client.clear(); useTrainingStore.setState(savedStore); Object.assign(globalThis, saved);

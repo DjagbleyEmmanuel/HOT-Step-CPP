@@ -102,9 +102,13 @@ function HeartmulaPage({ context, useController, review = false }: {
           <HeartmulaPrepareCard key={view.scopeKey} datasetId={context.datasetId} status={view.status.prepare} busy={view.busy} preparing={view.preparing}
             blockedReason={view.prepareBlockedReason} onPrepare={view.onPrepare} />
         </>
-        : <HeartmulaTrainCard key={view.scopeKey} datasetId={context.datasetId} status={view.status} slug={context.slug} busy={view.busy}
-          trainStarted={view.trainStarted} blockedReason={view.trainBlockedReason}
-          onTrain={view.onTrain} onChain={view.onChain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} />)}
+        : <>
+          <HeartmulaTrainCard key={view.scopeKey} datasetId={context.datasetId} status={view.status} slug={context.slug} busy={view.busy}
+            trainStarted={view.trainStarted} blockedReason={view.trainBlockedReason}
+            onTrain={view.onTrain} onChain={view.onChain} onCheckpoint={view.onCheckpoint} onCancel={view.onCancel} />
+          {/* Previews land under the run as they render, as on the YuE2 Train page. */}
+          {view.status.runs.length > 0 && previewCard}
+        </>)}
   </div>;
 }
 
