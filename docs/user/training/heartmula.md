@@ -59,7 +59,7 @@ The starting recipe is rank 64, alpha 64, learning rate 1e-4, 480 steps and four
 micro-batches per step. The Train page uses YuE2's amber training panel. Choose
 **Resume a previous run** or enter an adapter name, then set the steps, save
 interval, seed, rank, alpha and learning rate in the visible parameter row.
-Dropout, songs per update and **Train MLP layers** sit under **Advanced**.
+Dropout, songs per update, **Train MLP layers** and **Crop songs** sit under **Advanced**.
 Checkpoint preview settings follow the recipe, and the start, pause and cancel
 controls stay below the form:
 
@@ -68,7 +68,8 @@ controls stay below the form:
 | Rank, Alpha | Adapter size and scaling. Higher ranks use more memory. |
 | Learning rate, Gradient accumulation, Training seed | Usual meanings. Keep the seed fixed to compare recipes. |
 | LoRA dropout | 0 turns it off (the default). 0.05 is a proven value; it adds about 8% to each step and 1.3 GiB of memory. |
-| Train MLP layers | Off by default: the adapter covers the attention projections only. On also trains each backbone block's MLP, which unlocks the MLP dial in the Adapters tab. At rank 64 the adapter grows from about 37M to 97M parameters (389 MB) and needs more memory. |
+| Train MLP layers | On by default: also trains each backbone block's MLP, not only the attention projections, which unlocks the MLP dial in the Adapters tab. At rank 64 the adapter is about 97M parameters (389 MB) instead of 37M, and steps need more memory and time. Runs started before it was the default resume as attention-only. |
+| Crop songs | Off by default. On trains on a window of each song, at most the given seconds (10 to 600, 120 to start), with a fresh seeded window every step so the run still covers whole songs. Shorter windows make steps faster and lighter, which helps most with long songs; songs shorter than the window train whole. |
 | Save every, steps | Resumable checkpoint interval. 0 saves only when stopping or finishing. |
 
 **Save and pause** writes a checkpoint and stops; **Resume run** continues it with

@@ -29,7 +29,10 @@ test('recipe: defaults are the proven recipe, bad values and unknown keys throw'
   assert.equal(train.resolveHeartmulaRecipe({ loraDropout: 0.05 }).loraDropout, 0.05);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: 1 }), /loraDropout/);
   assert.throws(() => train.resolveHeartmulaRecipe({ loraDropout: -0.1 }), /loraDropout/);
-  assert.equal(HEARTMULA_RECIPE_DEFAULTS.trainMlp, false);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.trainMlp, true);
+  assert.equal(HEARTMULA_RECIPE_DEFAULTS.cropSeconds, 0);
+  assert.equal(train.resolveHeartmulaRecipe({ cropSeconds: 120 }).cropSeconds, 120);
+  for (const bad of [5, 601, -1, 'x']) assert.throws(() => train.resolveHeartmulaRecipe({ cropSeconds: bad }), /cropSeconds/);
   assert.equal(train.resolveHeartmulaRecipe({ trainMlp: true }).trainMlp, true);
   assert.throws(() => train.resolveHeartmulaRecipe({ trainMlp: 'yes' }), /trainMlp/);
   assert.deepEqual([HEARTMULA_RECIPE_DEFAULTS.variant, HEARTMULA_RECIPE_DEFAULTS.quant], ['3B', 'F16']);
@@ -62,17 +65,23 @@ test('preview settings: defaults, overrides, and every bad value refused', () =>
 });
 
 test('argv matches the trainer CLI contract', () => {
+  const plain = { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: false };
+  assert.ok(train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false })
+    .includes('--lora-mlp'), 'MLP layers train by default');
   const args = train.buildHeartmulaTrainArgs({
-    dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: true,
+    dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: plain, name: 'a', resume: true,
   });
   assert.deepEqual(args.slice(0, 11), ['heartmula-train', '--data', 'D', '--out', 'R', '--models', 'M', '--variant', '3B', '--type', 'F16']);
   assert.ok(args.join(' ').includes('--grad-accum 4 --seed 0 --save-every 100 --attn auto --keep-layers auto --lora-dropout 0 --name a --resume'));
   assert.ok(!args.includes('--stop-after'));
-  const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
+  const seg = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...plain, loraDropout: 0.05 }, name: 'a', resume: false, stopAfter: 100 });
   assert.ok(seg.join(' ').includes('--lora-dropout 0.05 --name a --stop-after 100'));
+  const crop = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...plain, cropSeconds: 120 }, name: 'a', resume: false });
+  assert.ok(crop.join(' ').includes('--max-frames 1500'), '120 s at 12.5 frames per second');
+  assert.ok(!args.includes('--max-frames'), 'no crop, no flag');
   const mlp = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: true }, name: 'a', resume: false });
   assert.ok(mlp.join(' ').includes('--lora-dropout 0 --lora-mlp --name a'));
-  const trig = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false, trigger: ' zx9 ' });
+  const trig = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: plain, name: 'a', resume: false, trigger: ' zx9 ' });
   assert.ok(trig.join(' ').includes('--trigger zx9 --name a'));
   assert.ok(!args.includes('--trigger'), 'no dataset trigger, no flag');
   assert.ok(!args.includes('--lora-mlp'), 'attention-only runs keep their old command line');
@@ -112,6 +121,13 @@ test('runs: new run, resume rules, foreign dataset refused', () => {
   assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { steps: 30 } }), /cannot change steps/);
   const again = runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { steps: 20 } });
   assert.equal(again.resume, true);
+  // A run saved before trainMlp and cropSeconds existed trained attention-only on whole songs.
+  const recordFile = path.join(first.dir, 'run.json');
+  const legacy = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
+  delete legacy.recipe.trainMlp; delete legacy.recipe.cropSeconds;
+  fs.writeFileSync(recordFile, JSON.stringify(legacy));
+  assert.equal(runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { trainMlp: false, cropSeconds: 0 } }).resume, true);
+  assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: first.id, recipe: { trainMlp: true } }), /cannot change trainMlp/);
   assert.equal(again.dir, first.dir);
   assert.throws(() => runs.resolveHeartmulaRun({ id: 'other', slug: 'demo' }, { resumeRun: first.id }), /another dataset/);
   assert.throws(() => runs.resolveHeartmulaRun(ds, { resumeRun: '../../x/1' }), /Invalid/);

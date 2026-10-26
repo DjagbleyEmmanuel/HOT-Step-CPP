@@ -27,7 +27,7 @@ export interface HeartmulaTrainCardProps {
 
 const BUTTON = 'px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2';
 const INPUT = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
-type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp' | 'variant' | 'quant'>;
+type NumericRecipeKey = Exclude<keyof HeartmulaRecipe, 'trainMlp' | 'variant' | 'quant' | 'cropSeconds'>;
 const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: number; max: number; step: number }> = [
   { key: 'steps', label: 'Updates', info: 'Number of optimizer updates. More steps take longer and can overfit the dataset.', min: 1, max: 1_000_000, step: 1 },
   { key: 'rank', label: 'Rank', info: 'Adapter capacity. Higher ranks use more memory. The starting recipe uses rank 64.', min: 1, max: 256, step: 1 },
@@ -52,6 +52,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const [presetKey, setPresetKey] = useState('balanced');
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
+  const [cropDraft, setCropDraft] = useState(120);
   const fileRef = useRef<HTMLInputElement>(null);
   const validRecipe = (value: unknown): value is HeartmulaRecipe => !!value && typeof value === 'object' && FIELDS.every(field => {
     const number = (value as Record<string, unknown>)[field.key];
@@ -61,7 +62,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const [presets, setPresets] = useState<Array<{ name: string; recipe: HeartmulaRecipe }>>(() => {
     try {
       const stored: unknown = JSON.parse(localStorage.getItem('hs-heartmula-training-presets') ?? '[]');
-      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe })) : [];
+      return Array.isArray(stored) ? stored.filter(item => typeof item?.name === 'string' && item.name.trim() && item.name.length <= 64 && validRecipe(item.recipe)).slice(0, 32).map(item => ({ name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, cropSeconds: Number(item.recipe.cropSeconds) || 0, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe })) : [];
     } catch { return []; }
   });
   const persist = (next: typeof presets) => {
@@ -87,7 +88,8 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
   const locked = busy || resume;
   const edited = (key: keyof HeartmulaPreviewSettings) => !locked && previewEdits[key] !== undefined && previewEdits[key] !== status.previewDefaults[key];
-  const valid = FIELDS.every(field => Number.isFinite(recipe[field.key]) && recipe[field.key] >= field.min
+  const cropOk = !recipe.cropSeconds || (Number.isFinite(recipe.cropSeconds) && recipe.cropSeconds >= 10 && recipe.cropSeconds <= 600);
+  const valid = cropOk && FIELDS.every(field => Number.isFinite(recipe[field.key]) && recipe[field.key] >= field.min
     && recipe[field.key] <= field.max && (field.step !== 1 || Number.isInteger(recipe[field.key])))
     && Number.isInteger(cadence) && cadence >= 0 && cadence <= 1_000_000
     && Number.isInteger(previewSettings.seconds) && previewSettings.seconds >= 5 && previewSettings.seconds <= 240
@@ -117,7 +119,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         || !data.presets.every((item: { name?: unknown; recipe?: unknown }) => typeof item.name === 'string'
           && item.name.trim().length > 0 && item.name.length <= 64 && validRecipe(item.recipe))) throw new Error('Invalid HeartMuLa presets');
       const merged = new Map(presets.map(item => [item.name, item]));
-      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe });
+      for (const item of data.presets) merged.set(item.name, { name: item.name, recipe: { ...Object.fromEntries(FIELDS.map(field => [field.key, item.recipe[field.key]])), trainMlp: item.recipe.trainMlp === true, cropSeconds: Number(item.recipe.cropSeconds) || 0, ...(typeof item.recipe.variant === 'string' ? { variant: item.recipe.variant } : {}), ...(typeof item.recipe.quant === 'string' ? { quant: item.recipe.quant } : {}) } as unknown as HeartmulaRecipe });
       persist([...merged.values()].slice(-32));
     } catch { setPresetError(t('trainingStudio.heartmula.presetImportError', 'Import a valid HeartMuLa preset file of up to 100 KB.')); }
   };
@@ -226,6 +228,24 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
         onChange={value => setEdits(previous => ({ ...previous, trainMlp: value }))}
         label={t('trainingStudio.heartmula.field.trainMlp', 'Train MLP layers')}
         info={t('trainingStudio.heartmula.field.trainMlpInfo', 'Also trains the MLP (feed-forward) layers of every backbone block, not only attention. The adapter is bigger, steps take longer and use more memory. Lets the MLP dial in the Adapters panel change the sound.')} />
+      <Toggle className="mt-3" accent="amber" disabled={locked} checked={(recipe.cropSeconds ?? 0) > 0}
+        onChange={value => setEdits(previous => ({ ...previous, cropSeconds: value ? cropDraft : 0 }))}
+        label={t('trainingStudio.heartmula.field.crop', 'Crop songs')}
+        info={t('trainingStudio.heartmula.field.cropInfo', 'Trains on a window of each song instead of the whole track, a different window every step, so the run still covers every part of a song. Steps are faster and use less memory; long songs benefit most. Songs shorter than the window train whole.')} />
+      {(recipe.cropSeconds ?? 0) > 0 && (
+        <div className="mt-2 max-w-[16rem]">
+          <PreviewField label={t('trainingStudio.heartmula.field.cropSeconds', 'Window (seconds)')}
+            info={t('trainingStudio.heartmula.field.cropSecondsInfo', 'Longest stretch of a song trained on per step, 10 to 600 seconds. 120 is a good start.')}>
+            <input className={INPUT} type="number" min={10} max={600} step={1} disabled={locked}
+              value={recipe.cropSeconds ?? cropDraft}
+              onChange={event => {
+                const v = event.target.valueAsNumber;
+                if (Number.isFinite(v)) setCropDraft(v);
+                setEdits(previous => ({ ...previous, cropSeconds: v }));
+              }} />
+          </PreviewField>
+        </div>
+      )}
     </details>
     <TrainingPreviewSettings title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
       enabled={cadence > 0} disabled={locked} onEnabledChange={enabled => setPreviewEvery(enabled ? status.previewDefaults.everySteps || 100 : 0)}

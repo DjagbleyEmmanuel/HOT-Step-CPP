@@ -20,7 +20,7 @@ import { resolveHeartmulaPreviewSettings, resolveHeartmulaRecipe } from './heart
 import type {
   HeartmulaAdapterAsset, HeartmulaLossPoint, HeartmulaPreviewSource, HeartmulaRecipe, HeartmulaRunId, HeartmulaRunState, HeartmulaRunStatus,
 } from '../../contracts/heartmulaTraining.js';
-import { HEARTMULA_RECIPE_DEFAULTS } from '../../contracts/heartmulaTraining.js';
+import { HEARTMULA_RECIPE_DEFAULTS, HEARTMULA_RECIPE_LEGACY } from '../../contracts/heartmulaTraining.js';
 
 /** `<adapterName>/<timestamp>`, the id the routes and `resumeRun` take. */
 export const HEARTMULA_RUN_ID = /^[a-z0-9][a-z0-9_-]{0,63}\/[0-9][0-9_-]*$/i;
@@ -127,6 +127,7 @@ export function resolveHeartmulaRun(
     for (const [key, value] of Object.entries(given ?? {})) {
       // A run saved before a recipe key existed ran with that key's default.
       const saved = (run.record.recipe as unknown as Record<string, unknown>)[key]
+        ?? (HEARTMULA_RECIPE_LEGACY as unknown as Record<string, unknown>)[key]
         ?? (HEARTMULA_RECIPE_DEFAULTS as unknown as Record<string, unknown>)[key];
       if (value !== undefined && saved !== value) throw new Error(`A resume cannot change ${key}`);
     }
