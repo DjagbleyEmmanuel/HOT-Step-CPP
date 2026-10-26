@@ -105,7 +105,14 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
       value={Number.isFinite(recipe[field.key]) ? recipe[field.key] : ''} disabled={locked}
       onChange={event => setEdits(previous => ({ ...previous, [field.key]: event.target.valueAsNumber }))} />
   </PreviewField>;
-  const changed = FIELDS.filter(field => recipe[field.key] !== status.defaults[field.key]);
+  // Every recipe key, not just the number fields: the toggles, the crop and the base count as changes too.
+  const recipeKeys: Array<keyof HeartmulaRecipe> = [...FIELDS.map(field => field.key), 'variant', 'quant', 'trainMlp', 'cropSeconds'];
+  const changed = recipeKeys.filter(key => (recipe[key] ?? status.defaults[key]) !== status.defaults[key]).map(key => ({ key }));
+  const shown = (key: keyof HeartmulaRecipe) => {
+    const v = recipe[key];
+    if (key === 'cropSeconds') return v ? `${v} s` : 'off';
+    return typeof v === 'boolean' ? (v ? 'on' : 'off') : String(v);
+  };
   const savePreset = () => {
     if (!presetName.trim() || !validRecipe(recipe)) return;
     persist([...presets.filter(item => item.name !== presetName.trim()), { name: presetName.trim(), recipe: { ...recipe } }].slice(-32));
@@ -190,7 +197,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, trainStarted
       <div className="mt-3 flex items-center gap-2 flex-wrap">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.changedSettings', 'Changed from defaults')}</span>
         {!changed.length ? <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noChangedSettings', 'none: this form is the recipe defaults')}</span>
-          : <>{changed.map(field => <span key={field.key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">{field.key}: {recipe[field.key]}
+          : <>{changed.map(field => <span key={field.key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">{field.key}: {shown(field.key)}
             <button type="button" disabled={locked} title={t('trainingStudio.yue2.method.resetSetting', 'Reset this setting to its default')} onClick={() => setEdits(previous => { const next = { ...previous }; delete next[field.key]; return next; })} className="rounded p-0.5 hover:text-sky-900 dark:hover:text-white disabled:opacity-40"><RotateCcw size={11} /></button>
           </span>)}<button type="button" disabled={locked} onClick={() => setEdits({})} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40"><RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}</button></>}
       </div>
