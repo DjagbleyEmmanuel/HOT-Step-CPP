@@ -1,20 +1,15 @@
-# HeartMuLa publication staging
+# HeartMuLa publication
 
 The model card is [heartmula-model-card.md](heartmula-model-card.md).
 [heartmula-hf-manifest.json](heartmula-hf-manifest.json) inventories every file
 in the active `models/heartmula/` folder with its exact size and SHA-256.
-No repository has been created and no file has been uploaded by this slice.
+The full inventory is published in [HeartMuLa-GGUF](https://huggingface.co/scragnog/HeartMuLa-GGUF). The [verification receipt](heartmula-hf-verification.json) records the revision, public URL, exact size and SHA-256 for every hosted file.
 
 ## Exact upload set
 
-The 123 entries whose `upload` field is true are the complete weight upload
-list, at root-level repository paths. They total 150,260,222,528 bytes,
-about 139.94 GiB. The three `*-quant-manifest.json` source files are recorded
-for inventory completeness but excluded from upload because they contain
-machine-local build paths. The publication manifest records the final weight
-hashes without those paths.
+The 126 source entries are uploaded at root-level repository paths: 123 GGUFs totalling 150,260,222,528 bytes, plus three quant provenance manifests. The source inventory totals 150,260,271,695 bytes. The provenance manifests retain their original build paths for reproducibility; those paths are not installation requirements. README, LICENSE, NOTICE and manifest.json bring the hosted total to 150,260,314,195 bytes in 130 files.
 
-Upload these metadata files too:
+The publication includes these metadata files:
 
 | Local file under `docs/dev/` | Repository path |
 |---|---|
@@ -23,29 +18,19 @@ Upload these metadata files too:
 | `heartmula-LICENSE` | `LICENSE` |
 | `heartmula-NOTICE` | `NOTICE` |
 
-## Command after approval
+## Publication commands
 
-Lead must obtain approval for this exact upload first. The destination must
-already exist as the approved `scragnog/HeartMuLa-GGUF` model repository.
-The commands below are a plan, not evidence of publication. Run from the repo
-root with `ACESTEPCPP_MODELS` resolved to the active models folder. Resolve it
-with `cd server; npx tsx scripts/data-paths.ts`, then return to the repo root.
+Publication was authorized on 2026-10-26. The repository was created public and the source files were sent through `HfApi.upload_large_folder` with eight workers and an allow-list of the 126 inventory paths. Metadata was uploaded with `HfApi.upload_file`. The equivalent CLI commands below require the models directory resolved through `cd server; npx tsx scripts/data-paths.ts`. Any later publication needs its own authorization.
 
 ```powershell
-hf upload scragnog/HeartMuLa-GGUF "$env:ACESTEPCPP_MODELS/heartmula" . --include "*.gguf"
+hf upload scragnog/HeartMuLa-GGUF "$env:ACESTEPCPP_MODELS/heartmula" . --include "*.gguf" "*-quant-manifest.json"
 hf upload scragnog/HeartMuLa-GGUF docs/dev/heartmula-model-card.md README.md
 hf upload scragnog/HeartMuLa-GGUF docs/dev/heartmula-LICENSE LICENSE
 hf upload scragnog/HeartMuLa-GGUF docs/dev/heartmula-NOTICE NOTICE
 hf upload scragnog/HeartMuLa-GGUF docs/dev/heartmula-hf-manifest.json manifest.json
 ```
 
-Before running, compare every source file against the committed inventory and
-stop if a name, byte count or hash has changed. After publication, run
-`node server/scripts/check-release-prereqs.mjs`, remove pending-upload labels
-from the registry and UI, and verify a HeartMuLa download through the app.
-Until publication, HF returns a missing-file error; a repository that has not
-been created can answer 401 rather than 404. Do not mistake that for a need
-to provide a token.
+Every source hash was checked before upload. Every hosted size and SHA-256 was then checked against the publication manifest. Public resolve URLs were checked anonymously; GGUF hashes were compared with HF LFS object SHA-256, and small metadata/provenance files were downloaded and hashed. The receipt records which method was used.
 
 ## Component gaps
 

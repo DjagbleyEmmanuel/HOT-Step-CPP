@@ -57,7 +57,7 @@ catalogue. Download completion, reconnection and model deletion refresh the
 catalogue and backend availability. Downloads are commands you start explicitly;
 reopening the manager does not start them again.
 
-HeartMuLa has three matching global/local LM variants, each with the full quant ladder, plus codec flow, scalar decoder, RVQ and tokenizer. Its optional encoder pack is separate. The entries are staged for publication and downloads remain unavailable until the approved upload. See the [model card](../../dev/heartmula-model-card.md) and [publication staging](../../dev/heartmula-publishing.md) for exact component coverage and missing encoder variants.
+HeartMuLa has three matching global/local LM variants, each with the full quant ladder, plus codec flow, scalar decoder, RVQ and tokenizer. Its optional encoder pack is separate. All listed HeartMuLa components download from the public HeartMuLa-GGUF repository. See the [model card](../../dev/heartmula-model-card.md) and [publication staging](../../dev/heartmula-publishing.md) for exact component coverage and missing encoder variants.
 
 ## Related
 

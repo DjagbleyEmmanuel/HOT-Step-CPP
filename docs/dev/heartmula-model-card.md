@@ -16,7 +16,7 @@ base_model:
 
 Split GGUF conversions of the HeartMuLa Team's language models and HeartCodec,
 for native C++/GGML inference in HOT-Step. Python is used for conversion only.
-These files are staged for publication in `scragnog/HeartMuLa-GGUF`.
+These files are published in [scragnog/HeartMuLa-GGUF](https://huggingface.co/scragnog/HeartMuLa-GGUF).
 
 ## Sources and license
 
@@ -74,4 +74,4 @@ Long prose in the tags field can produce poor output in the original model too.
 Native inference does not need the optional encoder pack for text generation.
 
 The publication manifest contains exact paths, byte sizes and SHA-256 values.
-Downloads remain unavailable until the staged weights have been published.
+Download these components through the HeartMuLa tab in the HOT-Step Model Manager.

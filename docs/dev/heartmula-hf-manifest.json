@@ -399,7 +399,7 @@
       "path": "heartmula-3b-happy-new-year-quant-manifest.json",
       "sizeBytes": 16722,
       "sha256": "9238666e8e87ec08ec40ffae8eed2a719501f63a11b60657639c123691e37402",
-      "upload": false
+      "upload": true
     },
     {
       "path": "heartmula-3b-local-F16.gguf",
@@ -519,7 +519,7 @@
       "path": "heartmula-3b-quant-manifest.json",
       "sizeBytes": 16167,
       "sha256": "69003933511f71a620c89fb75b81db9baf582963db2bbc47772a2e9b6deee4a0",
-      "upload": false
+      "upload": true
     },
     {
       "path": "heartmula-3b-rl-global-F16.gguf",
@@ -753,7 +753,7 @@
       "path": "heartmula-3b-rl-quant-manifest.json",
       "sizeBytes": 16278,
       "sha256": "8cfb9ddbea9e7a26f0d6946dc32ebc113fcedb6c8af52bf1c3ead1060534606b",
-      "upload": false
+      "upload": true
     },
     {
       "path": "heartmula-tokenizer.gguf",
@@ -765,8 +765,8 @@
   "uploadMetadata": [
     {
       "path": "README.md",
-      "sizeBytes": 3648,
-      "sha256": "38cd1d7c517a9a54369f448f398a3cebad016b4018ef34edb78cd85c313486a4"
+      "sizeBytes": 3768,
+      "sha256": "fe444097ae0c1d4809d77c16acad69f789d64076060ddac0bea6818b5d81fd48"
     },
     {
       "path": "LICENSE",
@@ -779,5 +779,6 @@
       "sha256": "3d77fca0e4f34031fcd4fd4ceec3b7a7686263165d42e73861955ccc228c176d"
     }
   ],
-  "uploadBytesExcludingManifest": 150260237958
+  "uploadBytesExcludingManifest": 150260287245,
+  "uploadSourceBytes": 150260271695
 }

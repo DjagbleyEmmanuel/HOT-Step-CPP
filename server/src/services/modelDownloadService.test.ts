@@ -36,7 +36,7 @@ test('all five generation backends have complete packs referencing real catalogu
 
 test('every HeartMuLa download agrees with the measured publication inventory', () => {
   const manifest = JSON.parse(fs.readFileSync(new URL('../../../docs/dev/heartmula-hf-manifest.json', import.meta.url), 'utf8'));
-  const weights = manifest.files.filter((f: any) => f.upload);
+  const weights = manifest.files.filter((f: any) => f.upload && f.path.endsWith('.gguf'));
   const entries = catalogue.files.filter((f: any) => f.family === 'heartmula');
   assert.equal(entries.length, weights.length);
   for (const file of weights) {
