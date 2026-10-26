@@ -3,9 +3,51 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { assertIdle, assertScratchEnv, inside } from './promote.mjs';
+import { assertIdle, assertScratchEnv, inside, parseOptions } from './promote.mjs';
 import { maintenanceHandler } from './runtime.mjs';
+import { resolveSharedData, readDevData } from './data-mode.mjs';
+
+test('mode selection refuses ambiguous, missing and misspelled options', () => {
+  for (const args of [['--scratch', 'root', '--data-root', 'root'], ['--data-root'],
+    ['--scratch', 'root', '--data-root'], ['--shared', 'root'], ['--dev-profile', 'profile'],
+    ['--data-root', 'root', '--data-root', 'other'], ['--start', '--data-root', 'root']]) {
+    assert.throws(() => parseOptions(args));
+  }
+  assert.deepEqual(parseOptions(['--data-root', 'root']), { '--data-root': 'root' });
+});
+
+test('shared paths come from the dev pointer and env overrides, without creating missing targets', () => {
+  const checkout = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const fixture = fs.mkdtempSync(path.join(checkout, '.tmp/prod-mode-test-'));
+  try {
+    const root = path.join(fixture, 'shared data');
+    const profile = path.join(fixture, 'profile');
+    const adapters = path.join(fixture, 'external adapters');
+    for (const dir of [profile, adapters, root, path.join(root, 'library/training'), path.join(root, 'models'), path.join(root, 'settings')]) fs.mkdirSync(dir, { recursive: true });
+    // Use the real resolver and the checkout-specific pointer format.
+    const initial = readDevData(profile);
+    fs.writeFileSync(initial.pointerPath, JSON.stringify({ version: 1, root, pending: null, checkout }));
+    fs.writeFileSync(path.join(root, 'settings/.env'), `ACESTEPCPP_ADAPTERS="${adapters.replaceAll('\\', '/')}"\n`);
+    const report = readDevData(profile);
+    const selected = resolveSharedData(root, report);
+    assert.equal(selected.profile, profile);
+    assert.equal(selected.library, path.join(root, 'library'));
+    assert.equal(selected.training, path.join(root, 'library/training'));
+    assert.equal(selected.adapters, adapters);
+    assert.throws(() => resolveSharedData('relative', report), /absolute/);
+    for (const changed of [{ root: fixture }, { pendingMove: {} }, { pointerError: 'bad JSON' }, { source: 'fallback' }, { children: null }]) {
+      assert.throws(() => resolveSharedData(root, { ...report, ...changed }), /dev pointer/);
+    }
+    for (const key of ['library', 'training', 'adapters', 'models']) {
+      const missing = path.join(fixture, `missing-${key}`);
+      assert.throws(() => resolveSharedData(root, { ...report, children: { ...report.children, [key]: missing } }), /directory/);
+      assert.equal(fs.existsSync(missing), false);
+    }
+    assert.throws(() => resolveSharedData(root, { ...report, profileDir: path.join(fixture, 'missing-profile') }), /directory/);
+  } finally { fs.rmSync(fixture, { recursive: true }); }
+});
 
 test('promotion fails closed for busy, unknown, or moving data', () => {
   assert.doesNotThrow(() => assertIdle({ blockers: [], pending: null }));

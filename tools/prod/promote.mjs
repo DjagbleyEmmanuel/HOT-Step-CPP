@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { readDevData, resolveSharedData } from './data-mode.mjs';
 
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const upstream = 'https://github.com/scragnog/HOT-Step-CPP.git';
@@ -35,6 +36,24 @@ export function assertScratchEnv(text, scratch) {
       throw new Error(`Scratch .env redirects ${key} outside its data root.`);
     }
   }
+}
+export function parseOptions(args) {
+  const values = {};
+  const valued = ['--prod', '--scratch', '--data-root', '--dev-profile'];
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    if (Object.hasOwn(values, flag)) throw new Error(`Repeated option: ${flag}`);
+    if (valued.includes(flag)) {
+      const value = args[++i];
+      if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
+      values[flag] = value;
+    } else if (['--help', '--start', '--stop'].includes(flag)) values[flag] = true;
+    else throw new Error(`Unknown option: ${flag}`);
+  }
+  if (values['--scratch'] && values['--data-root']) throw new Error('Choose exactly one explicit data mode.');
+  if (values['--dev-profile'] && (!values['--data-root'] || !path.isAbsolute(values['--dev-profile']))) throw new Error('--dev-profile requires shared mode and an absolute profile path.');
+  if ((values['--start'] || values['--stop']) && (values['--scratch'] || values['--data-root'] || values['--start'] && values['--stop'])) throw new Error('Start/stop uses the recorded mode. Promote to change data paths.');
+  return values;
 }
 async function request(endpoint) {
   const response = await fetch(`http://127.0.0.1:3101${endpoint}`, { signal: AbortSignal.timeout(15_000) });
@@ -127,11 +146,12 @@ function copyEngine(stage, commit) {
   return { sourceTree: git(source, 'rev-parse', `${commit}:engine`), builtAt: new Date(builtAt).toISOString(), hashes };
 }
 async function main(args) {
+  const options = parseOptions(args);
   if (args.includes('--help')) {
-    console.log('node tools/prod/promote.mjs --scratch <absolute-data-root> [--prod <clone-path>]\nBuilds local master, promotes idle prod on 3101/8186. Shared data remains disabled.\n--stop stops the managed prod; --start starts its recorded artifact.');
+    console.log('node tools/prod/promote.mjs (--scratch <absolute-data-root> | --data-root <absolute-shared-root>) [--prod <clone-path>]\nShared mode reads the dev pointer and overrides. --dev-profile <absolute-profile> selects a stand-in dev profile.\n--stop stops the managed prod; --start starts its recorded artifact.');
     return;
   }
-  const option = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
+  const option = name => options[name];
   const prod = path.resolve(option('--prod') ?? 'D:/Ace-Step-Latest/hot-step-prod');
   if (!inside(path.dirname(source), prod) || inside(source, prod) || inside(prod, source) || prod === source) throw new Error('Prod must be a separate sibling clone.');
   if (process.env.HOTSTEP_ENGINE_LOCK_ROOT !== source) {
@@ -151,13 +171,24 @@ async function main(args) {
     await start(prod, config.commit); return;
   }
   const scratchArg = option('--scratch');
-  if (!scratchArg || !path.isAbsolute(scratchArg)) throw new Error('An absolute --scratch data root is required until both slice reviews pass.');
-  const scratch = path.resolve(scratchArg);
-  // Only disposable roots inside this checkout are authorized for validation.
-  if (!inside(path.join(source, '.tmp'), scratch)) throw new Error('Scratch root must be under the dev checkout .tmp directory.');
-  fs.mkdirSync(scratch, { recursive: true });
-  const scratchEnv = path.join(scratch, 'settings/.env');
-  if (fs.existsSync(scratchEnv)) assertScratchEnv(fs.readFileSync(scratchEnv, 'utf8'), scratch);
+  const sharedArg = option('--data-root');
+  if (Boolean(scratchArg) === Boolean(sharedArg)) throw new Error('Choose exactly one explicit mode: --scratch or --data-root.');
+  const mode = sharedArg ? 'shared' : 'scratch';
+  const scratch = scratchArg ? path.resolve(scratchArg) : null;
+  let data;
+  if (mode === 'shared') {
+    data = resolveSharedData(sharedArg, readDevData(option('--dev-profile')));
+  } else {
+    if (!path.isAbsolute(scratchArg)) throw new Error('An absolute --scratch data root is required.');
+    // Scratch validation only authorizes disposable roots in this checkout.
+    if (!inside(path.join(source, '.tmp'), scratch)) throw new Error('Scratch root must be under the dev checkout .tmp directory.');
+    fs.mkdirSync(scratch, { recursive: true });
+    const scratchEnv = path.join(scratch, 'settings/.env');
+    if (fs.existsSync(scratchEnv)) assertScratchEnv(fs.readFileSync(scratchEnv, 'utf8'), scratch);
+    data = { root: scratch, profile: path.join(prod, '.prod/scratch-profile'), library: path.join(scratch, 'library'),
+      training: path.join(scratch, 'library/training'), adapters: path.join(scratch, 'adapters'), models: 'N:\\HOT-Step Data\\models' };
+  }
+  console.log(`PROD DATA mode=${mode}\n${JSON.stringify(data, null, 2)}`);
   if (git(source, 'branch', '--show-current') !== 'master') throw new Error('Source must be on master.');
   const commit = git(source, 'rev-parse', 'refs/heads/master');
   const existing = fs.existsSync(prod);
@@ -183,12 +214,11 @@ async function main(args) {
     npm(path.join(stage, part), 'run', 'build');
   }
   const engine = copyEngine(stage, commit);
-  const config = { commit, scratch, token: crypto.randomBytes(32).toString('hex'), intendedDataRoot: 'N:\\HOT-Step Data', models: 'N:\\HOT-Step Data\\models', ports: { server: 3101, engine: 8186 } };
+  const config = { commit, mode, data, devCheckout: source, scratch, token: crypto.randomBytes(32).toString('hex'), models: data.models, ports: { server: 3101, engine: 8186 } };
   writeJson(path.join(stage, '.prod/config.json'), config);
   writeJson(path.join(stage, '.prod/artifact.json'), { commit, preparedAt: new Date().toISOString(), engine });
   fs.writeFileSync(path.join(stage, '.env'), 'SERVER_PORT=3101\nACESTEPCPP_PORT=8186\nACESTEPCPP_HOST=127.0.0.1\nACESTEPCPP_MODELS="N:\\HOT-Step Data\\models"\n');
-  pointer(path.join(stage, '.prod/profile'), prod, config.intendedDataRoot);
-  pointer(path.join(stage, '.prod/scratch-profile'), prod, scratch);
+  if (mode === 'scratch') pointer(path.join(stage, '.prod/scratch-profile'), prod, scratch);
   if (!fs.existsSync(path.join(stage, 'ui/dist/index.html')) || !fs.existsSync(path.join(stage, 'server/dist/index.js'))) throw new Error('Missing built UI or server.');
   // Recheck after preparation. A failed build leaves the live clone untouched.
   if (existing && ownedServer(prod)) {
@@ -201,6 +231,7 @@ async function main(args) {
   try {
     if (existing) fs.renameSync(prod, previous);
     fs.renameSync(stage, prod); installed = true;
+    if (mode === 'shared') pointer(data.profile, prod, data.root);
     await start(prod, commit);
     console.log(`PROMOTE PASS ${commit}\nArtifact: ${path.join(prod, '.prod/artifact.json')}\nPrevious clone retained: ${existing ? previous : 'none'}\nStop: node tools/prod/promote.mjs --stop`);
   } catch (error) {

@@ -565,11 +565,10 @@ at `D:\Ace-Step-Latest\hot-step-prod`. It serves the built UI on
 `http://localhost:3101`, with a separate engine on 8186. Development keeps its
 existing ports and binaries. No push or remote pull happens during promotion.
 
-Shared-data activation is disabled until the job-ownership and production
-slices have both passed review. The intended production pointer is
-`N:\HOT-Step Data`; validation uses a scratch root under the dev checkout's
-`.tmp` directory. The launcher refuses to run without that scratch root.
-Models are read from the shared models directory. Startup warming and
+Scratch is the default data mode and requires an explicit `--scratch` root
+under the dev checkout's `.tmp` directory. Shared mode requires `--data-root`
+instead. There is no fallback between modes. Models in scratch mode are read
+from the shared models directory. Startup warming and
 keep-loaded are disabled. Do not submit generation or training while another
 job holds the GPU.
 
@@ -577,9 +576,33 @@ From the development checkout, using PowerShell 7 and Node 20 to 24:
 
 ```powershell
 node tools/prod/promote.mjs --scratch D:\Ace-Step-Latest\hot-step-cpp\.tmp\prod-scratch
+node tools/prod/promote.mjs --data-root "N:\HOT-Step Data"
 node tools/prod/promote.mjs --stop
 node tools/prod/promote.mjs --start
 ```
+
+Shared mode reads dev's own read-only data-path resolver, including its
+checkout-specific pointer and `settings/.env` overrides. The requested root
+must match that pointer. Production uses the same profile, library, training,
+adapters and models paths without copying them. This includes adapters on a
+separate drive when configured in dev. All selected directories must already
+exist. A pending move, unreadable pointer, root mismatch or missing directory
+refuses promotion. The resolved paths print before preparation and startup.
+Recorded-artifact restarts recheck the dev selection and refuse changed paths.
+Promote again after changing dev's data paths.
+
+For a stand-in validation, `--dev-profile <absolute-profile-directory>` selects
+an isolated dev profile whose checkout-specific pointer names the stand-in
+root. Use it only with `--data-root`. This does not edit the normal dev pointer.
+Promotion writes only the production checkout's pointer in the selected
+profile. Do not hand-edit the live server's pointer to switch modes. Use a
+new promotion with `--scratch` to return to isolation.
+
+Stop both copies before an incompatible migration. Shared mode opens the same
+database and settings, so a schema or data-format change that the other copy
+cannot read must never run while that copy is active. Back up shared data
+before its first activation. Shared-data and GPU concurrency still require
+their separate validation before real shared-data use.
 
 Promotion clones one recorded local master commit into a staging clone,
 installs server and UI dependencies with `npm ci`, and builds both packages.
@@ -617,9 +640,9 @@ commit. Startup failure restores and starts the previous clone. Previous and
 failed clones are retained for inspection; no automatic recursive cleanup
 runs. Review these folders before removing them.
 
-The launcher pins ports and scratch write paths in the process environment.
-This takes precedence over data-root `settings/.env` values. Its private
-profile contains separate intended-production and active-scratch pointers.
+The launcher pins ports and the selected write paths in the process environment.
+This takes precedence over data-root `settings/.env` values. Scratch mode uses
+a private profile; shared mode uses the selected dev profile.
 Other writable path overrides in the scratch `.env` must resolve inside that
 scratch root. Generated relative paths are accepted on subsequent promotions.
 Do not launch this clone with `LAUNCH.bat` or its in-app updater: use promotion
