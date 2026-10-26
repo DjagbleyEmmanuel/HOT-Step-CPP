@@ -15,6 +15,54 @@ import { describeDownloadError, modelDownloadService } from './modelDownloadServ
 
 const svc = modelDownloadService as any;
 
+const catalogue = JSON.parse(fs.readFileSync(new URL('../data/model-registry.json', import.meta.url), 'utf8'));
+
+test('all five generation backends have complete packs referencing real catalogue entries', () => {
+  const ids = catalogue.files.map((f: any) => f.id);
+  assert.equal(new Set(ids).size, ids.length, 'file ids must be unique');
+  for (const family of ['as1.5', 'mm3', 'yue2', 'sa3', 'heartmula']) {
+    assert.ok(catalogue.files.some((f: any) => f.family === family), family);
+    assert.ok(catalogue.packs.some((p: any) => p.family === family && p.fileIds.length > 0), family);
+  }
+  for (const pack of catalogue.packs) {
+    for (const id of pack.fileIds) assert.ok(ids.includes(id), `${pack.id}: ${id}`);
+  }
+  const sa3 = catalogue.packs.find((p: any) => p.id === 'sa3-generation');
+  assert.equal(sa3.fileIds.length, 7, 'generation needs one DiT, not every alternative quant');
+  assert.ok(sa3.fileIds.includes('stablestep-gguf-dit'));
+  assert.ok(sa3.fileIds.includes('stablestep-tokenizer'));
+  assert.ok(!sa3.fileIds.some((id: string) => id.startsWith('sa3-training')));
+});
+
+test('every HeartMuLa download agrees with the measured publication inventory', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../../../docs/dev/heartmula-hf-manifest.json', import.meta.url), 'utf8'));
+  const weights = manifest.files.filter((f: any) => f.upload);
+  const entries = catalogue.files.filter((f: any) => f.family === 'heartmula');
+  assert.equal(entries.length, weights.length);
+  for (const file of weights) {
+    const entry = entries.find((f: any) => f.filename === file.path);
+    assert.ok(entry, file.path);
+    assert.equal(entry.repo, manifest.repo);
+    assert.equal(entry.repoPath, file.path);
+    assert.equal(entry.subdir, 'heartmula');
+    assert.equal(entry.sizeBytes, file.sizeBytes);
+    assert.equal(entry.sha256, file.sha256);
+    assert.match(entry.sha256, /^[a-f0-9]{64}$/);
+  }
+});
+
+test('each HeartMuLa variant offers the same full ladder for both LM parts', () => {
+  const ladder = ['F16', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S',
+    'Q3_K_L', 'Q3_K_M', 'Q3_K_S', 'Q2_K', 'IQ4_XS', 'IQ3_XXS', 'IQ2_XS',
+    'IQ2_XXS', 'IQ1_M', 'IQ1_S', 'MXFP4', 'NVFP4'].sort();
+  for (const variant of ['heartmula-3b', 'heartmula-3b-happy-new-year', 'heartmula-3b-rl']) {
+    for (const part of ['global', 'local']) {
+      const files = catalogue.files.filter((f: any) => f.variant === `${variant}-${part}`);
+      assert.deepEqual(files.map((f: any) => f.quant).sort(), ladder, `${variant}-${part}`);
+    }
+  }
+});
+
 function tmpFile(contents: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'model-sha-'));
   const p = path.join(dir, 'model.gguf');

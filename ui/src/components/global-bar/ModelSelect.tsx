@@ -196,9 +196,10 @@ export const ModelSelect: React.FC<ModelSelectProps> = ({
   const selectedFormat = value && formatOf ? formatOf(value) : null;
 
   return (
-    <div ref={containerRef} className="relative" id={id}>
+    <div ref={containerRef} className="relative">
       {/* Trigger button */}
       <button
+        id={id}
         type="button"
         onClick={() => !disabled && setOpen(!open)}
         onKeyDown={handleTriggerKeyDown}

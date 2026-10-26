@@ -13,20 +13,22 @@ import { useTranslation } from 'react-i18next';
 import { ModelRow } from './ModelRow';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import type { RegistryFile, DownloadJob } from '../../types';
 
-export type FamilyTab = 'as1.5' | 'mm3' | 'yue2' | 'shared';
+export type FamilyTab = 'as1.5' | 'mm3' | 'yue2' | 'sa3' | 'heartmula' | 'shared';
 
 export const FAMILY_TABS: { id: FamilyTab; label: string }[] = [
   { id: 'as1.5', label: 'ACE-Step 1.5' },
   { id: 'mm3', label: 'MiniMax-Music3' },
   { id: 'yue2', label: 'YuE2' },
+  { id: 'sa3', label: 'Stable Audio 3' },
+  { id: 'heartmula', label: 'HeartMuLa' },
   { id: 'shared', label: 'Shared' },
 ];
 
-type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 'supersep' | 'whisper' | 'mm3' | 'moss' | 'yue2';
+type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 'supersep' | 'whisper' | 'mm3' | 'moss' | 'yue2' | 'heartmula';
 
 /** Role → family fallback, for entries with no `family` field of their own
  *  (a hand-edited catalogue, or one written before this field existed). Every
@@ -34,8 +36,8 @@ type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 's
  *  matters as a safety net. */
 const ROLE_FAMILY_FALLBACK: Record<RoleTab, FamilyTab> = {
   dit: 'as1.5', lm: 'as1.5', embedding: 'as1.5', vae: 'as1.5', 'pp-vae': 'as1.5',
-  stablestep: 'shared', supersep: 'shared', whisper: 'shared', moss: 'shared',
-  mm3: 'mm3', yue2: 'yue2',
+  stablestep: 'sa3', supersep: 'shared', whisper: 'shared', moss: 'shared',
+  mm3: 'mm3', yue2: 'yue2', heartmula: 'heartmula',
 };
 
 /** Family for one registry file, honoring an explicit `family` first. The
@@ -94,8 +96,9 @@ const FAMILY_SECTIONS: Record<FamilyTab, { id: RoleTab; label: string }[]> = {
   yue2: [
     { id: 'yue2', label: 'YuE2' },
   ],
+  sa3: [{ id: 'stablestep', label: 'Stable Audio 3' }],
+  heartmula: [{ id: 'heartmula', label: 'HeartMuLa' }],
   shared: [
-    { id: 'stablestep', label: 'StableStep' },
     { id: 'supersep', label: 'Stem Separation' },
     { id: 'whisper', label: 'Whisper' },
     { id: 'moss', label: 'Captioning (MOSS)' },
@@ -525,13 +528,17 @@ const StableStepTab: React.FC<{
   onDelete: (filename: string) => void;
 }> = ({ files, downloadJobs, onDownload, onCancel, onResume, onDelete }) => {
   // License acceptance is persisted so it's asked once.
+  const { t } = useTranslation();
   const [licenseAccepted, setLicenseAccepted] = usePersistedState('hs-stablestepLicenseAccepted', false);
   // Optional Hugging Face token — forwarded as `Authorization: Bearer <token>`
   // on huggingface.co requests (only needed if the repo is gated).
   const [hfToken, setHfToken] = usePersistedState('hs-hfToken', '');
   const [licenseNudge, setLicenseNudge] = useState(false);
 
-  const missing = files.filter(f => !f.installed);
+  const generationIds = new Set(['stablestep-gguf-dit', 'stablestep-gguf-same-enc',
+    'stablestep-gguf-same-dec', 'stablestep-gguf-text-enc', 'stablestep-tokenizer',
+    'stablestep-tokenizer-config', 'stablestep-special-tokens']);
+  const missing = files.filter(f => generationIds.has(f.id) && !f.installed);
 
   // GGUF weights live at the models root; tokenizer files remain under onnx/sa3.
   const ggufFiles = files.filter(f => f.filename.endsWith('.gguf'));
@@ -575,7 +582,7 @@ const StableStepTab: React.FC<{
             <Toggle
               accent="pink"
               checked={licenseAccepted}
-              onChange={checked => { setLicenseAccepted(checked); setLicenseNudge(false); }}
+              onChange={checked => { setLicenseAccepted(checked); writePersistedState('hs-stablestepLicenseAccepted', checked); setLicenseNudge(false); }}
               label={STABLESTEP_LICENSE_TEXT}
               info="Confirms you accept the Stability AI Community License for these StableStep weights (free for individuals and organizations under $1M annual revenue; commercial use above that needs a license from Stability AI). Off: every download in this tab is blocked until you accept."
             />
@@ -622,7 +629,7 @@ const StableStepTab: React.FC<{
       {missing.length > 0 && (
         <div className="flex items-center justify-between px-1">
           <span className="text-[11px] text-zinc-500">
-            {files.length - missing.length}/{files.length} files installed &middot; StableStep needs 4 GGUFs (~5.8 GB)
+            {t('models.sa3.generationMissing', '{{count}} generation files missing. Alternative quants are optional.', { count: missing.length })}
           </span>
           <button
             onClick={handleDownloadAll}
@@ -632,10 +639,10 @@ const StableStepTab: React.FC<{
                 ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white hover:from-pink-400 hover:to-pink-500 shadow-lg shadow-pink-500/10'
                 : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 cursor-not-allowed'
             }`}
-            title={licenseAccepted ? 'Download all missing StableStep files' : 'Accept the license first'}
+            title={licenseAccepted ? t('models.sa3.downloadGeneration', 'Download generation set') : 'Accept the license first'}
           >
             <Download size={12} />
-            Download all missing ({missing.length})
+            {t('models.sa3.downloadGeneration', 'Download generation set')} ({missing.length})
           </button>
         </div>
       )}
@@ -699,6 +706,7 @@ const StableStepTab: React.FC<{
 // ── Main component ──────────────────────────────────────────
 
 export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDownload, onCancel, onResume, onDelete, activeFamily }) => {
+  const { t } = useTranslation();
   const sections = FAMILY_SECTIONS[activeFamily];
   const [activeSection, setActiveSection] = useState<RoleTab>(sections[0].id);
 
@@ -824,6 +832,8 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
         {activeSection === 'embedding' && renderSimpleGroup(embeddingFiles, ROLE_INFO.embedding)}
         {activeSection === 'vae' && renderSimpleGroup(vaeFiles, ROLE_INFO.vae)}
         {activeSection === 'pp-vae' && renderSimpleGroup(ppVaeFiles, ROLE_INFO['pp-vae'])}
+        {activeSection === 'heartmula' && renderSimpleGroup(files.filter(f => f.role === 'heartmula'),
+          t('models.heartmula.info', 'Choose matching global and local models from one variant, plus codec flow, waveform decoder, RVQ and tokenizer. Encoder files are optional. HeartMuLa downloads are staged for publication and remain unavailable until the files are uploaded.'))}
         {activeSection === 'stablestep' && (
           <StableStepTab
             files={stablestepFiles}

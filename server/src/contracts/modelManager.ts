@@ -10,12 +10,12 @@
 
 export type FileRole =
   | 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep' | 'whisper'
-  | 'stablestep' | 'runtime' | 'mm3' | 'moss' | 'yue2';
+  | 'stablestep' | 'runtime' | 'mm3' | 'moss' | 'yue2' | 'heartmula';
 
 /** Which generation backend (or "shared" across several) a file belongs to.
  *  Absent on entries added before this field existed; the UI falls back to
  *  a role -> family mapping in that case. */
-export type FileFamily = 'as1.5' | 'mm3' | 'yue2' | 'shared';
+export type FileFamily = 'as1.5' | 'mm3' | 'yue2' | 'sa3' | 'heartmula' | 'shared';
 
 export interface RegistryCompanion {
   filename: string;

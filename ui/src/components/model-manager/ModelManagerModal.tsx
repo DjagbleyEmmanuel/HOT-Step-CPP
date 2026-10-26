@@ -49,6 +49,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
   // owned here (not inside ModelCatalogueTab) so the Starter Packs section
   // above the catalogue can filter to the same family.
   const [activeFamily, setActiveFamily] = usePersistedState<FamilyTab>('hs-modelManagerFamily', 'as1.5');
+  const [sa3LicenseAccepted] = usePersistedState('hs-stablestepLicenseAccepted', false);
 
   const { jobs, hasActiveDownloads } = useDownloadStream();
 
@@ -206,7 +207,10 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
                 <div>
                   <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-1">{t('models.starterPacks')}</h3>
                   <p className="text-xs text-zinc-600 mb-4">{t('models.starterPacksDesc')}</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  {activeFamily === 'sa3' && !sa3LicenseAccepted && (
+                    <p className="text-xs text-amber-400 mb-3">{t('models.sa3.acceptPackLicense', 'Accept the Stability AI license below to enable pack downloads.')}</p>
+                  )}
+                  <fieldset disabled={activeFamily === 'sa3' && !sa3LicenseAccepted} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                     {visiblePacks.map(pack => (
                       <StarterPackCard
                         key={pack.id}
@@ -216,7 +220,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
                         onDownloadPack={handleDownloadPack}
                       />
                     ))}
-                  </div>
+                  </fieldset>
                 </div>
               )}
 

@@ -125,11 +125,13 @@ export const BackendModelsDropdown: React.FC = () => {
         const meta = catalogue.meta?.[bucket] ?? {};
         return (
           <div key={bucket}>
+            <label htmlFor={`backend-model-${bucket}`}>
             <ParamLabel
               label={t(`globalBar.modelBucket.${bucket}`, BUCKET_LABELS[bucket] ?? bucket)}
               info={t('globalBar.modelBucketInfo', 'Selects the weights for this component. Different quantizations trade memory use for precision. Incompatible files cannot be selected.')}
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
               rootClassName="block mb-1.5" />
+            </label>
             <ModelSelect
               id={`backend-model-${bucket}`}
               value={current}

@@ -364,7 +364,7 @@
     },
     {
       "id": "sa3-training",
-      "family": "shared",
+      "family": "sa3",
       "name": "Stable Audio 3 Training",
       "description": "SA3 DoRA-rows training and audition dependencies: BF16 Medium Base with its own conditioner, distilled generation DiT, SAME encoder/decoder, T5Gemma, tokenizer files and vocal-stripping models. Quantized base variants are experimental and are not supported training bases. Powered by Stability AI.",
       "fileIds": [
@@ -378,6 +378,76 @@
         "stablestep-special-tokens",
         "supersep-leap-xe-voc",
         "supersep-leap-xe-inst"
+      ]
+    },
+    {
+      "id": "heartmula-3b-q8",
+      "family": "heartmula",
+      "name": "heartmula-3b Q8_0 generation",
+      "description": "Matching global/local Q8_0 models, codec and tokenizer. Pending approved upload; downloads are unavailable until publication.",
+      "fileIds": [
+        "heartmula-3b-global-q8_0",
+        "heartmula-3b-local-q8_0",
+        "heartcodec-flow-q8_0",
+        "heartcodec-scalar-decoder-f16",
+        "heartcodec-rvq-f32",
+        "heartmula-tokenizer"
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-q8",
+      "family": "heartmula",
+      "name": "heartmula-3b-happy-new-year Q8_0 generation",
+      "description": "Matching global/local Q8_0 models, codec and tokenizer. Pending approved upload; downloads are unavailable until publication.",
+      "fileIds": [
+        "heartmula-3b-happy-new-year-global-q8_0",
+        "heartmula-3b-happy-new-year-local-q8_0",
+        "heartcodec-flow-q8_0",
+        "heartcodec-scalar-decoder-f16",
+        "heartcodec-rvq-f32",
+        "heartmula-tokenizer"
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-q8",
+      "family": "heartmula",
+      "name": "heartmula-3b-rl Q8_0 generation",
+      "description": "Matching global/local Q8_0 models, codec and tokenizer. Pending approved upload; downloads are unavailable until publication.",
+      "fileIds": [
+        "heartmula-3b-rl-global-q8_0",
+        "heartmula-3b-rl-local-q8_0",
+        "heartcodec-flow-q8_0",
+        "heartcodec-scalar-decoder-f16",
+        "heartcodec-rvq-f32",
+        "heartmula-tokenizer"
+      ]
+    },
+    {
+      "id": "heartmula-encoder",
+      "family": "heartmula",
+      "name": "HeartCodec optional encoder pack",
+      "description": "F16 MuEncoder, WavLM, Whisper and query fusion, plus shared RVQ. Optional for audio encoding; text generation does not load these.",
+      "fileIds": [
+        "heartcodec-muencoder-f16",
+        "heartcodec-wavlm-f16",
+        "heartcodec-whisper-f16",
+        "heartcodec-query-f16",
+        "heartcodec-rvq-f32"
+      ]
+    },
+    {
+      "id": "sa3-generation",
+      "family": "sa3",
+      "name": "Stable Audio 3 generation",
+      "description": "Default BF16 generation DiT, SAME encoder/decoder, T5Gemma and tokenizer. Also used by StableStep. Powered by Stability AI.",
+      "fileIds": [
+        "stablestep-gguf-dit",
+        "stablestep-gguf-same-enc",
+        "stablestep-gguf-same-dec",
+        "stablestep-gguf-text-enc",
+        "stablestep-tokenizer",
+        "stablestep-tokenizer-config",
+        "stablestep-special-tokens"
       ]
     }
   ],
@@ -2027,7 +2097,7 @@
       "id": "stablestep-tokenizer",
       "filename": "tokenizer.json",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "subdir": "onnx/sa3",
       "displayName": "Tokenizer",
       "scale": null,
@@ -2044,7 +2114,7 @@
       "id": "stablestep-tokenizer-config",
       "filename": "tokenizer_config.json",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "subdir": "onnx/sa3",
       "displayName": "Tokenizer Config",
       "scale": null,
@@ -2061,7 +2131,7 @@
       "id": "stablestep-special-tokens",
       "filename": "special_tokens_map.json",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "subdir": "onnx/sa3",
       "displayName": "Special Tokens Map",
       "scale": null,
@@ -2078,7 +2148,7 @@
       "id": "sa3-training-base-bf16",
       "filename": "sa3-dit-base-BF16.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (BF16)",
       "scale": null,
       "variant": "training-base",
@@ -2103,7 +2173,7 @@
       "id": "sa3-training-base-iq1_m-imat",
       "filename": "sa3-dit-base-IQ1_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ1_M-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2128,7 +2198,7 @@
       "id": "sa3-training-base-iq1_s-imat",
       "filename": "sa3-dit-base-IQ1_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ1_S-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2153,7 +2223,7 @@
       "id": "sa3-training-base-iq2_xs-imat",
       "filename": "sa3-dit-base-IQ2_XS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ2_XS-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2178,7 +2248,7 @@
       "id": "sa3-training-base-iq2_xxs-imat",
       "filename": "sa3-dit-base-IQ2_XXS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ2_XXS-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2203,7 +2273,7 @@
       "id": "sa3-training-base-iq3_xxs-imat",
       "filename": "sa3-dit-base-IQ3_XXS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ3_XXS-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2228,7 +2298,7 @@
       "id": "sa3-training-base-iq4_xs-imat",
       "filename": "sa3-dit-base-IQ4_XS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (IQ4_XS-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2253,7 +2323,7 @@
       "id": "sa3-training-base-mxfp4",
       "filename": "sa3-dit-base-MXFP4.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (MXFP4)",
       "scale": null,
       "variant": "training-base",
@@ -2278,7 +2348,7 @@
       "id": "sa3-training-base-nvfp4",
       "filename": "sa3-dit-base-NVFP4.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (NVFP4)",
       "scale": null,
       "variant": "training-base",
@@ -2303,7 +2373,7 @@
       "id": "sa3-training-base-q2_k-imat",
       "filename": "sa3-dit-base-Q2_K-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q2_K-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2328,7 +2398,7 @@
       "id": "sa3-training-base-q2_k",
       "filename": "sa3-dit-base-Q2_K.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q2_K)",
       "scale": null,
       "variant": "training-base",
@@ -2353,7 +2423,7 @@
       "id": "sa3-training-base-q3_k_l-imat",
       "filename": "sa3-dit-base-Q3_K_L-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_L-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2378,7 +2448,7 @@
       "id": "sa3-training-base-q3_k_l",
       "filename": "sa3-dit-base-Q3_K_L.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_L)",
       "scale": null,
       "variant": "training-base",
@@ -2403,7 +2473,7 @@
       "id": "sa3-training-base-q3_k_m-imat",
       "filename": "sa3-dit-base-Q3_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_M-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2428,7 +2498,7 @@
       "id": "sa3-training-base-q3_k_m",
       "filename": "sa3-dit-base-Q3_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_M)",
       "scale": null,
       "variant": "training-base",
@@ -2453,7 +2523,7 @@
       "id": "sa3-training-base-q3_k_s-imat",
       "filename": "sa3-dit-base-Q3_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_S-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2478,7 +2548,7 @@
       "id": "sa3-training-base-q3_k_s",
       "filename": "sa3-dit-base-Q3_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q3_K_S)",
       "scale": null,
       "variant": "training-base",
@@ -2503,7 +2573,7 @@
       "id": "sa3-training-base-q4_k_m-imat",
       "filename": "sa3-dit-base-Q4_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q4_K_M-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2528,7 +2598,7 @@
       "id": "sa3-training-base-q4_k_m",
       "filename": "sa3-dit-base-Q4_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q4_K_M)",
       "scale": null,
       "variant": "training-base",
@@ -2553,7 +2623,7 @@
       "id": "sa3-training-base-q4_k_s-imat",
       "filename": "sa3-dit-base-Q4_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q4_K_S-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2578,7 +2648,7 @@
       "id": "sa3-training-base-q4_k_s",
       "filename": "sa3-dit-base-Q4_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q4_K_S)",
       "scale": null,
       "variant": "training-base",
@@ -2603,7 +2673,7 @@
       "id": "sa3-training-base-q5_k_m-imat",
       "filename": "sa3-dit-base-Q5_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q5_K_M-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2628,7 +2698,7 @@
       "id": "sa3-training-base-q5_k_m",
       "filename": "sa3-dit-base-Q5_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q5_K_M)",
       "scale": null,
       "variant": "training-base",
@@ -2653,7 +2723,7 @@
       "id": "sa3-training-base-q5_k_s-imat",
       "filename": "sa3-dit-base-Q5_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q5_K_S-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2678,7 +2748,7 @@
       "id": "sa3-training-base-q5_k_s",
       "filename": "sa3-dit-base-Q5_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q5_K_S)",
       "scale": null,
       "variant": "training-base",
@@ -2703,7 +2773,7 @@
       "id": "sa3-training-base-q6_k-imat",
       "filename": "sa3-dit-base-Q6_K-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q6_K-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2728,7 +2798,7 @@
       "id": "sa3-training-base-q6_k",
       "filename": "sa3-dit-base-Q6_K.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q6_K)",
       "scale": null,
       "variant": "training-base",
@@ -2753,7 +2823,7 @@
       "id": "sa3-training-base-q8_0-imat",
       "filename": "sa3-dit-base-Q8_0-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q8_0-imat)",
       "scale": null,
       "variant": "training-base",
@@ -2778,7 +2848,7 @@
       "id": "sa3-training-base-q8_0",
       "filename": "sa3-dit-base-Q8_0.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 Medium Base (Q8_0)",
       "scale": null,
       "variant": "training-base",
@@ -2803,7 +2873,7 @@
       "id": "stablestep-gguf-dit",
       "filename": "sa3-dit-BF16.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (GGML)",
       "scale": null,
       "variant": null,
@@ -2818,7 +2888,7 @@
       "id": "stablestep-gguf-dit-iq1_m-imat",
       "filename": "sa3-dit-IQ1_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ1_M-imat)",
       "scale": null,
       "variant": null,
@@ -2843,7 +2913,7 @@
       "id": "stablestep-gguf-dit-iq1_s-imat",
       "filename": "sa3-dit-IQ1_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ1_S-imat)",
       "scale": null,
       "variant": null,
@@ -2868,7 +2938,7 @@
       "id": "stablestep-gguf-dit-iq2_xs-imat",
       "filename": "sa3-dit-IQ2_XS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ2_XS-imat)",
       "scale": null,
       "variant": null,
@@ -2893,7 +2963,7 @@
       "id": "stablestep-gguf-dit-iq2_xxs-imat",
       "filename": "sa3-dit-IQ2_XXS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ2_XXS-imat)",
       "scale": null,
       "variant": null,
@@ -2918,7 +2988,7 @@
       "id": "stablestep-gguf-dit-iq3_xxs-imat",
       "filename": "sa3-dit-IQ3_XXS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ3_XXS-imat)",
       "scale": null,
       "variant": null,
@@ -2943,7 +3013,7 @@
       "id": "stablestep-gguf-dit-iq4_xs-imat",
       "filename": "sa3-dit-IQ4_XS-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (IQ4_XS-imat)",
       "scale": null,
       "variant": null,
@@ -2968,7 +3038,7 @@
       "id": "stablestep-gguf-dit-mxfp4",
       "filename": "sa3-dit-MXFP4.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (MXFP4)",
       "scale": null,
       "variant": null,
@@ -2993,7 +3063,7 @@
       "id": "stablestep-gguf-dit-nvfp4",
       "filename": "sa3-dit-NVFP4.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (NVFP4)",
       "scale": null,
       "variant": null,
@@ -3018,7 +3088,7 @@
       "id": "stablestep-gguf-dit-q2_k-imat",
       "filename": "sa3-dit-Q2_K-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q2_K-imat)",
       "scale": null,
       "variant": null,
@@ -3043,7 +3113,7 @@
       "id": "stablestep-gguf-dit-q2_k",
       "filename": "sa3-dit-Q2_K.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q2_K)",
       "scale": null,
       "variant": null,
@@ -3068,7 +3138,7 @@
       "id": "stablestep-gguf-dit-q3_k_l-imat",
       "filename": "sa3-dit-Q3_K_L-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_L-imat)",
       "scale": null,
       "variant": null,
@@ -3093,7 +3163,7 @@
       "id": "stablestep-gguf-dit-q3_k_l",
       "filename": "sa3-dit-Q3_K_L.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_L)",
       "scale": null,
       "variant": null,
@@ -3118,7 +3188,7 @@
       "id": "stablestep-gguf-dit-q3_k_m-imat",
       "filename": "sa3-dit-Q3_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_M-imat)",
       "scale": null,
       "variant": null,
@@ -3143,7 +3213,7 @@
       "id": "stablestep-gguf-dit-q3_k_m",
       "filename": "sa3-dit-Q3_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_M)",
       "scale": null,
       "variant": null,
@@ -3168,7 +3238,7 @@
       "id": "stablestep-gguf-dit-q3_k_s-imat",
       "filename": "sa3-dit-Q3_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_S-imat)",
       "scale": null,
       "variant": null,
@@ -3193,7 +3263,7 @@
       "id": "stablestep-gguf-dit-q3_k_s",
       "filename": "sa3-dit-Q3_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q3_K_S)",
       "scale": null,
       "variant": null,
@@ -3218,7 +3288,7 @@
       "id": "stablestep-gguf-dit-q4_k_m-imat",
       "filename": "sa3-dit-Q4_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q4_K_M-imat)",
       "scale": null,
       "variant": null,
@@ -3243,7 +3313,7 @@
       "id": "stablestep-gguf-dit-q4_k_m",
       "filename": "sa3-dit-Q4_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q4_K_M)",
       "scale": null,
       "variant": null,
@@ -3268,7 +3338,7 @@
       "id": "stablestep-gguf-dit-q4_k_s-imat",
       "filename": "sa3-dit-Q4_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q4_K_S-imat)",
       "scale": null,
       "variant": null,
@@ -3293,7 +3363,7 @@
       "id": "stablestep-gguf-dit-q4_k_s",
       "filename": "sa3-dit-Q4_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q4_K_S)",
       "scale": null,
       "variant": null,
@@ -3318,7 +3388,7 @@
       "id": "stablestep-gguf-dit-q5_k_m-imat",
       "filename": "sa3-dit-Q5_K_M-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q5_K_M-imat)",
       "scale": null,
       "variant": null,
@@ -3343,7 +3413,7 @@
       "id": "stablestep-gguf-dit-q5_k_m",
       "filename": "sa3-dit-Q5_K_M.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q5_K_M)",
       "scale": null,
       "variant": null,
@@ -3368,7 +3438,7 @@
       "id": "stablestep-gguf-dit-q5_k_s-imat",
       "filename": "sa3-dit-Q5_K_S-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q5_K_S-imat)",
       "scale": null,
       "variant": null,
@@ -3393,7 +3463,7 @@
       "id": "stablestep-gguf-dit-q5_k_s",
       "filename": "sa3-dit-Q5_K_S.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q5_K_S)",
       "scale": null,
       "variant": null,
@@ -3418,7 +3488,7 @@
       "id": "stablestep-gguf-dit-q6_k-imat",
       "filename": "sa3-dit-Q6_K-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q6_K-imat)",
       "scale": null,
       "variant": null,
@@ -3443,7 +3513,7 @@
       "id": "stablestep-gguf-dit-q6_k",
       "filename": "sa3-dit-Q6_K.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q6_K)",
       "scale": null,
       "variant": null,
@@ -3468,7 +3538,7 @@
       "id": "stablestep-gguf-dit-q8_0-imat",
       "filename": "sa3-dit-Q8_0-imat.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q8_0-imat)",
       "scale": null,
       "variant": null,
@@ -3493,7 +3563,7 @@
       "id": "stablestep-gguf-dit-q8_0",
       "filename": "sa3-dit-Q8_0.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SA3 DiT (Q8_0)",
       "scale": null,
       "variant": null,
@@ -3518,7 +3588,7 @@
       "id": "stablestep-gguf-same-enc",
       "filename": "sa3-same-enc-F16.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SAME Encoder (GGML)",
       "scale": null,
       "variant": null,
@@ -3532,7 +3602,7 @@
       "id": "stablestep-gguf-same-dec",
       "filename": "sa3-same-dec-F16.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "SAME Decoder (GGML)",
       "scale": null,
       "variant": null,
@@ -3546,7 +3616,7 @@
       "id": "stablestep-gguf-text-enc",
       "filename": "sa3-text-enc-BF16.gguf",
       "role": "stablestep",
-      "family": "shared",
+      "family": "sa3",
       "displayName": "T5Gemma Text Encoder (GGML)",
       "scale": null,
       "variant": null,
@@ -6068,6 +6138,3327 @@
       "description": "TensorRT's PTX-JIT builder resource — compiles at engine-build time for whatever compute capability the specific SM DLLs above don't cover (a newer GPU than this release shipped for). Slower to build than a matching SM DLL, but works on anything CUDA can target. Use this only if none of the numbered SM entries match your GPU.",
       "tags": [
         "runtime"
+      ]
+    },
+    {
+      "id": "heartcodec-flow-f16",
+      "filename": "heartcodec-flow-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-flow-F16.gguf",
+      "displayName": "heartcodec-flow (F16)",
+      "variant": "heartcodec-flow",
+      "quant": "F16",
+      "sizeBytes": 2974881920,
+      "sha256": "45b4309948f7e22810bb4e6daf039c62577cc059544eb0987e5e9a4f3bd077e7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-flow-q8_0",
+      "filename": "heartcodec-flow-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-flow-Q8_0.gguf",
+      "displayName": "heartcodec-flow (Q8_0)",
+      "variant": "heartcodec-flow",
+      "quant": "Q8_0",
+      "sizeBytes": 1609869536,
+      "sha256": "f9b67fd65b6873c371b62680cd0ae2d3064d0b1081e8758a4f538d076734f83c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-muencoder-f16",
+      "filename": "heartcodec-muencoder-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-muencoder-F16.gguf",
+      "displayName": "heartcodec-muencoder (F16)",
+      "variant": "heartcodec-muencoder",
+      "quant": "F16",
+      "sizeBytes": 651074464,
+      "sha256": "871ac1e66785a1ed6eee6b4f79c32f69556965223c5f701f2967123abde7e864",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "Optional audio encoder component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "optional",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-query-f16",
+      "filename": "heartcodec-query-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-query-F16.gguf",
+      "displayName": "heartcodec-query (F16)",
+      "variant": "heartcodec-query",
+      "quant": "F16",
+      "sizeBytes": 59549952,
+      "sha256": "446d0ce24ef7f314f4f59e4f9d941f27081f50ae0625e6e4dcfbecd1262dce98",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "Optional audio encoder component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "optional",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-rvq-f32",
+      "filename": "heartcodec-rvq-F32.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-rvq-F32.gguf",
+      "displayName": "heartcodec-rvq (F32)",
+      "variant": "heartcodec-rvq",
+      "quant": "F32",
+      "sizeBytes": 17194624,
+      "sha256": "d292f57cbcb204a06f998c8bf0f4a2ef671ba82b1a0071904d102435e3525b44",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-scalar-decoder-f16",
+      "filename": "heartcodec-scalar-decoder-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-scalar-decoder-F16.gguf",
+      "displayName": "heartcodec-scalar-decoder (F16)",
+      "variant": "heartcodec-scalar-decoder",
+      "quant": "F16",
+      "sizeBytes": 167671648,
+      "sha256": "cc53325408d2527b99f09cfdf65451bee72cb952b0c52ff135d673b4aacb087f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-wavlm-f16",
+      "filename": "heartcodec-wavlm-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-wavlm-F16.gguf",
+      "displayName": "heartcodec-wavlm (F16)",
+      "variant": "heartcodec-wavlm",
+      "quant": "F16",
+      "sizeBytes": 189171488,
+      "sha256": "afe8f3f6da22339da19d9c80c6605a69a0c03077f04d9193d4e8f0e5b82476c6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "Optional audio encoder component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "optional",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartcodec-whisper-f16",
+      "filename": "heartcodec-whisper-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartcodec-whisper-F16.gguf",
+      "displayName": "heartcodec-whisper (F16)",
+      "variant": "heartcodec-whisper",
+      "quant": "F16",
+      "sizeBytes": 178950976,
+      "sha256": "2ab07c9e51c64d9d474b5e4e7c549e4c8d815194945cf91dd6e57bc9f46885fc",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "Optional audio encoder component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "optional",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-f16",
+      "filename": "heartmula-3b-global-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-F16.gguf",
+      "displayName": "heartmula-3b-global (F16)",
+      "variant": "heartmula-3b-global",
+      "quant": "F16",
+      "sizeBytes": 6882411520,
+      "sha256": "2f79ef996e2efa6ae0ad22f30dcd34b27e6d62e45afce770eaa2523558c84bee",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq1_m",
+      "filename": "heartmula-3b-global-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ1_M.gguf",
+      "displayName": "heartmula-3b-global (IQ1_M)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ1_M",
+      "sizeBytes": 974099648,
+      "sha256": "05480b75e4be077c63bae9d6dc3bd4fdb77c715a88449b2be27900bf9947ecb6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq1_s",
+      "filename": "heartmula-3b-global-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ1_S.gguf",
+      "displayName": "heartmula-3b-global (IQ1_S)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ1_S",
+      "sizeBytes": 765232704,
+      "sha256": "57237a0834929e060558ea4975bd722201abcc8cb9a9a8e3f23b962f5a21f212",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq2_xs",
+      "filename": "heartmula-3b-global-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-global (IQ2_XS)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ2_XS",
+      "sizeBytes": 1178473664,
+      "sha256": "4dde6e76dd13ce41ee1e9f5990698f7b0026e78eb66f71b4223440ded20ce982",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq2_xxs",
+      "filename": "heartmula-3b-global-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-global (IQ2_XXS)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 1093932224,
+      "sha256": "29579eaecbf0b0543b1e8c208f28ddab10eff4b28bf1cfdb21036dee1b7a4e01",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq3_xxs",
+      "filename": "heartmula-3b-global-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-global (IQ3_XXS)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 1526487104,
+      "sha256": "3f7603601ef3b2b9376aac17ec02e76eae211cb3773cb374a4b759d174bf5d6d",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-iq4_xs",
+      "filename": "heartmula-3b-global-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-global (IQ4_XS)",
+      "variant": "heartmula-3b-global",
+      "quant": "IQ4_XS",
+      "sizeBytes": 2010486784,
+      "sha256": "41a6b8cc25a72ef8db167be2d7c6a697eb3a3eb674bbadc817f8cf5a8068ebf6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-mxfp4",
+      "filename": "heartmula-3b-global-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-MXFP4.gguf",
+      "displayName": "heartmula-3b-global (MXFP4)",
+      "variant": "heartmula-3b-global",
+      "quant": "MXFP4",
+      "sizeBytes": 2160796352,
+      "sha256": "3559d9de55574f844e11a1e786d65c3c8a36392e44834569a771a31b175afc9e",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-nvfp4",
+      "filename": "heartmula-3b-global-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-NVFP4.gguf",
+      "displayName": "heartmula-3b-global (NVFP4)",
+      "variant": "heartmula-3b-global",
+      "quant": "NVFP4",
+      "sizeBytes": 2248876736,
+      "sha256": "a07997ff74fb50656f1aef54fb0dd501198f748e633784052e04012ae1e1e1d3",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q2_k",
+      "filename": "heartmula-3b-global-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q2_K.gguf",
+      "displayName": "heartmula-3b-global (Q2_K)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q2_K",
+      "sizeBytes": 1464506368,
+      "sha256": "648baf8b1aa84897a23da1e270f0479305b1b34016eb8a2168553ee89f45a565",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q3_k_l",
+      "filename": "heartmula-3b-global-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-global (Q3_K_L)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q3_K_L",
+      "sizeBytes": 1996724224,
+      "sha256": "9b82fe7dbab9cd69b1453ef26a14541ebbfdb6e5f71201208140e98be941f15b",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q3_k_m",
+      "filename": "heartmula-3b-global-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-global (Q3_K_M)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q3_K_M",
+      "sizeBytes": 1826412544,
+      "sha256": "282cc0a8004c5757c5af2c7560b84d5c3c2c1bb3a027771613f5aeffc88fb5a2",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q3_k_s",
+      "filename": "heartmula-3b-global-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-global (Q3_K_S)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q3_K_S",
+      "sizeBytes": 1724225536,
+      "sha256": "708bbc013ccd5381c258c8ff67a2fcfe936a9833ae4b05880d4b77e1fbd2949f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q4_k_m",
+      "filename": "heartmula-3b-global-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-global (Q4_K_M)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2200754176,
+      "sha256": "b05f42b378e07a30dbc68e23c82fca2787e82ded80ff4fd15b44a8d655843add",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q4_k_s",
+      "filename": "heartmula-3b-global-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-global (Q4_K_S)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q4_K_S",
+      "sizeBytes": 2112722944,
+      "sha256": "86b30b7f352b7bd18359c76b9e2f10c95e69b932e033dd1974e904a332882527",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q5_k_m",
+      "filename": "heartmula-3b-global-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-global (Q5_K_M)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q5_K_M",
+      "sizeBytes": 2503530496,
+      "sha256": "30c060d1e2ba5d189ab3a84173df58a467c486dfb675eee26cc8148152401232",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q5_k_s",
+      "filename": "heartmula-3b-global-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-global (Q5_K_S)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q5_K_S",
+      "sizeBytes": 2450888704,
+      "sha256": "17dd9165aa4f2ad99163d1554c8553966cfe476c1b1e9bcdf3dd417577d6e4b9",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q6_k",
+      "filename": "heartmula-3b-global-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q6_K.gguf",
+      "displayName": "heartmula-3b-global (Q6_K)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q6_K",
+      "sizeBytes": 2825230336,
+      "sha256": "4b3319f858a4c2ea8522066bd4a37f2844b7df849ef96eb4c283eff7b3c5bde5",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-global-q8_0",
+      "filename": "heartmula-3b-global-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-global-Q8_0.gguf",
+      "displayName": "heartmula-3b-global (Q8_0)",
+      "variant": "heartmula-3b-global",
+      "quant": "Q8_0",
+      "sizeBytes": 3658162880,
+      "sha256": "54546b73a4a1a47af91d064c9cf36f9f58ab817bb5b8782aa1d49f952aba247e",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-f16",
+      "filename": "heartmula-3b-happy-new-year-global-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-F16.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (F16)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "F16",
+      "sizeBytes": 6882411552,
+      "sha256": "0b469ca5267837dbf2dd3f82142f6d716ee19974a74146124fed2d8ed66459b3",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq1_m",
+      "filename": "heartmula-3b-happy-new-year-global-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ1_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ1_M)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ1_M",
+      "sizeBytes": 974099712,
+      "sha256": "b6942a65f2f81b6ff8029c9dc2bfc5fcfa436fddf4b9b69a3a68804f0e05d8b6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq1_s",
+      "filename": "heartmula-3b-happy-new-year-global-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ1_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ1_S)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ1_S",
+      "sizeBytes": 765232768,
+      "sha256": "67b129f4e2a23671fe517579f2030b536f795a38d00d5f856830ef97ad8180d5",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq2_xs",
+      "filename": "heartmula-3b-happy-new-year-global-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ2_XS)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ2_XS",
+      "sizeBytes": 1178473728,
+      "sha256": "b943fda2497a45b54993db9c6b4494348ef3ee45ca981d7e3595c5b3aa56b7f7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq2_xxs",
+      "filename": "heartmula-3b-happy-new-year-global-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ2_XXS)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 1093932288,
+      "sha256": "7eede8eefbdb4b63e1ca9d513a226e6ff47a7ac7bf983b6b39392b28f592491a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq3_xxs",
+      "filename": "heartmula-3b-happy-new-year-global-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ3_XXS)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 1526487168,
+      "sha256": "d6e1f4e61cf33865fa03089f6548ff2f0883b3d45dcb2d2f96fa13119717aa6c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-iq4_xs",
+      "filename": "heartmula-3b-happy-new-year-global-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (IQ4_XS)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "IQ4_XS",
+      "sizeBytes": 2010486848,
+      "sha256": "63edcc338fb6e58c4a21c9ba6d49c74e712080d8c6a6c1bcf9c50093aa0593eb",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-mxfp4",
+      "filename": "heartmula-3b-happy-new-year-global-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-MXFP4.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (MXFP4)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "MXFP4",
+      "sizeBytes": 2160796416,
+      "sha256": "cbd7545c4ea35b790bf928f22ecb14981a59c01ad8647a2d801c09cca84dc86f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-nvfp4",
+      "filename": "heartmula-3b-happy-new-year-global-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-NVFP4.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (NVFP4)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "NVFP4",
+      "sizeBytes": 2248876800,
+      "sha256": "5385db8b3f5e54389bff183e41458caacfe938218cc22e56bee5642d64ce6a3f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q2_k",
+      "filename": "heartmula-3b-happy-new-year-global-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q2_K.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q2_K)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q2_K",
+      "sizeBytes": 1464506400,
+      "sha256": "949a8b6ec7a90be92bb264046900a06fd5746a6b2685f8bc30b9e6afa342562c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q3_k_l",
+      "filename": "heartmula-3b-happy-new-year-global-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q3_K_L)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q3_K_L",
+      "sizeBytes": 1996724288,
+      "sha256": "d81f83a783660104530d76e79062ed453f1bf6aac1ac9e8804d8cec0ab1734cb",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q3_k_m",
+      "filename": "heartmula-3b-happy-new-year-global-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q3_K_M)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q3_K_M",
+      "sizeBytes": 1826412608,
+      "sha256": "ab5f518c8efe4be924ec7120bf2d82de6220146ef447881f5334ee4791c619ac",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q3_k_s",
+      "filename": "heartmula-3b-happy-new-year-global-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q3_K_S)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q3_K_S",
+      "sizeBytes": 1724225600,
+      "sha256": "344f9b0b785c39c146d594499b97692378d63ef6a9665998bc6d0e0503d7e73b",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q4_k_m",
+      "filename": "heartmula-3b-happy-new-year-global-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q4_K_M)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2200754240,
+      "sha256": "2dd10336ea229242d2a815e0b4efcb2233485eb1d83a75f69cb67b2e55dee211",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q4_k_s",
+      "filename": "heartmula-3b-happy-new-year-global-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q4_K_S)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q4_K_S",
+      "sizeBytes": 2112723008,
+      "sha256": "0cacca5a96fa858eaf0aa096ad9a10702baea5b68de07e09998a535164150963",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q5_k_m",
+      "filename": "heartmula-3b-happy-new-year-global-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q5_K_M)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q5_K_M",
+      "sizeBytes": 2503530560,
+      "sha256": "213cd375787916ae21782513fc718add8af887f4d34bee4d5dd21c78909bcdea",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q5_k_s",
+      "filename": "heartmula-3b-happy-new-year-global-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q5_K_S)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q5_K_S",
+      "sizeBytes": 2450888768,
+      "sha256": "1c185fecfa813bede5b3a12e6fc378a99380e8af2eed8131768c6403642d030f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q6_k",
+      "filename": "heartmula-3b-happy-new-year-global-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q6_K.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q6_K)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q6_K",
+      "sizeBytes": 2825230368,
+      "sha256": "8dd660066a33ca71475ba5f9854a89ce3c2a4024851aa4f8176902942741526a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-global-q8_0",
+      "filename": "heartmula-3b-happy-new-year-global-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-global-Q8_0.gguf",
+      "displayName": "heartmula-3b-happy-new-year-global (Q8_0)",
+      "variant": "heartmula-3b-happy-new-year-global",
+      "quant": "Q8_0",
+      "sizeBytes": 3658162912,
+      "sha256": "6321e4a676df3c48b371e39498e314bdec88961570088adeffadf357d91b2a36",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-f16",
+      "filename": "heartmula-3b-happy-new-year-local-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-F16.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (F16)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "F16",
+      "sizeBytes": 994370880,
+      "sha256": "592799aa8f25e44c016bbcba832186396885d6141634f12b9d63604c95ade661",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq1_m",
+      "filename": "heartmula-3b-happy-new-year-local-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ1_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ1_M)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ1_M",
+      "sizeBytes": 176192160,
+      "sha256": "9f1db745d0da26f2f2ddaa11dd71bc07b8fab1f5e31706439d1592a2b5869821",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq1_s",
+      "filename": "heartmula-3b-happy-new-year-local-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ1_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ1_S)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ1_S",
+      "sizeBytes": 127469728,
+      "sha256": "c595760930fd4d6f8a05bebb04d60880cfe066dbe3b2f252befea04410b12ad5",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq2_xs",
+      "filename": "heartmula-3b-happy-new-year-local-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ2_XS)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ2_XS",
+      "sizeBytes": 202992288,
+      "sha256": "29747677d655a94c32b44994f896c2e42f1e663d8bf29bb3ef1d18376dd54c8a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq2_xxs",
+      "filename": "heartmula-3b-happy-new-year-local-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ2_XXS)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 196061856,
+      "sha256": "e0af446528bd669feb02a662205bbe091c55cfe0588237a95b47026a2560d0c5",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq3_xxs",
+      "filename": "heartmula-3b-happy-new-year-local-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ3_XXS)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 260304672,
+      "sha256": "7df74e5380380b7ff9590489df5c9c07d1db7cba69932dfed597e009a478dc22",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-iq4_xs",
+      "filename": "heartmula-3b-happy-new-year-local-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (IQ4_XS)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "IQ4_XS",
+      "sizeBytes": 317888288,
+      "sha256": "40bb69965378ecb33870263ba279b1fdc8f4d8bdf21283cb44fc2a08d127fa04",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-mxfp4",
+      "filename": "heartmula-3b-happy-new-year-local-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-MXFP4.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (MXFP4)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "MXFP4",
+      "sizeBytes": 362863776,
+      "sha256": "79ad2043d5a05e2ea2fa2673f281887c5574513f73625540c49375fa5be4f651",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-nvfp4",
+      "filename": "heartmula-3b-happy-new-year-local-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-NVFP4.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (NVFP4)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "NVFP4",
+      "sizeBytes": 372595872,
+      "sha256": "0d96580f52b831bfd4d917115f0a8702d744078898c907cb66358a58964c571e",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q2_k",
+      "filename": "heartmula-3b-happy-new-year-local-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q2_K.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q2_K)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q2_K",
+      "sizeBytes": 275642144,
+      "sha256": "920c5e1e45ca1ea08182561bf0c8541ddf0088be479a310f2c3b44fbb460180a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q3_k_l",
+      "filename": "heartmula-3b-happy-new-year-local-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q3_K_L)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q3_K_L",
+      "sizeBytes": 316671776,
+      "sha256": "f3b149a654dbcd10046b87d366cfae4b45abc5698db2ea9cc87636c91b8b5859",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q3_k_m",
+      "filename": "heartmula-3b-happy-new-year-local-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q3_K_M)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q3_K_M",
+      "sizeBytes": 293963552,
+      "sha256": "29fc8d4907517f67818df9488206e47ba96f3b1035c3ccd20629e18e4866f262",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q3_k_s",
+      "filename": "heartmula-3b-happy-new-year-local-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q3_K_S)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q3_K_S",
+      "sizeBytes": 286258976,
+      "sha256": "bd4758881f1aa468c311bfd3b675724472e1ebfe1a09c71ffc07faf2a19dd8b4",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q4_k_m",
+      "filename": "heartmula-3b-happy-new-year-local-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q4_K_M)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q4_K_M",
+      "sizeBytes": 335324960,
+      "sha256": "019920357950dd052b33314aef668d5f69d65ac1b4b81cf17340df485131377f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q4_k_s",
+      "filename": "heartmula-3b-happy-new-year-local-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q4_K_S)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q4_K_S",
+      "sizeBytes": 338827040,
+      "sha256": "9e9733bdb8b0c6e702d49508b73a4ac03c9b56608bcaccf93504c9ab2182c7f9",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q5_k_m",
+      "filename": "heartmula-3b-happy-new-year-local-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q5_K_M)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q5_K_M",
+      "sizeBytes": 370517792,
+      "sha256": "1f161104666e3a64b569be6b80cc8e55b1eb224505cb0d7fed348121c03b349e",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q5_k_s",
+      "filename": "heartmula-3b-happy-new-year-local-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q5_K_S)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q5_K_S",
+      "sizeBytes": 366548768,
+      "sha256": "4882c47c727ef38f379d6d3ffe47bc69fe8074fdd2d297a8deb4b823dbf1573a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q6_k",
+      "filename": "heartmula-3b-happy-new-year-local-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q6_K.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q6_K)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q6_K",
+      "sizeBytes": 407910176,
+      "sha256": "12e95f6ed8cdd5c73fa21140f35cf33cf500fb2785649d4067d7ebf1c38ef264",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-happy-new-year-local-q8_0",
+      "filename": "heartmula-3b-happy-new-year-local-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-happy-new-year-local-Q8_0.gguf",
+      "displayName": "heartmula-3b-happy-new-year-local (Q8_0)",
+      "variant": "heartmula-3b-happy-new-year-local",
+      "quant": "Q8_0",
+      "sizeBytes": 528309408,
+      "sha256": "c1bf611a9bd5ab014feee06ddab5c3365630ac681ad024fdd3f4327de2d63668",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-f16",
+      "filename": "heartmula-3b-local-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-F16.gguf",
+      "displayName": "heartmula-3b-local (F16)",
+      "variant": "heartmula-3b-local",
+      "quant": "F16",
+      "sizeBytes": 994370816,
+      "sha256": "b8883db1e6f442a4436b401819dc3ad0519a05bf9bd80e9c10b1bfbf3fc45747",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq1_m",
+      "filename": "heartmula-3b-local-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ1_M.gguf",
+      "displayName": "heartmula-3b-local (IQ1_M)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ1_M",
+      "sizeBytes": 176192096,
+      "sha256": "8c9e7214521d5ab2f1be0bf696904ed765c661b5f4ec78df8981d5de047daa73",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq1_s",
+      "filename": "heartmula-3b-local-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ1_S.gguf",
+      "displayName": "heartmula-3b-local (IQ1_S)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ1_S",
+      "sizeBytes": 127469664,
+      "sha256": "6f463c193fa7a9597e9890b6a76477229805ac36e4e21fcf265459890b6fdd56",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq2_xs",
+      "filename": "heartmula-3b-local-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-local (IQ2_XS)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ2_XS",
+      "sizeBytes": 202992224,
+      "sha256": "96c15a21c9784e5151e203f83a0ac4b1a8fd7a3c63717c417eb1f8e3eae980ef",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq2_xxs",
+      "filename": "heartmula-3b-local-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-local (IQ2_XXS)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 196061792,
+      "sha256": "30edad9e6b1caa88c4add00b89e362db261c400dfdcd9dd3b9a752c0ad3367af",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq3_xxs",
+      "filename": "heartmula-3b-local-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-local (IQ3_XXS)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 260304608,
+      "sha256": "cf1baefe76be725f1dceffb001c5bb86f3ed0a38c8cce576154ee69516bd21ad",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-iq4_xs",
+      "filename": "heartmula-3b-local-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-local (IQ4_XS)",
+      "variant": "heartmula-3b-local",
+      "quant": "IQ4_XS",
+      "sizeBytes": 317888224,
+      "sha256": "191b3a0c01dde94c6a2b9729ed0d21e9192161ee146920c4f201f959a3b9c7ba",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-mxfp4",
+      "filename": "heartmula-3b-local-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-MXFP4.gguf",
+      "displayName": "heartmula-3b-local (MXFP4)",
+      "variant": "heartmula-3b-local",
+      "quant": "MXFP4",
+      "sizeBytes": 362863712,
+      "sha256": "324030c8b41912ea30688a0acca4fcc4f9453536c1f37904fde66d38e77a5ba6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-nvfp4",
+      "filename": "heartmula-3b-local-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-NVFP4.gguf",
+      "displayName": "heartmula-3b-local (NVFP4)",
+      "variant": "heartmula-3b-local",
+      "quant": "NVFP4",
+      "sizeBytes": 372595808,
+      "sha256": "5eb78245d5c31d9d321c4a03e7f58cb7e5e2c6a4e21cf5eca8caa3f192b50fcb",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q2_k",
+      "filename": "heartmula-3b-local-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q2_K.gguf",
+      "displayName": "heartmula-3b-local (Q2_K)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q2_K",
+      "sizeBytes": 275642080,
+      "sha256": "f3c561540fe0367bc0249d7ea83a289a6d716a7165b71efd5575b077abfeace0",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q3_k_l",
+      "filename": "heartmula-3b-local-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-local (Q3_K_L)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q3_K_L",
+      "sizeBytes": 316671712,
+      "sha256": "d3bd25a4c502ba543e581265f6dab25c51c471b0182713aca6ff7d1206782140",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q3_k_m",
+      "filename": "heartmula-3b-local-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-local (Q3_K_M)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q3_K_M",
+      "sizeBytes": 293963488,
+      "sha256": "6b2fe78f7d300ce0d37395ff84d7a1489be023bf26c309846bbd8efc106fcc8d",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q3_k_s",
+      "filename": "heartmula-3b-local-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-local (Q3_K_S)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q3_K_S",
+      "sizeBytes": 286258912,
+      "sha256": "7e545701551b8c4f6f1b14208d03973ff2cf3f6ec3615af17a4db26a7c271f09",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q4_k_m",
+      "filename": "heartmula-3b-local-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-local (Q4_K_M)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q4_K_M",
+      "sizeBytes": 335324896,
+      "sha256": "623dae25c8e201a9aad52174e1cdf3079690fc8ce54714310dad82f4c49d4c05",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q4_k_s",
+      "filename": "heartmula-3b-local-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-local (Q4_K_S)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q4_K_S",
+      "sizeBytes": 338826976,
+      "sha256": "bdcda5633f314b3ad20df5d155e01a799ea71b237c04eee563ba54211908617c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q5_k_m",
+      "filename": "heartmula-3b-local-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-local (Q5_K_M)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q5_K_M",
+      "sizeBytes": 370517728,
+      "sha256": "55e0b2343c74ab84f43f0bc8ae8a54aa4d33b11fdf4a8fa9c8616ab8d7722445",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q5_k_s",
+      "filename": "heartmula-3b-local-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-local (Q5_K_S)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q5_K_S",
+      "sizeBytes": 366548704,
+      "sha256": "d1715095ca07159fed3c27da788ee4993a345c06453af32eb2fef15a4f11314a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q6_k",
+      "filename": "heartmula-3b-local-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q6_K.gguf",
+      "displayName": "heartmula-3b-local (Q6_K)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q6_K",
+      "sizeBytes": 407910112,
+      "sha256": "b046c2dc5d0305a405f4566b564dbb647f1409b6e487518bf9f4620ce70fae82",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-local-q8_0",
+      "filename": "heartmula-3b-local-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-local-Q8_0.gguf",
+      "displayName": "heartmula-3b-local (Q8_0)",
+      "variant": "heartmula-3b-local",
+      "quant": "Q8_0",
+      "sizeBytes": 528309344,
+      "sha256": "0533e957c05feb704f32cc422a17818035e63dda64ce41f878cd6bfb6d823724",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-f16",
+      "filename": "heartmula-3b-rl-global-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-F16.gguf",
+      "displayName": "heartmula-3b-rl-global (F16)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "F16",
+      "sizeBytes": 6882411520,
+      "sha256": "cb6c9d8e9ba2bf0256025750983a78b13068e1920dc04e2ad7e00df703882d2f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq1_m",
+      "filename": "heartmula-3b-rl-global-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ1_M.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ1_M)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ1_M",
+      "sizeBytes": 974099648,
+      "sha256": "be8177b99d94519dd719eb30153875a822c42e708e1e73119c3a0d05f6d3d58e",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq1_s",
+      "filename": "heartmula-3b-rl-global-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ1_S.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ1_S)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ1_S",
+      "sizeBytes": 765232704,
+      "sha256": "7213eef89ea8ec799f8c444e32a47df8a1f68ed648069746fcc480174d536aef",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq2_xs",
+      "filename": "heartmula-3b-rl-global-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ2_XS)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ2_XS",
+      "sizeBytes": 1178473664,
+      "sha256": "812176b5b5edd2b92fb3bcbc7a79aaa9d29b3f08d1b8c0530d07d050db64338b",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq2_xxs",
+      "filename": "heartmula-3b-rl-global-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ2_XXS)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 1093932224,
+      "sha256": "965656f80ee71b0ef6db8f5810b53c8b6bfb739de61cef2c64d56a542fb72bf1",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq3_xxs",
+      "filename": "heartmula-3b-rl-global-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ3_XXS)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 1526487104,
+      "sha256": "6af6ca9b33071272c86d7d06da8028a2eec00a45c45e7569a8051c3dc1d58810",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-iq4_xs",
+      "filename": "heartmula-3b-rl-global-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-rl-global (IQ4_XS)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "IQ4_XS",
+      "sizeBytes": 2010486784,
+      "sha256": "8691d8355b8c241826fc9b56026fd2f09eaeb47a2683133ce1e7c309e00dc927",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-mxfp4",
+      "filename": "heartmula-3b-rl-global-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-MXFP4.gguf",
+      "displayName": "heartmula-3b-rl-global (MXFP4)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "MXFP4",
+      "sizeBytes": 2160796352,
+      "sha256": "ab3930f16b85d529095e5975c7964df28e8a8e04a01eb2f57f1980dc51d5701a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-nvfp4",
+      "filename": "heartmula-3b-rl-global-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-NVFP4.gguf",
+      "displayName": "heartmula-3b-rl-global (NVFP4)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "NVFP4",
+      "sizeBytes": 2248876736,
+      "sha256": "a56544e8d5c324fd53f0b6beca34e0a9e176758fab518a9bc4ecd32a6b81120d",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q2_k",
+      "filename": "heartmula-3b-rl-global-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q2_K.gguf",
+      "displayName": "heartmula-3b-rl-global (Q2_K)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q2_K",
+      "sizeBytes": 1464506368,
+      "sha256": "40270e3548080f6c22f6a58776c8b09b1b0b1bdd2d03fd15772ac66a9a19ee4c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q3_k_l",
+      "filename": "heartmula-3b-rl-global-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-rl-global (Q3_K_L)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q3_K_L",
+      "sizeBytes": 1996724224,
+      "sha256": "1aaacacd487d3641a7f9696e149d9f3b4cf5106f5799a330a737b8c0a765cdb7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q3_k_m",
+      "filename": "heartmula-3b-rl-global-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-rl-global (Q3_K_M)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q3_K_M",
+      "sizeBytes": 1826412544,
+      "sha256": "9e0a8c73290b0b34e189920adbb419edbad9fd0be0b3872c1974d50b947daddf",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q3_k_s",
+      "filename": "heartmula-3b-rl-global-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-rl-global (Q3_K_S)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q3_K_S",
+      "sizeBytes": 1724225536,
+      "sha256": "d05b6112226a9bff5b0b35047f0c30e70c5daa42e161c3230253f199e7cdfbae",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q4_k_m",
+      "filename": "heartmula-3b-rl-global-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-rl-global (Q4_K_M)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2200754176,
+      "sha256": "09ce7e8acc06f46a87de3a1e7b31f4af255f572da36f1142a2b15ebd0ed2f9b1",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q4_k_s",
+      "filename": "heartmula-3b-rl-global-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-rl-global (Q4_K_S)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q4_K_S",
+      "sizeBytes": 2112722944,
+      "sha256": "589001208b0b06f37f4fe793f213abdff98d7308e9fdf1158f56c8b21df88f28",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q5_k_m",
+      "filename": "heartmula-3b-rl-global-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-rl-global (Q5_K_M)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q5_K_M",
+      "sizeBytes": 2503530496,
+      "sha256": "7f777e9bf5ad9357b64155c7af1199dde9856d800fd3ff352f052a27cb019ea1",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q5_k_s",
+      "filename": "heartmula-3b-rl-global-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-rl-global (Q5_K_S)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q5_K_S",
+      "sizeBytes": 2450888704,
+      "sha256": "8230c014b8ba17c8660d33ce79b487c57a32b1f6825196d9356483e4790b5ed8",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q6_k",
+      "filename": "heartmula-3b-rl-global-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q6_K.gguf",
+      "displayName": "heartmula-3b-rl-global (Q6_K)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q6_K",
+      "sizeBytes": 2825230336,
+      "sha256": "6c08ac1873d9c772e4b32a351e7161442570b878933ce284ee5ad0a4f23d289f",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-global-q8_0",
+      "filename": "heartmula-3b-rl-global-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-global-Q8_0.gguf",
+      "displayName": "heartmula-3b-rl-global (Q8_0)",
+      "variant": "heartmula-3b-rl-global",
+      "quant": "Q8_0",
+      "sizeBytes": 3658162880,
+      "sha256": "6e7b61a749cbd34d8726c3d5baf482aa89b88f69bf3178b7215a7330a4a1f12c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-f16",
+      "filename": "heartmula-3b-rl-local-F16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-F16.gguf",
+      "displayName": "heartmula-3b-rl-local (F16)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "F16",
+      "sizeBytes": 994370848,
+      "sha256": "1907a35befde8b40a71f2cefbdaaac4fd70985f11c00e8f2310edb3ff0977fea",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq1_m",
+      "filename": "heartmula-3b-rl-local-IQ1_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ1_M.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ1_M)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ1_M",
+      "sizeBytes": 176192096,
+      "sha256": "c57767cf2c5926527dfa5b150b0156138c202033aaca9429dd80ff58c0f48f36",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq1_s",
+      "filename": "heartmula-3b-rl-local-IQ1_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ1_S.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ1_S)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ1_S",
+      "sizeBytes": 127469664,
+      "sha256": "ce9b91fa18809ddb181a4ad1171b79ec861d2c1c85eeb9265de9b7dcc01c7131",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq2_xs",
+      "filename": "heartmula-3b-rl-local-IQ2_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ2_XS.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ2_XS)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ2_XS",
+      "sizeBytes": 202992224,
+      "sha256": "0afef414e97f512c4de5bb311549689f1b7741e372c823a68aedb906f6c2d12a",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq2_xxs",
+      "filename": "heartmula-3b-rl-local-IQ2_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ2_XXS.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ2_XXS)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ2_XXS",
+      "sizeBytes": 196061792,
+      "sha256": "c5c9fe84b32f160da3d3268b42b2d0bc18d4981417965556a0a573981e216bc6",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq3_xxs",
+      "filename": "heartmula-3b-rl-local-IQ3_XXS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ3_XXS.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ3_XXS)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ3_XXS",
+      "sizeBytes": 260304608,
+      "sha256": "c6b492ad653b1c0ad497ee793b33c3850cbaf6ee774a5cedc770eed8a9cf3ba7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-iq4_xs",
+      "filename": "heartmula-3b-rl-local-IQ4_XS.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-IQ4_XS.gguf",
+      "displayName": "heartmula-3b-rl-local (IQ4_XS)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "IQ4_XS",
+      "sizeBytes": 317888224,
+      "sha256": "4bc9bac02652e9b85733d20e5a2f7f64c4ebba5e09cd4164bcc127c13d021429",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-mxfp4",
+      "filename": "heartmula-3b-rl-local-MXFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-MXFP4.gguf",
+      "displayName": "heartmula-3b-rl-local (MXFP4)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "MXFP4",
+      "sizeBytes": 362863712,
+      "sha256": "f51a6f69ee2b5e0bb108cee0a52ed0bdd1c9453ecd94b735a0c23386615bbc73",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-nvfp4",
+      "filename": "heartmula-3b-rl-local-NVFP4.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-NVFP4.gguf",
+      "displayName": "heartmula-3b-rl-local (NVFP4)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "NVFP4",
+      "sizeBytes": 372595808,
+      "sha256": "ab51ecc99a47ed79c0cada78f551f194ecf8dfe6e0b9be2338db9909ece4e016",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q2_k",
+      "filename": "heartmula-3b-rl-local-Q2_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q2_K.gguf",
+      "displayName": "heartmula-3b-rl-local (Q2_K)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q2_K",
+      "sizeBytes": 275642080,
+      "sha256": "7959a88ec4de72ee039248e7b1b49e13022ec3cc13dc0f2e4dde4b83a4a2c248",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q3_k_l",
+      "filename": "heartmula-3b-rl-local-Q3_K_L.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q3_K_L.gguf",
+      "displayName": "heartmula-3b-rl-local (Q3_K_L)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q3_K_L",
+      "sizeBytes": 316671712,
+      "sha256": "d7d823e67c487f53b5f8769d3d703b6899d1d60c83d3e880799411c439d385a1",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q3_k_m",
+      "filename": "heartmula-3b-rl-local-Q3_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q3_K_M.gguf",
+      "displayName": "heartmula-3b-rl-local (Q3_K_M)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q3_K_M",
+      "sizeBytes": 293963488,
+      "sha256": "0166edacc588d4764b22a9c99aa4363d647046e9516f2306a126c95d10ead1ab",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q3_k_s",
+      "filename": "heartmula-3b-rl-local-Q3_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q3_K_S.gguf",
+      "displayName": "heartmula-3b-rl-local (Q3_K_S)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q3_K_S",
+      "sizeBytes": 286258912,
+      "sha256": "b1327c5bb5c334eb111d5a8757f4a21efc6adf60c6eb54e1d08fad681668b626",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q4_k_m",
+      "filename": "heartmula-3b-rl-local-Q4_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q4_K_M.gguf",
+      "displayName": "heartmula-3b-rl-local (Q4_K_M)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q4_K_M",
+      "sizeBytes": 335324896,
+      "sha256": "f468d0a78fa120320177ba216c76aa0347dba666149a66f173f4a3f50b8ca3a7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q4_k_s",
+      "filename": "heartmula-3b-rl-local-Q4_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q4_K_S.gguf",
+      "displayName": "heartmula-3b-rl-local (Q4_K_S)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q4_K_S",
+      "sizeBytes": 338826976,
+      "sha256": "2dcb8acf6569fe4cd249d3061fe8c219193dcbcd5157a4380970b55636ae685d",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q5_k_m",
+      "filename": "heartmula-3b-rl-local-Q5_K_M.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q5_K_M.gguf",
+      "displayName": "heartmula-3b-rl-local (Q5_K_M)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q5_K_M",
+      "sizeBytes": 370517728,
+      "sha256": "b9f9fb9fc261beb3edca0d97dbddee558f32c3728bac7ed0cdbae062381c4819",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q5_k_s",
+      "filename": "heartmula-3b-rl-local-Q5_K_S.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q5_K_S.gguf",
+      "displayName": "heartmula-3b-rl-local (Q5_K_S)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q5_K_S",
+      "sizeBytes": 366548704,
+      "sha256": "107365bb89dc22dc436abfe0e6207cdd385e006f079cbb9d37e926bb95e7cc7c",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q6_k",
+      "filename": "heartmula-3b-rl-local-Q6_K.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q6_K.gguf",
+      "displayName": "heartmula-3b-rl-local (Q6_K)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q6_K",
+      "sizeBytes": 407910112,
+      "sha256": "6013d6c4aa7ad37be529a4440ceacd4402739ec160849403ece4ceee3d291ce4",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-3b-rl-local-q8_0",
+      "filename": "heartmula-3b-rl-local-Q8_0.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-3b-rl-local-Q8_0.gguf",
+      "displayName": "heartmula-3b-rl-local (Q8_0)",
+      "variant": "heartmula-3b-rl-local",
+      "quant": "Q8_0",
+      "sizeBytes": 528309344,
+      "sha256": "6d37fdb8f84417d15ebd36aa7b7773ae06f596d8429d12b148d93e9848f0a6ff",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-tokenizer",
+      "filename": "heartmula-tokenizer.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-tokenizer.gguf",
+      "displayName": "heartmula-tokenizer (F32)",
+      "variant": "heartmula-tokenizer",
+      "quant": "F32",
+      "sizeBytes": 7852064,
+      "sha256": "d4881e7fd90d6bc80367d909cc1453da93b666f29d4ab89a8befbba00f4c3cb1",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "HeartMuLa generation component. Staged for publication; the download is unavailable until the approved Hugging Face upload.",
+      "tags": [
+        "generation",
+        "pending-upload"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE"
+        },
+        {
+          "filename": "NOTICE"
+        }
       ]
     }
   ]
