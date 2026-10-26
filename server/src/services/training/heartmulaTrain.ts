@@ -212,6 +212,8 @@ export function buildHeartmulaTrainArgs(o: {
   dataDir: string; runDir: string; modelsDir: string; recipe: HeartmulaRecipe; name: string; resume: boolean;
   /** Pause at this step with a checkpoint (exit 3); a preview segment ends here. */
   stopAfter?: number;
+  /** The dataset's trigger word, stored in the adapter so generation can lead the tags with it. */
+  trigger?: string;
 }): string[] {
   const r = o.recipe;
   return ['heartmula-train', '--data', o.dataDir, '--out', o.runDir, '--models', o.modelsDir,
@@ -222,5 +224,6 @@ export function buildHeartmulaTrainArgs(o: {
     // so the same run fits a small card and is quick on a big one. Losses are identical in every mode.
     '--attn', 'auto', '--keep-layers', 'auto', '--lora-dropout', String(r.loraDropout ?? 0),
     ...(r.trainMlp ? ['--lora-mlp'] : []),
+    ...(o.trigger?.trim() ? ['--trigger', o.trigger.trim()] : []),
     '--name', o.name, ...(o.stopAfter ? ['--stop-after', String(o.stopAfter)] : []), ...(o.resume ? ['--resume'] : [])];
 }

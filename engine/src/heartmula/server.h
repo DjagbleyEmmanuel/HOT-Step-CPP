@@ -602,6 +602,20 @@ static void heartmula_handle_synth(const httplib::Request & req, httplib::Respon
     }
     fprintf(stderr, "[HeartMuLa] job %s queued: %s, %.0f s, seed %llu\n", job->id.c_str(), r.id.c_str(), r.duration_s,
             (unsigned long long) r.seed);
+    // What the model is conditioned on, before the pipeline lower-cases and wraps it.
+    fprintf(stderr, "[HeartMuLa] tags: %s\n", r.tags.c_str());
+    if (r.lyrics.empty()) {
+        fprintf(stderr, "[HeartMuLa] lyrics: (none)\n");
+    } else {
+        size_t from = 0;
+        fprintf(stderr, "[HeartMuLa] lyrics:\n");
+        while (from <= r.lyrics.size()) {
+            const size_t nl = r.lyrics.find('\n', from);
+            fprintf(stderr, "[HeartMuLa]   %s\n", r.lyrics.substr(from, nl == std::string::npos ? std::string::npos : nl - from).c_str());
+            if (nl == std::string::npos) break;
+            from = nl + 1;
+        }
+    }
     work_push([job, r, info]() mutable { hm_synth_worker(job, std::move(r), info); });
     res.set_content("{\"id\":\"" + job->id + "\"}", "application/json");
 }

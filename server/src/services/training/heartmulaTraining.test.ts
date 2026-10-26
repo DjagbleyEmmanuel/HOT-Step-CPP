@@ -72,6 +72,9 @@ test('argv matches the trainer CLI contract', () => {
   assert.ok(seg.join(' ').includes('--lora-dropout 0.05 --name a --stop-after 100'));
   const mlp = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: { ...HEARTMULA_RECIPE_DEFAULTS, trainMlp: true }, name: 'a', resume: false });
   assert.ok(mlp.join(' ').includes('--lora-dropout 0 --lora-mlp --name a'));
+  const trig = train.buildHeartmulaTrainArgs({ dataDir: 'D', runDir: 'R', modelsDir: 'M', recipe: HEARTMULA_RECIPE_DEFAULTS, name: 'a', resume: false, trigger: ' zx9 ' });
+  assert.ok(trig.join(' ').includes('--trigger zx9 --name a'));
+  assert.ok(!args.includes('--trigger'), 'no dataset trigger, no flag');
   assert.ok(!args.includes('--lora-mlp'), 'attention-only runs keep their old command line');
   const prepare = train.buildHeartmulaPrepareArgs({ samplesJson: 'S', outDir: 'O', modelsDir: 'M', encoderDir: 'E', force: true });
   assert.deepEqual(prepare, ['heartmula-prepare', '--dataset', 'S', '--out', 'O', '--models', 'M', '--encoder', 'E', '--force']);

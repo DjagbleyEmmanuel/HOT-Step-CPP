@@ -299,6 +299,7 @@ export async function runHeartmulaTrainJob(job: TrainingJob): Promise<void> {
       const stopAfter = nextPreviewStep(from, preview.everySteps, recipe.steps);
       const args = buildHeartmulaTrainArgs({
         dataDir, runDir: opts.runDir, modelsDir: config.aceServer.models, recipe, name: opts.record.adapterName, resume, stopAfter,
+        trigger: getDataset(job.datasetId)?.customTag ?? '',
       });
       st.checkpointReason = ''; st.exitCode = undefined; st.started = false;
       await runYue2AceTrain(job, 'heartmula-train', args, YUE2_IDLE_MS, () => null,

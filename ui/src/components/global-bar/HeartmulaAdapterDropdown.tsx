@@ -38,7 +38,7 @@ export function HeartmulaAdapterDropdown() {
           ...(missing ? [{ value: selected, label: `${fileName(selected)} ${t('globalBar.fileNotFound', '(file not found)')}` }] : []),
           ...adapters.map(value => {
             const m = data?.lmAdapterMeta?.[value];
-            const tags = [m?.variant && m.variant.toLowerCase() !== loadedVariant.toLowerCase() ? m.variant : '', m?.mlp ? 'MLP' : ''].filter(Boolean);
+            const tags = [m?.trigger ? `"${m.trigger}"` : '', m?.variant && m.variant.toLowerCase() !== loadedVariant.toLowerCase() ? m.variant : '', m?.mlp ? 'MLP' : ''].filter(Boolean);
             return { value, label: [fileName(value), ...tags].join(' · ') };
           }),
         ]}
@@ -53,6 +53,7 @@ export function HeartmulaAdapterDropdown() {
         <p className="text-xs text-zinc-500">{t('globalBar.heartmulaNoAdapters', 'No HeartMuLa adapters installed yet. Train one on the Train page, or convert a PEFT LoRA with engine/tools/convert-heartmula-lora.py into the heartmula-lm-adapters folder.')}</p>
       )}
       {selected && !missing && <>
+        {meta?.trigger && <p className="text-[11px] text-zinc-500">{t('globalBar.heartmulaAdapterTrigger', 'Trigger word "{{trigger}}" is added to the front of your tags, as in every training sample.', { trigger: meta.trigger })}</p>}
         {home && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{t('globalBar.heartmulaAdapterRebased', 'Trained on {{home}}: re-based onto {{loaded}}. Re-base strength sets how far its layers move toward {{home}}.', { home, loaded: loadedVariant })}</p>}
         <BackendExtensionControls group="adapter" accentColor="emerald" hide={hidden} />
         {!hasMlp && <p className="text-[11px] text-zinc-500">{t('globalBar.heartmulaAdapterNoMlp', 'MLP: this adapter was trained on attention only, so it has no MLP dial. Turn on "Train MLP layers" when training to get one.')}</p>}

@@ -506,8 +506,9 @@ static bool hmt_state_load(const std::string & path, uint64_t ident, HmtCounters
 
 // ── Adapter export ─────────────────────────────────────────────────────────
 
+// `trigger` is the word the dataset's tags led with, recorded so generation can lead with it too.
 static bool hmt_export(const std::string & path, const std::string & name, int64_t step, const HmtLora & L,
-                       const HeartMuLaModel & m, std::string * err) {
+                       const HeartMuLaModel & m, std::string * err, const std::string & trigger = "") {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (fs::exists(fs::u8path(path), ec)) return true;  // immutable: a step is written once
@@ -536,6 +537,7 @@ static bool hmt_export(const std::string & path, const std::string & name, int64
     gguf_set_val_u32(g, "heartmula.lora.rank", (uint32_t) L.rank);
     gguf_set_val_f32(g, "heartmula.lora.alpha", L.alpha);
     gguf_set_val_str(g, "heartmula.lora.targets", targets.c_str());
+    if (!trigger.empty()) gguf_set_val_str(g, "heartmula.lora.trigger", trigger.c_str());
     for (ggml_tensor * p : L.params) {
         data.emplace_back((size_t) ggml_nelements(p));
         ggml_backend_tensor_get(p, data.back().data(), 0, ggml_nbytes(p));

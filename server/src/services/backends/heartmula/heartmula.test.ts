@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { heartmulaStageText } from './progress.js';
+import { withHeartmulaTrigger } from './trigger.js';
 
 // Isolate the settings database, audio files and engine transport from the app.
 test('HeartMuLa contract, queued picks, validation, persistence, cancellation and residency', t => {
@@ -202,4 +203,11 @@ test('HeartMuLa queue card text follows the engine stage and ticks for the stall
   assert.match(lm!.stage, /: Step \d+/);
   assert.equal(heartmulaStageText({ stage: 'done' }), null);
   assert.equal(heartmulaStageText({ stage: 'frames', frames_done: 5, max_frames: 0 })?.progress, 10);
+});
+
+test('HeartMuLa adapter trigger leads the tags once, as in training', () => {
+  assert.equal(withHeartmulaTrigger('pop, piano', 'zx9'), 'zx9, pop, piano');
+  assert.equal(withHeartmulaTrigger('pop, ZX9, piano', 'zx9'), 'pop, ZX9, piano', 'already typed: left alone');
+  assert.equal(withHeartmulaTrigger('pop', undefined), 'pop');
+  assert.equal(withHeartmulaTrigger('', 'zx9'), 'zx9');
 });

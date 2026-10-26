@@ -444,7 +444,12 @@ is re-based onto the loaded one, as ACE-Step's Basin Re-base does: the picker ta
 with its home variant, and **Re-base strength (β)**, default 0.75, sets how far the
 layers it trained move toward that home model. 1 runs them as the home model, 0
 applies the adapter to the loaded model unchanged. The home variant's global model
-has to be installed, in any quant. If the selected file is deleted, the picker shows it as not found and renders are
+has to be installed, in any quant. An adapter's trigger word (the dataset tag
+its training samples' tags led with) is shown in the picker and added to the front of
+the tags at render time, unless the tags already contain it. Adapters trained before
+the word was stored in the file take it from the dataset of the run that made them.
+The generation log and the engine log both show the exact tags and lyrics sent. If the
+selected file is deleted, the picker shows it as not found and renders are
 refused until another adapter, or None, is picked. Put converted adapters
 under `<adapters>/heartmula-lm-adapters/`, optionally in run subfolders. Training Studio
 trains and publishes GGUF adapters there directly, see [HeartMuLa training](training/heartmula.md);

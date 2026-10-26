@@ -12,7 +12,7 @@ import { heartmulaClient } from './client.js';
 import type { HeartmulaRequest } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { GenerationContext, GenerationOutcome, BackendModelSelection } from '../types.js';
-import { heartmulaPick } from './models.js';
+import { heartmulaAdapterInfo, heartmulaPick, withHeartmulaTrigger } from './models.js';
 import { heartmulaStageText } from './progress.js';
 
 function number(value: unknown, name: string, fallback: number, min: number, max: number, integer = false): number {
@@ -60,6 +60,9 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
     if (typeof models[key] !== 'string') throw new Error(`Invalid HeartMuLa model selection: ${key}`);
   }
   const pick = heartmulaPick(models, number(params.heartmulaAdapterStrength, 'adapter strength', 1, 0, 2));
+  // The adapter learned its trigger at the head of every sample's tags; lead with it here too.
+  const tagged = pick.adapter ? withHeartmulaTrigger(tags, heartmulaAdapterInfo(pick.adapter).trigger) : tags;
+  if (Buffer.byteLength(tagged) > 4096) throw new Error('tags with the adapter trigger exceed 4096 bytes');
   // The group dials only mean something with an adapter, so a base render's wire stays as it was.
   const groups = pick.adapter ? {
     adapter_scale_attn: number(params.heartmulaAdapterScaleAttn, 'adapter attention scale', 1, 0, 2),
@@ -72,7 +75,7 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
   const mainSeed = seed(params.seed, 'seed');
   const noiseSeed = seed(params.heartmulaNoiseSeed, 'noise seed');
   return {
-    ...pick, ...groups, tags, lyrics,
+    ...pick, ...groups, tags: tagged, lyrics,
     // Create's Auto duration uses -1. Let audio EOS end the song within
     // HeartMuLa's maximum duration, while an omitted duration keeps 120 s.
     duration_s: number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
@@ -107,6 +110,14 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     ctx.attempt.effective.seed = wire.seed;
     ctx.attempt.effective.models = { ...ctx.envelope.models };
     logGenerationParams(job.id, wire as unknown as Record<string, unknown>);
+    // What the engine is conditioned on, in plain text (the engine log repeats it).
+    log('INFO', `[HeartMuLa] Tags sent to engine: ${wire.tags}`);
+    if (wire.adapter) log('INFO', `[HeartMuLa] Adapter: ${path.basename(wire.adapter)} (strength ${wire.adapter_scale})`);
+    if (!wire.lyrics) log('INFO', '[HeartMuLa] Lyrics sent to engine: (none)');
+    else {
+      log('INFO', '[HeartMuLa] Lyrics sent to engine:');
+      for (const line of wire.lyrics.split('\n')) log('INFO', `[HeartMuLa]   ${line}`);
+    }
     job.status = 'synth_running';
     job.stage = 'Loading HeartMuLa models...';
     job.progress = 2;

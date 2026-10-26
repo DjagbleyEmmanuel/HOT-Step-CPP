@@ -16,6 +16,7 @@
 //       [--weights f16|bf16] [--local-chunk 0] [--lora-dropout 0]
 //       [--attn auto|flash-bf16|flash|exact] [--keep-layers auto|-1|0..28]
 //       [--lora-mlp]   also train the backbone MLP (w1/w2/w3), not only attention
+//       [--trigger <word>]  the word the tags lead with, stored as heartmula.lora.trigger
 //
 // Files under --out:
 //   hm_train_state.bin          the resumable checkpoint (latest only)
@@ -72,6 +73,7 @@ struct HeartmulaTrainArgs {
     uint64_t seed = 0;
     bool     resume = false;
     bool     mlp    = false;       // --lora-mlp
+    std::string trigger;           // --trigger: written to the adapter, not part of the run identity
 };
 
 static std::string hmt_json_str(const std::string & s) {
@@ -570,7 +572,7 @@ static int hmt_train(const HeartmulaTrainArgs & a_in) {
         cnt.opt_iter = R.opt.opt_iter;
         const std::string ad = adapter_path(cnt.steps_done);
         if (!hmt_state_save(f_state, ident, cnt, R.lora, R.opt, &err) ||
-            !hmt_export(ad, a.name, cnt.steps_done, R.lora, R.m, &err)) return false;
+            !hmt_export(ad, a.name, cnt.steps_done, R.lora, R.m, &err, a.trigger)) return false;
         hmt_emit("\"event\":\"checkpoint\",\"step\":" + std::to_string((long long) cnt.steps_done) + ",\"state\":" +
                  hmt_json_str(f_state) + ",\"adapter\":" + hmt_json_str(ad) + ",\"reason\":\"" + reason + "\"");
         return true;

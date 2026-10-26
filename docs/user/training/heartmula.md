@@ -103,7 +103,10 @@ reference. Smaller quants use less memory (the frozen weights measured 8.4 GiB a
 generate with. The adapter records its variant: it plays natively on that variant and
 is re-based onto the others (see [HeartMuLa](../backends.md#heartmula)). Checkpoint
 previews render on the run's own base. GPU and adapter type are fixed to automatic
-CUDA and LoRA by the current trainer. Attention mode and layer residency are automatic, with no per-run
+CUDA and LoRA by the current trainer.
+
+The dataset's trigger word leads every sample's tags, and the finished adapter stores
+it, so generation can put it back in front of your tags. Attention mode and layer residency are automatic, with no per-run
 controls exposed by this API.
 
 **Perform all stages** on Train prepares missing or stale HeartMuLa audio,
