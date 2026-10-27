@@ -28,6 +28,13 @@ export const gpusOptions = () => queryOptions({
   queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
 });
 
+/** Live status; asked fresh each time the form loads. */
+export const engineWorkersOptions = () => queryOptions({
+  queryKey: sharedKeys.engineWorkers(),
+  queryFn: ({ signal }) => settingsApi.getEngineWorkers({ signal }),
+  staleTime: 0,
+});
+
 /** Log tails for the Report an issue tab; fresh each visit so the report shows the latest lines. */
 export const reportLogsOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/report-logs'),

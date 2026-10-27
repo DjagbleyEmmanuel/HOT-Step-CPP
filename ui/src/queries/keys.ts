@@ -43,6 +43,8 @@ export const SHARED = {
   loadedModels: 'loaded-models',
   /** `settingsApi.getGpus()`: raw `GpusResponse`. Owner: shell-queue. */
   gpus: 'gpus',
+  /** `settingsApi.getEngineWorkers()`: raw `EngineWorkersResponse`. Owner: shell-queue. */
+  engineWorkers: 'engine-workers',
   /** `adapterApi.scan(folder)`, filters `{ folder }`: a read-only POST, raw
    *  response. Owner: global-models. */
   adapterScan: 'adapter-scan',
@@ -165,6 +167,7 @@ export const sharedKeys = {
   vram: () => serverKey(SHARED.vram),
   loadedModels: () => serverKey(SHARED.loadedModels),
   gpus: () => serverKey(SHARED.gpus),
+  engineWorkers: () => serverKey(SHARED.engineWorkers),
   adapterScan: (folder: string) => serverKey(SHARED.adapterScan, { filters: { folder } }),
   browse: (dir: string, filter?: string) => serverKey(SHARED.browse, { filters: { dir, filter } }),
   workflowJob: (id: string, after = 0) => serverKey(SHARED.workflowJob, { auth: true, id, filters: { after } }),

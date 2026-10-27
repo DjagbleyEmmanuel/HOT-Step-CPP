@@ -15,7 +15,8 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
-import { envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
+import type { EngineWorkersResponse } from '../../../../server/src/contracts/settings';
+import { engineWorkersOptions, envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { DataFolderPanel } from './DataFolderPanel';
 import { SettingsBackupPanel } from './SettingsBackupPanel';
@@ -187,6 +188,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Detected GPUs for the GPU selector dropdown
   const [detectedGpus, setDetectedGpus] = useState<Array<{ index: number; uuid: string; name: string; memoryMB: number }>>([]);
 
+  // Engine workers for the experimental multi-GPU section (status is read-only)
+  const [engineWorkers, setEngineWorkers] = useState<EngineWorkersResponse | null>(null);
+
   // Subsection open/close state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     engine: true, server: true, apiKeys: true, llmConfig: true, llmEndpoints: false,
@@ -202,10 +206,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const loadEnvSettings = useCallback(async () => {
     try {
       setEnvLoading(true);
-      const [data, gpuData] = await Promise.all([
+      const [data, gpuData, workerData] = await Promise.all([
         queryClient.query(envOptions()),
         queryClient.query(gpusOptions()).catch(() => ({ gpus: [] })),
+        queryClient.query(engineWorkersOptions()).catch(() => null),
       ]);
+      setEngineWorkers(workerData);
       setEnvValues(data.values);
       setEnvOriginal(data.values);
       setRestartKeys(data.restartKeys || []);
@@ -234,6 +240,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     : undefined;
   const gpuSelectValue = gpuRaw ? (gpuMatch ? (gpuMatch.uuid || String(gpuMatch.index)) : gpuRaw) : '';
   const gpuSelectUnknown = !!gpuRaw && !gpuMatch;
+
+  // Multi-GPU opt-in: comma-separated UUIDs, same stable ids as the picker above.
+  const workerGpuSet = new Set((envValues.ACESTEPCPP_WORKER_GPUS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+  const toggleWorkerGpu = (uuid: string) => {
+    const key = uuid.toLowerCase();
+    const chosen = detectedGpus.filter(g => g.uuid && (g.uuid.toLowerCase() === key ? !workerGpuSet.has(key) : workerGpuSet.has(g.uuid.toLowerCase())));
+    handleEnvChange('ACESTEPCPP_WORKER_GPUS', chosen.map(g => g.uuid).join(','));
+  };
 
   const handleEnvChange = (key: string, value: string) => {
     setEnvValues((prev) => ({ ...prev, [key]: value }));
@@ -413,6 +427,58 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   />
                 )}
               </div>
+
+              {/* Multi-GPU (experimental) — one engine per ticked card. Only shown with 2+ detected
+                  cards. Ticking cards does not run jobs in parallel yet; the concurrency
+                  switch stays out of the UI until the compatibility audit passes. */}
+              {detectedGpus.length > 1 && (
+                <div className="setting-row">
+                  <div className="setting-info">
+                    <ParamLabel
+                      label="Multi-GPU workers"
+                      className="setting-label"
+                      meta="experimental · off by default"
+                      info="Starts one engine per ticked card instead of one engine in total. Each model must fit in a single card's VRAM; a model is never split across cards. CUDA-only: Vulkan, CPU and Apple Silicon keep the single engine. Leave all unticked for the normal single engine, which still uses the GPU Device pick above. Requires a restart to take effect."
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {detectedGpus.map((gpu) => (
+                      <label key={gpu.uuid || gpu.index} className="flex items-center gap-2">
+                        <Toggle
+                          id={`env-worker-gpu-${gpu.index}`}
+                          disabled={!gpu.uuid}
+                          checked={!!gpu.uuid && workerGpuSet.has(gpu.uuid.toLowerCase())}
+                          onChange={() => toggleWorkerGpu(gpu.uuid)}
+                        />
+                        <span>{`GPU ${gpu.index}: ${gpu.name} (${Math.round(gpu.memoryMB / 1024)} GB)`}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-worker engine status: shown once a second worker exists (after a restart with the opt-in set) */}
+              {engineWorkers && engineWorkers.workers.length > 1 && (
+                <div className="setting-row">
+                  <div className="setting-info">
+                    <ParamLabel
+                      label="Engine workers"
+                      className="setting-label"
+                      info="One row per running engine. w0 is the primary. “busy” means a job is running on that worker; a worker is only restarted while idle."
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 text-sm">
+                    {engineWorkers.workers.map((w) => {
+                      const card = detectedGpus.find(g => g.uuid && g.uuid === w.gpuUuid);
+                      return (
+                        <div key={w.id}>
+                          {`${w.id}${w.primary ? ' (primary)' : ''} · ${card ? `GPU ${card.index}` : 'auto'} · port ${w.port} · ${w.ready ? 'ready' : w.status}${w.busy > 0 ? ' · busy' : ''}`}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Keep models in VRAM — passes --keep-loaded to the engine.
                   Restart-required (spawn-time flag). Default off (VRAM cost). */}

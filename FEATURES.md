@@ -402,6 +402,7 @@ Configuration for engine, server, providers, downloads and storage, with album-p
 |---|---|
 | Environment editor | Edits `.env` with only changed keys written, and a Restart now button when a key needs it. |
 | GPU device picker | Lists NVIDIA cards by name and VRAM and stores a stable GPU UUID. |
+| Multi-GPU workers (experimental) | Opt-in per-card engines for machines with two or more NVIDIA cards, plus a worker status list. Jobs still run one at a time. [Details](docs/user/studios/settings.md) |
 | Keep models in VRAM | Engine flag that keeps DiT, adapter and VAE resident between renders, plus a per-request toggle that skips DiT/VAE swaps. |
 | Warm on startup | `.env` settings that preload a DiT, VAE and adapter after the engine boots. |
 | Pipeline parallelism | Run Whisper, quality evaluation and cover art alongside post-processing. |

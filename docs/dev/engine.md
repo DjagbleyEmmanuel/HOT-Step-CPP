@@ -213,6 +213,17 @@ module in VRAM at a time. `--keep-loaded`, or `?keep_loaded=1` on `/lm`, `/synth
 `/warm`, switches to keeping everything resident. `POST /models/restore-policy` undoes
 the per-request switch; it refuses when `--keep-loaded` came from the command line.
 
+## Multi-GPU workers (experimental)
+
+`ACESTEPCPP_WORKER_GPUS` (see [Configuration](config.md)) starts one `ace-server` per listed
+CUDA card, each pinned by UUID. The server binds each job's engine calls to one worker, so the
+backends hosted by `ace-server` reach the same worker's port without a client argument. The
+worker table and status are in `server/src/services/engineWorkers.ts`; `GET
+/api/settings/engine-workers` serves the status. A worker restarts only while idle. Each
+engine stays one process, one port, one GPU worker thread, so each model must fit in one
+card. Server-side model caches and model-change routes still target `w0`, and jobs are not
+yet dispatched in parallel. Real card affinity has not been verified on a dual-GPU machine.
+
 ## Pipelines
 
 ### ACE-Step 1.5: LM, DiT, VAE

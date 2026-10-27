@@ -21,7 +21,7 @@ import type {
   MonitorStatusResponse, MonitorSeekResponse,
 } from '../../../server/src/contracts/vst';
 import type { ReportLogsResponse } from '../../../server/src/contracts/reportLogs';
-import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../../../server/src/contracts/settings';
+import type { EngineWorkersResponse, EnvResponse, EnvUpdateResponse, GpusResponse } from '../../../server/src/contracts/settings';
 import type {
   ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
 } from '../../../server/src/contracts/profiles';
@@ -427,6 +427,8 @@ export const settingsApi = {
    *  CUDA_VISIBLE_DEVICES — the index is display-only, because nvidia-smi and
    *  CUDA number GPUs differently (issue #153). */
   getGpus: (opts?: ReadOptions) => get<GpusResponse>('/settings/gpus', opts),
+  /** Per-worker engine status for the experimental multi-GPU section. */
+  getEngineWorkers: (opts?: ReadOptions) => get<EngineWorkersResponse>('/settings/engine-workers', opts),
 };
 
 export const reportLogsApi = {
