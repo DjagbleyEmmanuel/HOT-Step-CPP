@@ -127,9 +127,9 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
 
   /** Readiness: the primary keeps driving the global engine state it always has. */
   const setReady = (ready: boolean, status: string) => {
+    if (worker.primary) { setEngineReady(ready, status); return; }   // w0 reads the globals
     worker.ready = ready;
     worker.status = status;
-    if (worker.primary) setEngineReady(ready, status);
   };
   const setNoModels = (v: boolean) => { if (worker.primary) setEngineNoModels(v); };
   const isReachable = () => inWorkerScope(worker, () => aceClient.isReachable());
@@ -301,8 +301,8 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
       console.log(`${srv} TensorRT libs: ${config.aceServer.trtLibs}`);
     }
 
-    worker.device = null;
-    if (worker.primary) resetEngineDevice();
+    if (worker.primary) resetEngineDevice();   // w0 reads the global
+    else worker.device = null;
     const child = testHooks.spawn(exe, args, spawnOpts);
 
     // Filter repetitive GGML noise from console output (still written to ace_engine.log via logEngine)
@@ -312,8 +312,8 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     const noteDevice = (line: string) => {
       const device = engineBackendFromLine(line);
       if (!device) return;
-      worker.device = device;
-      if (worker.primary) noteEngineBackendLine(line);
+      if (worker.primary) noteEngineBackendLine(line);   // w0 reads the global
+      else worker.device = device;
     };
     const logWorker = worker.primary ? undefined : worker.id;
     const feedOut = backendLineFeeder(noteDevice);
@@ -395,13 +395,18 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
         }
 
         console.log(`${tag} Restarting in 3 seconds... (crash ${crashCount}/${MAX_CRASHES})`);
+        // Down until the respawn answers /health: nothing may dispatch to a dead engine.
+        setReady(false, 'Engine crashed — restarting...');
         if (respawnTimer) clearTimeout(respawnTimer);
         respawnTimer = setTimeout(() => {
           respawnTimer = null;
           // A stop OR a restart that landed inside the 3 s window must win, or
           // this spawns a duplicate engine that nothing tracks.
           if (suspended || spawnEpoch !== lifecycleEpoch) return;
-          start();
+          // Same health probe and restore hooks as restart(), without resetting
+          // the crash limiter: the new process forgot the user's selections.
+          const respawned = start();
+          if (respawned) void lateReadyWatch(respawned, lifecycleEpoch, 'after a crash');
         }, 3000);
       }
     };
@@ -551,8 +556,8 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     return false;
   }
 
-  /** Keep polling a live child after the restart timeout; flip ready when it answers. */
-  async function lateReadyWatch(child: ChildProcess, epoch: number): Promise<void> {
+  /** Keep polling a live child until /health answers; then flip ready and restore. */
+  async function lateReadyWatch(child: ChildProcess, epoch: number, when = 'after the restart timeout'): Promise<void> {
     while (aceProcess === child && epoch === lifecycleEpoch && !suspended
            && child.exitCode === null && child.signalCode === null) {
       await new Promise(r => setTimeout(r, testHooks.lateReadyPollMs));
@@ -564,7 +569,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
           || child.exitCode !== null || child.signalCode !== null) return;
       if (up) {
         setReady(true, 'Ready');
-        console.log(`${srv} ace-server answered /health after the restart timeout — marking ready`);
+        console.log(`${srv} ace-server answered /health ${when} — marking ready`);
         await restore();
         return;
       }

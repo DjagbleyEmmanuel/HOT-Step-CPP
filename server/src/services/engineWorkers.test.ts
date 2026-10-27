@@ -178,6 +178,7 @@ test('two workers: identical engine job ids, logs, selection restore, crash and 
   }) as any;
   proc.testHooks.restartHealthTimeoutMs = 2000;
   proc.testHooks.listGpus = () => GPUS;
+  proc.testHooks.lateReadyPollMs = 50;
 
   const savedPort = config.aceServer.port;
   config.aceServer.port = pa;
@@ -241,8 +242,13 @@ test('two workers: identical engine job ids, logs, selection restore, crash and 
       await assert.rejects(proc.restartEngineWorker('w1'), /busy/);
     });
 
-    // Crash of w1: its epoch moves, the primary's does not, the primary stays ready.
+    // w0 is the live primary: bootstrap's setEngineReady is what it reports.
     state.setEngineReady(true, 'Ready');
+    assert.equal(w0.ready, true);
+    assert.equal(w0.status, 'Ready');
+    assert.deepEqual(workers.engineWorkerStatus()[0].ready, true);
+
+    // Crash of w1: its epoch moves, the primary's does not, the primary stays ready.
     const w0Seq = w0.crashSeq;
     const seqInW1 = await workers.runWithWorker(w1, () => proc.engineCrashSeq());
     k1.exitCode = 1;
@@ -252,6 +258,7 @@ test('two workers: identical engine job ids, logs, selection restore, crash and 
     assert.equal(proc.engineCrashSeq(), w0Seq, 'primary epoch unchanged');
     assert.equal(state.engineReady, true, 'primary readiness untouched');
     assert.equal(w1.pid, null);
+    assert.equal(w1.ready, false, 'a crashed worker is down at once');
 
     // Restart w1 while idle: the respawn timer is superseded, selection restored again.
     const before = hits.filter(h => h === 'B /models/select?role=lm').length;
@@ -262,7 +269,35 @@ test('two workers: identical engine job ids, logs, selection restore, crash and 
     await new Promise(r => setTimeout(r, 3300));   // past the crash timer's 3 s
     assert.equal(kids.length, 2, 'stale crash timer never fires');
     assert.deepEqual(workers.engineWorkerStatus().map(s => [s.id, s.ready, s.gpuUuid]),
-      [['w0', false, 'GPU-aaaa'], ['w1', true, 'GPU-bbbb']]);
+      [['w0', true, 'GPU-aaaa'], ['w1', true, 'GPU-bbbb']]);
+
+    // Automatic recovery: the crash timer respawns, probes /health and restores
+    // in w1's scope, keeping the crash limiter's count.
+    const crash = async () => {
+      const k = kids[kids.length - 1];
+      k.exitCode = 1;
+      k.emit('exit', 1, null);
+      assert.equal(w1.ready, false, 'down from the crash until /health answers');
+    };
+    const recovered = async (n: number) => {
+      const until = Date.now() + 5000;
+      while (!(kids.length === n && w1.ready) && Date.now() < until) await new Promise(r => setTimeout(r, 50));
+      assert.equal(kids.length, n, 'respawned once');
+      assert.equal(w1.ready, true, 'ready again after /health');
+    };
+    const seqBefore = w1.crashSeq;
+    await crash();
+    await recovered(3);
+    assert.deepEqual(restores, ['w1', 'w1', 'w1'], 'selection restored after the automatic respawn');
+    assert.equal(w1.pid, 6002);
+    await crash();
+    await recovered(4);
+    await crash();   // third crash inside the window: the limiter gives up
+    await new Promise(r => setTimeout(r, 3300));
+    assert.equal(kids.length, 4, 'limiter count survived the automatic respawns');
+    assert.equal(w1.crashSeq, seqBefore + 3);
+    assert.match(w1.status, /crashed 3 times/);
+    assert.equal(w0.ready, true, 'primary untouched throughout');
   } finally {
     for (const k of kids) k.exitCode = 0;   // fake pid: never let stop reach taskkill
     await proc.stopEngineWorkers('test', 100, { suspend: false });

@@ -17,6 +17,7 @@
 
 import { config, engineWorkerScope } from '../config.js';
 import { listGpusSync, type NvidiaGpu } from './gpuDevices.js';
+import * as engineState from '../engineState.js';
 
 export interface EngineWorker {
   /** "w0" is the primary; secondaries are w1, w2... in opt-in order. */
@@ -62,7 +63,7 @@ export function parseWorkerGpus(setting: string): string[] {
 
 function makeWorker(index: number, gpuUuid: string | null, port?: number): EngineWorker {
   const primary = index === 0;
-  return {
+  const worker: EngineWorker = {
     id: `w${index}`, index, primary, gpuUuid,
     // w0 tracks config live, exactly as the single engine always has.
     get port() { return primary ? config.aceServer.port : port!; },
@@ -71,6 +72,19 @@ function makeWorker(index: number, gpuUuid: string | null, port?: number): Engin
     logFile: primary ? 'ace_engine.log' : `ace_engine.w${index}.log`,
     pid: null, ready: false, status: 'Not started', crashSeq: 0, device: null, busy: 0,
   };
+  // w0's readiness and device ARE the global engine state that bootstrap,
+  // training and /api/health already drive; a copy would drift from them.
+  if (primary) {
+    Object.defineProperties(worker, {
+      ready: { enumerable: true, get: () => engineState.engineReady,
+        set: (v: boolean) => engineState.setEngineReady(v, engineState.engineBootStatus) },
+      status: { enumerable: true, get: () => engineState.engineBootStatus,
+        set: (v: string) => engineState.setEngineReady(engineState.engineReady, v) },
+      device: { enumerable: true, get: () => engineState.engineDevice,
+        set: (v: string | null) => { if (v === null) engineState.resetEngineDevice(); } },
+    });
+  }
+  return worker;
 }
 
 /**
