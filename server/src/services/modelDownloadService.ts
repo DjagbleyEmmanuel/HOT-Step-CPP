@@ -493,6 +493,9 @@ class ModelDownloadService extends EventEmitter {
         job.status = 'completed';
         job.bytesDownloaded = job.totalBytes;
         this.emit('progress');
+        // Installs that predate a companion (or got the weights placed by
+        // hand) would otherwise never receive it.
+        this._fetchCompanions(file, targetDir).catch(() => {});
         return;
       }
       console.log(`[ModelManager] ${file.filename} on disk does not match the registry sha256 — re-downloading`);

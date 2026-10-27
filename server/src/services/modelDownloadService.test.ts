@@ -144,3 +144,27 @@ test('nothing usable still produces something to read', () => {
   assert.equal(describeDownloadError(undefined), 'unknown error');
   assert.equal(describeDownloadError({}), '[object Object]');
 });
+
+test('a model already on disk still gets its missing companion files, side by side', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'companions-'));
+  fs.writeFileSync(path.join(dir, 'model.gguf'), 'weights');
+  const fetched: string[] = [];
+  const realTarget = svc.getTargetDir, realSimple = svc._downloadSimple;
+  svc.getTargetDir = () => dir;
+  svc._downloadSimple = async (url: string, dest: string) => { fetched.push(url); fs.writeFileSync(dest, url); };
+  try {
+    const job = { status: 'queued', bytesDownloaded: 0, totalBytes: 0 } as any;
+    for (const name of ['LICENSE', 'LICENSE-YuE2-RS-4.0x0.7']) {
+      await svc._executeDownload(job, {
+        filename: 'model.gguf', sizeBytes: 0, repo: 'o/r',
+        companions: [{ filename: name, repoPath: 'LICENSE' }],
+      });
+    }
+    await new Promise(r => setTimeout(r, 20)); // companions are fire-and-forget
+    assert.equal(job.status, 'completed');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['LICENSE', 'LICENSE-YuE2-RS-4.0x0.7', 'model.gguf']);
+    assert.ok(fetched.every(u => u.endsWith('/o/r/resolve/main/LICENSE')));
+  } finally {
+    svc.getTargetDir = realTarget; svc._downloadSimple = realSimple;
+  }
+});
