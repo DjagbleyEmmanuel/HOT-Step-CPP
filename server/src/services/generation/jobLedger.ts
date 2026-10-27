@@ -28,11 +28,14 @@ export interface LedgerEntry {
   createdAt: number;
   finishedAt: number | null;
   ownerInstance: string | null;
+  /** Engine worker the job ran on (multi-GPU); null until a worker took it. */
+  workerId: string | null;
 }
 
 interface Row {
   id: string; user_id: string; status: LedgerEntry['status']; error: string | null;
   result_json: string | null; created_at: number; finished_at: number | null; owner_instance: string | null;
+  worker_id: string | null;
 }
 
 export class GenerationJobLedger {
@@ -47,8 +50,10 @@ export class GenerationJobLedger {
         created_at  INTEGER NOT NULL,
         finished_at INTEGER
       )`);
-    const has = (db.prepare(`SELECT COUNT(*) AS c FROM pragma_table_info('generation_jobs') WHERE name = 'owner_instance'`).get() as { c: number }).c;
-    if (!has) db.exec('ALTER TABLE generation_jobs ADD COLUMN owner_instance TEXT');
+    for (const column of ['owner_instance', 'worker_id']) {
+      const has = (db.prepare(`SELECT COUNT(*) AS c FROM pragma_table_info('generation_jobs') WHERE name = ?`).get(column) as { c: number }).c;
+      if (!has) db.exec(`ALTER TABLE generation_jobs ADD COLUMN ${column} TEXT`);
+    }
     const at = this.now();
     // An open row whose process has gone died with it: this runs once, before
     // this process queues anything. Rows another live process opened are its own.
@@ -62,6 +67,12 @@ export class GenerationJobLedger {
   opened(job: Pick<GenerationJob, 'id' | 'userId' | 'createdAt'>): void {
     this.db.prepare(`INSERT OR REPLACE INTO generation_jobs (id, user_id, status, created_at, owner_instance) VALUES (?, ?, 'open', ?, ?)`)
       .run(job.id, job.userId ?? '', job.createdAt, instanceId());
+  }
+
+  /** Record the engine worker a job was dispatched to, so an interrupted row
+   *  still says which card it died on. */
+  assigned(job: Pick<GenerationJob, 'id' | 'workerId'>): void {
+    this.db.prepare('UPDATE generation_jobs SET worker_id = ? WHERE id = ?').run(job.workerId ?? null, job.id);
   }
 
   /** Record a job's terminal state; a job still active is left open. */
@@ -79,6 +90,7 @@ export class GenerationJobLedger {
       id: row.id, userId: row.user_id, status: row.status, error: row.error,
       result: row.result_json ? JSON.parse(row.result_json) : null,
       createdAt: row.created_at, finishedAt: row.finished_at, ownerInstance: row.owner_instance ?? null,
+      workerId: row.worker_id ?? null,
     };
   }
 }
@@ -100,6 +112,7 @@ export function ledgerStatusBody(entry: LedgerEntry): Record<string, unknown> {
     result: entry.result ?? undefined,
     error: interrupted ? (entry.error ?? INTERRUPTED_ERROR) : entry.error ?? undefined,
     interrupted,
+    workerId: entry.workerId,
     attempts: [],
     ace_job_id: null,
     ace_phase: null,

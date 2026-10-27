@@ -21,9 +21,10 @@ import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
-  runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
+  runOnGpuLane, runOnWorkerLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
   type LaneLease,
 } from '../services/generation/gpuLane.js';
+import { inWorkerScope, workerForJob } from '../services/engineWorkers.js';
 import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes.js';
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
@@ -81,6 +82,13 @@ export function markGenerationJobCancelled(job: GenerationJob): void {
   job.status = 'cancelled';
   withLedger('cancel', ledger => ledger.finished(job));
 }
+
+/** The worker a job's engine work is on: a YuE2 batch follower's is its lead's. */
+function jobWorkerId(job: GenerationJob): string | undefined {
+  return (job.coalescedInto && jobs.get(job.coalescedInto)?.workerId) || job.workerId;
+}
+/** Bind an out-of-lease call (cancel, stream) to the job's own worker. */
+const jobWorker = (job: GenerationJob) => workerForJob({ workerId: jobWorkerId(job) });
 
 // TTL cleanup: prune terminal jobs older than 1 hour every 10 minutes.
 // Prevents unbounded memory growth during long batch sessions.
@@ -183,11 +191,14 @@ async function runGeneration(
   });
 }
 // ── Async generation queue ────────────────────────────────────────────
-// Generations run one at a time on the shared GPU lane (services/generation/
-// gpuLane.ts). The C++ engine is single-GPU, and concurrent runGeneration
-// calls also leak progress between jobs because subscribeLines() is a global
-// pub/sub with no job tagging. The lane is shared rather than private because
-// post-processing re-runs are just as GPU-hungry and must not race a render.
+// Each generation holds one engine worker's lease on the shared GPU lane
+// (services/generation/gpuLane.ts) for its whole run, every retry included,
+// and every engine call, log line and crash epoch inside follows that worker.
+// One engine runs one job at a time; with worker concurrency off (the
+// default) the primary is the only worker, so generations run one at a time
+// as they always have. The lane is shared rather than private because
+// post-processing re-runs are just as GPU-hungry and must not race a render:
+// those stay exclusive and wait for every worker.
 function enqueueGeneration(job: GenerationJob): void {
   const family = job.envelope.backendId;
   noteEnqueued(family);
@@ -195,7 +206,10 @@ function enqueueGeneration(job: GenerationJob): void {
     console.log(`[Generate] Job ${job.id} queued (${gpuLaneDepth() + 1} waiting)`);
   }
 
-  void trackBusy('generation', runOnGpuLane(async (lease) => {
+  void trackBusy('generation', runOnWorkerLane(async (lease) => {
+    // A YuE2 batch follower already runs inside its lead's engine job.
+    if (!job.coalescedInto) job.workerId = lease.worker!.id;
+    withLedger('assign', ledger => ledger.assigned(job));
     const retryPolicy = job.envelope.policy.retry;
     let attemptNumber = 0;
     let reseededForAttempt = false;
@@ -499,6 +513,8 @@ router.get('/status/:id', (req, res) => {
     result: job.result,
     error: job.error,
     attempts: job.attempts,
+    // Engine worker the job runs on (multi-GPU); null until one takes it.
+    workerId: jobWorkerId(job) ?? null,
     ace_job_id: job.aceJobId ?? null,
     ace_phase: job.acePhase ?? null,
     ace_phase_progress: job.acePhaseProgress ?? null,
@@ -567,9 +583,11 @@ router.get('/mm3/stream/:id', async (req, res) => {
   let session: StreamSession | null = null;
 
   try {
+    // This request runs outside the job's lease: address the job's own worker.
+    const streamUrl = inWorkerScope(jobWorker(job), () => mm3StreamUrl(job.aceJobId!));
     const engUrl = take > 0
-      ? `${mm3StreamUrl(job.aceJobId)}${mm3StreamUrl(job.aceJobId).includes('?') ? '&' : '?'}take=${take}`
-      : mm3StreamUrl(job.aceJobId);
+      ? `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}take=${take}`
+      : streamUrl;
     const eng = await fetch(engUrl, { signal: upstream.signal });
     if (!eng.ok || !eng.body) {
       const msg = await eng.text().catch(() => '');
@@ -613,14 +631,17 @@ export function cancelGenerationJob(id: string): boolean {
   const job = jobs.get(id);
   if (!job) return false;
   markGenerationJobCancelled(job);
-  // One song of a running YuE2 batch: the engine drops it, the rest carry on.
-  if (dropYue2BatchMember(job)) return true;
-  if (job.aceJobId) {
-    aceClient.cancelJob(job.aceJobId).catch(() => {});
-  }
-  if ((job as any)._abort) {
-    (job as any)._abort.abort();
-  }
+  // A cancel arrives outside the job's lease: send it to the job's own worker.
+  inWorkerScope(jobWorker(job), () => {
+    // One song of a running YuE2 batch: the engine drops it, the rest carry on.
+    if (dropYue2BatchMember(job)) return;
+    if (job.aceJobId) {
+      aceClient.cancelJob(job.aceJobId).catch(() => {});
+    }
+    if ((job as any)._abort) {
+      (job as any)._abort.abort();
+    }
+  });
   return true;
 }
 
@@ -636,7 +657,8 @@ router.post('/cancel-all', (req, res) => {
     if (isActiveJob(job)) {
       markGenerationJobCancelled(job);
       if (job.aceJobId) {
-        aceClient.cancelJob(job.aceJobId).catch(() => {});
+        const aceJobId = job.aceJobId;
+        inWorkerScope(jobWorker(job), () => aceClient.cancelJob(aceJobId)).catch(() => {});
       }
       if ((job as any)._abort) {
         (job as any)._abort.abort();
@@ -683,7 +705,8 @@ router.post('/reset-queue', (_req, res) => {
       job.stage = 'Reset';
       withLedger('finish', ledger => ledger.finished(job));
       if (job.aceJobId) {
-        aceClient.cancelJob(job.aceJobId).catch(() => {});
+        const aceJobId = job.aceJobId;
+        inWorkerScope(jobWorker(job), () => aceClient.cancelJob(aceJobId)).catch(() => {});
       }
       if ((job as any)._abort) {
         (job as any)._abort.abort();
