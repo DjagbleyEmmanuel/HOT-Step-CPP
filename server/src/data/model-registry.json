@@ -5593,7 +5593,7 @@
       "tags": [],
       "companions": [
         {
-          "filename": "LICENSE",
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
       ]
@@ -5614,7 +5614,7 @@
       "tags": [],
       "companions": [
         {
-          "filename": "LICENSE",
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
       ]
@@ -5635,7 +5635,7 @@
       "tags": [],
       "companions": [
         {
-          "filename": "LICENSE",
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
       ]
@@ -5656,7 +5656,238 @@
       "tags": [],
       "companions": [
         {
-          "filename": "LICENSE",
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-Q4_K_M-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-Q4_K_M-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (Q4_K_M-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q4_K_M-imat",
+      "sizeBytes": 2429623776,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided Q4_K_M quant. Needs one of the VAE decoders below; this file is ~2.4 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-Q4_K_S-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-Q4_K_S-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (Q4_K_S-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q4_K_S-imat",
+      "sizeBytes": 2338332128,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided Q4_K_S quant. Needs one of the VAE decoders below; this file is ~2.3 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-IQ4_XS-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-IQ4_XS-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (IQ4_XS-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ4_XS-imat",
+      "sizeBytes": 2235571680,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided IQ4_XS quant. Needs one of the VAE decoders below; this file is ~2.2 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-NVFP4",
+      "filename": "yue2-lm-rs-4.0x0.7-NVFP4.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (NVFP4)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "NVFP4",
+      "sizeBytes": 2506878304,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, NVFP4 quant. Needs one of the VAE decoders below; this file is ~2.5 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-MXFP4",
+      "filename": "yue2-lm-rs-4.0x0.7-MXFP4.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (MXFP4)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "MXFP4",
+      "sizeBytes": 2418797920,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, MXFP4 quant. Needs one of the VAE decoders below; this file is ~2.4 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-Q3_K_M-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-Q3_K_M-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (Q3_K_M-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q3_K_M-imat",
+      "sizeBytes": 2055282144,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided Q3_K_M quant. Needs one of the VAE decoders below; this file is ~2.1 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-Q3_K_S-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-Q3_K_S-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (Q3_K_S-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q3_K_S-imat",
+      "sizeBytes": 1949310432,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided Q3_K_S quant. Needs one of the VAE decoders below; this file is ~1.9 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-IQ3_XXS-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-IQ3_XXS-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (IQ3_XXS-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ3_XXS-imat",
+      "sizeBytes": 1734143456,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided IQ3_XXS quant. Needs one of the VAE decoders below; this file is ~1.7 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-Q2_K-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-Q2_K-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (Q2_K-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q2_K-imat",
+      "sizeBytes": 1690574304,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided Q2_K quant. Needs one of the VAE decoders below; this file is ~1.7 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-IQ2_XS-imat",
+      "filename": "yue2-lm-rs-4.0x0.7-IQ2_XS-imat.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM (IQ2_XS-imat)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "IQ2_XS-imat",
+      "sizeBytes": 1368911328,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "YuE2 autoregressive language model, Ruach Studio YuE2-RS 4.0x0.7 fine-tune, imatrix-guided IQ2_XS quant. Needs one of the VAE decoders below; this file is ~1.4 GB. Quality is not benchmarked for this fine-tune; lower-bit quants lose more fidelity (see the base YuE2 ladder for the trend). Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "yue2-lm-rs-4.0x0.7-imatrix",
+      "filename": "yue2-lm-rs-4.0x0.7-imatrix.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2-RS 4.0x0.7 LM Importance Matrix",
+      "scale": null,
+      "variant": "imatrix",
+      "quant": "imatrix",
+      "sizeBytes": 4217888,
+      "repo": "scragnog/YuE2-RS-4.0x0.7-GGUF",
+      "description": "Calibration data used to build this fine-tune's imatrix-guided quants (collected on its BF16 weights from 12 generations across English, Mandarin, hip-hop and metal prompts) - not a model file, not needed to run YuE2 and not part of any pack. Only useful for requantizing with quantize.exe --imatrix. ~4.2 MB. Ruach Studio's YuE2-RS fine-tune (goldhub/YuE2-RS-Finetunes, 4.0 x 0.7 merge of m-a-p/YuE2-3B), converted and quantized by HOT-Step. Licensed CC BY-NC-SA 4.0 (share-alike), not the CC BY-NC of the base YuE2 files.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
       ]
