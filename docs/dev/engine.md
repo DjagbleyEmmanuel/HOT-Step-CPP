@@ -56,6 +56,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `yue2-convrot8-cpu-numeric-test`, `yue2-*-metal-*-test` | `tools/yue2-*.cpp` | YuE2 training-op gates: the CPU ConvRot8 kernels bit for bit against a scalar oracle, and each Metal training kernel against the CPU backend or the Metal kernel it replaced. The Metal ones skip without a Metal device |
 | `yue2-rms-double-round-test`, `yue2-linear-lora-round-test`, `yue2-clip-non-finite-test`, `yue2-head-loss-device-test` | `tools/yue2-*.cpp` | YuE2 trainer checks: whether two graph simplifications are bit-exact, that a non-finite gradient still fails the clip, and that the device head loss matches the host mode |
 | `yue2-nar-op-bench`, `yue2-mul-bf16-dispatch-profile` | `tools/yue2-*.cpp` | Timing diagnostics with no pass or fail: Metal kernel throughput at YuE2 NAR shapes, and the dispatch cost of the trainer's BF16 multiply |
+| `backend-health-test` | `tools/backend-health-test.cpp` | The GH #242 recovery flow on the shared backend with an injected fault (`ACE_FAULT_BACKEND_ERROR=align`, compiled into this target only): `--no-probe` must fail, `--other-holder` must end on the clear error. It proves the control flow, not recovery from a real Metal fault |
 | `yue2-vae-lifetime-test` | `tests/test-yue2-vae-lifetime.cpp` | YuE2 VAE decoder cache lifetime (see [YuE2](#yue2-plan-compose-render)) |
 | `convrot-graph-probe` | `tools/convrot-graph-probe.cpp` | ConvRot8 under repeated CUDA graph capture and replay (CUDA only, see [ggml-fork.md](ggml-fork.md)) |
 
@@ -193,6 +194,19 @@ These routes therefore queue behind whatever job is running: a call made during 
 long YuE2 batch waits for the whole batch, so a direct engine client needs a timeout
 long enough to cover that wait. The MM3 bring-up endpoints, `POST /mm3/imatrix` and
 `POST /yue2/imatrix` are not wrapped yet and still compute on their HTTP thread.
+
+Metal reports a failed command buffer only at the next synchronize, and from then on
+refuses every `graph_compute` until the backend is recreated (GH #242). `backend_healthy()`
+in `backend.h` synchronizes the shared backend and runs a one-element graph. `/yue2/align`
+calls it after the MMS_FA forward and answers 500 `MMS_FA compute failed on the GPU backend
+(device error)`; it only try-locks the YuE2 job locks, so while the NAR lane renders it logs
+`probe skipped` instead. A YuE2 job calls it again before the AR prefill. When the backend
+is unhealthy the job drains the NAR lane, unloads YuE2 and reloads on a fresh backend. That
+works only when YuE2 held the last backend ref: if another model still holds one, the job
+fails with `GPU backend in error state, unload models to recover`, and unloading the other
+models clears it. Under the default one-module policy the backend usually reaches zero refs
+between jobs anyway, so the recovery matters mostly with `--keep-loaded`. The probe covers
+the shared backend only, not the NAR lane's own `backend_nar`.
 
 `POST /sa3-synth` and `/sa3-refine` cancel by connection: when the client closes it,
 both SA3 sampling loops stop before the next step, and a full-loop Lua solver sees
@@ -818,6 +832,10 @@ plus five, if that is larger). Preparation and the dataset reader apply the
 same rule (`dataset_detail::context_tokens` in `yue2-aitk-dataset.h`).
 Preparation leaves out a track that does not fit and prints
 `[yue2-prepare] NOTE: <track> needs N tokens, over the 24576-token YuE2 context; skipped`.
+The note goes on to break the total down (style and lyrics, score, audio length
+and frames) and says to shorten the song or train it without its score.
+A prompt token fault (an empty prefix, a token outside the vocabulary) fails the
+dataset with `song <id>: <reason>`.
 It fails only when no track fits. If the reader rejects the prepared manifest,
 the error carries the reader's reason after `prepared manifest failed reader roundtrip:`.
 
