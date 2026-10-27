@@ -19,6 +19,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { config } from '../config.js';
 import { registerBusyCheck } from '../dataroot/pointer.js';
+import { muscriptorRoots, resolveModelDir, targetRoot } from './muscriptorPaths.js';
 
 export const MUSCRIPTOR_DIR = path.join(config.data.dir, 'muscriptor');
 
@@ -83,18 +84,20 @@ export function aceMidiExe(): string | null {
 
 // ── Model weights (gated on HF — downloaded with the user's read token) ──
 
-// MUSCRIPTOR_MODELS_DIR (Settings > Environment) mirrors ACESTEPCPP_MODELS so
-// the gated weights can live outside the install (#86). Read at import, so a
-// change needs a restart.
-export const MODELS_DIR = process.env.MUSCRIPTOR_MODELS_DIR || path.join(config.data.dir, 'models', 'muscriptor');
+// Weights live in <models>/muscriptor/<variant>; a complete pre-#228 download
+// under <library>/models/muscriptor is still used. MUSCRIPTOR_MODELS_DIR
+// (Settings > Environment) overrides both (#86). Rules: muscriptorPaths.ts.
+// Read at import, so a change needs a restart.
+export const MODEL_ROOTS = muscriptorRoots(process.env.MUSCRIPTOR_MODELS_DIR, config.aceServer.models, config.data.dir);
+/** Where downloads go and what Settings shows. */
+export const MODELS_DIR = targetRoot(MODEL_ROOTS);
 
 export function modelDir(m: DownloadableModel): string {
-  return path.join(MODELS_DIR, m);
+  return resolveModelDir(MODEL_ROOTS, m).dir;
 }
 
 export function isModelDownloaded(m: DownloadableModel): boolean {
-  return fs.existsSync(path.join(modelDir(m), 'model.safetensors'))
-      && fs.existsSync(path.join(modelDir(m), 'config.json'));
+  return resolveModelDir(MODEL_ROOTS, m).complete;
 }
 
 export interface ModelDownloadState {
@@ -162,12 +165,14 @@ export function startModelDownload(m: DownloadableModel): { started: boolean; er
   downloads.set(m, state);
   const token = getHfToken();
   const base = `https://huggingface.co/${HF_MODEL_REPOS[m]}/resolve/main`;
+  // Downloads go to the target root, never the legacy folder.
+  const dest = path.join(MODELS_DIR, m);
 
   (async () => {
     try {
       console.log(`[MidiStudio] Downloading ${m} weights from ${HF_MODEL_REPOS[m]}`);
-      await fetchToFile(`${base}/config.json`, token, path.join(modelDir(m), 'config.json'));
-      await fetchToFile(`${base}/model.safetensors`, token, path.join(modelDir(m), 'model.safetensors'),
+      await fetchToFile(`${base}/config.json`, token, path.join(dest, 'config.json'));
+      await fetchToFile(`${base}/model.safetensors`, token, path.join(dest, 'model.safetensors'),
         (received, total) => { state.receivedBytes = received; state.totalBytes = total; });
       console.log(`[MidiStudio] ${m} weights downloaded (${(state.receivedBytes / 1e9).toFixed(2)} GB)`);
     } catch (err: any) {
