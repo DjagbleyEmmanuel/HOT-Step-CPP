@@ -9,6 +9,8 @@ import { dataFolderApi } from '../../services/dataFolderApi';
 import { updatesApi } from '../../services/updatesApi';
 import { getStemStats } from '../../services/stemStudioApi';
 import { serverKey, sharedKeys } from '../keys';
+import { pollWhile } from '../contract';
+import type { EngineWorkersResponse } from '../../../../server/src/contracts/settings';
 
 export const healthOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/health'),
@@ -28,11 +30,13 @@ export const gpusOptions = () => queryOptions({
   queryFn: ({ signal }) => settingsApi.getGpus({ signal }),
 });
 
-/** Live status; asked fresh each time the form loads. */
+/** Live worker status. Polled while observed (react-query pauses it in a hidden tab). */
+export const ENGINE_WORKERS_POLL_MS = 3000;
 export const engineWorkersOptions = () => queryOptions({
   queryKey: sharedKeys.engineWorkers(),
   queryFn: ({ signal }) => settingsApi.getEngineWorkers({ signal }),
   staleTime: 0,
+  refetchInterval: pollWhile<EngineWorkersResponse>(() => true, ENGINE_WORKERS_POLL_MS),
 });
 
 /** Log tails for the Report an issue tab; fresh each visit so the report shows the latest lines. */

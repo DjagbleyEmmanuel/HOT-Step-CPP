@@ -15,7 +15,6 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
-import type { EngineWorkersResponse } from '../../../../server/src/contracts/settings';
 import { engineWorkersOptions, envOptions, gpusOptions, healthOptions, stemStatsOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { DataFolderPanel } from './DataFolderPanel';
@@ -188,8 +187,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Detected GPUs for the GPU selector dropdown
   const [detectedGpus, setDetectedGpus] = useState<Array<{ index: number; uuid: string; name: string; memoryMB: number }>>([]);
 
-  // Engine workers for the experimental multi-GPU section (status is read-only)
-  const [engineWorkers, setEngineWorkers] = useState<EngineWorkersResponse | null>(null);
+  // Engine workers for the experimental multi-GPU section: observed and polled
+  // while mounted, separate from the editable env form (read-only status).
+  const engineWorkers = useQuery(engineWorkersOptions()).data ?? null;
 
   // Subsection open/close state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -206,12 +206,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const loadEnvSettings = useCallback(async () => {
     try {
       setEnvLoading(true);
-      const [data, gpuData, workerData] = await Promise.all([
+      const [data, gpuData] = await Promise.all([
         queryClient.query(envOptions()),
         queryClient.query(gpusOptions()).catch(() => ({ gpus: [] })),
-        queryClient.query(engineWorkersOptions()).catch(() => null),
       ]);
-      setEngineWorkers(workerData);
       setEnvValues(data.values);
       setEnvOriginal(data.values);
       setRestartKeys(data.restartKeys || []);
