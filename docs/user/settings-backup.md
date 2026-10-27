@@ -31,6 +31,16 @@ and unsupported versions are rejected with a message. Database replacement runs
 as one transaction, so a database error rolls back the import. Application settings
 apply in the browser after the server confirms the import.
 
+## This is not a backup of your data folder
+
+The JSON file covers settings and Lyric Studio records only. To keep everything else,
+copy the whole data folder while HOT-Step is stopped. API keys are in `settings/.env` and
+the MuScriptor Hugging Face token is in `library/muscriptor/hf_token`; both are inside that
+folder and are not in the JSON file. Treat a copy of the folder as secret.
+
+Upgrading does not need a backup restore: extract the new version and start it. It finds
+the same data folder through your profile. See [Data folder and upgrades](data-folder.md).
+
 ## What stays outside the backup
 
 Audio and image files, model weights, adapter weights, reference tracks, training

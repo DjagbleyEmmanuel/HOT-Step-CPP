@@ -40,6 +40,7 @@ export function checkReleaseLayout(root) {
     if (!src.includes('profile-path.mjs') || !src.includes('RESTART_MARKER')) errors.push(`${launcher}: restart must use the profile helper`);
     if (src.includes('.restart-requested') || /mkdir[^\n]*models/.test(src)) errors.push(`${launcher}: writes state inside app`);
     if (/powershell|pwsh/i.test(src)) errors.push(`${launcher}: spawns PowerShell, which behaviour-based antivirus quarantines`);
+    if (/HOT_STEP_DATA_ROOT|HOT_STEP_PROFILE_DIR/.test(src)) errors.push(`${launcher}: pins the data root or profile, so two unpacked releases would stop sharing one library`);
   }
   return errors;
 }

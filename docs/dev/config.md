@@ -173,6 +173,29 @@ their database.
 An unreadable pointer or a move that stops part way still prints the reason and serves
 one explanation page on `SERVER_PORT` instead of the app. Restarting retries.
 
+#### Upgrades, reuse and backup
+
+Two unpacked releases that share one profile folder share one library: the launchers set
+only `HOT_STEP_ROOT` (their own folder) and never `HOT_STEP_DATA_ROOT` or
+`HOT_STEP_PROFILE_DIR`, so the pointer in the profile decides, not the new app folder's
+sibling default. `release/check-layout.mjs` fails a launcher that sets either variable.
+
+- **Reuse** is the upgrade path: the same profile and pointer, nothing copied. Tokens come
+  with the folder: service keys in `settings/.env`, the Hugging Face token for MuScriptor in
+  `library/muscriptor/hf_token`. **Import previous install** is for an old app folder with no
+  pointer; it moves data, it does not merge.
+- **Backup** is a copy you keep: the data folder (including both token files) and, for a
+  restore on another machine, `data-location.json`. The Settings JSON export is not a data
+  backup; see [Settings and Lyric Studio backup](../user/settings-backup.md).
+- **Stale root**: with the saved folder missing, every app folder starts on its own
+  `HOT-Step-Data` sibling (possibly empty) and the pointer is left alone, so reconnecting the
+  drive and restarting reconnects.
+
+Fixtures: `server/src/dataroot/dataroot.test.ts` ("Upgrade fixtures" and the legacy-layout,
+override and stale-root tests; platform profile paths, spaces included) and
+`release/data-root-launcher.test.mjs` (launcher contract, restart marker per platform).
+Run `node --test release/data-root-launcher.test.mjs`.
+
 ### Dev checkouts
 
 A checkout keeps its own paths (`.env` at the root, `DATA_DIR` against `server/`, `models/`,

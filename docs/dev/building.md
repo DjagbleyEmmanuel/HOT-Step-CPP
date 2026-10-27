@@ -556,6 +556,8 @@ CI and `release/build-release.ps1` bundle the server as `server/server.mjs`, wit
 
 Every package ships `release/.env.example` as `.env.example`, the shared launcher, `profile-path.mjs` and `README.txt`. No assembler precreates app-root models or adapters. Bootstrap creates the sibling data layout. The release template leaves managed paths unset; the checkout template retains its existing values. Launchers use `profile-path.mjs` to resolve the stable profile restart marker, matching `dataroot/paths.ts`, including `HOT_STEP_PROFILE_DIR` fixtures. Dev wrappers retain the checkout `.restart-requested` marker.
 
+Run `node --test release/data-root-launcher.test.mjs` to check the launcher contract (own `HOT_STEP_ROOT` only, shared profile marker); the data-folder reuse fixtures are in `server/src/dataroot/dataroot.test.ts`.
+
 Run `node server/scripts/check-release-prereqs.mjs` before shipping. It checks all three CI platform sections and both local assemblers, then runs disposable layout fixtures. Fixtures cover profile defaults for each platform, release reuse and unchanged dev selection; they do not run native Linux or macOS binaries. See [Data folder and upgrades](../user/data-folder.md).
 
 ## Stable production beside development

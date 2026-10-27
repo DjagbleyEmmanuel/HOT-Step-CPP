@@ -178,3 +178,4 @@ Saving the Environment or AI Services tab only writes keys you changed; unmodifi
 - [Lyric Studio](lyric-studio.md)
 
 For upgrade, layout and recovery instructions, see [Data folder and upgrades](../data-folder.md).
+Service keys live in the data folder's `settings/.env` and the MuScriptor token in `library/muscriptor/hf_token`, so a new version that reuses the folder keeps them. The JSON export in the backup panel does not include either; see [Settings and Lyric Studio backup](../settings-backup.md).
