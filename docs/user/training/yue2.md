@@ -72,6 +72,7 @@ Things to know:
 
 - The first run on a dataset needs its prepared set built with the prompt variants the recipe trains on. **Perform all stages** and **Train multiple** can do this; direct **Start joint training** asks you to prepare missing inputs first.
 - Songs per update multiplies the time per update: 4 songs with the presets' 60 s decoder crop is about 17 s an update on an RTX 5090, 8 songs about twice that; 4 whole songs is about 28 s, 8 about 60 s. Whole-song decoder training takes about 12 GB of VRAM. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
+- The planner always trains on whole songs, so preparation leaves out a song too long for the model's 24,576-token context (at most about 16 minutes of audio, and far less with long lyrics or a dense lead sheet: an 11-minute song with a busy sheet can already be over). The prepare log names each song it skips and its token count. The rest of the album trains as normal. Preparation fails only if no song fits.
 - Lyric timing supervision is not used by this recipe; the toggle only decides whether the stem and alignment stages run, and it is off by default.
 
 ## Recommended settings

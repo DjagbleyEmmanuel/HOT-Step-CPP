@@ -800,6 +800,16 @@ selects them during training. HOT-Approved uses this preparation flag with the
 trigger, falling back to the dataset slug. Older prepared datasets need
 re-preparing; the server invalidates the old Fixed recipe preparation cache.
 
+Every prepared track must fit the 24,576-token context in full, because the
+planner trains on the whole song: the longer prompt prefix, plus the ABC sheet,
+plus the frame count and three markers (or twice the 1500-frame decoder window
+plus five, if that is larger). Preparation and the dataset reader apply the
+same rule (`dataset_detail::context_tokens` in `yue2-aitk-dataset.h`).
+Preparation leaves out a track that does not fit and prints
+`[yue2-prepare] NOTE: <track> needs N tokens, over the 24576-token YuE2 context; skipped`.
+It fails only when no track fits. If the reader rejects the prepared manifest,
+the error carries the reader's reason after `prepared manifest failed reader roundtrip:`.
+
 The flash-attention training ops these trainers use come from the HOT-ggml fork
 below. How the Training Studio drives these subcommands, and the design decisions
 behind them, are in [training-internals.md](training-internals.md).
