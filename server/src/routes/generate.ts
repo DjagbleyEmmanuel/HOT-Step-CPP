@@ -293,13 +293,14 @@ function enqueueGeneration(job: GenerationJob): void {
     }
   }).finally(() => {
     noteFinished(family);
-    withLedger('finish', ledger => ledger.finished(job));
   }).then(async () => {
-    // A batch follower's own turn returns at once. If the batch hands it back
-    // (it failed or its lead was cancelled), that is only known once the
-    // lead's run ends; queue the job again then, so it is never stranded.
+    // A batch follower's own turn returns at once; how it ends (rendered, or
+    // handed back because the batch failed or its lead was cancelled) is only
+    // known once the lead's run ends. Record it then, and queue a handed-back
+    // job again, so it is never stranded.
     const lead = job.coalescedInto ? laneRuns.get(job.coalescedInto) : undefined;
     if (lead) await lead;
+    withLedger('finish', ledger => ledger.finished(job));
     if (job.status === 'pending' && !job.coalescedInto) enqueueGeneration(job);
   }).finally(() => { if (laneRuns.get(job.id) === run) laneRuns.delete(job.id); });
   laneRuns.set(job.id, run);

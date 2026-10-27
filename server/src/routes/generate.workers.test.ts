@@ -234,3 +234,43 @@ test('batching: a dispatched job is never claimed; followers carry the lead work
     onGenerate = undefined;
   }
 });
+
+test('batching: a follower whose own turn ends first is recorded when its batch succeeds', async () => {
+  lane.setWorkerConcurrency(true);
+  ran.length = 0;
+  let lead!: { job: any; deps: any };
+  let releaseLead!: () => void, releaseOther!: () => void;
+  onGenerate = async (job, deps) => {
+    ran.push({ id: job.id, worker: workers.currentWorker().id });
+    if (!lead) { lead = { job, deps }; job.status = 'running'; await new Promise<void>(r => { releaseLead = r; }); }
+    else await new Promise<void>(r => { releaseOther = r; });
+    job.status = 'succeeded';
+    return done;
+  };
+  try {
+    const j1 = await submit();
+    await submit();
+    await until(() => ran.length === 2, 'both jobs dispatched');
+    const j3 = await submit();
+    const f = gen.getGenerationJob(j3)!;
+    f.coalescedInto = j1; lead.deps.assignFollower(f, lead.job); f.status = 'running';
+    // j3's own turn runs on the freed worker and returns at once, while the batch renders.
+    releaseOther();
+    await until(() => ran.some(r => r.id === j3), 'the follower turn');
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(ledger.get(j3)?.status, 'open', 'the follower was recorded before its batch ended');
+    // The batch renders the follower's song too.
+    f.status = 'succeeded';
+    f.result = { audioUrls: ['/audio/follower.wav'] } as any;
+    releaseLead();
+    await until(() => !lane.gpuLaneBusy(), 'the lane to go idle');
+    await until(() => ledger.get(j3)?.status === 'succeeded', 'the follower to be recorded');
+    const row = ledger.get(j3)!;
+    assert.ok(row.finishedAt, 'finishedAt');
+    assert.deepEqual(row.result, f.result);
+    assert.equal(row.workerId, lead.job.workerId);
+    assert.equal(ran.filter(r => r.id === j3).length, 1, 'a finished follower must not be requeued');
+  } finally {
+    onGenerate = undefined;
+  }
+});
