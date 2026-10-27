@@ -644,7 +644,7 @@ export const SongBuilder: React.FC = () => {
                   <span className="text-[11px] text-zinc-600">{p.section_count ?? 0} section{(p.section_count ?? 0) === 1 ? '' : 's'}</span>
                   <Trash2
                     size={14} className={`text-zinc-600 hover:text-red-400${deleteProjectMut.isPending && deleteProjectMut.variables === p.id ? ' opacity-40' : ''}`}
-                    onClick={e => { if (deleteProjectMut.isPending) return; e.stopPropagation(); deleteProject(p.id); }}
+                    onClick={e => { e.stopPropagation(); if (deleteProjectMut.isPending) return; deleteProject(p.id); }}
                   />
                 </button>
               ))}

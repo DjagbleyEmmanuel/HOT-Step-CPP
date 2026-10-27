@@ -16,6 +16,7 @@ export function HeartmulaAdapterDropdown() {
   const selectModels = useBackendStore(s => s.selectModels);
   const { data, error, isPending } = useQuery(backendModelsOptions(backend));
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
   const selected = String(data?.defaults?.lmAdapter ?? '');
   const adapters = data?.lmAdapters ?? [];
   // A pick whose file was deleted or renamed: shown, not silently read as None (YuE2 does the same).
@@ -44,10 +45,11 @@ export function HeartmulaAdapterDropdown() {
         ]}
         onChange={async value => {
           setBusy(true);
-          try { await selectModels({ lmAdapter: value }, backend); }
+          try { setFailed(!(await selectModels({ lmAdapter: value }, backend))); }
           finally { setBusy(false); }
         }} />
       {error && <p className="text-xs text-amber-500">{error.message}</p>}
+      {failed && <p className="text-xs text-amber-500">{t('globalBar.heartmulaAdapterSelectFailed', 'Could not switch adapter; the previous one is still selected.')}</p>}
       {missing && <p className="text-xs text-amber-500">{t('globalBar.heartmulaAdapterMissing', 'This adapter file is no longer installed. Pick another one, or None, before generating.')}</p>}
       {!isPending && !error && !adapters.length && (
         <p className="text-xs text-zinc-500">{t('globalBar.heartmulaNoAdapters', 'No HeartMuLa adapters installed yet. Train one on the Train page, or convert a PEFT LoRA with engine/tools/convert-heartmula-lora.py into the heartmula-lm-adapters folder.')}</p>

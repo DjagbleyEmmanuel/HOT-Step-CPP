@@ -489,6 +489,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const captionStartMut = useMutation({
     mutationFn: async (cap: { provider: 'gemini' | 'moss'; model?: string }) => {
       const started = await captionMissingYue2(datasetId, cap, { worker: trainingWorker });
+      // The stages list shows the captioning job as soon as it starts.
+      await trainingWritePlan(client, trainingWorker);
       if (!started.jobId) return;
       let j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
       setCaptioning(j);
@@ -948,6 +950,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // error line (sole notifier), as before.
   const prepareStartMut = useMutation({
     mutationFn: (snapshot: Parameters<typeof preparationApi.startYue2Preparation>[0]) => preparationApi.startYue2Preparation(snapshot),
+    onSuccess: () => trainingWritePlan(client, trainingWorker),
   });
   const run = async (): Promise<string | null> => {
     if (presetLoadGate.current.pending) return null;

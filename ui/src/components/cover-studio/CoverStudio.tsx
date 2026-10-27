@@ -1679,7 +1679,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             showToast(`Failed: ${s.error || 'Unknown error'}`);
             failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
           }
-        }, { timeoutMs: (getGenerationTimeoutMinutes() + 30) * 60_000 });
+        }, { timeoutMs: (getGenerationTimeoutMinutes() + 30) * 60_000, deliverRepeats: true });
       await songsChanged();
     } catch (err) {
       failManualQueueItem(qId, err instanceof Error ? err.message : 'Generation status failed');

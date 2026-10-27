@@ -35,9 +35,11 @@ export const FolderPicker: React.FC<FolderPickerProps> = ({ open, onClose, onSel
   const [currentDir, setCurrentDir] = useState(getLastDir);
   const [pathInput, setPathInput] = useState(getLastDir);
 
+  // An empty dir asks the server for its default folder, so a first open with
+  // nothing remembered still lists something.
   const browseQuery = useQuery({
     ...tq.browse(currentDir, 'trainingAudio'),
-    enabled: open && currentDir.length > 0,
+    enabled: open,
   });
 
   // Remember where the user was once a listing lands (localStorage is an

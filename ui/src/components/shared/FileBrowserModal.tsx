@@ -54,12 +54,14 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
 }) => {
   // The directory being browsed; changing it drives the query. Query handles
   // cancellation of stale navigations and loading/error state automatically.
-  const [currentDir, setCurrentDir] = useState('');
+  // null until the open effect picks the start dir; '' then means the server's
+  // default folder.
+  const [currentDir, setCurrentDir] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState('');
 
   const browseQuery = useQuery({
-    ...browseOptions(currentDir, filter),
-    enabled: open && currentDir !== '',
+    ...browseOptions(currentDir ?? '', filter),
+    enabled: open && currentDir !== null,
   });
 
   // Sync the displayed path and persist it when a listing lands.
@@ -84,7 +86,7 @@ export const FileBrowserModal: React.FC<FileBrowserModalProps> = ({
   const entries = browseQuery.data?.entries ?? [];
   const loading = browseQuery.isPending;
   const error = browseQuery.error?.message ?? null;
-  const displayDir = browseQuery.data?.current ?? currentDir;
+  const displayDir = browseQuery.data?.current ?? currentDir ?? '';
 
   const navigateTo = (dir: string) => { setCurrentDir(dir); setPathInput(dir); };
 

@@ -132,9 +132,22 @@ export class ApiClient {
       xhr.open('POST', this.url(path));
       const token = getAuthToken();
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      if (opts.onProgress) {
-        xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress!(e.loaded / e.total); };
-      }
+      // A stalled upload would otherwise hang forever (XHR has no default
+      // timeout). The limit is on silence, not the whole request, so a big
+      // import over a slow link still finishes while bytes keep moving. Once
+      // the body is sent, the server's own work is untimed.
+      const idleMs = opts.timeout ?? SLOW_ROUTE_TIMEOUT_MS;
+      let stalled = false;
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      const watch = () => {
+        clearTimeout(idle);
+        idle = setTimeout(() => { stalled = true; xhr.abort(); }, idleMs);
+      };
+      xhr.upload.onprogress = (e) => {
+        watch();
+        if (opts.onProgress && e.lengthComputable) opts.onProgress(e.loaded / e.total);
+      };
+      xhr.upload.onload = () => clearTimeout(idle);
       if (opts.signal) {
         if (opts.signal.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
         opts.signal.addEventListener('abort', () => xhr.abort());
@@ -145,19 +158,21 @@ export class ApiClient {
       const fail = (info: Parameters<typeof handleFailure>[0]) => {
         try { handleFailure(info); } catch (err) { reject(err); }
       };
-      // A stalled upload would otherwise hang forever — XHR has no default
-      // timeout, and the axios JSON path's does not reach this code path.
-      xhr.timeout = opts.timeout ?? SLOW_ROUTE_TIMEOUT_MS;
-      xhr.ontimeout = () => fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent });
       xhr.onload = () => {
+        clearTimeout(idle);
         let parsed: unknown;
         try { parsed = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
         if (xhr.status >= 200 && xhr.status < 300) { resolve(parsed as T); return; }
         fail({ status: xhr.status, body: parsed ?? null, method: 'POST', url: this.url(path), skip: opts.silent });
       };
-      xhr.onerror = () => fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent });
-      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
+      xhr.onerror = () => { clearTimeout(idle); fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent }); };
+      xhr.onabort = () => {
+        clearTimeout(idle);
+        if (stalled) fail({ status: 0, body: null, method: 'POST', url: this.url(path), skip: opts.silent });
+        else reject(new DOMException('Aborted', 'AbortError'));
+      };
       xhr.send(form);
+      watch();
     });
   }
 

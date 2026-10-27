@@ -1196,9 +1196,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
           sampleOrder: order,
           pendingEdits: edits,
         });
-        // The store's samplesById is the authoritative row map; the dataset
-        // cache is refreshed by the next dataset query. Writing the SSE frame
-        // here would bypass the bridge's validation and once-ledger.
+        // Keep the cached dataset detail in step, so a reopen within staleTime
+        // does not restore the pre-label rows.
+        const { trainingWorker, selectedDatasetId } = get();
+        if (selectedDatasetId) cacheSample(trainingWorker, selectedDatasetId, merged);
         break;
       }
 
