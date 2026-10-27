@@ -249,12 +249,21 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
     size_t aggregate_payload = 0;
     for (size_t index = 0; index < request.items.size(); ++index) {
         const auto & item = request.items[index];
-        if (item.id.empty() || !no_nul(item.id) || !ids.insert(item.id).second || item.frames == 0 || item.frames > 24576 || !token_ids(item.prompt, error))
+        if (item.id.empty() || !no_nul(item.id) || !ids.insert(item.id).second || item.frames == 0 || item.frames > 24576)
             return prep_fail(error, "native item metadata is invalid");
+        if (std::string token_error; !token_ids(item.prompt, &token_error)) {
+            if (error) *error = "song " + item.id + ": " + token_error;
+            return false;
+        }
         // A track the trainer cannot fit is left out by name, not the album.
         if (const size_t need = dataset_detail::context_tokens(item.prompt, item.frames); need > dataset_detail::kMaxFrames) {
-            std::fprintf(stderr, "[yue2-prepare] NOTE: %s needs %zu tokens, over the %zu-token YuE2 context; skipped\n",
-                         item.id.c_str(), need, dataset_detail::kMaxFrames);
+            const size_t prompt = std::max(item.prompt.retained_prefix_ids.size(), item.prompt.dropped_prefix_ids.size());
+            std::fprintf(stderr,
+                         "[yue2-prepare] NOTE: %s needs %zu tokens, over the %zu-token YuE2 context; skipped "
+                         "(style and lyrics %zu, score %zu, %zu min %zu s of audio = %zu frames; "
+                         "shorten the song or train it without its score)\n",
+                         item.id.c_str(), need, dataset_detail::kMaxFrames, prompt, item.prompt.abc_ids.size(),
+                         item.frames / 25 / 60, item.frames / 25 % 60, item.frames);
             continue;
         }
         const size_t written = yyjson_mut_arr_size(items);

@@ -56,6 +56,13 @@ int main(int argc, char ** argv) {
         !expect_reject("bad-nonfinite", [](auto & r) { r.items[0].latent_file = r.source_manifest.parent_path() / "bad.f32"; write_f32(r.items[0].latent_file, 4, false); }) ||
         !expect_reject("bad-codec", [](auto & r) { r.items[0].semantic_file = r.source_manifest.parent_path() / "bad.i32"; write_i32(r.items[0].semantic_file, 4, 40000); }) ||
         !expect_reject("bad-provenance", [](auto & r) { r.models.clear(); })) return 1;
+    {
+        // A prompt token fault names the song and the reason.
+        auto bad = req; bad.output_dir = root / "bad-token"; bad.items[0].prompt.abc_ids = {-1}; std::string why;
+        if (yue2_aitk::prepare_dataset(bad, &why) || why.rfind("song " + bad.items[0].id + ": ", 0) != 0 || !no_manifest(bad.output_dir)) {
+            std::cerr << "bad-token: " << why << "\n"; return 1;
+        }
+    }
     // Over-context tracks: prefix 3 + sheet 2 + frames + 3 must fit 24576, as
     // the planner trains on the whole song. At the limit stays; one over and
     // far over are skipped by name, and the reader accepts what is left.
