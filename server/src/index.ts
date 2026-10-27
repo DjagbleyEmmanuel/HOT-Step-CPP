@@ -228,7 +228,7 @@ import { setEngineReady } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
-import { onEngineRestarted, retryIfGaveUp, startAceServer, stopAceServer } from './services/aceEngineProcess.js';
+import { onEngineRestarted, retryIfGaveUp, startAceServer, startEngineWorkers, stopAceServer, stopEngineWorkers } from './services/aceEngineProcess.js';
 import { killActiveChildren, recoverStaleJobs } from './services/training/labelingQueue.js';
 
 // ── Required runtime DLL bootstrap ──────────────────────────────────
@@ -398,6 +398,10 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   setEngineReady(false, cudaReady ? 'Starting engine...' : 'Starting engine (CPU only — CUDA runtime missing)...');
   startAceServer();
   setEngineReady(true, cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
+  // Multi-GPU opt-in: one more engine per further opted-in card. Each runs the
+  // restore hooks below in its own scope once its /health answers. A no-op
+  // with the opt-in empty (the default).
+  void startEngineWorkers();
 
   // The engine scans models once at boot, so wait for the whole queue to
   // drain before retrying — retrying after the first file can boot it on a
@@ -520,6 +524,7 @@ function shutdown() {
   // during the 1 s exit window.
   // Fire-and-forget: the 1 s process.exit delay below covers the wait.
   void stopAceServer('Server shutting down', undefined, { suspend: false });
+  void stopEngineWorkers('Server shutting down', undefined, { suspend: false });
 
   // Close HTTP server
   server.close(() => {

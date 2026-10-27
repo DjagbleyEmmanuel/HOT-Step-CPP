@@ -3,6 +3,7 @@ import { config as dotenvConfig, parse as dotenvParse } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { AsyncLocalStorage } from 'node:async_hooks';
 // Must stay the first local import: it picks (and if needed moves) the release
 // data folder before anything below reads a path.
 import { RUNTIME } from './dataroot/bootstrap.js';
@@ -208,6 +209,11 @@ export function parseUnslothKeyless(v: string | undefined): boolean {
   return v === '1';
 }
 
+/** Worker scope behind config.aceServer.url. Declared here so the getter has
+ *  no import cycle; services/engineWorkers.ts owns what goes in it. A
+ *  secondary worker sets scopedUrl; the primary leaves it undefined. */
+export const engineWorkerScope = new AsyncLocalStorage<{ readonly scopedUrl?: string }>();
+
 export const config = {
   // ace-server configuration
   aceServer: {
@@ -220,6 +226,10 @@ export const config = {
     vaeOverlap: parseInt(process.env.ACESTEPCPP_VAE_OVERLAP || '64', 10),
     /** GPU device selection — maps to CUDA_VISIBLE_DEVICES env var for the engine process */
     cudaVisibleDevices: process.env.CUDA_VISIBLE_DEVICES || '',
+    /** Multi-GPU opt-in: comma-separated NVIDIA GPU UUIDs, one ace-server per
+     *  card (services/engineWorkers.ts). Empty (the default) is the single
+     *  engine above, launched exactly as before. Read once at boot. */
+    workerGpus: process.env.ACESTEPCPP_WORKER_GPUS || '',
     noiseProfile: process.env.ACESTEPCPP_NOISE_PROFILE || (() => {
       // Auto-detect: find first .wav in noise_samples/
       const dir = DEFAULT_NOISE_SAMPLES;
@@ -285,8 +295,10 @@ export const config = {
     //   }
     //   return '';
     // })(),
+    /** The engine the current async chain is bound to: a secondary worker
+     *  inside engineWorkers.runWithWorker(), the primary everywhere else. */
     get url() {
-      return `http://${this.host}:${this.port}`;
+      return engineWorkerScope.getStore()?.scopedUrl ?? `http://${this.host}:${this.port}`;
     },
   },
 
@@ -444,7 +456,7 @@ export const EXPOSED_ENV_KEYS = [
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
   'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP', 'ACESTEPCPP_KEEP_LOADED',
   // GPU
-  'CUDA_VISIBLE_DEVICES',
+  'CUDA_VISIBLE_DEVICES', 'ACESTEPCPP_WORKER_GPUS',
   // Server
   'SERVER_PORT', 'DATA_DIR',
   // API keys
@@ -483,7 +495,7 @@ export const configReloadListeners: Array<() => void> = [];
 export const RESTART_REQUIRED_KEYS = new Set([
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
   'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP', 'ACESTEPCPP_KEEP_LOADED',
-  'CUDA_VISIBLE_DEVICES',
+  'CUDA_VISIBLE_DEVICES', 'ACESTEPCPP_WORKER_GPUS',
   'SERVER_PORT', 'DATA_DIR', 'MUSCRIPTOR_MODELS_DIR',
 ]);
 
@@ -524,6 +536,8 @@ export function reloadEnvConfig(envText?: string): string[] {
     () => String(config.aceServer.vaeOverlap));
   apply('CUDA_VISIBLE_DEVICES', v => { config.aceServer.cudaVisibleDevices = v; },
     () => config.aceServer.cudaVisibleDevices);
+  apply('ACESTEPCPP_WORKER_GPUS', v => { config.aceServer.workerGpus = v; },
+    () => config.aceServer.workerGpus);
   apply('ACESTEPCPP_KEEP_LOADED', v => { config.aceServer.keepLoaded = (v || '0') !== '0'; },
     () => (config.aceServer.keepLoaded ? '1' : '0'));
 

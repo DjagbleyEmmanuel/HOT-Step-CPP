@@ -10,7 +10,9 @@
 import { config } from '../config.js';
 import { engineCrashSeq } from './aceEngineProcess.js';
 
-const BASE = config.aceServer.url;
+/** Engine base URL, read per call: the worker the caller is bound to
+ *  (engineWorkers.runWithWorker), the primary everywhere else. */
+const base = () => config.aceServer.url;
 
 // Timeouts (ms) — ace-server is single-threaded httplib, so during heavy
 // compute (DiT steps, adapter merge) it can't respond. These must be
@@ -377,7 +379,7 @@ async function workerPost(url: string, init: RequestInit): Promise<Response> {
 async function drainWorker(crashSeqAtStart: number, retryMs = 1000): Promise<void> {
   for (;;) {
     try {
-      const res = await fetch(`${BASE}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) });
+      const res = await fetch(`${base()}/worker-drain`, { signal: AbortSignal.timeout(TIMEOUT_SA3) });
       if (res.ok) return;
       // Any other status (a 404 from an engine older than the route included)
       // proves nothing about the render, so keep holding.
@@ -388,7 +390,7 @@ async function drainWorker(crashSeqAtStart: number, retryMs = 1000): Promise<voi
 }
 
 async function aceGet(path: string, timeoutMs = TIMEOUT_QUICK): Promise<Response> {
-  const res = await aceFetch(`${BASE}${path}`, {
+  const res = await aceFetch(`${base()}${path}`, {
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
@@ -407,7 +409,7 @@ async function acePost(path: string, body?: unknown, contentType = 'application/
     reqBody = typeof body === 'string' ? body : JSON.stringify(body);
   }
 
-  const res = await aceFetch(`${BASE}${path}`, {
+  const res = await aceFetch(`${base()}${path}`, {
     method: 'POST',
     headers,
     body: reqBody,
@@ -556,7 +558,7 @@ export const aceClient = {
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     const body = Buffer.concat(parts);
 
-    const res = await aceFetch(`${BASE}${path}`, {
+    const res = await aceFetch(`${base()}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -602,7 +604,7 @@ export const aceClient = {
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     const body = Buffer.concat(parts);
 
-    const res = await aceFetch(`${BASE}/understand`, {
+    const res = await aceFetch(`${base()}/understand`, {
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
       body,
@@ -629,7 +631,7 @@ export const aceClient = {
   /** GET /job?id=N&result=1 — fetch completed job result.
    *  Uses TIMEOUT_RESULT because the response contains the full MP3/WAV audio. */
   async getJobResult(jobId: string): Promise<Response> {
-    return fetch(`${BASE}/job?id=${jobId}&result=1`, {
+    return fetch(`${base()}/job?id=${jobId}&result=1`, {
       signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
   },
@@ -638,7 +640,7 @@ export const aceClient = {
    *  Returns null if no latent was captured (non-cover tasks, cancelled, etc). */
   async getJobLatent(jobId: string): Promise<Buffer | null> {
     try {
-      const res = await aceFetch(`${BASE}/job?id=${jobId}&latent=1`, {
+      const res = await aceFetch(`${base()}/job?id=${jobId}&latent=1`, {
         signal: AbortSignal.timeout(TIMEOUT_RESULT),
       });
       if (!res.ok) return null;
@@ -651,7 +653,7 @@ export const aceClient = {
 
   /** POST /job?id=N&cancel=1 — cancel a running job */
   async cancelJob(jobId: string): Promise<void> {
-    await aceFetch(`${BASE}/job?id=${jobId}&cancel=1`, {
+    await aceFetch(`${base()}/job?id=${jobId}&cancel=1`, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_POLL),
     });
@@ -660,7 +662,7 @@ export const aceClient = {
   /** POST /job?id=N&drop_songs=MASK — take songs out of a running YuE2
    *  batch (bit b = song b). The rest of the batch carries on. */
   async dropSongs(jobId: string, mask: number): Promise<void> {
-    await aceFetch(`${BASE}/job?id=${jobId}&drop_songs=${mask >>> 0}`, {
+    await aceFetch(`${base()}/job?id=${jobId}&drop_songs=${mask >>> 0}`, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_POLL),
     });
@@ -703,7 +705,7 @@ export const aceClient = {
     const qsStr = qs.toString();
     const path = qsStr ? `/spectral-lifter?${qsStr}` : '/spectral-lifter';
 
-    const res = await aceFetch(`${BASE}${path}`, {
+    const res = await aceFetch(`${base()}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: wavBuffer,
@@ -726,7 +728,7 @@ export const aceClient = {
     if (blend > 0) params.set('blend', blend.toFixed(3));
     if (outFmt) params.set('out_fmt', outFmt);
     const qs = params.toString();
-    const url = qs ? `${BASE}/pp-vae-reencode?${qs}` : `${BASE}/pp-vae-reencode`;
+    const url = qs ? `${base()}/pp-vae-reencode?${qs}` : `${base()}/pp-vae-reencode`;
     const res = await aceFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
@@ -829,7 +831,7 @@ export const aceClient = {
     if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
-    const res = await workerPost(`${BASE}/sa3-refine?${params.toString()}`, {
+    const res = await workerPost(`${base()}/sa3-refine?${params.toString()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: wavBuffer,
@@ -848,7 +850,7 @@ export const aceClient = {
    *  null so backends/sa3/index.ts can report `up: false` without throwing. */
   async sa3Props(): Promise<Sa3Props | null> {
     try {
-      const res = await fetch(`${BASE}/sa3/props`, { signal: AbortSignal.timeout(5_000) });
+      const res = await fetch(`${base()}/sa3/props`, { signal: AbortSignal.timeout(5_000) });
       if (!res.ok) return null;
       return await res.json() as Sa3Props;
     } catch {
@@ -929,7 +931,7 @@ export const aceClient = {
     if (opts.postprocessPlugin) params.set('postprocess_plugin', opts.postprocessPlugin);
     if (opts.outFmt) params.set('out_fmt', opts.outFmt);
 
-    const res = await workerPost(`${BASE}/sa3-synth?${params.toString()}`, {
+    const res = await workerPost(`${base()}/sa3-synth?${params.toString()}`, {
       method: 'POST',
       signal: withTimeout(opts.signal, TIMEOUT_SA3),
     });
@@ -948,7 +950,7 @@ export const aceClient = {
    *  level: 0=BASIC (6 stems), 1=VOCAL_SPLIT, 2=FULL, 3=MAXIMUM,
    *         4=VOCALS_ONLY (BS-RoFormer 2-stem: Vocals incl. backing + complement Instrumental). */
   async submitSuperSepSeparate(audioBuffer: Buffer, level = 0): Promise<string> {
-    const res = await aceFetch(`${BASE}/supersep/separate?level=${level}`, {
+    const res = await aceFetch(`${base()}/supersep/separate?level=${level}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
       body: audioBuffer,
@@ -985,7 +987,7 @@ export const aceClient = {
   /** GET /supersep/serve?id=...&stem=N — download one stem as a 44.1 kHz WAV. */
   async superSepStem(jobId: string, index: number, outFmt?: WavOutFormat): Promise<Buffer> {
     const fmtQs = outFmt ? `&out_fmt=${outFmt}` : '';
-    const res = await aceFetch(`${BASE}/supersep/serve?id=${jobId}&stem=${index}${fmtQs}`, {
+    const res = await aceFetch(`${base()}/supersep/serve?id=${jobId}&stem=${index}${fmtQs}`, {
       signal: AbortSignal.timeout(TIMEOUT_RESULT),
     });
     if (!res.ok) {
@@ -1004,7 +1006,7 @@ export const aceClient = {
     outFmt?: WavOutFormat,
   ): Promise<Buffer> {
     const fmtQs = outFmt ? `?out_fmt=${outFmt}` : '';
-    const res = await aceFetch(`${BASE}/supersep/recombine${fmtQs}`, {
+    const res = await aceFetch(`${base()}/supersep/recombine${fmtQs}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: jobId, stems }),
@@ -1046,7 +1048,7 @@ export const aceClient = {
     parts.push(Buffer.from(`--${boundary}--\r\n`));
     const body = Buffer.concat(parts);
 
-    const res = await aceFetch(`${BASE}/vae`, {
+    const res = await aceFetch(`${base()}/vae`, {
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -1129,7 +1131,7 @@ export const aceClient = {
    *  the call failed. */
   async restoreEvictPolicy(): Promise<boolean> {
     try {
-      const res = await aceFetch(`${BASE}/models/restore-policy`, {
+      const res = await aceFetch(`${base()}/models/restore-policy`, {
         method: 'POST',
         signal: AbortSignal.timeout(TIMEOUT_QUICK),
       });
@@ -1147,7 +1149,7 @@ export const aceClient = {
    *  this to make room can always proceed. */
   async listLoadedModels(): Promise<Array<{ label: string; mb: number; in_use: boolean }>> {
     try {
-      const res = await aceFetch(`${BASE}/models/loaded`, { signal: AbortSignal.timeout(TIMEOUT_QUICK) });
+      const res = await aceFetch(`${base()}/models/loaded`, { signal: AbortSignal.timeout(TIMEOUT_QUICK) });
       if (!res.ok) return [];
       const data = await res.json().catch(() => ({})) as {
         loaded?: Array<{ label: string; mb: number; in_use: boolean }>;
@@ -1162,7 +1164,7 @@ export const aceClient = {
    *  'FSQ-Detok', …). Best-effort: a false/failed reply is not an error. */
   async unloadLabel(label: string): Promise<boolean> {
     try {
-      const res = await aceFetch(`${BASE}/models/unload`, {
+      const res = await aceFetch(`${base()}/models/unload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label }),

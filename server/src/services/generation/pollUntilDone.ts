@@ -1,5 +1,6 @@
 import { aceClient } from '../aceClient.js';
 import { engineCrashSeq } from '../aceEngineProcess.js';
+import { currentWorker } from '../engineWorkers.js';
 import type { GenerationJob } from './jobTypes.js';
 
 export interface PollWatchdogOptions {
@@ -81,6 +82,9 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   let notFoundRun = 0;
   const NOT_FOUND_LIMIT = 3;
   const crashSeqAtStart = engineCrashSeq();
+  // The worker this poll talks to owns aceJobId; record it so calls made from
+  // outside the job's scope (route cancel, streams) reach the same engine.
+  job.workerId = currentWorker().id;
   // Heartbeat token from the ace-server poll body. adapter_progress is the
   // live delta index of an in-flight adapter precompute; during a lazy
   // inference-time DiT reload the phase is dit_inference and phase_step
