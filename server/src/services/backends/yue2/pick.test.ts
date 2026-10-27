@@ -245,10 +245,19 @@ test('a cover submission with a blank ABC is rejected at submit', async () => {
   );
 });
 
-test('a cover submission rejects a silent Vocal score', async () => {
+test('a silent Vocal score is rejected for a vocal cover and accepted for an instrumental one', async () => {
   const { yue2Backend } = await import('./index.js');
-  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c',
-    yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|' }),
+  const yue2Abc = 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|';
+  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c', lyrics: 'la la',
+    yue2Cover: { sourceId: 's' }, yue2Abc }),
+  /The transcriber heard no melody in this source/);
+  for (const extra of [{ instrumental: true, lyrics: 'la la' }, {}]) {
+    // Past the score check the resolver needs a database; only the score verdict matters here.
+    try { yue2Backend.resolveRequest({ caption: 'c', ...extra, yue2Cover: { sourceId: 's' }, yue2Abc }); }
+    catch (err) { assert.doesNotMatch((err as Error).message, /heard no melody/); }
+  }
+  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c', instrumental: true,
+    yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nz4|' }),
   /The transcriber heard no melody in this source/);
 });
 

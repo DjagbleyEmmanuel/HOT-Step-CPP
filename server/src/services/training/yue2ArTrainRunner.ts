@@ -38,7 +38,7 @@ import { runOnGpuLane } from '../generation/gpuLane.js';
 import { evictOtherFamilies } from '../generation/residency.js';
 import { saveDatasetCoverAbc } from '../coverDatasetSource.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
-import { EMPTY_COVER_SCORE_ERROR, hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
+import { EMPTY_COVER_SCORE_ERROR, hasSoundingScore, hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
 import { vocalCadenceAbc } from '../backends/yue2/vocalCadence.js';
 import { readWav } from '../generation/audioLevel.js';
 import { getDataset } from './datasetsRepo.js';
@@ -723,7 +723,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
     const verify = () => {
-      try { return hasSoundingVocalBar(readYue2CoverAbc(manifest, name)) || deps.vocalStem ? null : EMPTY_COVER_SCORE_ERROR; }
+      try { return hasSoundingScore(readYue2CoverAbc(manifest, name)) || deps.vocalStem ? null : EMPTY_COVER_SCORE_ERROR; }
       catch (err) { return err instanceof Error ? err.message : String(err); }
     };
     let loadFailed = false;
@@ -762,7 +762,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
       for (const row of data.sources) if (row.name === name) row.abc = abc;
       fs.writeFileSync(manifest, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 });
     }
-    if (!hasSoundingVocalBar(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
+    if (!hasSoundingScore(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     saveDatasetCoverAbc(audioPath, abc);
     finishJob(job, 'done');
     return abc;

@@ -78,6 +78,8 @@ test('successful force result replaces the sidecar, while empty and error rows d
     assert.equal(writeAbcSidecar(audio, '  '), false);
     assert.equal(writeAbcSidecar(audio, 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|'), false);
     assert.equal(readAbcSidecar(audio), 'X:1\nK:D\nD');
+    // Cover caching opts in to a sounding Ins under a silent Vocal.
+    assert.equal(writeAbcSidecar(audio, 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|', { anySounding: true }), true);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -86,7 +88,7 @@ test('cover transcription fails for all-rest Vocal bars and accepts a sounding b
   try {
     const audio = path.join(dir, 'track.wav');
     fs.writeFileSync(audio, 'audio');
-    let abc = 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|';
+    let abc = 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nz4|';
     const run = (async (_job, _kind, _args, _idleMs, verify) => {
       const manifest = path.join(dir, 'cover-sheet.json');
       const data = JSON.parse(fs.readFileSync(manifest, 'utf8'));

@@ -29,7 +29,7 @@ import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
-import { EMPTY_COVER_SCORE_ERROR, hasSoundingVocalBar } from './scoreHealth.js';
+import { EMPTY_COVER_SCORE_ERROR, hasSoundingScore, hasSoundingVocalBar } from './scoreHealth.js';
 import { yue2CoverGuide, type Yue2CoverGuide } from './sourceGuide.js';
 import { runYue2Generation } from './generate.js';
 import {
@@ -403,6 +403,10 @@ export function yue2CoverPickBase(persisted: Yue2PersistedSelection): Yue2Persis
 function resolveRequest(submission: Readonly<Record<string, unknown>>): ResolvedRequest {
   const instrumental = typeof submission.instrumental === 'boolean'
     ? submission.instrumental : undefined;
+  // generate.ts renders instrumental when flagged or when there are no lyrics.
+  const instrumentalRender = instrumental === true
+    || !(typeof submission.lyrics === 'string' && submission.lyrics);
+  const soundingFor = (abc: string) => instrumentalRender ? hasSoundingScore(abc) : hasSoundingVocalBar(abc, true);
   const cover = yue2CoverFromSubmission(submission);
   if (cover?.sourceKind === 'musicxml' && submission.sourceAudioUrl) {
     throw new Error('MusicXML covers cannot also supply source audio.');
@@ -422,7 +426,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     if (!abc) {
       throw new Error('A cover needs an approved lead sheet (yue2Abc) — none was supplied.');
     }
-    if (!hasSoundingVocalBar(abc, true)) throw new Error(EMPTY_COVER_SCORE_ERROR);
+    if (!soundingFor(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     coverAbc = abc;
   }
   const options: Record<string, unknown> = {};
@@ -433,7 +437,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     const choices = coverScoreChoices(cover);
     const score = transformCoverScore(coverAbc, choices);
     // Dropping the instrumental voices can leave nothing to sing.
-    if (!hasSoundingVocalBar(score.renderedAbc, true)) throw new Error(EMPTY_COVER_SCORE_ERROR);
+    if (!soundingFor(score.renderedAbc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     options.yue2Cover = { ...(cover.sourceId ? { sourceId: cover.sourceId } : {}),
       ...(cover.sourceKind ? { sourceKind: cover.sourceKind } : {}),
       ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),

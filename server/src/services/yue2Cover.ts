@@ -24,7 +24,7 @@ import { matchSectionsToScore, planScoreFromLyrics, suggestionLyrics, suggestSec
 import { prepareV2Problem, structureHash, type PrepareV2 } from '../contracts/yue2Prepare.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar, writeAbcSidecar } from './training/abcSidecar.js';
-import { hasSoundingVocalBar } from './backends/yue2/scoreHealth.js';
+import { hasSoundingScore } from './backends/yue2/scoreHealth.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 import { cachedMp3 } from './audioConvert.js';
 
@@ -309,7 +309,7 @@ export function createYue2CoverService(deps = {
       }
       fields.lyrics = lyrics.replace(/\r\n?/g, '\n');
     }
-    if (abc !== undefined && (typeof abc !== 'string' || abc.length > MAX_ABC_LENGTH || !hasSoundingVocalBar(abc))) {
+    if (abc !== undefined && (typeof abc !== 'string' || abc.length > MAX_ABC_LENGTH || !hasSoundingScore(abc))) {
       throw new CoverRequestError('The score must be ABC of at most 64 KB with a sounding vocal bar.');
     }
     if (bpm !== undefined || key !== undefined) {

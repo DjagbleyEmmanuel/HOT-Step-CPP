@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { stemPathFor } from './paths.js';
 import { backupPath } from './sidecarIO.js';
-import { hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
+import { hasSoundingScore, hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
 
 export function abcSidecarPath(audioPath: string): string {
   return `${stemPathFor(audioPath)}.abc`;
@@ -36,8 +36,8 @@ export function withAbcTempo(abc: string, bpm: number): string {
 /** A failed or empty transcription never replaces a usable score. With
  *  `keepBackups` the score it replaces is kept (see backupPath), and no write
  *  happens without that copy. */
-export function writeAbcSidecar(audioPath: string, abc: string, opts: { keepBackups?: boolean } = {}): boolean {
-  if (!hasSoundingVocalBar(abc)) return false;
+export function writeAbcSidecar(audioPath: string, abc: string, opts: { keepBackups?: boolean; anySounding?: boolean } = {}): boolean {
+  if (!(opts.anySounding ? hasSoundingScore(abc) : hasSoundingVocalBar(abc))) return false;
   const target = abcSidecarPath(audioPath);
   if (opts.keepBackups && fs.existsSync(target)) fs.copyFileSync(target, backupPath(target, true));
   const tmp = path.join(path.dirname(target), `.abc_${crypto.randomBytes(6).toString('hex')}.tmp`);
