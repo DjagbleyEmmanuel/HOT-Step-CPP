@@ -31,7 +31,7 @@ the server, and is hidden when there is only one.
   background, so two model families do not sit on the GPU together. Every generation
   waits until the other backends confirm their models are released, then loads its own.
 - With the experimental Multi-GPU setting on, each card runs its own engine and every model must fit
-  in one card. Which backends can use a second card is not settled yet, because jobs still run one at a time.
+  in one card. With two or more cards ticked, jobs run in parallel, one per card; training, post-processing and previews still take every card.
 - The global bar reshapes to the active backend. The Models, Adapters, Generation and
   LM / Thinking clusters show that backend's own controls, and controls that do nothing
   on it are hidden.

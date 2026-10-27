@@ -427,8 +427,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
 
               {/* Multi-GPU (experimental) — one engine per ticked card. Only shown with 2+ detected
-                  cards. Ticking cards does not run jobs in parallel yet; the concurrency
-                  switch stays out of the UI until the compatibility audit passes. */}
+                  cards. With two or more ticked cards, jobs run in parallel, one per card. */}
               {detectedGpus.length > 1 && (
                 <div className="setting-row">
                   <div className="setting-info">
@@ -436,7 +435,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       label="Multi-GPU workers"
                       className="setting-label"
                       meta="experimental · off by default"
-                      info="Starts one engine per ticked card instead of one engine in total. Each model must fit in a single card's VRAM; a model is never split across cards. CUDA-only: Vulkan, CPU and Apple Silicon keep the single engine. Leave all unticked for the normal single engine, which still uses the GPU Device pick above. Requires a restart to take effect."
+                      info="Starts one engine per ticked card instead of one engine in total. Each model must fit in a single card's VRAM; a model is never split across cards. CUDA-only: Vulkan, CPU and Apple Silicon keep the single engine. With two or more cards ticked, jobs run in parallel, one per card; training, post-processing and previews still take every card. Leave all unticked for the normal single engine, which still uses the GPU Device pick above. Requires a restart to take effect."
                     />
                   </div>
                   <div className="flex flex-col gap-1">

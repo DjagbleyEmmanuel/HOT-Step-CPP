@@ -235,8 +235,8 @@ backends hosted by `ace-server` reach the same worker's port without a client ar
 worker table and status are in `server/src/services/engineWorkers.ts`; `GET
 /api/settings/engine-workers` serves the status. A worker restarts only while idle. Each
 engine stays one process, one port, one GPU worker thread, so each model must fit in one
-card. Server-side model caches and model-change routes still target `w0`, and jobs are not
-yet dispatched in parallel. Real card affinity has not been verified on a dual-GPU machine.
+card. Server-side model caches and model-change routes still target `w0`. With two or more workers,
+jobs are dispatched in parallel, one per worker; training, post-processing and previews hold every worker. Real card affinity has not been verified on a dual-GPU machine.
 
 ## Pipelines
 

@@ -479,7 +479,7 @@ needed. Whatever is not listed is working memory and cannot be unloaded.
 
 Every generation goes into one queue, shown in the Queue section of the activity column on
 the right of the window. The engine uses one GPU, so the server runs one job at a time. (An experimental Multi-GPU
-setting in Settings starts one engine per card, but jobs still run one at a time for now.)
+setting in Settings starts one engine per card; with two or more cards ticked, jobs run in parallel, one per card.)
 Queue as many songs as you like, from any studio; each waits its turn. Post-processing
 re-runs from the Library wait in the same line.
 
