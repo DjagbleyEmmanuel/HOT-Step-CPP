@@ -103,7 +103,7 @@ interface VstChainState {
   deletePreset: (key: string) => Promise<void>;
 }
 
-let guiPoll: { observer: QueryObserver<{ uids: string[] }, Error, { uids: string[] }, { uids: string[] }, ServerKey>; unsubscribe: () => void } | null = null;
+let guiPoll: { observer: QueryObserver<{ uids: string[] }, Error, { uids: string[] }, { uids: string[] }, ServerKey>; unsubscribe: () => void; stopped: boolean } | null = null;
 
 /** Follow the open-GUI read until every editor window has closed. */
 function startGuiPoll() {
@@ -114,20 +114,27 @@ function startGuiPoll() {
     refetchInterval: 1500,
     refetchIntervalInBackground: true,
   });
+  // Registered before subscribe(), which can call the listener synchronously:
+  // a stop from inside that first call must still tear this poll down.
+  const poll = { observer, unsubscribe: () => {}, stopped: false };
+  guiPoll = poll;
   const unsubscribe = observer.subscribe(result => {
-    if (!result.data) return;
-    // subscribe() replays the cached entry synchronously before the fetch it
-    // starts returns. That replay is older than this poll, so acting on it
-    // would clear the marker openGui just set.
-    if (!result.isFetching && result.dataUpdatedAt < startedAt) return;
+    if (poll.stopped || !result.data) return;
+    // Only a read that finished after this poll started counts. subscribe()
+    // replays the cached entry, and that older snapshot stays in `data` while
+    // the first fetch runs; acting on it would clear the marker openGui just set.
+    if (result.isFetching || result.dataUpdatedAt < startedAt) return;
     const open = useVstChainStore.getState().openGuiUids.filter(u => result.data!.uids.includes(u));
     useVstChainStore.setState({ openGuiUids: open });
     if (open.length === 0) stopGuiPoll();
   });
-  guiPoll = { observer, unsubscribe };
+  poll.unsubscribe = unsubscribe;
+  if (poll.stopped) unsubscribe();
 }
 function stopGuiPoll() {
-  guiPoll?.unsubscribe();
+  if (!guiPoll) return;
+  guiPoll.stopped = true;
+  guiPoll.unsubscribe();
   guiPoll = null;
 }
 
