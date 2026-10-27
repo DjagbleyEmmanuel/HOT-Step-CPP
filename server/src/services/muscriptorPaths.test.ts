@@ -105,6 +105,18 @@ test('migration never overwrites a conflicting file', async () => {
   assert.equal(r.outcome, 'conflict');
   assert.equal(fs.readFileSync(path.join(f.models, 'muscriptor', 'large', 'config.json'), 'utf8'), '{"different":1}');
   assert.ok(isCompleteModelDir(path.join(f.library, 'models', 'muscriptor', 'large')), 'legacy kept on conflict');
+  assert.equal(fs.existsSync(path.join(f.models, 'muscriptor', 'large', 'model.safetensors')), false, 'no weights published beside the conflict');
+  assert.equal(resolveModelDir(f.roots, 'large').source, 'legacy');
+});
+
+test('migration with shared and legacy as one folder deletes nothing', async () => {
+  const f = fixture();
+  // ACESTEPCPP_MODELS=<library>/models: both roots are <library>/models/muscriptor
+  const roots = muscriptorRoots(undefined, path.join(f.library, 'models'), f.library);
+  put(path.join(roots.legacy, 'small'), FULL);
+  const [r] = await migrateLegacyModels(roots, ['small'], { removeLegacy: true });
+  assert.equal(r.outcome, 'identical');
+  assert.ok(isCompleteModelDir(path.join(roots.shared, 'small')));
 });
 
 test('migration: partial legacy, no legacy and override are left alone', async () => {

@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
+import { samePath } from '../dataroot/paths.js';
 
 /** The two files every variant needs; both must exist for it to be usable. */
 export const MODEL_FILES = ['model.safetensors', 'config.json'] as const;
@@ -107,34 +108,47 @@ export async function migrateLegacyModels(r: MuscriptorRoots, variants: readonly
     const to = path.join(r.shared, variant);
     if (!isCompleteModelDir(from)) { out.push({ variant, outcome: 'none' }); continue; }
     try {
-      let copied = false;
+      // Same folder under two names (ACESTEPCPP_MODELS=<library>/models, a
+      // junction): nothing to copy, and removing "legacy" would remove shared.
+      if (fs.existsSync(to) && samePath(fs.realpathSync(from), fs.realpathSync(to))) {
+        out.push({ variant, outcome: 'identical', detail: 'shared and legacy are the same folder' });
+        continue;
+      }
+      // Check every existing destination before publishing anything, so a
+      // conflict never leaves a mixed shared pair that outranks legacy.
       let conflict: string | null = null;
       for (const f of MODEL_FILES) {
+        const dst = path.join(to, f);
+        if (fs.existsSync(dst) && !await sameFile(path.join(from, f), dst)) { conflict = f; break; }
+      }
+      const published: string[] = [];
+      for (const f of conflict ? [] : MODEL_FILES) {
         const src = path.join(from, f);
         const dst = path.join(to, f);
-        if (fs.existsSync(dst)) {
-          if (!await sameFile(src, dst)) { conflict = f; break; }
-          continue;
-        }
+        if (fs.existsSync(dst)) continue;
         fs.mkdirSync(to, { recursive: true });
         const tmp = `${dst}.migrate-${process.pid}`;
         try {
           fs.copyFileSync(src, tmp);
           if (!await sameFile(src, tmp)) throw new Error(`${f} did not verify after copy`);
-          // A download may have finished meanwhile: re-check before claiming the name.
+          // Something may have written the name meanwhile: re-check before claiming it.
           if (fs.existsSync(dst)) {
             if (!await sameFile(src, dst)) { conflict = f; break; }
           } else {
             fs.renameSync(tmp, dst);
-            copied = true;
+            published.push(dst);
           }
         } finally {
           fs.rmSync(tmp, { force: true });
         }
       }
-      if (conflict) { out.push({ variant, outcome: 'conflict', detail: `${path.join(to, conflict)} differs from ${path.join(from, conflict)}` }); continue; }
+      if (conflict) {
+        for (const p of published) fs.rmSync(p, { force: true });
+        out.push({ variant, outcome: 'conflict', detail: `${path.join(to, conflict)} differs from ${path.join(from, conflict)}` });
+        continue;
+      }
       if (opts.removeLegacy) for (const f of MODEL_FILES) fs.rmSync(path.join(from, f), { force: true });
-      out.push({ variant, outcome: copied ? 'migrated' : 'identical' });
+      out.push({ variant, outcome: published.length ? 'migrated' : 'identical' });
     } catch (e: any) {
       out.push({ variant, outcome: 'error', detail: e?.message || String(e) });
     }
