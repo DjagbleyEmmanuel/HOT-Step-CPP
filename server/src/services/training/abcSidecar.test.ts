@@ -123,7 +123,7 @@ test('cover transcription fails for all-rest Vocal bars and accepts a sounding b
     const failStem = { ...deps, vocalStem: async () => { throw new Error('separation found no vocals'); } };
     assert.equal(await runYue2CoverSheetJob(noStem, audio, dir, failStem), abc);
     // Nothing sounding anywhere still fails.
-    abc = 'X:1@V: Vocal@Z4|z4|@V: Ins@z4|'.replace('@',String.fromCharCode(92)+'n');
+    abc = ['X:1', 'V: Vocal', 'Z4|z4|', 'V: Ins', 'z4|'].join(String.fromCharCode(10));
     await assert.rejects(runYue2CoverSheetJob(createJob('yue2-sheet', 'fixture', [], {}), audio, dir, failStem),
       /heard no melody in this source, and its vocal rhythm could not be read: separation found no vocals/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
