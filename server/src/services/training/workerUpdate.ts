@@ -13,7 +13,7 @@ import { listJobs } from './labelingQueue.js';
 import { listBatches } from './yue2BatchRunner.js';
 import { listPipelines } from './pipelineRunner.js';
 import { requestWorkerRestart } from '../../routes/shutdown.js';
-import { stopAceServer } from '../aceEngineProcess.js';
+import { stopAllEngines } from '../aceEngineProcess.js';
 import { gpuLaneBusy, gpuLaneDepth } from '../generation/gpuLane.js';
 
 const git = (args: string[], cwd = PROJECT_ROOT) =>
@@ -182,8 +182,8 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
       uiBuild: async () => { log('Building UI', 'ui-build'); await npm(['run', 'build'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
       engineBuild: async () => {
         log('Stopping engine for rebuild', 'engine-build');
-        // ace-server holds the ggml DLLs open; the linker cannot replace them while it runs.
-        if (!await stopAceServer('Worker engine rebuild')) throw new Error('ace-server did not stop before the engine build');
+        // Every ace-server holds the ggml DLLs open; the linker cannot replace them while one runs.
+        if (!await stopAllEngines('Worker engine rebuild')) throw new Error('ace-server did not stop before the engine build');
         log('Building engine', 'engine-build');
         await command(cmds.engineBuild[0], [...cmds.engineBuild[1]], path.join(PROJECT_ROOT, 'engine'), line => log(line)); },
       restart: () => { log('Build complete; requesting restart', 'restarting'); fs.unlinkSync(bundle); bundlePresent = false; requestWorkerRestart(); },

@@ -8,10 +8,12 @@
 import { test, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { EventEmitter } from 'node:events';
 import type { AddressInfo } from 'node:net';
 
 process.env.ACESTEPCPP_HOST = '127.0.0.1';
 process.env.ACESTEPCPP_WORKER_GPUS = '';
+process.env.ACESTEPCPP_EXE = process.execPath;   // the training tests respawn fake engines; it only needs to exist
 
 const { config } = await import('../../config.js');
 const workers = await import('../engineWorkers.js');
@@ -19,7 +21,8 @@ const { setEngineReady } = await import('../../engineState.js');
 const { aceClient } = await import('../aceClient.js');
 const lane = await import('./gpuLane.js');
 type LaneLease = import('./gpuLane.js').LaneLease;
-const { trackBackendRelease, awaitBackendRelease, _resetBackendReleases } = await import('./backendRelease.js');
+const { trackBackendRelease, awaitBackendRelease, releaseOnEveryWorker, _resetBackendReleases } = await import('./backendRelease.js');
+const proc = await import('../aceEngineProcess.js');
 
 function fakeEngine(name: string) {
   return http.createServer((req, res) => {
@@ -66,6 +69,21 @@ beforeEach(() => {
   setEngineReady(true, 'test');
   w1.ready = true;
 });
+
+function fakeChild(): any {
+  const c: any = new EventEmitter();
+  c.stdout = new EventEmitter();
+  c.stderr = new EventEmitter();
+  // No pid: stop() then forgets it as already gone. A real-looking pid would make
+  // stop() taskkill that pid on Windows.
+  c.pid = undefined;
+  c.exitCode = null;
+  c.signalCode = null;
+  c.kill = () => true;
+  return c;
+}
+proc.testHooks.spawn = (() => fakeChild()) as any;
+proc.testHooks.listGpus = () => GPUS;
 
 function deferred() {
   let resolve!: () => void;
@@ -248,5 +266,68 @@ test('backend evictions are per worker', async () => {
   assert.equal(w1Waited, false);
   unload.resolve();
   await w1Wait;
+  _resetBackendReleases();
+});
+
+test('training barrier: suspend waits for every worker and holds the lane until resume', async () => {
+  lane.setWorkerConcurrency(true);
+  const order: string[] = [];
+  const g0 = deferred(), g1 = deferred();
+  const j0 = lane.runOnWorkerLane(async () => { await g0.promise; order.push('w0 job done'); });
+  const j1 = lane.runOnWorkerLane(async () => { await g1.promise; order.push('w1 job done'); });
+  await tick();
+  const suspended = proc.suspendEngines('Paused for test training').then(ok => { order.push(`suspended:${ok}`); });
+  const late = lane.runOnWorkerLane(async l => { order.push(`late job:${l.worker!.id}`); });
+  g0.resolve();
+  await tick(); await tick();
+  assert.deepEqual(order, ['w0 job done'], 'training stopped the engines while w1 was still rendering');
+  g1.resolve();
+  await suspended;
+  await tick();
+  assert.deepEqual(order, ['w0 job done', 'w1 job done', 'suspended:true'], 'a job started on a card during training');
+  assert.equal(proc.isEngineSuspended(), true);
+  assert.equal(w1.ready, false, 'the secondary kept running through training');
+  assert.equal(await proc.resumeEngines(), true);
+  await Promise.all([j0, j1, late]);
+  assert.equal(order.at(-1)?.startsWith('late job:'), true);
+  assert.equal(w1.ready, true);
+});
+
+test('training barrier waits for a YuE2 render released early to drain', async () => {
+  lane.setWorkerConcurrency(true);
+  const order: string[] = [];
+  const render = deferred();
+  const job = lane.runOnWorkerLane(async l => {
+    lane.releaseGpuLane(l);
+    await render.promise;
+    await lane.runOnGpuLane(async l2 => { order.push(`finish:${l2.worker?.id}`); });
+    order.push('render settled');
+  }, { family: 'yue2' });
+  await tick();
+  const suspended = proc.suspendEngines('Paused for test training').then(() => { order.push('suspended'); });
+  await tick(); await tick();
+  assert.deepEqual(order, [], 'training stopped the engine under a draining YuE2 render');
+  render.resolve();
+  await Promise.all([job, suspended]);
+  assert.deepEqual(order, ['finish:w0', 'render settled', 'suspended']);
+  assert.equal(await proc.resumeEngines(), true);
+});
+
+test('a backend switch during a worker job evicts that worker only after the job', async () => {
+  _resetBackendReleases();
+  lane.setWorkerConcurrency(true);
+  const order: string[] = [];
+  const gate = deferred();
+  const onW1 = { eligible: (w: { id: string }) => w.id === 'w1' };
+  const job = lane.runOnWorkerLane(async () => { await gate.promise; order.push('w1 job done'); }, onW1);
+  await tick();
+  releaseOnEveryWorker('mm3', async () => { order.push(`release:${workers.currentWorker().id}:${await engineHit()}`); });
+  await until(() => order.length === 1, 'the idle worker to release');
+  assert.deepEqual(order, ['release:w0:A'], 'the busy worker was evicted mid-job');
+  const next = lane.runOnWorkerLane(async l => { await awaitBackendRelease(); order.push(`next job:${l.worker!.id}`); }, onW1);
+  gate.resolve();
+  await Promise.all([job, next]);
+  await until(() => !lane.gpuLaneBusy(), 'the releases to settle');
+  assert.deepEqual(order, ['release:w0:A', 'w1 job done', 'release:w1:B', 'next job:w1']);
   _resetBackendReleases();
 });

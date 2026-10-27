@@ -29,6 +29,7 @@ import { aceClient } from './aceClient.js';
 import { buildGpuEnv, listGpusSync } from './gpuDevices.js';
 import { currentWorker, engineWorkers, inWorkerScope, primaryWorker, workerById,
          type EngineWorker } from './engineWorkers.js';
+import { gpuLaneBusy, gpuLaneDepth, holdGpuLane } from './generation/gpuLane.js';
 
 /**
  * While the engine waits on an empty models folder, a model copied in by hand
@@ -634,6 +635,39 @@ export function startEngineWorkers(): Promise<boolean[]> {
 export function stopEngineWorkers(reason = 'Engine stopped', timeoutMs = 15_000,
                                   opts: { suspend?: boolean } = {}): Promise<boolean[]> {
   return Promise.all(engineWorkers().filter(w => !w.primary).map(w => engineProcess(w).stop(reason, timeoutMs, opts)));
+}
+
+/** Stop every worker (training, maintenance, shutdown). True when all of them exited. */
+export async function stopAllEngines(reason = 'Engine stopped', timeoutMs = 15_000,
+                                     opts: { suspend?: boolean } = {}): Promise<boolean> {
+  const exited = await Promise.all(engineWorkers().map(w => engineProcess(w).stop(reason, timeoutMs, opts)));
+  return exited.every(Boolean);
+}
+
+/** Lane holds taken by suspendEngines(), handed back in order by resumeEngines(). */
+const trainingHolds: Array<() => void> = [];
+
+/**
+ * Training owns every card (exclusive in v1): wait for all GPU lane work,
+ * including a YuE2 render still draining after its early lane release, then
+ * hold the whole lane and stop every worker, so no job starts on another card
+ * mid-run. resumeEngines() undoes both. Rejects with LaneResetError if the
+ * queue is reset while it waits; nothing has been stopped then.
+ */
+export async function suspendEngines(reason: string): Promise<boolean> {
+  if (gpuLaneBusy() || gpuLaneDepth() > 0) pushLog(`[Engine] ${reason}: waiting for running GPU work to finish`);
+  trainingHolds.push(await holdGpuLane(reason));
+  return stopAllEngines(reason);
+}
+
+/** Restart every worker, then hand the lane back. Answers for the primary, like restartAceServer(). */
+export async function resumeEngines(): Promise<boolean> {
+  try {
+    const [primaryUp] = await Promise.all(engineWorkers().map(w => engineProcess(w).restart()));
+    return primaryUp;
+  } finally {
+    trainingHolds.shift()?.();
+  }
 }
 
 /**

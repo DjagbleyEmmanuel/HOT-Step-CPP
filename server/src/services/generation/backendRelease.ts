@@ -13,6 +13,7 @@
  */
 
 import { currentWorker } from '../engineWorkers.js';
+import { laneWorkers, runOnWorkerLane } from './gpuLane.js';
 
 interface Eviction { family: string; release: () => Promise<void>; done: Promise<void> }
 
@@ -28,6 +29,18 @@ export function trackBackendRelease(family: string, release: () => Promise<void>
   done.catch(() => {});  // observed by awaitBackendRelease; never an unhandled rejection
   pending.set(key, { family, release, done });
   return done;
+}
+
+/** A backend switch: evict the outgoing family on every worker, each in its
+ *  own lease on that worker, so a job already running there finishes first.
+ *  Tracking starts inside the lease, so a render queued ahead of it never
+ *  waits on it (that render evicts other families itself). */
+export function releaseOnEveryWorker(family: string, release: () => Promise<void>): void {
+  for (const worker of laneWorkers()) {
+    runOnWorkerLane(() => trackBackendRelease(family, release),
+      { label: `release ${family}`, eligible: w => w === worker })
+      .catch(err => console.warn(`[backends] releaseVram not confirmed for outgoing '${family}' on ${worker.id}:`, err?.message || err));
+  }
 }
 
 /** Resolve once no eviction is unconfirmed. A failed eviction is tried once

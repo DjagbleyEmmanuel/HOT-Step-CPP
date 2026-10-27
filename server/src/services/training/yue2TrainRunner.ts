@@ -41,7 +41,7 @@ import { spawn } from 'child_process';
 import { pushLog } from '../../routes/logs.js';
 import { buildGpuEnv } from '../gpuDevices.js';
 import { withFfmpegOnPath } from '../../config.js';
-import { restartAceServer, stopAceServer } from '../aceEngineProcess.js';
+import { resumeEngines, suspendEngines } from '../aceEngineProcess.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import type { HeartmulaJobKind } from '../../contracts/heartmulaTraining.js';
 import { aceTrainExe } from './aceTrain.js';
@@ -404,8 +404,8 @@ export async function runYue2AceTrain<S extends RelayState>(
     emitProgress(job);
     log(job, 'info', 'Stopping the engine to free VRAM…');
     // Not gated on a live child: a crashed engine leaves a respawn scheduled and
-    // stopAceServer is what cancels it.
-    engineExited = await stopAceServer(`Paused for ${kind}`);
+    // suspendEngines is what cancels it.
+    engineExited = await suspendEngines(`Paused for ${kind}`);
   } else {
     log(job, 'info', 'Keeping the engine running: generation stays available and shares the GPU with training.');
   }
@@ -508,7 +508,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     emitProgress(job);
     log(job, 'info', 'Restarting the engine…');
     pushLog(`[Training] ${kind} job ${job.id}: restarting the engine…`);
-    const back = await restartAceServer();
+    const back = await resumeEngines();
     if (!back) {
       log(job, 'warn', 'Engine did not answer /health within 90 s — restart the app if generation fails');
     }

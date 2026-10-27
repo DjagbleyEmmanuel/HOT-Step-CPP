@@ -109,7 +109,8 @@ export function resetGpuLane(): number {
   return drained.length;
 }
 
-function workerPool(): EngineWorker[] {
+/** The workers lane leases can land on: every worker with concurrency on, else the primary. */
+export function laneWorkers(): EngineWorker[] {
   return workerConcurrency ? engineWorkers() : [primaryWorker()];
 }
 
@@ -118,7 +119,7 @@ function workerPool(): EngineWorker[] {
  *  of redispatching it forever). */
 function placeWorker(task: Pending): EngineWorker | null | Error {
   if (!workerConcurrency) return slots.size ? null : primaryWorker();
-  const eligible = workerPool().filter(w => !task.eligible || task.eligible(w));
+  const eligible = laneWorkers().filter(w => !task.eligible || task.eligible(w));
   if (!eligible.length) return new Error(`No engine worker can run ${task.label}`);
   const ready = eligible.filter(w => w.ready);
   // A leased worker that is no longer ready settles and pumps again; only give
@@ -213,4 +214,13 @@ export function runOnWorkerLane<T>(
   opts: WorkerLaneOptions = {},
 ): Promise<T> {
   return enqueue(fn, { label: opts.label ?? 'gpu task', family: opts.family, exclusive: false, eligible: opts.eligible });
+}
+
+/** Exclusive like runOnGpuLane, held outside a callback until the returned
+ *  release runs: training owns every card from its engine stop to its restart.
+ *  Rejects with LaneResetError if a reset drops it while it waits. */
+export function holdGpuLane(label: string): Promise<() => void> {
+  return new Promise((held, failed) => {
+    runOnGpuLane(() => new Promise<void>(release => held(release)), { label }).catch(failed);
+  });
 }

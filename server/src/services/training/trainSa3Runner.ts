@@ -4,7 +4,7 @@ import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { config } from '../../config.js';
 import { buildGpuEnv } from '../gpuDevices.js';
-import { restartAceServer, stopAceServer } from '../aceEngineProcess.js';
+import { resumeEngines, suspendEngines } from '../aceEngineProcess.js';
 import { tokenizeForSa3 } from '../sa3Tokenizer.js';
 import { aceTrainExe, buildSa3TrainArgs, engineGpuBackend, resolveSa3Recipe, type Sa3Recipe } from './aceTrain.js';
 import { newRunDir, publishSa3Export, sa3RunsRoot } from './adapterLayout.js';
@@ -211,7 +211,7 @@ export async function executeSa3Train(job: TrainingJob, run: Sa3Run, launch = sp
 
 export interface Sa3RunnerDependencies {
   prepare: typeof prepare; execute: (job: TrainingJob, run: Sa3Run) => Promise<Execution>;
-  stop: typeof stopAceServer; restart: typeof restartAceServer;
+  stop: typeof suspendEngines; restart: typeof resumeEngines;
   publish: typeof publishSa3Export; render: typeof renderSa3Previews;
 }
 
@@ -234,7 +234,7 @@ const sa3Identity = (sha: string) => `stabilityai/stable-audio-3-medium sha256:$
  */
 export async function runSa3TrainJob(job: TrainingJob, injected: Partial<Sa3RunnerDependencies> = {}): Promise<void> {
   if (isCancelled(job)) return;
-  const deps = { prepare, execute: executeSa3Train, stop: stopAceServer, restart: restartAceServer, publish: publishSa3Export,
+  const deps = { prepare, execute: executeSa3Train, stop: suspendEngines, restart: resumeEngines, publish: publishSa3Export,
     render: renderSa3Previews, ...injected };
   const run = job.opts as Sa3Run;
   const preview = run.preview && run.preview.everySteps > 0 && run.preview.prompts.length ? run.preview : undefined;

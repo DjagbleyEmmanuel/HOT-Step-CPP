@@ -229,6 +229,8 @@ import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
 import { onEngineRestarted, retryIfGaveUp, startAceServer, startEngineWorkers, stopAceServer, stopEngineWorkers } from './services/aceEngineProcess.js';
+import { engineWorkers } from './services/engineWorkers.js';
+import { setWorkerConcurrency } from './services/generation/gpuLane.js';
 import { killActiveChildren, recoverStaleJobs } from './services/training/labelingQueue.js';
 
 // ── Required runtime DLL bootstrap ──────────────────────────────────
@@ -402,6 +404,9 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // restore hooks below in its own scope once its /health answers. A no-op
   // with the opt-in empty (the default).
   void startEngineWorkers();
+  // Generations run side by side only with two or more workers; one worker
+  // (the default) keeps the single lane. Placement skips a worker until it is ready.
+  setWorkerConcurrency(engineWorkers().length > 1);
 
   // The engine scans models once at boot, so wait for the whole queue to
   // drain before retrying — retrying after the first file can boot it on a
