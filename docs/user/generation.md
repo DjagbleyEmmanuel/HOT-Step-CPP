@@ -84,6 +84,7 @@ engine falls back to BF16 and the generation log records the filename it loaded.
 |---|---|
 | Format | Filter chips (GGUF, SafeTensors, ONNX), shown when models in more than one format are installed. They only filter the lists; a selected model stays selected when its format is hidden. |
 | DiT Model | The diffusion transformer that turns the plan into audio latents. The main quality and VRAM decision. |
+| Quantization | Shown under DiT Model, LM Model and Text Encoder once a model is installed in more than one quant. The list above picks the model; this one picks its quant. Switching model keeps the same quant when the new model has it. Other backends split a component list the same way when it holds more than one model. |
 | LM Model | The 5 Hz language model that writes metadata, the rewritten caption and the audio codes. |
 | VAE Decoder | Turns latents into audio. Only shown when more than one VAE is installed. |
 | Text Encoder | Only shown when more than one text encoder is installed. |

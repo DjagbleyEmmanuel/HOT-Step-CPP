@@ -23,7 +23,8 @@ import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
-import { ModelSelect } from './ModelSelect';
+import { VariantModelSelect } from './ModelSelect';
+import { splitModel } from './modelLabels';
 import type { Mm3DitRuntime } from './Mm3RendererRow';
 import { Mm3RendererRow } from './Mm3RendererRow';
 
@@ -132,7 +133,7 @@ export const BackendModelsDropdown: React.FC = () => {
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
               rootClassName="block mb-1.5" />
             </label>
-            <ModelSelect
+            <VariantModelSelect
               id={`backend-model-${bucket}`}
               value={current}
               onChange={(v) => void onPick(bucket, v)}
@@ -146,6 +147,10 @@ export const BackendModelsDropdown: React.FC = () => {
               formatLabel={(opt) =>
                 `${opt === 'convrot' ? 'INT8 ConvRot (CUDA)' : opt}${meta[opt]?.bytes ? ` — ${formatBytes(meta[opt].bytes)}` : ''}`}
               placeholder={busy === bucket ? 'Switching…' : 'Select model…'}
+              variantLabel={(v) => v === '' ? t('globalBar.standardVariant', 'Standard')
+                : v === 'convrot' ? 'INT8 ConvRot (CUDA)' : v}
+              quantLabel={(opt) =>
+                `${splitModel(opt).quant || (opt === 'convrot' ? 'INT8' : opt)}${meta[opt]?.bytes ? ` — ${formatBytes(meta[opt].bytes)}` : ''}`}
             />
             {meta[current]?.label && (
               <p className="text-[10px] text-zinc-500 mt-1.5 font-mono truncate">{meta[current].label}</p>
