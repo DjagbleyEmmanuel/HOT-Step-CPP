@@ -140,6 +140,9 @@ interface InternalJob extends DownloadJob {
 
 // ── Service ─────────────────────────────────────────────────
 
+/** A required companion fetched to `tmp`, waiting to be renamed to `dest`. */
+interface Staged { tmp: string; dest: string }
+
 class ModelDownloadService extends EventEmitter {
   private jobs = new Map<string, InternalJob>();
 
@@ -551,7 +554,9 @@ class ModelDownloadService extends EventEmitter {
       }
     }
     const r = this._muscriptorRoots();
-    const dirs = (r.override ? [r.override] : [r.shared, r.legacy]).map(root => path.join(root, variant));
+    // A folder the user pointed MUSCRIPTOR_MODELS_DIR at is theirs: never deleted from.
+    if (r.override) return false;
+    const dirs = [r.shared, r.legacy].map(root => path.join(root, variant));
     let removed = false;
     for (const dir of dirs) {
       for (const name of MODEL_FILES) {
@@ -605,14 +610,17 @@ class ModelDownloadService extends EventEmitter {
     if (fs.existsSync(finalPath)) {
       if (await this._matchesRegistry(finalPath, file)) {
         // A required companion missing beside good weights is fetched now.
+        const staged: Staged[] = [];
         try {
-          await this._fetchRequired(file, targetDir, job);
+          await this._fetchRequired(file, targetDir, job, staged);
+          // A cancel during the config fetch stands; it must not become "completed".
+          if ((job.status as DownloadStatus) === 'cancelled') { this._discardStaged(staged); return; }
+          this._publishStaged(staged);
         } catch (err: any) {
+          this._discardStaged(staged);
           if ((job.status as DownloadStatus) !== 'cancelled') this._failJob(job, file, err);
           return;
         }
-        // A cancel during the config fetch stands; it must not become "completed".
-        if ((job.status as DownloadStatus) === 'cancelled') return;
         job.status = 'completed';
         job.bytesDownloaded = job.totalBytes;
         this.emit('progress');
@@ -660,15 +668,18 @@ class ModelDownloadService extends EventEmitter {
       }
       const url = `https://huggingface.co/${file.repo}/resolve/main/${repoPath}`;
 
+      // Required files are staged as .part first (a denied or gated repo
+      // fails here, in a second, not after the weights have come down) but
+      // published only once the weights are in place: a cancelled or failed
+      // job must not leave a config beside missing weights.
+      const staged: Staged[] = [];
       try {
-        // Required files first: a denied or gated repo fails here, in a
-        // second, not after the weights have come down.
-        await this._fetchRequired(file, targetDir, job);
-        if ((job.status as DownloadStatus) === 'cancelled') return;
+        await this._fetchRequired(file, targetDir, job, staged);
+        if ((job.status as DownloadStatus) === 'cancelled') { this._discardStaged(staged); return; }
 
         await this._downloadWithRedirects(url, partPath, job, startByte);
 
-        if ((job.status as DownloadStatus) === 'cancelled') return;
+        if ((job.status as DownloadStatus) === 'cancelled') { this._discardStaged(staged); return; }
 
         // Validate downloaded file before finalising
         this._validateDownload(partPath, file);
@@ -683,6 +694,7 @@ class ModelDownloadService extends EventEmitter {
         // Rename .part to final
         fs.renameSync(partPath, finalPath);
         if (file.sha256) this._writeSidecar(finalPath, file.sha256);
+        this._publishStaged(staged);
         job.status = 'completed';
         job.speed = 0;
         this.emit('progress');
@@ -695,6 +707,7 @@ class ModelDownloadService extends EventEmitter {
 
         return; // Success — exit retry loop
       } catch (err: any) {
+        this._discardStaged(staged);
         if ((job.status as DownloadStatus) === 'cancelled') return;
 
         const isLastAttempt = attempt === ModelDownloadService.RETRY_DELAYS.length - 1;
@@ -879,8 +892,10 @@ class ModelDownloadService extends EventEmitter {
   /** Fetch the companions marked `required`. Unlike _fetchCompanions this
    *  sends the HF token, validates what arrived, installs it atomically and
    *  throws on any failure, so the job fails instead of reporting a model
-   *  that cannot load. A copy already on disk is kept if it still validates. */
-  private async _fetchRequired(file: RegistryFile, targetDir: string, job: InternalJob): Promise<void> {
+   *  that cannot load. A copy already on disk is kept if it still validates.
+   *  Fetched files stay as validated `.part` files in `staged`; the caller
+   *  publishes them (_publishStaged) or drops them (_discardStaged). */
+  private async _fetchRequired(file: RegistryFile, targetDir: string, job: InternalJob, staged: Staged[]): Promise<void> {
     // cancelDownload aborts job.abortController; every request below carries
     // its signal, and nothing is published once it has fired.
     const signal = (job.abortController ??= new AbortController()).signal;
@@ -895,12 +910,20 @@ class ModelDownloadService extends EventEmitter {
         await this._downloadSimple(`https://huggingface.co/${file.repo}/resolve/main/${c.repoPath || c.filename}`, tmp, job.hfToken, signal);
         if (cancelled()) throw new Error('Download cancelled');
         if (!this._validRequired(tmp)) throw new Error(`${c.filename} from ${file.repo} is not valid`);
-        fs.renameSync(tmp, dest);
+        staged.push({ tmp, dest });
       } catch (err) {
         try { fs.unlinkSync(tmp); } catch {}
         throw err;
       }
     }
+  }
+
+  private _publishStaged(staged: Staged[]): void {
+    for (const { tmp, dest } of staged.splice(0)) fs.renameSync(tmp, dest);
+  }
+
+  private _discardStaged(staged: Staged[]): void {
+    for (const { tmp } of staged.splice(0)) try { fs.unlinkSync(tmp); } catch {}
   }
 
   /** A required companion is usable: present, non-empty, and for JSON, an object. */

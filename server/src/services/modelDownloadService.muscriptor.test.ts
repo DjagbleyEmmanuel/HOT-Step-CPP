@@ -121,9 +121,30 @@ test('a download fetches config.json with the token before the weights, into the
     assert.equal(job.status, 'failed', '7 bytes is nowhere near the declared size');
     assert.match(calls[0], /MuScriptor\/muscriptor-small\/resolve\/main\/config\.json hf_abc$/);
     assert.equal(calls[1], 'weights');
-    assert.ok(fs.existsSync(path.join(sb.shared, 'small', 'config.json')));
+    assert.equal(fs.existsSync(path.join(sb.shared, 'small', 'config.json')), false, 'a failed job publishes no config');
     assert.equal(fs.existsSync(path.join(sb.shared, 'small', 'config.json.part')), false);
   } finally { sb.restore(); }
+});
+
+test('cancelling mid-weights leaves no config.json and no .part', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(r => { release = r; });
+  const sb = sandbox({
+    simple: async (_u, dest) => { fs.writeFileSync(dest, '{"a":1}'); },
+    weights: async (_u, part) => { fs.writeFileSync(part, '12345'); await gate; },
+  });
+  try {
+    const dir = path.join(sb.shared, 'small');
+    const jobId = svc.startDownload('muscriptor-small');
+    for (let i = 0; i < 200 && !fs.existsSync(path.join(dir, 'model.safetensors.part')); i++) await new Promise(r => setTimeout(r, 10));
+    assert.ok(fs.existsSync(path.join(dir, 'config.json.part')), 'config is staged while weights download');
+    assert.equal(fs.existsSync(path.join(dir, 'config.json')), false);
+    assert.equal(svc.cancelDownload(jobId), true);
+    release();
+    await new Promise(r => setTimeout(r, 50));
+    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.deepEqual(installedIds(), []);
+  } finally { release(); sb.restore(); }
 });
 
 test('denied access fails the job on config.json before any weights are requested', async () => {
@@ -236,6 +257,30 @@ test('deleting one model removes only its own files, in shared and legacy', () =
     assert.equal(svc.deleteFile('muscriptor-large'), false, 'nothing there to delete');
     assert.equal(fs.existsSync(path.join(sb.shared, 'large')), false);
   } finally { sb.restore(); }
+});
+
+test('deleting leaves Beat This and other variants alone, and an override directory is never deleted from', () => {
+  const sb = sandbox();
+  try {
+    for (const root of [sb.shared, sb.legacy]) {
+      put(path.join(root, 'small'), { 'model.safetensors': 'w', 'config.json': '{}' });
+      put(path.join(root, 'beat-this'), { 'model.safetensors': 'w', 'config.json': '{}', 'x.txt': 'x' });
+    }
+    assert.equal(svc.deleteFile('muscriptor-small'), true);
+    for (const root of [sb.shared, sb.legacy]) {
+      assert.equal(fs.existsSync(path.join(root, 'small')), false);
+      assert.deepEqual(fs.readdirSync(path.join(root, 'beat-this')).sort(), ['config.json', 'model.safetensors', 'x.txt']);
+    }
+  } finally { sb.restore(); }
+
+  const override = fs.mkdtempSync(path.join(os.tmpdir(), 'muscriptor-ovr-'));
+  const saved = svc._muscriptorRoots;
+  try {
+    put(path.join(override, 'small'), { 'model.safetensors': 'w', 'config.json': '{}' });
+    svc._muscriptorRoots = () => muscriptorRoots(override, path.join(override, 'm'), path.join(override, 'l'));
+    assert.equal(svc.deleteFile('muscriptor-small'), false);
+    assert.deepEqual(fs.readdirSync(path.join(override, 'small')).sort(), ['config.json', 'model.safetensors']);
+  } finally { svc._muscriptorRoots = saved; }
 });
 
 test('a model that is downloading cannot be deleted', () => {
