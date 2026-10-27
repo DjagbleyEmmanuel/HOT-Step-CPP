@@ -75,7 +75,7 @@ export function createYue2CoverService(deps = {
     if (slug) patchLabel(slug, matched.sampleId, { sources: Object.fromEntries(Object.keys(fields).map(field => [field, 'user' as const])) });
   },
   // Keeps the score it replaces, like saveDetails does for the .txt.
-  saveAbc: (matched: CoverDatasetSource, abc: string) => writeAbcSidecar(matched.audioPath, abc, { keepBackups: true }),
+  saveAbc: (matched: CoverDatasetSource, abc: string) => writeAbcSidecar(matched.audioPath, abc, { keepBackups: true, anySounding: true }),
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }) {
   function readiness() {

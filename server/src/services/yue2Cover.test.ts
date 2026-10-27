@@ -72,7 +72,7 @@ function fixture(missing = false, defer = false) {
     },
     saveAbc: ({ audioPath }: { audioPath: string }, abc: string) => {
       if (failAbc) throw new Error('disk full');
-      return writeAbcSidecar(audioPath, abc, { keepBackups: true });
+      return writeAbcSidecar(audioPath, abc, { keepBackups: true, anySounding: true });
     },
     toMp3: async (file: string) => { const out = path.join(root, 'cover-mp3', path.basename(file) + '.mp3'); fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, 'mp3'); return out; },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
@@ -459,6 +459,13 @@ test('an accepted score plan saves lyrics and the revised score with backups, an
     assert.equal(started.status, 'done');
     assert.equal(started.abc, revised.trim());
     assert.equal(f.counts().started, 0);
+
+    // An instrumental score (silent Vocal, sounding Ins) saves and reloads.
+    const instrumental = revised.replace(/^C6\|D6\|$/m, 'Z2|').replace(/^E6\|F6\|$/m, 'Z2|') + ['V: Ins', 'C6|D6|', ''].join(String.fromCharCode(10));
+    const insPlan = await f.service.planScoreSections({ ...input, abc: instrumental, lyrics }, 'owner');
+    const saved = await f.service.saveDatasetDetails({ ...input, lyrics: insPlan.lyrics, abc: instrumental, revision: insPlan.revision }, 'owner') as { abcSaved?: boolean };
+    assert.equal(saved.abcSaved, true);
+    assert.equal(fs.readFileSync(abcFile, 'utf8').trim(), instrumental.trim());
   } finally { f.close(); }
 });
 

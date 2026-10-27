@@ -754,13 +754,20 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
       // Rap, screams: no pitched melody, but the chords, the Ins line and the
       // vocal's rhythm are still worth a cover.
       log(job, 'info', 'The transcriber heard no sung melody; writing the vocal rhythm from the vocal stem on one note.');
-      try { abc = vocalCadenceAbc(abc, readWav(await deps.vocalStem(audioPath))); }
-      catch (err) { throw new Error(`${EMPTY_COVER_SCORE_ERROR}, and its vocal rhythm could not be read: ${err instanceof Error ? err.message : String(err)}`); }
-      if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
-      // The cover job's result is read back from this manifest.
-      const data = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { sources: { name: string; abc?: string }[] };
-      for (const row of data.sources) if (row.name === name) row.abc = abc;
-      fs.writeFileSync(manifest, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 });
+      try {
+        abc = vocalCadenceAbc(abc, readWav(await deps.vocalStem(audioPath)));
+        if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
+        // The cover job's result is read back from this manifest.
+        const data = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { sources: { name: string; abc?: string }[] };
+        for (const row of data.sources) if (row.name === name) row.abc = abc;
+        fs.writeFileSync(manifest, JSON.stringify(data), { encoding: 'utf8', mode: 0o600 });
+      } catch (err) {
+        const why = err instanceof Error ? err.message : String(err);
+        if (isCancelled(job)) throw err;
+        // A sounding Ins line is still a usable instrumental score.
+        if (!hasSoundingScore(abc)) throw new Error(`${EMPTY_COVER_SCORE_ERROR}, and its vocal rhythm could not be read: ${why}`);
+        log(job, 'warn', `The vocal rhythm could not be read (${why}); keeping the instrumental score.`);
+      }
     }
     if (!hasSoundingScore(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     saveDatasetCoverAbc(audioPath, abc);

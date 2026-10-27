@@ -119,7 +119,12 @@ test('cover transcription fails for all-rest Vocal bars and accepts a sounding b
     assert.equal(rapped.status, 'done');
     assert.equal(readYue2CoverAbc(path.join(dir, 'cover-sheet.json'), 'track.wav'), filled);
     const noStem = createJob('yue2-sheet', 'fixture', [], {});
-    await assert.rejects(runYue2CoverSheetJob(noStem, audio, dir, { ...deps, vocalStem: async () => { throw new Error('separation found no vocals'); } }),
+    // Sounding Ins survives a failed separation (production always passes vocalStem).
+    const failStem = { ...deps, vocalStem: async () => { throw new Error('separation found no vocals'); } };
+    assert.equal(await runYue2CoverSheetJob(noStem, audio, dir, failStem), abc);
+    // Nothing sounding anywhere still fails.
+    abc = 'X:1@V: Vocal@Z4|z4|@V: Ins@z4|'.replace('@',String.fromCharCode(92)+'n');
+    await assert.rejects(runYue2CoverSheetJob(createJob('yue2-sheet', 'fixture', [], {}), audio, dir, failStem),
       /heard no melody in this source, and its vocal rhythm could not be read: separation found no vocals/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
