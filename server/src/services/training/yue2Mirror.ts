@@ -310,11 +310,13 @@ async function mirrorRun(w: WorkerInfo, run: MirrorRun, st: WorkerState, errors:
     if (!local || todo.length || local.status !== run.status || local.updatedAt !== run.updatedAt) recordYue2AitkRun(record());
 
     const complete = errors.length === failedBefore && files.every(current);
+    let linked = true;
     if (TERMINAL.has(run.status) && !run.previewsBusy && complete) {
-      linkMirroredRun(ds, run, output);
-      await retire();
+      const linkError = linkMirroredRun(ds, run, output);
+      if (linkError) { errors.push(`${run.folder}: ${linkError}`); linked = false; }
+      else await retire();
     }
-    return run.status === 'running' || run.previewsBusy || !complete ? 'active' : 'idle';
+    return run.status === 'running' || run.previewsBusy || !complete || !linked ? 'active' : 'idle';
   });
 }
 
@@ -322,13 +324,16 @@ async function mirrorRun(w: WorkerInfo, run: MirrorRun, st: WorkerState, errors:
  *  its copy once we have mirrored it, so that link dies with the folder and
  *  pullLinked finds nothing. Link the run's top complete checkpoint here, as
  *  the local job end does, unless this machine already links into the run
- *  (a "Use this rung" pick). */
-function linkMirroredRun(ds: { slug: string; lyricsSetId?: number }, run: MirrorRun, output: string): void {
-  if (run.status !== 'done') return;
+ *  (a "Use this rung" pick). Returns an error text when the run must stay on
+ *  the worker for the next pass. */
+function linkMirroredRun(ds: { slug: string; lyricsSetId?: number }, run: MirrorRun, output: string): string | null {
+  if (run.status !== 'done') return null;
   const have = readYue2Linked()[ds.slug.toLowerCase()];
-  if (have && isInside(output, have.arPath)) return;
+  if (have && isInside(output, have.arPath)) return null;
   const top = checkpointRecords(output).find(c => c.arPath && c.narPath);
-  if (top?.arPath && top.narPath) refreshYue2PresetsForJointCheckpoint(ds, top.arPath, top.narPath);
+  if (!top?.arPath || !top.narPath) return 'done run has no complete checkpoint to link; worker copy kept';
+  const r = refreshYue2PresetsForJointCheckpoint(ds, top.arPath, top.narPath);
+  return r.linked ? null : `could not link the checkpoint (${r.error || 'unknown'}); worker copy kept`;
 }
 
 let started = false;
