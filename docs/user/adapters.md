@@ -207,6 +207,7 @@ between model sizes (XL and 2B): nothing in the app does that.
 
 HeartMuLa does the same for its LM adapters without a home-base picker, because each
 adapter records the variant it was trained on. See [HeartMuLa](backends.md#heartmula).
+YuE2 does it for its AR and NAR adapters the same way, see [YuE2](backends.md#yue2).
 
 ### Per-section adapters
 

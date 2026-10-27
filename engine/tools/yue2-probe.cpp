@@ -5571,8 +5571,8 @@ int main(int argc, char ** argv) {
             }
         } else if (!strcmp(argv[i], "--adapter") && i + 1 < argc) {
             // "<path>", "<path>@<scale>", or the full
-            // "<path>@<scale>,a<attn>,m<mlp>,e<early>,i<mid>,l<late>" that
-            // yue2_adapter_key() renders — so a /yue2/props string pastes
+            // "<path>@<scale>,a<attn>,m<mlp>,e<early>,i<mid>,l<late>[,r<rebase>]"
+            // that yue2_adapter_key() renders — so a /yue2/props string pastes
             // straight back in, dials and all. Every dial is optional and
             // defaults to 1.0; an unparseable tail leaves the path alone
             // (a real filename may contain '@').
@@ -5602,6 +5602,7 @@ int main(int argc, char ** argv) {
                             case 'e': dst = &sc.early; break;
                             case 'i': dst = &sc.mid;   break;
                             case 'l': dst = &sc.late;  break;
+                            case 'r': dst = &sc.rebase; break;
                             default:  ok  = false;     break;
                         }
                         part = part.substr(1);

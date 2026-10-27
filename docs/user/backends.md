@@ -279,6 +279,14 @@ What sets it apart:
   style prompt.
   Single-file adapters from ComfyUI or ai-toolkit load through **Import adapter…**, which
   splits them into the two halves.
+- An adapter trained on another YuE2 variant (a base-model adapter on the YuE2-RS
+  fine-tune, say) is re-based onto the loaded LM, as ACE-Step's Basin Re-base does: the
+  picker tags it with the variant it was trained on, and **Re-base strength (β)**,
+  default 0.75, sets how far the layers it targets move toward that model before it
+  merges. 1 runs them as that model, 0 applies the adapter to the loaded LM unchanged.
+  That variant's LM has to be installed, in any quant; the loaded quant is used when
+  present. Without it the adapter merges unchanged. An adapter that records no training
+  LM counts as trained on the base model.
 - Lyric timestamps come from a forced aligner run after the render, switched on per
   render in the Post-Processing cluster. It needs the `mms-fa-f32.gguf` model.
 

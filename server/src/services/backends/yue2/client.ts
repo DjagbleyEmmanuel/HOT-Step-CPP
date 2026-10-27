@@ -113,7 +113,10 @@ export interface Yue2PropsAdapter {
    *  'ar+nar' family string cannot say that one of the two landed while the
    *  other is still pending. Absent from engines older than the two-slot
    *  picker. */
-  entries?: Array<{ path?: string; family?: string; tensors?: number }>;
+  /** rebase_variant: the variant it was trained on when that is not the loaded
+   *  one ("base" = the base model); rebase_file: the LM it was re-based onto,
+   *  '' when that variant is not installed. */
+  entries?: Array<{ path?: string; family?: string; tensors?: number; rebase_variant?: string; rebase_file?: string }>;
 }
 
 export interface Yue2Props {
@@ -177,6 +180,11 @@ export interface Yue2AdapterScales {
    *  score (plan_only), so the AR can plan at one strength and compose at
    *  another. Server-side only, never a dial on the wire. Absent = `global`. */
   plan?: number;
+  /** Basin re-base beta, 0 to 1: how far the layers an adapter trained on
+   *  another YuE2 variant targets move toward that variant before it merges.
+   *  Absent = the engine's 0.75. Ignored for an adapter trained on the loaded
+   *  variant. */
+  rebase?: number;
 }
 
 /** One adapter in a stack, with its own dials. The engine merges AR and NAR
@@ -589,7 +597,7 @@ export async function yue2Unload(timeoutMs = TIMEOUT_QUICK): Promise<Yue2UnloadR
  *  reads as a different one and costs a needless model reload. */
 export type Yue2AdapterWire = Array<{
   path: string; scale: number; scale_attn: number; scale_mlp: number;
-  scale_early: number; scale_mid: number; scale_late: number;
+  scale_early: number; scale_mid: number; scale_late: number; rebase?: number;
 }> | null;
 
 export function yue2AdapterWire(stack: readonly Yue2AdapterRef[]): Yue2AdapterWire {
@@ -601,6 +609,7 @@ export function yue2AdapterWire(stack: readonly Yue2AdapterRef[]): Yue2AdapterWi
     scale_early: a.scales.early,
     scale_mid: a.scales.mid,
     scale_late: a.scales.late,
+    ...(a.scales.rebase === undefined ? {} : { rebase: a.scales.rebase }),
   }));
 }
 

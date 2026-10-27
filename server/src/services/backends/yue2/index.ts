@@ -114,6 +114,30 @@ function yue2Dial(raw: unknown, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+/** The engine's default basin re-base beta (Yue2LmAdapterScales::rebase). */
+export const YUE2_REBASE_DEFAULT = 0.75;
+
+/** A re-base beta the engine accepts: a dial clamped to 0..1. */
+function yue2Rebase(raw: unknown): number {
+  return Math.min(1, yue2Dial(raw, YUE2_REBASE_DEFAULT));
+}
+
+/** A YuE2 LM variant: the LM file's type minus its quant, '' for the base model
+ *  ('q8_0' -> '', 'rs-4.0x0.7-Q6_K' -> 'rs-4.0x0.7'). Mirrors yue2_lm_variant
+ *  in engine/src/yue2/yue2-adapter.h, which decides whether to re-base. */
+export function yue2LmVariant(type: string): string {
+  const t = type.replace(/-imat$/i, '');
+  const dash = t.lastIndexOf('-');
+  return dash < 0 ? '' : t.slice(0, dash);
+}
+
+/** The variant an adapter was trained on, from its base_sha (the training LM's
+ *  path). An adapter recording none predates the variants: the base model. */
+export function yue2AdapterHome(baseSha: string | undefined): string {
+  const m = /^yue2-lm-(.+)\.gguf$/i.exec(path.basename(baseSha ?? ''));
+  return m ? yue2LmVariant(m[1]) : '';
+}
+
 function yue2ReadScales(key: string): Yue2AdapterScales {
   const base = yue2DefaultScales();
   const raw = getSetting(key, '');
@@ -128,6 +152,7 @@ function yue2ReadScales(key: string): Yue2AdapterScales {
       mid: yue2Dial(parsed.mid, base.mid),
       late: yue2Dial(parsed.late, base.late),
       ...(parsed.plan === undefined ? {} : { plan: yue2Dial(parsed.plan, base.global) }),
+      ...(parsed.rebase === undefined ? {} : { rebase: yue2Rebase(parsed.rebase) }),
     };
   } catch {
     return base;
@@ -239,7 +264,9 @@ function yue2AdapterKey(specs: ReadonlyArray<Yue2AdapterRef>, legacy = false): s
   }
   return specs.map(a => `${a.path}@${a.scales.global.toFixed(4)},a${a.scales.attn.toFixed(4)}`
     + `,m${a.scales.mlp.toFixed(4)},e${a.scales.early.toFixed(4)}`
-    + `,i${a.scales.mid.toFixed(4)},l${a.scales.late.toFixed(4)}`).join('; ');
+    + `,i${a.scales.mid.toFixed(4)},l${a.scales.late.toFixed(4)}`
+    // The engine writes re-base only off its default, so older keys stay as they were.
+    + (a.scales.rebase !== undefined && a.scales.rebase !== YUE2_REBASE_DEFAULT ? `,r${a.scales.rebase.toFixed(4)}` : '')).join('; ');
 }
 
 /** Is this engine old enough to predate the group dials?
@@ -451,6 +478,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     pickedModels[`lm_adapter_${kind}_scale_mid`] = String(slot.scales.mid);
     pickedModels[`lm_adapter_${kind}_scale_late`] = String(slot.scales.late);
     if (slot.scales.plan !== undefined) pickedModels[`lm_adapter_${kind}_scale_plan`] = String(slot.scales.plan);
+    if (slot.scales.rebase !== undefined) pickedModels[`lm_adapter_${kind}_rebase`] = String(slot.scales.rebase);
   }
   return {
     operation: 'text2music',
@@ -1114,6 +1142,9 @@ export type Yue2LmAdapterEntry = NonNullable<BackendModels['lmAdapterMeta']>[str
    *  composes with. */
   styleTemplate?: string;
   captionDropout?: number;
+  /** The YuE2 variant it was trained on, '' = the base model. When it differs
+   *  from the loaded LM's, the engine re-bases it (yue2AdapterHome). */
+  home: string;
 };
 
 /** What the catalogue needs from a run. Structural on purpose: the AR and NAR
@@ -1187,6 +1218,7 @@ function yue2LmAdapterCatalogue(): {
         valLoss: ckpt.valLoss,
         styleTemplate: ckpt.meta?.styleTemplate,
         captionDropout: ckpt.meta?.captionDropout,
+        home: yue2AdapterHome(ckpt.meta?.baseSha),
       };
     }
   }
@@ -1234,6 +1266,7 @@ function yue2LmAdapterCatalogue(): {
           loss: ckpt.loss,
           styleTemplate: fileMeta?.styleTemplate,
           captionDropout: fileMeta?.captionDropout,
+          home: yue2AdapterHome(fileMeta?.baseSha),
         };
       };
       if (ckpt.arPath) add('ar', ckpt.arPath);
@@ -1268,6 +1301,7 @@ function yue2LmAdapterCatalogue(): {
       bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
       styleTemplate: fileMeta?.styleTemplate,
       captionDropout: fileMeta?.captionDropout,
+      home: yue2AdapterHome(fileMeta?.baseSha),
     };
   }
   return { paths, meta };
@@ -1327,6 +1361,9 @@ async function models(): Promise<BackendModels> {
       lmAdapterMerged: props?.adapter?.merged ?? '',
       lmAdapterInForce: props?.adapter?.in_force === true,
       lmAdapterFolder: getSetting(ADAPTER_FOLDER_SETTING, ''),
+      // The picked LM's variant, against which each adapter's `home` decides
+      // whether it re-bases.
+      lmVariant: yue2LmVariant(yue2PickerLmVae(persisted, props ?? null).lm),
     },
     meta,
   };
@@ -1378,6 +1415,7 @@ function slotDefaults(
     out[`lmAdapter${Slot}ScaleMid`] = slot.scales.mid;
     out[`lmAdapter${Slot}ScaleLate`] = slot.scales.late;
     if (slot.scales.plan !== undefined) out[`lmAdapter${Slot}ScalePlan`] = slot.scales.plan;
+    out[`lmAdapter${Slot}Rebase`] = slot.scales.rebase ?? YUE2_REBASE_DEFAULT;
     out[`lmAdapter${Slot}InForce`] = !!slot.path && inForce;
   }
   return out;
@@ -1407,6 +1445,8 @@ function readSlotSelection(
   const planRaw = selection[`lmAdapter${Slot}ScalePlan`];
   const plan = planRaw === undefined ? persisted.scales.plan
     : String(planRaw).trim() === '' ? undefined : yue2Dial(planRaw, persisted.scales.global);
+  const rebaseRaw = selection[`lmAdapter${Slot}Rebase`];
+  const rebase = rebaseRaw === undefined ? persisted.scales.rebase : yue2Rebase(rebaseRaw);
   return {
     given,
     ref: given ? selection[pathKey].trim() : persisted.path,
@@ -1420,6 +1460,7 @@ function readSlotSelection(
       mid: dial('Mid', persisted.scales.mid),
       late: dial('Late', persisted.scales.late),
       ...(plan === undefined ? {} : { plan }),
+      ...(rebase === undefined ? {} : { rebase }),
     },
   };
 }
@@ -1521,6 +1562,7 @@ export function yue2PickFromModels(models: Readonly<Record<string, string>>): Yu
         mid: num(`${key}_scale_mid`, d.mid),
         late: num(`${key}_scale_late`, d.late),
         ...(models[`${key}_scale_plan`] === undefined ? {} : { plan: num(`${key}_scale_plan`, d.global) }),
+        ...(models[`${key}_rebase`] === undefined ? {} : { rebase: yue2Rebase(models[`${key}_rebase`]) }),
       },
     };
   };
