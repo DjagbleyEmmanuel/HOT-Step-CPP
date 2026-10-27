@@ -18,10 +18,10 @@ import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import { isInside, trainingBaseDir } from './paths.js';
 import { getWorker, listWorkers, workerFetch, workerJson, type MirrorRun, type WorkerInfo } from './trainingWorkers.js';
-import { deleteYue2AitkRun, freeYue2RunDirectory, listAllYue2AitkRuns, moveYue2AitkRun, recordYue2AitkRun, withYue2RunLock, yue2RunFinished,
+import { checkpointRecords, deleteYue2AitkRun, freeYue2RunDirectory, listAllYue2AitkRuns, moveYue2AitkRun, recordYue2AitkRun, withYue2RunLock, yue2RunFinished,
   type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, recordYue2JointPreview } from './yue2JointPreview.js';
-import { rebaseYue2JointLinks } from './lyricStudioExport.js';
+import { readYue2Linked, rebaseYue2JointLinks, refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { noteYue2TrainLog, trainLogArchiveDir, trainLogName } from './datasetProfile.js';
 
 export interface MirrorStatus {
@@ -310,9 +310,25 @@ async function mirrorRun(w: WorkerInfo, run: MirrorRun, st: WorkerState, errors:
     if (!local || todo.length || local.status !== run.status || local.updatedAt !== run.updatedAt) recordYue2AitkRun(record());
 
     const complete = errors.length === failedBefore && files.every(current);
-    if (TERMINAL.has(run.status) && !run.previewsBusy && complete) await retire();
+    if (TERMINAL.has(run.status) && !run.previewsBusy && complete) {
+      linkMirroredRun(ds, run, output);
+      await retire();
+    }
     return run.status === 'running' || run.previewsBusy || !complete ? 'active' : 'idle';
   });
+}
+
+/** The worker links a finished run's checkpoint on its own disk, then deletes
+ *  its copy once we have mirrored it, so that link dies with the folder and
+ *  pullLinked finds nothing. Link the run's top complete checkpoint here, as
+ *  the local job end does, unless this machine already links into the run
+ *  (a "Use this rung" pick). */
+function linkMirroredRun(ds: { slug: string; lyricsSetId?: number }, run: MirrorRun, output: string): void {
+  if (run.status !== 'done') return;
+  const have = readYue2Linked()[ds.slug.toLowerCase()];
+  if (have && isInside(output, have.arPath)) return;
+  const top = checkpointRecords(output).find(c => c.arPath && c.narPath);
+  if (top?.arPath && top.narPath) refreshYue2PresetsForJointCheckpoint(ds, top.arPath, top.narPath);
 }
 
 let started = false;

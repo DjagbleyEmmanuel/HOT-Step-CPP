@@ -327,3 +327,17 @@ test('the worker manifest lists weights, meters, logs and previews but never the
     assert.equal((await fetch(base + encodeURIComponent('../album/../album_worker_side/train.jsonl'))).status, 404);
   } finally { server.close(); }
 });
+
+test('a done worker run is linked here once mirrored, so it is offered as an adapter after the worker copy is gone', async () => {
+  const { readYue2Linked } = await import('./lyricStudioExport.js');
+  const fake = await fakeWorker([ladder('job-link', 'album_link', 'done')]);
+  try {
+    await sync('LinkW', fake);
+    assert.deepEqual(fake.deletes, ['job-link']);
+    const run = localRun('LinkW', 'job-link')!;
+    const ckpt = run.checkpoints.find(c => c.step === 10)!;
+    const linked = readYue2Linked().album;
+    assert.equal(linked?.arPath, ckpt.arPath);
+    assert.equal(linked?.narPath, ckpt.narPath);
+  } finally { fake.close(); }
+});
