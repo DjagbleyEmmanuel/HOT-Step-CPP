@@ -266,3 +266,47 @@ test('MIDI Studio and the Model Manager share one job per model', async () => {
     sb.restore();
   }
 });
+
+test('cancelling during the config fetch publishes nothing and the job stays cancelled (fresh and existing weights)', async () => {
+  for (const existing of [false, true]) {
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    let started!: () => void;
+    const inFlight = new Promise<void>(r => { started = r; });
+    let weights = 0;
+    const sb = sandbox({
+      simple: async (_u, dest) => { started(); await gate; fs.writeFileSync(dest, '{"late":true}'); },
+      weights: async () => { weights++; },
+    });
+    try {
+      const dir = path.join(sb.shared, 'small');
+      if (existing) put(dir, { 'model.safetensors': 'w' });
+      const jobId = svc.startDownload('muscriptor-small');
+      await inFlight;
+      assert.equal(svc.cancelDownload(jobId), true);
+      release();
+      await new Promise(r => setTimeout(r, 50));
+      assert.equal(svc.jobs.get(jobId).status, 'cancelled', existing ? 'existing weights' : 'fresh');
+      assert.equal(weights, 0);
+      assert.equal(fs.existsSync(path.join(dir, 'config.json')), false);
+      assert.equal(fs.existsSync(path.join(dir, 'config.json.part')), false);
+      assert.deepEqual(installedIds(), []);
+    } finally { release(); sb.restore(); }
+  }
+});
+
+test('cancel aborts the config request itself, so the busy gate does not release over live I/O', async () => {
+  let aborted = false;
+  const server = http.createServer((req) => { req.on('close', () => { aborted = true; }); /* never answers */ });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const ac = new AbortController();
+  const dest = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'abort-')), 'config.json.part');
+  try {
+    const p = svc._downloadSimple(`http://127.0.0.1:${(server.address() as any).port}/x`, dest, undefined, ac.signal);
+    await new Promise(r => setTimeout(r, 30));
+    ac.abort();
+    await assert.rejects(p);
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(aborted, true);
+  } finally { server.closeAllConnections?.(); server.close(); }
+});

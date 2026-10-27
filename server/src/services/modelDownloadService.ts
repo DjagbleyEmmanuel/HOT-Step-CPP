@@ -608,9 +608,11 @@ class ModelDownloadService extends EventEmitter {
         try {
           await this._fetchRequired(file, targetDir, job);
         } catch (err: any) {
-          this._failJob(job, file, err);
+          if ((job.status as DownloadStatus) !== 'cancelled') this._failJob(job, file, err);
           return;
         }
+        // A cancel during the config fetch stands; it must not become "completed".
+        if ((job.status as DownloadStatus) === 'cancelled') return;
         job.status = 'completed';
         job.bytesDownloaded = job.totalBytes;
         this.emit('progress');
@@ -879,13 +881,19 @@ class ModelDownloadService extends EventEmitter {
    *  throws on any failure, so the job fails instead of reporting a model
    *  that cannot load. A copy already on disk is kept if it still validates. */
   private async _fetchRequired(file: RegistryFile, targetDir: string, job: InternalJob): Promise<void> {
+    // cancelDownload aborts job.abortController; every request below carries
+    // its signal, and nothing is published once it has fired.
+    const signal = (job.abortController ??= new AbortController()).signal;
+    const cancelled = () => signal.aborted || (job.status as DownloadStatus) === 'cancelled';
     for (const c of file.companions ?? []) {
       if (!c.required) continue;
+      if (cancelled()) return;
       const dest = path.join(targetDir, c.filename);
       if (this._validRequired(dest)) continue;
       const tmp = `${dest}.part`;
       try {
-        await this._downloadSimple(`https://huggingface.co/${file.repo}/resolve/main/${c.repoPath || c.filename}`, tmp, job.hfToken);
+        await this._downloadSimple(`https://huggingface.co/${file.repo}/resolve/main/${c.repoPath || c.filename}`, tmp, job.hfToken, signal);
+        if (cancelled()) throw new Error('Download cancelled');
         if (!this._validRequired(tmp)) throw new Error(`${c.filename} from ${file.repo} is not valid`);
         fs.renameSync(tmp, dest);
       } catch (err) {
@@ -911,16 +919,16 @@ class ModelDownloadService extends EventEmitter {
   /** Minimal one-shot download (redirects, no Range/resume, no progress
    *  events) for small companion files. The token, if any, follows
    *  hfAuthHeader's rule on every hop. */
-  private _downloadSimple(url: string, destPath: string, token?: string, redirectCount = 0): Promise<void> {
+  private _downloadSimple(url: string, destPath: string, token?: string, signal?: AbortSignal, redirectCount = 0): Promise<void> {
     if (redirectCount > 5) return Promise.reject(new Error('Too many redirects'));
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
       const transport = parsedUrl.protocol === 'https:' ? https : http;
-      const req = transport.get(parsedUrl, { headers: { 'User-Agent': 'HOT-Step-CPP/1.0', ...hfAuthHeader(parsedUrl, token) } }, (res) => {
+      const req = transport.get(parsedUrl, { headers: { 'User-Agent': 'HOT-Step-CPP/1.0', ...hfAuthHeader(parsedUrl, token) }, signal }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
           const redirectUrl = new URL(res.headers.location, parsedUrl).href;
-          this._downloadSimple(redirectUrl, destPath, token, redirectCount + 1).then(resolve).catch(reject);
+          this._downloadSimple(redirectUrl, destPath, token, signal, redirectCount + 1).then(resolve).catch(reject);
           return;
         }
         if (res.statusCode && res.statusCode >= 400) {
@@ -932,7 +940,9 @@ class ModelDownloadService extends EventEmitter {
         res.pipe(writeStream);
         writeStream.on('finish', () => writeStream.close(() => resolve()));
         writeStream.on('error', reject);
-        res.on('error', reject);
+        // An aborted response never ends the pipe: close the file and settle.
+        res.on('error', err => { writeStream.destroy(); reject(err); });
+        res.on('close', () => { if (!res.complete) { writeStream.destroy(); reject(new Error('Download interrupted')); } });
       });
       req.on('error', reject);
     });
