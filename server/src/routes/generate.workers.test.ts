@@ -70,7 +70,12 @@ gen.setGenerationJobLedgerForTests(ledger);
 const ran: Array<{ id: string; worker: string }> = [];
 const ace = registry.getBackend('ace') as any;
 ace.capabilities = async () => ({ extensions: [] });
+/** Per-test override of the stub; a coalesced follower's turn returns at once, as YuE2's does. */
+let onGenerate: ((job: any, deps: any) => Promise<unknown>) | undefined;
+const done = { endReason: 'succeeded', stages: [], artifacts: [], songIds: [] };
 ace.generate = async (job: any, deps: any) => {
+  if (job.coalescedInto) { ran.push({ id: job.id, worker: `follower:${workers.currentWorker().id}` }); return done; }
+  if (onGenerate) return onGenerate(job, deps);
   ran.push({ id: job.id, worker: workers.currentWorker().id });
   job.aceJobId = `eng-${ran.length}`;
   job.mm3Streaming = true;
@@ -158,4 +163,74 @@ test('concurrency off: jobs queue on the primary, which /status reports', async 
   assert.deepEqual(ran.map(r => r.worker), ['w0', 'w0']);
   gen.cancelGenerationJob(j2);
   await until(() => !lane.gpuLaneBusy(), 'the lane to go idle');
+});
+
+test('a job no worker can take fails with the error and stays failed in the ledger', async () => {
+  lane.setWorkerConcurrency(true);
+  ran.length = 0;
+  let releaseExclusive!: () => void;
+  const exclusive = lane.runOnGpuLane(() => new Promise<void>(r => { releaseExclusive = r; }), { label: 'training' });
+  const id = await submit();
+  // Both cards drop out while the exclusive task holds the lane.
+  setEngineReady(false, 'crashed');
+  table[1].ready = false;
+  try {
+    releaseExclusive();
+    await exclusive;
+    await until(() => gen.getGenerationJob(id)!.status !== 'pending', 'the job to end');
+    const job = gen.getGenerationJob(id)!;
+    assert.equal(job.status, 'failed');
+    assert.match(job.error ?? '', /No engine worker is ready/);
+    await until(() => ledger.get(id)?.status === 'failed', 'the ledger to record the failure');
+    assert.equal(ran.length, 0);
+  } finally {
+    setEngineReady(true, 'test');
+    table[1].ready = true;
+  }
+});
+
+test('batching: a dispatched job is never claimed; followers carry the lead worker and are requeued when handed back', async () => {
+  lane.setWorkerConcurrency(true);
+  ran.length = 0;
+  let lead!: { job: any; deps: any };
+  let releaseLead!: () => void, releaseOther!: () => void;
+  onGenerate = async (job, deps) => {
+    ran.push({ id: job.id, worker: workers.currentWorker().id });
+    // The second job stays "pending" while it prepares, as YuE2's preflight does.
+    if (!lead) { lead = { job, deps }; job.status = 'running'; await new Promise<void>(r => { releaseLead = r; }); }
+    else if (ran.length === 2) await new Promise<void>(r => { releaseOther = r; });
+    else onGenerate = undefined;  // the requeued follower: end as a plain stub job
+    if (job.status === 'running' || job.status === 'pending') job.status = 'succeeded';
+    return done;
+  };
+  try {
+    const j1 = await submit();
+    const j2 = await submit();
+    await until(() => ran.length === 2, 'both jobs dispatched');
+    const j3 = await submit();
+    await new Promise(r => setTimeout(r, 20));
+    const candidates = lead.deps.pendingJobs().map((j: any) => j.id);
+    assert.deepEqual(candidates, [j3], 'a job already dispatched to a worker was offered for coalescing');
+
+    // Claim j3 into the lead's batch, as runYue2Generation does.
+    const f = gen.getGenerationJob(j3)!;
+    f.coalescedInto = j1; lead.deps.assignFollower(f, lead.job); f.status = 'running';
+    assert.equal(ledger.get(j3)?.workerId, lead.job.workerId, 'the running follower must carry the lead worker durably');
+    assert.equal((await callRoute('get', '/status/:id', { id: j3 })).body.workerId, lead.job.workerId);
+
+    // j2's worker frees: j3's own turn runs there and returns at once (it is in a batch).
+    releaseOther();
+    await until(() => ran.some(r => r.id === j3), 'the follower turn');
+    // The batch fails and hands j3 back; it must render on its own afterwards.
+    f.coalescedInto = undefined; lead.deps.assignFollower(f, null); f.status = 'pending';
+    assert.equal(ledger.get(j3)?.workerId, null);
+    releaseLead();
+    await until(() => ran.filter(r => r.id === j3).length === 2, 'the handed-back follower to be requeued');
+    await until(() => !lane.gpuLaneBusy(), 'the lane to go idle');
+    assert.equal(gen.getGenerationJob(j3)!.status, 'succeeded');
+    assert.ok(ledger.get(j3)?.workerId, 'the requeued follower records its own worker');
+    void j2;
+  } finally {
+    onGenerate = undefined;
+  }
 });

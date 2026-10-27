@@ -101,6 +101,9 @@ export interface Yue2GenerationDeps {
   releaseLane?(): boolean;
   nextLaneFamily?(): string | undefined;
   runOnLane?<T>(fn: () => Promise<T>): Promise<T>;
+  /** Bind a claimed follower to this job's engine worker, or unbind one
+   *  handed back to the queue (lead null). */
+  assignFollower?(follower: GenerationJob, lead: GenerationJob | null): void;
 }
 
 /** Mirrors the capability manifest's core.duration (max 360, auto: true). */
@@ -1109,6 +1112,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       const need = Math.max(1, mapped.req.lm_batch_size ?? 1);
       if (songsSoFar + need > maxSongs) continue;
       cand.coalescedInto = job.id;
+      deps.assignFollower?.(cand, job);
       cand.status = 'running';
       cand.stage = 'YuE2: joining a batch...';
       cand.progress = 1;
@@ -1132,6 +1136,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
       m.log('WARNING', `[YuE2] ${reason}; this song goes back to the queue to render on its own`);
       m.job.coalescedInto = undefined;
+      deps.assignFollower?.(m.job, null);
       m.job.status = 'pending';
       m.job.stage = 'Queued';
       m.job.progress = 0;

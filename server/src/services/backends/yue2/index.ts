@@ -1755,6 +1755,7 @@ export const yue2Backend: EngineBackend = {
       releaseLane: ctx.releaseLane,
       nextLaneFamily: ctx.nextLaneFamily,
       runOnLane: ctx.runOnLane,
+      assignFollower: ctx.assignFollower,
     });
     return outcomeFromJob(job);
   },

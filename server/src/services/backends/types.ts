@@ -336,6 +336,9 @@ export interface GenerationContext {
   nextLaneFamily?: () => string | undefined;
   /** Take the lane again for GPU work after releasing it. */
   runOnLane?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** A queued job claimed into this job's batch runs on this job's engine
+   *  worker (lead set); one handed back to the queue has none (lead null). */
+  assignFollower?: (follower: GenerationJob, lead: GenerationJob | null) => void;
 }
 
 export interface ResolvedRequest {
