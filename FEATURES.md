@@ -201,6 +201,7 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 | Genius fetch | Pull an artist's or album's lyrics, or add artists, albums and songs by hand. |
 | Style profiles | An LLM profiles themes, tone and structure; rhyme, meter and vocabulary statistics are computed locally without one. |
 | Lyric generation | Streams new songs from a profile, with an optional subject and count, avoiding subjects, keys and titles used before. |
+| Write Lyrics | Local Ollama writes a complete song from a theme, style, structure or starter lines, without source songs or a learned profile, and saves it under Generated Lyrics. |
 | Refine | An LLM revises lyrics and title, saved as a linked new generation. |
 | Per-backend captions | ACE-Step/YuE2 caption, MiniMax-Music3 Structured Caption and YuE2 planner caption per song. |
 | Caption source picker | Borrow a caption from the album's captioned training tracks. |

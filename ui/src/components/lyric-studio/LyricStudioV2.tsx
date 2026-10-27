@@ -36,6 +36,7 @@ import type { TabId } from './ContentTabs';
 import { SourceLyricsTab } from './SourceLyricsTab';
 import { ProfilesTab } from './ProfilesTab';
 import { WrittenSongsTab } from './WrittenSongsTab';
+import { WriteLyricsTab } from './WriteLyricsTab';
 import { RecordingsTab } from './RecordingsTab';
 import { RenderAcrossModal } from './RenderAcrossModal';
 import type { RenderTarget } from './RenderAcrossModal';
@@ -77,7 +78,7 @@ function buildUrl(artistId?: number, albumId?: number, tab?: TabId): string {
 }
 
 function parseUrl(path: string): { artistId?: number; albumId?: number; tab?: TabId } {
-  const m = path.match(/\/lyric-studio\/artist\/(\d+)(?:\/album\/(\d+)(?:\/(source-lyrics|profiles|written-songs|recordings))?)?/);
+  const m = path.match(/\/lyric-studio\/artist\/(\d+)(?:\/album\/(\d+)(?:\/(source-lyrics|profiles|write-lyrics|written-songs|recordings))?)?/);
   if (!m) return {};
   return {
     artistId: Number(m[1]),
@@ -708,6 +709,10 @@ export const LyricStudioV2: React.FC = () => {
                       <ProfilesTab lyricsSetId={nav.selectedAlbum.id} profiles={profiles}
                         onRefresh={refreshAlbumData} showToast={showToast}
                         profilingModel={modelSelections.profiling} />
+                    )}
+                    {activeTab === 'write-lyrics' && (
+                      <WriteLyricsTab key={nav.selectedAlbum.id} lyricsSetId={nav.selectedAlbum.id}
+                        onRefresh={refreshAlbumData} onViewLyrics={() => handleTabChange('written-songs')} />
                     )}
                     {activeTab === 'written-songs' && (
                       <WrittenSongsTab generations={generations} profiles={profiles}

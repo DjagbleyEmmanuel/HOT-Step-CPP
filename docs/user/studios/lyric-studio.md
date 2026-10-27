@@ -60,6 +60,24 @@ its artist, and from an artist to the artist list.
 
 ## Controls
 
+### Write lyrics from a prompt
+
+Add an artist and an album manually, then open the album's **Write Lyrics**
+tab. Choose a local Ollama model and enter a **Theme**, or paste your own
+**Starter lyrics**. **Style** steers the genre and mood; **Structure** can
+specify section order and length. Both are optional. Configure Ollama's address
+and default model under **Settings > AI Services** first.
+
+Click **Write lyrics**. No Genius token, source songs or learned profile are
+needed. The job continues if you leave the tab, and reopening it reconnects
+to the job. Your brief is kept in this browser for that album.
+
+The completed song saves under **Generated Lyrics**, with a title, tagged
+lyrics and musical caption. A prompt-based profile is saved with it to keep
+the album's normal library relationships. You can edit, refine, send to
+Custom-Gen or render the lyric using the existing controls. This tab writes
+the whole song; it does not regenerate individual sections.
+
 | Control | What it does |
 |---|---|
 | Fetch Lyrics (artist grid's "Add Artist", or an artist's "Add Album") | Pulls songs from Genius by artist name/URL and optional album name/URL, up to a max-songs cap (1-100, default 50). Needs `GENIUS_ACCESS_TOKEN`. |
