@@ -5,7 +5,7 @@ import test from 'node:test';
 // The card imports CSS, which the node loader cannot. Stub it for this file.
 register('data:text/javascript,' + encodeURIComponent(
   'export async function load(url, ctx, next) { if (url.endsWith(".css")) return { format: "module", source: "export default {}", shortCircuit: true }; return next(url, ctx); }'));
-const { createPresetLoadGate } = await import('./Yue2AitkTrainCard');
+const { createPresetLoadGate, baselineFor } = await import('./Yue2AitkTrainCard');
 
 test('a delayed preset response cannot submit the old form through batch or exposed Start', async () => {
   const gate = createPresetLoadGate();
@@ -41,4 +41,16 @@ test('a delayed preset response cannot submit the old form through batch or expo
   startBatch();
   await exposedStart();
   assert.deepEqual(submitted, [200, 200]);
+});
+
+test('DoRA and LoRA baselines carry their own alpha and KL stop, LoKr keeps the recipe defaults (#318)', () => {
+  for (const adapterType of ['dora', 'lora'] as const) {
+    const base = baselineFor({ adapterType, rank: 64 });
+    assert.equal(base.alpha, 64);
+    assert.equal(base.targetKl, 1.4);
+    assert.equal(base.plannerLrScale, 0.3);
+  }
+  const lokr = baselineFor({ adapterType: 'lokr', rank: 64 });
+  assert.equal(lokr.targetKl, 1.0);
+  assert.equal(lokr.plannerLrScale, 0.6);
 });

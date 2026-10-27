@@ -121,6 +121,12 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
 const PRESET_EXCLUDED_KEYS: ReadonlySet<keyof Yue2JointTrainRequest> = new Set([
   'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled', 'gpuUuid',
 ]);
+/** The recipe default for the chosen adapter type: picking LoRA/DoRA fills
+ *  alpha and the KL stop, which are that type's defaults, not edits (#318).
+ *  The adapter type itself still shows as changed. */
+export function baselineFor(f: Pick<Yue2JointTrainRequest, 'adapterType' | 'rank'>): Record<string, unknown> {
+  return { ...DEFAULT_FORM, ...((f.adapterType ?? 'lora') === 'lokr' ? LOKR_STOP : { alpha: f.rank ?? 64, ...LORA_STOP }) } as unknown as Record<string, unknown>;
+}
 function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolean): Partial<Yue2JointTrainRequest> {
   const settings: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(form)) {
@@ -864,10 +870,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // Settings that differ from the recipe defaults, per-run paths excluded
   // (#200). Each one can be reset on its own, or all at once.
   const changedSettings = Object.entries(snapshotPresetSettings(form, lyricTiming))
-    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify((DEFAULT_FORM as unknown as Record<string, unknown>)[key]));
+    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(baselineFor(form)[key]));
   const resetSetting = (key: string) => {
     if (key === 'lyricTiming') { onLyricTimingChange(false); return; }
-    setForm(previous => ({ ...previous, [key]: (DEFAULT_FORM as unknown as Record<string, unknown>)[key] }));
+    setForm(previous => ({ ...previous, [key]: baselineFor(previous)[key] }));
   };
   const resetAllSettings = () => {
     setForm(previous => {
