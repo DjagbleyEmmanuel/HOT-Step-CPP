@@ -82,10 +82,18 @@ const Accordion: React.FC<AccordionProps> = ({
   return (
     <div className={`rounded-xl border transition-all ${activeStyle || 'border-zinc-200 dark:border-white/5 bg-zinc-100/30 dark:bg-zinc-800/30'}`}>
       {/* Header */}
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left"
+        onKeyDown={e => {
+          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            setOpen(o => !o);
+          }
+        }}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer"
       >
         <span className={`flex-shrink-0 ${toggle?.checked ? `text-${accentColor}-400` : 'text-zinc-500'}`}>
           {icon}
@@ -104,7 +112,7 @@ const Accordion: React.FC<AccordionProps> = ({
           size={14}
           className={`text-zinc-500 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`}
         />
-      </button>
+      </div>
 
       {/* Content */}
       {open && (
