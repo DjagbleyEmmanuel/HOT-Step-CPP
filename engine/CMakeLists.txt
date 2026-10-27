@@ -674,6 +674,12 @@ link_ggml_backends(yue2-bf16-round-fuse-metal-test)
 add_executable(yue2-rms-double-round-test tools/yue2-rms-double-round-test.cpp)
 link_ggml_backends(yue2-rms-double-round-test)
 
+# backend-health-test: logic test for the #242 poisoned-backend probe,
+# fault injection (ACE_FAULT_BACKEND_ERROR) and teardown recovery.
+add_executable(backend-health-test tools/backend-health-test.cpp)
+link_ggml_backends(backend-health-test)
+target_compile_definitions(backend-health-test PRIVATE ACE_ENABLE_FAULT_INJECTION)
+
 # yue2-linear-lora-round-test: checks whether removing the seemingly
 # redundant round(ctx, x) in yue2-aitk-graph.h's linear() (LoRA branch)
 # is actually a bit-exact no-op like the rms() fix was -- unlike that
