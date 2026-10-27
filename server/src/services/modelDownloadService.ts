@@ -919,7 +919,10 @@ class ModelDownloadService extends EventEmitter {
   }
 
   private _publishStaged(staged: Staged[]): void {
-    for (const { tmp, dest } of staged.splice(0)) fs.renameSync(tmp, dest);
+    while (staged.length) {
+      fs.renameSync(staged[0].tmp, staged[0].dest);
+      staged.shift(); // an entry leaves the list only once published, so a throw leaves it for _discardStaged
+    }
   }
 
   private _discardStaged(staged: Staged[]): void {

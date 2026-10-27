@@ -283,6 +283,18 @@ test('deleting leaves Beat This and other variants alone, and an override direct
   } finally { svc._muscriptorRoots = saved; }
 });
 
+test('a config that cannot be published fails the job and leaves no .part', async () => {
+  const sb = sandbox({ simple: async (_u, dest) => { fs.writeFileSync(dest, '{"a":1}'); } });
+  try {
+    const dir = path.join(sb.shared, 'small');
+    put(dir, { 'model.safetensors': 'w' });
+    fs.mkdirSync(path.join(dir, 'config.json')); // rename onto a directory throws
+    const job = await settle(svc.startDownload('muscriptor-small'));
+    assert.equal(job.status, 'failed');
+    assert.equal(fs.existsSync(path.join(dir, 'config.json.part')), false);
+  } finally { sb.restore(); }
+});
+
 test('a model that is downloading cannot be deleted', () => {
   const sb = sandbox();
   try {
