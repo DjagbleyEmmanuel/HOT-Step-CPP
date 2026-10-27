@@ -25,16 +25,21 @@ test('restart marker sits in the platform profile, spaces included', () => {
   assert.equal(restartMarker({ XDG_CONFIG_HOME: '/cfg dir' }, 'linux', '/home/jo', posix), '/cfg dir/hot-step/restart-requested');
 });
 
-test('the helper prints the same marker for two app folders sharing one profile', t => {
+test('the helper prints the same marker from two release folders sharing one profile', t => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'hs launcher '));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const profile = path.join(base, 'my profile');
-  const run = () => execFileSync(process.execPath, [path.join(here, 'profile-path.mjs')],
-    { env: { ...process.env, HOT_STEP_PROFILE_DIR: profile }, cwd: path.join(base), encoding: 'utf8' }).trim();
-  const a = run();
-  fs.mkdirSync(path.join(base, 'HOT-Step v2'));
-  assert.equal(run(), a);
+  const run = name => {
+    // A real unpacked release: its own parent folder, its own copy of the helper, its own HOT_STEP_ROOT.
+    const app = path.join(base, `${name} parent`, 'HOT-Step v2');
+    fs.mkdirSync(app, { recursive: true });
+    fs.copyFileSync(path.join(here, 'profile-path.mjs'), path.join(app, 'profile-path.mjs'));
+    return execFileSync(process.execPath, [path.join(app, 'profile-path.mjs')],
+      { env: { ...process.env, HOT_STEP_ROOT: app, HOT_STEP_PROFILE_DIR: profile }, cwd: app, encoding: 'utf8' }).trim();
+  };
+  const a = run('old');
   assert.equal(a, path.join(profile, 'restart-requested'));
+  assert.equal(run('new'), a);
 });
 
 test('launchers set HOT_STEP_ROOT to their own folder and never pin the data root or profile', () => {

@@ -934,7 +934,8 @@ test('locateData: an empty process variable beats the .env file, like dotenv', (
 
 /** A second unpacked release folder (spaces in the name) sharing the fixture's profile. */
 function secondRelease(f: ReturnType<typeof fixture>, name = 'HOT-Step v3 (new)') {
-  const app = path.join(f.base, name);
+  // A different parent folder, so its sibling default differs from the first release's.
+  const app = path.join(f.base, 'second parent', name);
   fs.mkdirSync(path.join(app, 'server', 'data'), { recursive: true });
   for (const n of BUNDLED_DATA_NAMES) fs.writeFileSync(path.join(app, 'server', 'data', n), 'bundled');
   return { app, env: { ...f.env, HOT_STEP_ROOT: app } as NodeJS.ProcessEnv };
@@ -973,6 +974,7 @@ test('a release with a saved pointer ignores its own sibling default and creates
   assert.ok(r.ok);
   assert.equal(r.runtime.dataRoot, elsewhere);
   assert.ok(!fs.existsSync(f.sibling));
+  assert.ok(!fs.existsSync(path.join(f.base, 'second parent', 'HOT-Step-Data')));
 });
 
 test('HOT_STEP_DATA_ROOT beats a healthy pointer without rewriting it; unset, the pointer wins again', async () => {
@@ -1028,7 +1030,7 @@ test('stale drive: a second app folder falls back, then returns to the saved dri
   const logs: string[] = [];
   const away = await resolveRuntime({ env: v3.env, log: m => logs.push(m), skipEngineProbe: true });
   assert.ok(away.ok);
-  assert.equal(away.runtime.dataRoot, path.join(f.base, 'HOT-Step-Data'));
+  assert.equal(away.runtime.dataRoot, path.join(f.base, 'second parent', 'HOT-Step-Data'));
   assert.equal(logs.length, 1);
   assert.ok(logs[0].includes(drive));
   assert.equal(readPointer(f.ptrFile)!.root, drive);
