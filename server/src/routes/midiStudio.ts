@@ -31,10 +31,11 @@ import readline from 'readline';
 import { config } from '../config.js';
 import {
   getHfToken, setHfToken, looksLikeGatedError, aceMidiExe,
-  modelDir, isModelDownloaded, startModelDownload, getModelStates,
+  modelDir, isModelDownloaded, getModelStates,
   MUSCRIPTOR_MODELS, type MuscriptorModel, partialMidiFromEvents,
   BEAT_MODEL, readGrid, alignToAudio, exportArgs, speculativeArgs, type MidiExportOptions,
 } from '../services/muscriptor.js';
+import { modelDownloadService } from '../services/modelDownloadService.js';
 import { parseMidiFile } from '../services/midiParser.js';
 import { engineFormatPath } from '../services/audioConvert.js';
 import { addMidiLyrics } from '../services/midiLyrics.js';
@@ -323,7 +324,7 @@ router.get('/status', (_req: Request, res: Response) => {
     res.json({
       engineAvailable: aceMidiExe() !== null,
       hfTokenSet: getHfToken() !== null,
-      models: getModelStates(),
+      models: getModelStates(m => modelDownloadService.muscriptorState(m)),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -349,7 +350,7 @@ router.post('/models/:size/download', (req: Request, res: Response) => {
     res.status(400).json({ error: `Unknown model '${size}'` });
     return;
   }
-  const r = startModelDownload(size);
+  const r = modelDownloadService.startMuscriptorDownload(size);
   if (!r.started) {
     res.status(409).json({ error: r.error });
     return;

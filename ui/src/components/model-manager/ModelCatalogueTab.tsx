@@ -28,7 +28,7 @@ export const FAMILY_TABS: { id: FamilyTab; label: string }[] = [
   { id: 'shared', label: 'Shared' },
 ];
 
-type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 'supersep' | 'whisper' | 'mm3' | 'moss' | 'yue2' | 'heartmula';
+type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 'supersep' | 'whisper' | 'mm3' | 'moss' | 'yue2' | 'heartmula' | 'muscriptor';
 
 /** Role → family fallback, for entries with no `family` field of their own
  *  (a hand-edited catalogue, or one written before this field existed). Every
@@ -37,7 +37,7 @@ type RoleTab = 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'stablestep' | 's
 const ROLE_FAMILY_FALLBACK: Record<RoleTab, FamilyTab> = {
   dit: 'as1.5', lm: 'as1.5', embedding: 'as1.5', vae: 'as1.5', 'pp-vae': 'as1.5',
   stablestep: 'sa3', supersep: 'shared', whisper: 'shared', moss: 'shared',
-  mm3: 'mm3', yue2: 'yue2', heartmula: 'heartmula',
+  mm3: 'mm3', yue2: 'yue2', heartmula: 'heartmula', muscriptor: 'shared',
 };
 
 /** Family for one registry file, honoring an explicit `family` first. The
@@ -102,6 +102,7 @@ const FAMILY_SECTIONS: Record<FamilyTab, { id: RoleTab; label: string }[]> = {
     { id: 'supersep', label: 'Stem Separation' },
     { id: 'whisper', label: 'Whisper' },
     { id: 'moss', label: 'Captioning (MOSS)' },
+    { id: 'muscriptor', label: 'MIDI Transcription' },
   ],
 };
 
@@ -740,6 +741,7 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
   );
   const mossFiles = useMemo(() => files.filter(f => f.role === 'moss'), [files]);
   const yue2Files = useMemo(() => files.filter(f => f.role === 'yue2'), [files]);
+  const muscriptorFiles = useMemo(() => files.filter(f => f.role === 'muscriptor'), [files]);
 
   const renderSimpleGroup = (roleFiles: RegistryFile[], info?: string) => (
     <div className="space-y-3">
@@ -862,6 +864,8 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
           </div>
         )}
         {activeSection === 'moss' && renderSimpleGroup(mossFiles, ROLE_INFO.moss)}
+        {activeSection === 'muscriptor' && renderSimpleGroup(muscriptorFiles,
+          t('models.muscriptor.info', 'MuScriptor turns audio into multi-instrument MIDI in MIDI Studio, and Beat This! gives it tempo and bar lines. Each model is its weights plus a config.json, and both must be present. The MuScriptor weights are gated on Hugging Face (CC BY-NC 4.0): open the model page, request access, then save a read token in MIDI Studio or on the StableStep tab before you download. Beat This! is not gated. The weights are not mirrored here, and a download you made before this release keeps working where it is.'))}
         {activeSection === 'yue2' && (
           <Yue2Tab
             files={yue2Files}

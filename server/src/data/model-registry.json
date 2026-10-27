@@ -460,6 +460,16 @@
         "stablestep-tokenizer-config",
         "stablestep-special-tokens"
       ]
+    },
+    {
+      "id": "midi-transcription",
+      "family": "shared",
+      "name": "MIDI Transcription",
+      "description": "MuScriptor Small plus Beat This! for MIDI Studio (about 490 MB). MuScriptor is gated on Hugging Face: request access on its model page and save a read token before downloading. Medium and Large are optional.",
+      "fileIds": [
+        "muscriptor-small",
+        "muscriptor-beat-this"
+      ]
     }
   ],
   "files": [
@@ -9661,6 +9671,96 @@
         },
         {
           "filename": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "muscriptor-small",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/small",
+      "muscriptorModel": "small",
+      "displayName": "MuScriptor Small",
+      "quant": "",
+      "sizeBytes": 411888600,
+      "repo": "MuScriptor/muscriptor-small",
+      "description": "Fast audio-to-MIDI transcription (412 MB). Also the draft model that speeds up Large. Gated on Hugging Face (CC BY-NC 4.0): request access on the model page and save a read token first. Not mirrored by this project.",
+      "tags": [
+        "recommended",
+        "gated"
+      ],
+      "companions": [
+        {
+          "filename": "config.json",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "muscriptor-medium",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/medium",
+      "muscriptorModel": "medium",
+      "displayName": "MuScriptor Medium",
+      "quant": "",
+      "sizeBytes": 1228144472,
+      "repo": "MuScriptor/muscriptor-medium",
+      "description": "Balanced audio-to-MIDI transcription (1.2 GB). Gated on Hugging Face (CC BY-NC 4.0): request access on the model page and save a read token first. Not mirrored by this project.",
+      "tags": [
+        "gated"
+      ],
+      "companions": [
+        {
+          "filename": "config.json",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "muscriptor-large",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/large",
+      "muscriptorModel": "large",
+      "displayName": "MuScriptor Large",
+      "quant": "",
+      "sizeBytes": 5465642136,
+      "repo": "MuScriptor/muscriptor-large",
+      "description": "Most accurate audio-to-MIDI transcription (5.5 GB). Gated on Hugging Face (CC BY-NC 4.0): request access on the model page and save a read token first. Not mirrored by this project.",
+      "tags": [
+        "gated"
+      ],
+      "companions": [
+        {
+          "filename": "config.json",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "muscriptor-beat-this",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/beat-this",
+      "muscriptorModel": "beat-this",
+      "displayName": "Beat This!",
+      "quant": "",
+      "sizeBytes": 81029488,
+      "repo": "safe-models/beat-this-final0",
+      "description": "Beat and downbeat tracking that gives transcribed MIDI its tempo, time signature and bar lines (81 MB). MIT licence, not gated.",
+      "tags": [
+        "recommended"
+      ],
+      "sha256": "f758c77ba5d862cad3718a95705964e9af55298b1fb3544c62c9d79184ea0f2e",
+      "companions": [
+        {
+          "filename": "config.json",
+          "required": true
         }
       ]
     }

@@ -27,7 +27,7 @@ export function useModelRegistry() {
 
   const installedFiles = useMemo(() => {
     if (!registry) return new Set<string>();
-    return new Set(registry.files.filter(f => f.installed).map(f => f.filename));
+    return new Set(registry.files.filter(f => f.installed).map(f => f.id));
   }, [registry]);
 
   const getFile = useCallback((id: string): RegistryFile | undefined => {

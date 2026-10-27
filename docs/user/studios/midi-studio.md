@@ -63,7 +63,7 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Choose from Library | Search your [library](library.md) and pick a track with audio as the transcription source. |
 | Upload from PC | Upload a local `.wav`, `.mp3` or `.flac` as the source (same as dragging a file onto the panel). FLAC is converted to WAV before transcription. |
 | Transcription model | `small` (103M, fastest, runs on CPU), `medium` (307M, balanced, GPU recommended), or `large` (1.4B, best quality, GPU required). |
-| Download weights | Downloads the selected model's gated weights from Hugging Face using your saved token. Shows live progress; needs a saved token first. |
+| Download weights | Downloads the selected model's gated weights and its `config.json` from Hugging Face using your saved token. Shows live progress; needs a saved token first. It is the same download as Model Manager > Shared > MIDI Transcription, so starting it in one place shows progress in both. |
 | Transcribe to MIDI | Queues a transcription job for the selected source and model. Disabled until a source is picked and that model's weights are downloaded. |
 | Transcriptions list | Every job, newest first: queued/transcribing status with chunk progress, or a done/failed result. Jobs persist to disk and survive an app restart. |
 | Preview piano roll (chevron) | Expands the finished job into the piano-roll player. A failed job that kept a partial `.mid` has it too. |
@@ -119,4 +119,4 @@ stopped are left out.
 
 ## Release data paths
 
-Release MuScriptor tokens and preserved optional-install files live under `<data folder>/library/muscriptor`, with weights under `library/models/muscriptor` unless overridden. The shipped `ace-midi` stays in the app. Upgrading reuses downloaded weights; preserved optional Python environments may need rebuilding after relocation. See [Data folder and upgrades](../data-folder.md).
+Release MuScriptor tokens and preserved optional-install files live under `<data folder>/library/muscriptor`, with weights under `models/muscriptor` (shared with the other models) unless overridden. Weights downloaded by an earlier release under `library/models/muscriptor` keep working there. The shipped `ace-midi` stays in the app. Upgrading reuses downloaded weights; preserved optional Python environments may need rebuilding after relocation. See [Data folder and upgrades](../data-folder.md).

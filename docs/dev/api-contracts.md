@@ -668,7 +668,13 @@ copies of the same shape — exactly the bug class shared contracts exist to pre
   `POST /download/:id/resume` both return `DownloadStartResponse`
   (`{ jobId }`); `GET /downloads` streams `{ jobs: DownloadJob[] }` frames (unauthenticated, via
   `eventSourceUrl`/`sharedEventSource`); `POST /download/:id/cancel` and
-  `DELETE /files/:filename` are untyped `{ ok: boolean }` acks, unchanged. `ui/src/types.ts`
+  `DELETE /files/:filename` are untyped `{ ok: boolean }` acks, unchanged. The MuScriptor and
+  Beat This! entries (`role: 'muscriptor'`, `muscriptorModel`) all ship a `model.safetensors`,
+  so they are installed, downloaded and deleted by exact path: their `installed` flag needs
+  weights and `config.json` together, and `DELETE /files/:key` takes the entry `id` for them
+  (the file name is ambiguous). A `companions` entry with `required: true` is fetched with the
+  token, validated and installed atomically, and its failure fails the job. MIDI Studio's
+  download button starts the same job. `ui/src/types.ts`
   previously kept a second, hand-written `RegistryFile`/`StarterPack` pair that was missing
   `repoPath`, `sha256` and `companions`, and a `ModelRegistry` missing `variant` and `cudaMajor`
   — nothing currently reads those gaps, but a future consumer would have silently gotten

@@ -15,10 +15,7 @@
 
 import path from 'path';
 import fs from 'fs';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
 import { config } from '../config.js';
-import { registerBusyCheck } from '../dataroot/pointer.js';
 import { muscriptorRoots, resolveModelDir, targetRoot } from './muscriptorPaths.js';
 
 export const MUSCRIPTOR_DIR = path.join(config.data.dir, 'muscriptor');
@@ -108,12 +105,14 @@ export interface ModelDownloadState {
   gated?: boolean;
 }
 
-const downloads = new Map<DownloadableModel, ModelDownloadState>();
+/** Live download progress for one model, supplied by the caller so this module
+ *  holds no download state: the jobs live in the Model Manager's service. */
+export type ModelDownloadLookup = (m: DownloadableModel) => ModelDownloadState | undefined;
 
-export function getModelStates(): Record<string, ModelDownloadState & { downloaded: boolean; sizeBytes: number }> {
+export function getModelStates(lookup: ModelDownloadLookup): Record<string, ModelDownloadState & { downloaded: boolean; sizeBytes: number }> {
   const out: Record<string, any> = {};
   for (const m of [...MUSCRIPTOR_MODELS, BEAT_MODEL] as DownloadableModel[]) {
-    const dl = downloads.get(m);
+    const dl = lookup(m);
     let sizeBytes = 0;
     const downloaded = isModelDownloaded(m);
     if (downloaded) {
@@ -131,65 +130,6 @@ export function getModelStates(): Record<string, ModelDownloadState & { download
   }
   return out;
 }
-
-async function fetchToFile(url: string, token: string | null, dest: string,
-                           onProgress?: (received: number, total: number) => void): Promise<void> {
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  const res = await fetch(url, { headers, redirect: 'follow' });
-  if (!res.ok || !res.body) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} fetching ${url}: ${body.slice(0, 300)}`);
-  }
-  const total = parseInt(res.headers.get('content-length') || '0', 10);
-  let received = 0;
-  const src = Readable.fromWeb(res.body as any);
-  src.on('data', (chunk: Buffer) => {
-    received += chunk.length;
-    onProgress?.(received, total);
-  });
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  const tmp = dest + '.part';
-  await pipeline(src, fs.createWriteStream(tmp));
-  fs.renameSync(tmp, dest);
-}
-
-/**
- * Begin downloading a model's config.json + model.safetensors from its gated
- * HF repo. Fire-and-poll: progress via getModelStates(). Single-flight.
- */
-export function startModelDownload(m: DownloadableModel): { started: boolean; error?: string } {
-  if (downloads.get(m)?.downloading) return { started: false, error: 'Download already in progress' };
-  if (isModelDownloaded(m)) return { started: false, error: 'Already downloaded' };
-
-  const state: ModelDownloadState = { downloading: true, receivedBytes: 0, totalBytes: 0 };
-  downloads.set(m, state);
-  const token = getHfToken();
-  const base = `https://huggingface.co/${HF_MODEL_REPOS[m]}/resolve/main`;
-  // Downloads go to the target root, never the legacy folder.
-  const dest = path.join(MODELS_DIR, m);
-
-  (async () => {
-    try {
-      console.log(`[MidiStudio] Downloading ${m} weights from ${HF_MODEL_REPOS[m]}`);
-      await fetchToFile(`${base}/config.json`, token, path.join(dest, 'config.json'));
-      await fetchToFile(`${base}/model.safetensors`, token, path.join(dest, 'model.safetensors'),
-        (received, total) => { state.receivedBytes = received; state.totalBytes = total; });
-      console.log(`[MidiStudio] ${m} weights downloaded (${(state.receivedBytes / 1e9).toFixed(2)} GB)`);
-    } catch (err: any) {
-      state.error = err.message || 'Download failed';
-      state.gated = looksLikeGatedError(state.error ?? '');
-      console.error(`[MidiStudio] ${m} download FAILED: ${state.error}`);
-    } finally {
-      state.downloading = false;
-    }
-  })();
-
-  return { started: true };
-}
-
-registerBusyCheck('muscriptor-downloads', () => [...downloads.entries()]
-  .filter(([, s]) => s.downloading)
-  .map(([m]) => `downloading MuScriptor ${m}`));
 
 // ── Beat grid (ace-midi --beats-out) ─────────────────────────────────────
 
