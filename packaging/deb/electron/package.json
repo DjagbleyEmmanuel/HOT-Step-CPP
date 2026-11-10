@@ -1,0 +1,10 @@
+{
+  "name": "hot-step-cpp-desktop",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Standalone desktop shell for HOT-Step CPP",
+  "main": "src/main.js",
+  "dependencies": {
+    "electron": "44.7.2"
+  }
+}

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=HOT-Step CPP
+GenericName=AI Music Generator
+Comment=Generate music locally with AI: caption and lyrics in, stereo audio out
+Exec=hot-step
+TryExec=hot-step
+Icon=hot-step-cpp
+Terminal=false
+Categories=AudioVideo;Audio;Music;AudioVideoEditing;
+Keywords=music;ai;generation;song;audio;acestep;composer;stem;
+StartupNotify=true
+StartupWMClass=hot-step-cpp
+# Bind to localhost only by default; see /etc/hot-step-cpp/hot-step.env.
+X-HOT-Step-Models=/var/lib/hot-step-cpp/models

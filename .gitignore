@@ -36,6 +36,7 @@ logs/
 # Engine build artifacts
 engine/acestep.cpp/
 engine/build/
+engine/build-deb/
 engine/deps/
 engine/.cache/
 
@@ -168,6 +169,9 @@ scratch/
 toinstall/
 # Co-dev outbound folder (modified plugin copies to send back)
 tosend/
+
+# Debian package output (build-deb.sh writes the .deb here)
+packaging/deb/out/
 
 # Release build artifacts (but keep scripts and configs)
 release/staging/

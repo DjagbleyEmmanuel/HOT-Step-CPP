@@ -1,0 +1,35 @@
+#!/bin/sh
+# postrm - hot-step-cpp
+set -e
+
+PREFIX=/opt/hot-step-cpp
+STATE=/var/lib/hot-step-cpp
+
+case "$1" in
+    purge)
+        # Remove the symlinks first. dpkg removes the package's own files from
+        # /opt automatically, but these symlinks are created by the postinst and
+        # point into /var/lib, which is a state directory dpkg does not own.
+        rm -f "$PREFIX/.env" "$PREFIX/logs" "$PREFIX/.restart-requested" \
+              "$PREFIX/data" "$PREFIX/models" "$PREFIX/adapters"
+
+        # Everything the user actually produced: model weights, generated songs,
+        # the SQLite database, training runs and logs. Only gone on purge.
+        rm -rf "$STATE"
+
+        echo "hot-step-cpp: purged. Models, songs and logs were deleted."
+        echo "               Removing without 'purge' keeps them in $STATE."
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # State is deliberately left in place: a package removal should not
+        # delete gigabytes of downloaded models and the user's songs.
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

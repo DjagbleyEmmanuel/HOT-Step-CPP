@@ -1,0 +1,36 @@
+#!/bin/sh
+# prerm - hot-step-cpp
+set -e
+
+STATE=/var/lib/hot-step-cpp
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop the app if it is running. Killing it matters on upgrade: the next
+        # version's node binary replaces the file the running process is using,
+        # and a live server keeps its SQLite database open under /var/lib.
+        if pgrep -f "hot-step-cpp/server/server.mjs" >/dev/null 2>&1; then
+            echo "hot-step-cpp: stopping the running app..."
+            pkill -f "hot-step-cpp/server/server.mjs" || true
+            # Give it a moment to close the database cleanly.
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                pgrep -f "hot-step-cpp/server/server.mjs" >/dev/null 2>&1 || break
+                sleep 1
+            done
+            pkill -9 -f "hot-step-cpp/server/server.mjs" >/dev/null 2>&1 || true
+        fi
+
+        # The engine is a child process with its own PID; it does not exit on
+        # its own when the server goes away.
+        if pgrep -x "ace-server" >/dev/null 2>&1; then
+            pkill -x "ace-server" >/dev/null 2>&1 || true
+        fi
+        ;;
+
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

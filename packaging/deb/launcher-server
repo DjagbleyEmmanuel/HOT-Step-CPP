@@ -1,0 +1,131 @@
+#!/bin/sh
+# hot-step-server - headless launcher for HOT-Step CPP.
+#
+# Shipped as /usr/bin/hot-step-server by the hot-step-cpp Debian package.
+# Starts the Node server, which serves the UI on http://localhost:3001 and
+# spawns the C++ engine (ace-server) on 127.0.0.1:8085.
+
+set -e
+
+PREFIX=/opt/hot-step-cpp
+STATE=/var/lib/hot-step-cpp
+SYSTEM_CONFIG=/etc/hot-step-cpp/hot-step.env
+
+OPEN_BROWSER=1
+
+for arg in "$@"; do
+    case "$arg" in
+        --no-browser) OPEN_BROWSER=0 ;;
+        -h|--help)
+            cat <<'EOF'
+Usage: hot-step [options]
+
+Starts HOT-Step CPP and opens http://localhost:3001 in your browser.
+
+Options:
+  --no-browser   Start the server without opening a browser window
+  -h, --help     Show this message
+
+Files:
+  /opt/hot-step-cpp/            Application (read-only)
+  /var/lib/hot-step-cpp/        Models, songs, database, logs
+  /etc/hot-step-cpp/hot-step.env   System configuration (edit with sudo)
+EOF
+            exit 0
+            ;;
+        *)
+            echo "hot-step: unknown option '$arg' (try --help)" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [ ! -x "$PREFIX/runtime/bin/node" ] || [ ! -f "$PREFIX/server/boot.mjs" ]; then
+    echo "hot-step: HOT-Step CPP is not installed correctly under $PREFIX." >&2
+    echo "         Reinstall the hot-step-cpp package." >&2
+    exit 1
+fi
+
+# The app resolves every path from HOT_STEP_ROOT (server/src/config.ts), which
+# must be the /opt tree: that is where engine/, ui/, plugins/ and server/ live.
+export HOT_STEP_ROOT="$PREFIX"
+
+# Upstream's data-root subsystem defaults the data folder to
+# <parent of app>/HOT-Step-Data, which under /opt is read-only and makes the app
+# refuse to start. Pin it to the Debian state directory; must agree with
+# launcher-desktop and the Electron shell's serverEnv().
+export HOT_STEP_DATA_ROOT="$STATE"
+export HOT_STEP_PROFILE_DIR="$STATE/profile"
+
+# System configuration. /etc/hot-step-cpp/hot-step.env is parsed into the
+# environment, because dotenv does not override a variable that already exists
+# there. That file is deliberately minimal: it holds only settings the Settings
+# screen must not be able to change (bind addresses), so paths, ports, API keys,
+# the LLM provider and GPU selection stay user-editable in the app.
+if [ -r "$SYSTEM_CONFIG" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        key="${line%%=*}"
+        val="${line#*=}"
+        # Trim whitespace around the key, then surrounding quotes from the value.
+        key="$(printf '%s' "$key" | tr -d '[:space:]')"
+        case "$key" in
+            ''|[0-9]*) continue ;;
+        esac
+        case "$val" in
+            \"*\") val="${val#\"}"; val="${val%\"}" ;;
+            \'*\') val="${val#\'}"; val="${val%\'}" ;;
+        esac
+        export "$key=$val"
+    done < "$SYSTEM_CONFIG"
+fi
+
+# Nothing else is exported here on purpose.
+#
+# The writable paths do not need pinning. /opt/hot-step-cpp/{data,models,
+# adapters,logs} are symlinks into /var/lib/hot-step-cpp (created by postinst),
+# so the app's own defaults - DATA_DIR=./data, ACESTEPCPP_MODELS=./models -
+# already resolve somewhere writable. That matters because DATA_DIR,
+# ACESTEPCPP_MODELS, ACESTEPCPP_ADAPTERS, SERVER_PORT and LYRICS_EXPORT_DIR
+# are all Settings-screen fields: exporting them here would silently make the
+# Settings screen unable to save them.
+#
+# To point the app at model weights that live somewhere else, either use
+# Settings > Environment > ACESTEPCPP_MODELS, or set it in
+# /etc/hot-step-cpp/hot-step.env.
+
+mkdir -p "$STATE/models" "$STATE/adapters" "$STATE/data" "$STATE/logs" 2>/dev/null || true
+
+# Make sure the state is ours before the app starts writing to it.
+if [ ! -w "$STATE" ]; then
+    echo "hot-step: $STATE is not writable by $(id -un)." >&2
+    echo "         Fix with: sudo chown -R $(id -un):$(id -gn) $STATE" >&2
+    exit 1
+fi
+
+if [ "$OPEN_BROWSER" = "1" ] && command -v xdg-open >/dev/null 2>&1; then
+    ( sleep 5; xdg-open "http://localhost:3001" >/dev/null 2>&1 || true ) &
+fi
+
+# The app asks for a restart by writing <PROJECT_ROOT>/.restart-requested, which
+# is a symlink into $STATE. Check and clear the real file so the symlink
+# survives (removing the symlink would break every restart after the first).
+RESTART_MARKER="$STATE/.restart-requested"
+
+while :; do
+    # `|| status=$?` keeps `set -e` from killing the loop on a clean exit code
+    # from the app (it exits non-zero on SIGINT and on /api/shutdown).
+    status=0
+    "$PREFIX/runtime/bin/node" "$PREFIX/server/boot.mjs" || status=$?
+
+    if [ -f "$RESTART_MARKER" ]; then
+        rm -f "$RESTART_MARKER"
+        echo "hot-step: restarting..."
+        continue
+    fi
+    break
+done
+
+exit $status

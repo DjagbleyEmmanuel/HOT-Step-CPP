@@ -1,0 +1,150 @@
+#!/bin/sh
+# postinst - hot-step-cpp
+set -e
+
+PREFIX=/opt/hot-step-cpp
+STATE=/var/lib/hot-step-cpp
+
+case "$1" in
+    configure)
+        # The Debian package installs application files under /opt and leaves
+        # them root-owned. The app, however, is a single-user desktop app run as
+        # the person who installed it: it needs to write its database, songs and
+        # logs. So the state directory belongs to the invoking user.
+        #
+        # Finding that user is the whole problem. sudo and doas put them in the
+        # environment, but a GUI package manager (GNOME Software, KDE Discover,
+        # aptkit) runs this script as root with neither SUDO_USER nor
+        # PKEXEC_UID. If we fall back to root there - as this script used to -
+        # the state is root-owned and every menu launch dies instantly with
+        # "not writable by <user>" (the launcher refuses rather than corrupting
+        # a root-owned database). So walk the possibilities in order, and only
+        # use root when there is no real user to be found.
+        is_real_user() {
+            [ -n "${1:-}" ] || return 1
+            case "$1" in root) return 1 ;; esac
+            id "$1" >/dev/null 2>&1 || return 1
+            uid="$(id -u "$1" 2>/dev/null)" || return 1
+            # System accounts (daemon, nobody, ...) must never own user state.
+            [ "$uid" -ge 1000 ] || return 1
+            return 0
+        }
+
+        owner=""
+        # Keep the owner already running the app across upgrades.
+        if [ -d "$STATE" ]; then
+            previous="$(stat -c '%U' "$STATE" 2>/dev/null || true)"
+            if is_real_user "$previous"; then owner="$previous"; fi
+        fi
+        # sudo / doas hand the invoking user over in the environment.
+        for candidate in "${SUDO_USER:-}" "${DOAS_USER:-}"; do
+            if [ -z "$owner" ] && is_real_user "$candidate"; then owner="$candidate"; fi
+        done
+        # pkexec passes the caller's uid instead of a name.
+        if [ -z "$owner" ] && [ -n "${PKEXEC_UID:-}" ]; then
+            candidate="$(id -nu "$PKEXEC_UID" 2>/dev/null || true)"
+            if is_real_user "$candidate"; then owner="$candidate"; fi
+        fi
+        # PackageKit has no invoking user in the environment: use the active
+        # graphical login. This is the case that broke GUI installs.
+        if [ -z "$owner" ] && command -v loginctl >/dev/null 2>&1; then
+            for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+                state="$(loginctl show-session "$sid" -p State --value 2>/dev/null || true)"
+                [ "$state" = active ] || continue
+                candidate="$(loginctl show-session "$sid" -p Name --value 2>/dev/null || true)"
+                if is_real_user "$candidate"; then owner="$candidate"; break; fi
+            done
+        fi
+        # No logind (containers, minimal installs): the owner of the only
+        # human runtime directory is the person at the machine.
+        if [ -z "$owner" ]; then
+            for d in /run/user/*; do
+                [ -d "$d" ] || continue
+                candidate="$(stat -c '%U' "$d" 2>/dev/null || true)"
+                if is_real_user "$candidate"; then owner="$candidate"; break; fi
+            done
+        fi
+        [ -n "$owner" ] || owner=root
+        group="$(id -gn "$owner" 2>/dev/null || echo root)"
+
+        # Upstream's data-root subsystem (server/src/dataroot/paths.ts,
+        # dataLayout) lays the data folder out like this. The app creates these
+        # itself on first run, but seeding them here gets the ownership right
+        # before it tries, so it cannot fail with EACCES.
+        # Listed one at a time: this runs under /bin/sh (dash), which has no
+        # brace expansion.
+        for d in library models adapters settings logs tools profile plugins tmp cache; do
+            mkdir -p "$STATE/$d"
+        done
+
+        # The settings file moved to <data root>/settings/.env with the
+        # data-root subsystem. Carry a 1.4.0-era one across rather than making
+        # the user re-enter their API keys.
+        if [ ! -e "$STATE/settings/.env" ] && [ -e "$STATE/.env" ]; then
+            mv "$STATE/.env" "$STATE/settings/.env"
+            echo "hot-step-cpp: moved settings to $STATE/settings/.env"
+        fi
+        if [ ! -e "$STATE/settings/.env" ]; then
+            cp "$PREFIX/.env.example" "$STATE/settings/.env"
+            echo "hot-step-cpp: created $STATE/settings/.env"
+        fi
+
+        # /opt stays read-only. A 1.4.0-era install resolved these relative to
+        # the app folder, and the data-root subsystem inspects exactly these
+        # paths to find an old install to migrate, so keep them pointing into
+        # /var/lib rather than creating real directories in /opt.
+        ln -sfn "$STATE/settings/.env" "$PREFIX/.env"
+        ln -sfn "$STATE/logs" "$PREFIX/logs"
+        ln -sfn "$STATE/.restart-requested" "$PREFIX/.restart-requested"
+
+        # These three DO have environment variables, but the app's defaults are
+        # all relative to PROJECT_ROOT (./data, ./models, ./adapters), so a
+        # symlink makes the default land in /var/lib without the launcher
+        # having to export anything. That is what keeps them editable from the
+        # Settings screen instead of being frozen by the launcher.
+        ln -sfn "$STATE/data"     "$PREFIX/data"
+        ln -sfn "$STATE/models"   "$PREFIX/models"
+        ln -sfn "$STATE/adapters" "$PREFIX/adapters"
+
+        chown -R "$owner:$group" "$STATE"
+        chmod 0755 "$STATE"
+
+        # Chromium's sandbox helper. Electron refuses to run its renderer
+        # sandboxed without this binary being setuid root, and falls back to
+        # --no-sandbox (which we deliberately do not pass) or refuses outright.
+        # Setuid is the same mechanism Chromium's own Debian package uses.
+        sandbox="$PREFIX/desktop/chrome-sandbox"
+        if [ -f "$sandbox" ]; then
+            chown root:root "$sandbox"
+            chmod 4755 "$sandbox"
+            echo "hot-step-cpp: enabled the Chromium sandbox ($sandbox, setuid root)"
+        fi
+
+        # Let the desktop environment find the app immediately rather than on
+        # the next login. update-desktop-database and gtk-update-icon-cache are
+        # both optional, so failures here must not fail the install.
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database -q /usr/share/applications 2>/dev/null || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor 2>/dev/null || true
+        fi
+
+        if [ "$owner" != root ]; then
+            echo "hot-step-cpp: installed. Start it with: hot-step"
+            echo "               then open http://localhost:3001"
+        else
+            echo "hot-step-cpp: installed (state owned by root)."
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,78 @@
+#!/bin/sh
+# hot-step - HOT-Step CPP desktop application.
+#
+# Shipped as /usr/bin/hot-step by the hot-step-cpp Debian package.
+#
+# Opens the app in its own window. There is no browser involved and no separate
+# "start the server first" step: the Electron shell in this package starts the
+# bundled Node server, waits for it, shows the window, and shuts the server down
+# again when the window closes.
+#
+# To run the server alone (headless, over SSH, or on another machine's port),
+# use /usr/bin/hot-step-server instead - it is the same server without a window.
+
+set -e
+
+PREFIX=/opt/hot-step-cpp
+ELECTRON="$PREFIX/desktop/hot-step-cpp"
+APP="$PREFIX/desktop/app"
+
+# A menu launch has no terminal, so stderr goes nowhere. Say why the app did
+# not start in a window the user can actually see.
+show_error() {
+    printf 'hot-step: %s\n' "$1" >&2
+    [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --title="HOT-Step CPP" --text="$1" >/dev/null 2>&1 || true
+    elif command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "HOT-Step CPP" --error "$1" >/dev/null 2>&1 || true
+    elif command -v xmessage >/dev/null 2>&1; then
+        xmessage -center "$1" >/dev/null 2>&1 || true
+    fi
+}
+
+if [ ! -x "$ELECTRON" ] || [ ! -f "$APP/src/main.js" ]; then
+    show_error "HOT-Step CPP is not installed correctly: the desktop shell is missing from $PREFIX/desktop.
+
+Reinstall the hot-step-cpp package."
+    exit 1
+fi
+
+# The state directory must be writable before the app starts writing to it.
+# This is what happened on GUI (PackageKit/aptkit) installs before the postinst
+# learned to find the invoking user: the folder was root-owned, the menu
+# launcher printed to a terminal nobody could see, and nothing appeared.
+STATE=/var/lib/hot-step-cpp
+if [ ! -w "$STATE" ]; then
+    show_error "HOT-Step CPP cannot write its data folder:
+
+    $STATE
+
+It is owned by $(stat -c '%U' "$STATE" 2>/dev/null || echo root), but you are $(id -un).
+
+Fix it in a terminal:
+
+    sudo chown -R $(id -un):$(id -gn) $STATE
+
+Then start HOT-Step CPP again."
+    exit 1
+fi
+
+# Upstream's data-root subsystem (server/src/dataroot) defaults the data folder
+# to <parent of app>/HOT-Step-Data, which here would be /opt/HOT-Step-Data —
+# read-only, and the app refuses to start when it cannot write there. Pin it to
+# the Debian state directory instead.
+#
+# This is pinned rather than left to Settings on purpose: the data root has to
+# stay under /var/lib, and an environment override is the documented way to
+# choose it. It does mean the in-app "repoint your data folder" control will
+# not move it; edit this script if you want it somewhere else.
+export HOT_STEP_DATA_ROOT="$STATE"
+# Keep the pointer that records the data location with the data itself rather
+# than in $HOME, so a state-directory backup is self-contained.
+export HOT_STEP_PROFILE_DIR="$STATE/profile"
+
+# Chromium derives its WM_CLASS from the executable name, which is already
+# hot-step-cpp; --class pins it anyway so the window groups correctly under
+# Cinnamon's window switcher and matches StartupWMClass in the .desktop file.
+exec "$ELECTRON" --class=hot-step-cpp "$APP" "$@"
