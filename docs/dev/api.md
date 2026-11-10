@@ -277,6 +277,7 @@ Total: <!-- generated:start route-count -->
 | `GET` | `/api/logs` | `server/src/routes/logs.ts` |
 | `GET` | `/api/logs/snapshot` | `server/src/routes/logs.ts` |
 | `GET` | `/api/logs/vram` | `server/src/routes/logs.ts` |
+| `POST` | `/api/logs/vae-probe` | `server/src/routes/logs.ts` |
 | `GET` | `/api/logs/models-loaded` | `server/src/routes/logs.ts` |
 | `POST` | `/api/logs/models-unload` | `server/src/routes/logs.ts` |
 

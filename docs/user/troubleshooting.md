@@ -216,18 +216,28 @@ The signs are `CUDA error: out of memory`, a Vulkan `failed to allocate ... buff
 `Failed to allocate pinned memory`, or a crash while the stage reads "Decoding audio (VAE)".
 Try these in order.
 
-1. Lower **VAE chunk size** on the Environment tab of Settings, then restart. The default is
-   1024. 512 fixed decode crashes on 8 GB cards; 256 was needed on a 4 GB card. Decoding gets
-   somewhat slower (one report went from about 4 to 7 seconds). The VAE only splits a track
-   into chunks when it is longer than the chunk size (1024 is about 41 seconds of audio). Since
-   v1.3.5 a shorter track that would not fit in free VRAM in one piece is split into chunks of
-   256 by itself, and the engine log says `[VAE] Untiled decode of ... tiling at 256`.
+1. Press **Test** beside **VAE chunk size** on the Environment tab of Settings. It reports in
+   about a second whether the value fits, how much VRAM the graph takes, how much is left, and
+   the largest value the engine would pick for this card. Lowering the chunk size then
+   restarting also speeds decoding up (one report went from about 4 to 7 seconds at 512). The
+   default is 1024, which is fine on a 12 GB card and far too large for a 4 GB card. A song
+   that generates normally and then saves an empty file, with `CUDA error: out of memory`
+   (CUDA) or `failed to allocate ... buffer` (Vulkan) in the terminal panel, is the symptom.
+   Since v1.3.5 a shorter track that would not fit in free VRAM in one piece is split into
+   chunks of 256 by itself, and the engine log says `[VAE] Untiled decode of ... tiling at 256`.
 2. Turn off **Keep DiT & VAE loaded** (Performance tab) and **Keep Models in VRAM**
    (Environment tab).
 3. Use a smaller quant or pack. See the pack table in
    [Getting started](getting-started.md#which-pack-fits-your-gpu).
 4. With two GPUs, check which one the engine picked. The console's `[Server] GPU:` line names
    it. **GPU Device** on the Environment tab chooses; Auto picks the card with the most VRAM.
+
+The engine now sizes the tile to the free VRAM itself and halves it if a tile
+still will not allocate, so a song that used to end as an empty file now
+decodes at a smaller tile. Lowering **VAE chunk size** yourself is still worth
+it: the automatic size is the conservative one, and a value you know fits
+decodes faster with fewer seams. The **Test** button beside the field reports
+whether a value fits, and what the engine would pick, in about a second.
 
 If VRAM stays full after one render and the next fails straight away, **Restart** frees it.
 Please report it with the logs from that session, since the cause is not yet known.

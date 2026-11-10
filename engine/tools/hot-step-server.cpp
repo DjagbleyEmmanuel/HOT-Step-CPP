@@ -3460,6 +3460,64 @@ int main(int argc, char ** argv) {
     svr.Post("/lm", handle_lm);
     svr.Post("/synth", handle_synth);
     svr.Post("/understand", handle_understand);
+    // Would a given VAE tile size fit on this device? Lets a user find a safe
+    // value in about a second instead of by generating a song and losing it at
+    // the decode step. Allocates the graph and reports; never computes, so it
+    // cannot take the process down the way a compute-time OOM does.
+    svr.Post("/vae-probe", [](const httplib::Request & req, httplib::Response & res) {
+        int chunk = 1024, overlap = 64;
+        if (req.body.size()) {
+            yyjson_doc * doc = yyjson_read(req.body.c_str(), req.body.size(), 0);
+            if (!doc) {
+                json_error(res, 400, "invalid JSON body");
+                return;
+            }
+            yyjson_val * root = yyjson_doc_get_root(doc);
+            yyjson_val * v    = nullptr;
+            if ((v = yyjson_obj_get(root, "chunk")) && yyjson_is_int(v)) {
+                chunk = (int) yyjson_get_int(v);
+            }
+            if ((v = yyjson_obj_get(root, "overlap")) && yyjson_is_int(v)) {
+                overlap = (int) yyjson_get_int(v);
+            }
+            yyjson_doc_free(doc);
+        }
+        if (chunk < HOTSTEP_VAE_MIN_TILE || chunk > 16384) {
+            json_error(res, 400, "chunk out of range (64..16384)");
+            return;
+        }
+        if (overlap < 0 || overlap > chunk / 2) {
+            json_error(res, 400, "overlap out of range");
+            return;
+        }
+        if (g_registry.vae.empty()) {
+            json_error(res, 501, "no VAE in the registry to probe with");
+            return;
+        }
+        ModelKey vae_key;
+        vae_key.kind          = MODEL_VAE_DEC;
+        vae_key.path          = registry_find_non_onnx(g_registry.vae)->path;
+        vae_key.adapter_scale = 1.0f;
+        VAEGGML * vae = store_require_vae_dec(g_store, vae_key);
+        if (!vae) {
+            json_error(res, 500, "could not load the VAE");
+            return;
+        }
+        ModelHandle guard(g_store, vae);
+
+        VAEProbe p = vae_ggml_probe(vae, chunk, overlap);
+
+        char buf[768];
+        snprintf(buf, sizeof(buf),
+                 "{\"ok\":%s,\"chunk\":%d,\"overlap\":%d,\"backend\":\"%s\",\"verdict\":\"%s\","
+                 "\"free_before_mb\":%.0f,\"used_by_graph_mb\":%.0f,\"free_after_mb\":%.0f,"
+                 "\"safe_chunk\":%d,\"min_chunk\":%d}",
+                 p.ok ? "true" : "false", chunk, overlap, ggml_backend_name(vae->backend), p.verdict,
+                 (double) p.free_before / (1024.0 * 1024.0), (double) p.used_by_graph / (1024.0 * 1024.0),
+                 (double) p.free_after / (1024.0 * 1024.0), p.safe_tile, p.min_tile);
+        res.set_content(buf, "application/json");
+    });
+
     svr.Post("/vae", handle_vae);
     svr.Post("/codes-decode", handle_codes_decode);
     svr.Post("/warm", handle_warm);

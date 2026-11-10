@@ -107,7 +107,10 @@ export const EnvTextRow: React.FC<{
   onChange: (key: string, value: string) => void;
   type?: 'text' | 'number';
   placeholder?: string;
-}> = ({ envKey, label, description, value, onChange, type = 'text', placeholder }) => (
+  /** Rendered beside the input — used by rows that offer an inline action,
+   *  such as the VAE tile-size probe next to ACESTEPCPP_VAE_CHUNK. */
+  extra?: React.ReactNode;
+}> = ({ envKey, label, description, value, onChange, type = 'text', placeholder, extra }) => (
   <div className="setting-row">
     <div className="setting-info">
       <div className="setting-label">
@@ -125,6 +128,7 @@ export const EnvTextRow: React.FC<{
       onChange={(e) => onChange(envKey, e.target.value)}
       placeholder={placeholder}
     />
+    {extra}
   </div>
 );
 

@@ -143,6 +143,45 @@ router.get('/vram', async (_req: Request, res: Response) => {
   }
 });
 
+// ── VAE tile-size probe: POST /api/logs/vae-probe ─────────────────────
+// Would a given VAE tile size fit on this GPU right now?
+//
+// Without this the only way to find out is to generate a whole song and lose
+// it: the decode graph for a tile that is too big fails at the very last step
+// and saves a 0 KB WAV, after minutes of DiT work. The engine's /vae-probe
+// allocates the graph and measures without computing (a compute-time OOM is
+// fatal and aborts ace-server), so this is safe to call speculatively.
+router.post('/vae-probe', async (req: Request, res: Response) => {
+  const chunk = Number(req.body?.chunk ?? 1024);
+  const overlap = Number(req.body?.overlap ?? 64);
+  if (!Number.isFinite(chunk) || !Number.isFinite(overlap)) {
+    res.status(400).json({ error: 'chunk and overlap must be numbers' });
+    return;
+  }
+  try {
+    const resp = await fetch(`${config.aceServer.url}/vae-probe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chunk, overlap }),
+      // Loading the VAE weights on first call is the slow part.
+      signal: AbortSignal.timeout(60000),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      res.status(502).json({
+        ok: false,
+        verdict: 'unknown',
+        error: data.error ?? `engine returned ${resp.status}`,
+        safe_chunk: null,
+      });
+      return;
+    }
+    res.json(data);
+  } catch (e: any) {
+    res.status(502).json({ ok: false, verdict: 'unknown', error: e?.message ?? 'probe failed', safe_chunk: null });
+  }
+});
+
 // ── Loaded models proxy: GET /api/logs/models-loaded ──────────────────
 // Lists the GPU modules currently resident in the engine (for the manual
 // unload dropdown on the VRAM indicator).

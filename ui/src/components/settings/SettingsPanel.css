@@ -235,6 +235,54 @@
   text-align: center;
 }
 
+/* VAE tile-size probe: "Test" beside the field, and its verdict underneath.
+   The verdict colours match the meaning — green usable, amber survivable but
+   thin, red will not fit. */
+.env-probe-btn {
+  margin-left: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #3a3550);
+  background: var(--bg-elevated, #241f33);
+  color: var(--text-primary, #e8e6f0);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+.env-probe-btn:hover:not(:disabled) {
+  border-color: var(--accent-primary, #d946ef);
+}
+.env-probe-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.env-probe-result {
+  margin: 6px 0 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border-left: 3px solid;
+}
+.env-probe-result--ok {
+  border-left-color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+.env-probe-result--tight {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+.env-probe-result--too-big {
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+.env-probe-result--unknown {
+  border-left-color: #6b7280;
+  background: rgba(107, 114, 128, 0.1);
+}
+
 /* Path row: input + browse button */
 .env-path-row {
   display: flex;

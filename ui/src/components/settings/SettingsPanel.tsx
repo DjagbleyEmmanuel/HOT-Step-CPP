@@ -105,7 +105,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     restarting,
     pendingRestartKeys,
     gpus: detectedGpus,
-    change: handleEnvChange,
+    change: changeEnv,
     save: handleEnvSave,
     restartNow: handleRestartNow,
   } = useEnvSettingsForm();
@@ -113,6 +113,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // Engine workers for the experimental multi-GPU section: observed and polled
   // while mounted, separate from the editable env form (read-only status).
   const engineWorkers = useQuery(engineWorkersOptions()).data ?? null;
+
+  /** Outcome of the VAE tile-size probe, shown under the tile-size field. */
+  const [vaeProbe, setVaeProbe] = useState<{
+    busy: boolean;
+    result: { verdict: string } | null;
+    message: string;
+  }>({ busy: false, result: null, message: '' });
 
   // Subsection open/close state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -144,6 +151,58 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const key = uuid.toLowerCase();
     const chosen = detectedGpus.filter(g => g.uuid && (g.uuid.toLowerCase() === key ? !workerGpuSet.has(key) : workerGpuSet.has(g.uuid.toLowerCase())));
     handleEnvChange('ACESTEPCPP_WORKER_GPUS', chosen.map(g => g.uuid).join(','));
+  };
+
+  /** Env edits go through the hook, then invalidate a stale tile-size verdict. */
+  const handleEnvChange = (key: string, value: string) => {
+    changeEnv(key, value);
+    if (key === 'ACESTEPCPP_VAE_CHUNK' || key === 'ACESTEPCPP_VAE_OVERLAP') {
+      setVaeProbe({ busy: false, result: null, message: '' });
+    }
+  };
+
+  // Does the VAE tile size currently typed fit in the GPU's memory? Answers in
+  // about a second, where finding out by generating a song costs minutes and
+  // fails at the very last step with a 0 KB file.
+  const runVaeProbe = async () => {
+    const raw = envValues.ACESTEPCPP_VAE_CHUNK;
+    const chunk = Number(raw && raw.trim() !== '' ? raw : 1024);
+    const rawOverlap = envValues.ACESTEPCPP_VAE_OVERLAP;
+    const overlap = Number(rawOverlap && rawOverlap.trim() !== '' ? rawOverlap : 64);
+    if (!Number.isFinite(chunk) || chunk <= 0) {
+      setVaeProbe({ busy: false, result: null, message: 'Enter a tile size first.' });
+      return;
+    }
+    setVaeProbe({ busy: true, result: null, message: '' });
+    try {
+      const resp = await fetch('/api/logs/vae-probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chunk, overlap }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok || d.verdict === 'unknown') {
+        setVaeProbe({
+          busy: false,
+          result: { verdict: 'unknown' },
+          message: d.error ? `Could not test: ${d.error}` : 'Could not test this value.',
+        });
+        return;
+      }
+      const used = Math.round(d.used_by_graph_mb);
+      const free = Math.round(d.free_after_mb);
+      let msg: string;
+      if (d.verdict === 'too-big') {
+        msg = `${chunk} will not fit - it needs more than the ${free} MB free. Use ${d.safe_chunk} or lower.`;
+      } else if (d.verdict === 'tight') {
+        msg = `${chunk} fits, but only ${free} MB is left afterwards (${used} MB for the graph). ${d.safe_chunk} is safer.`;
+      } else {
+        msg = `${chunk} is safe: ${used} MB for the graph, ${free} MB still free.`;
+      }
+      setVaeProbe({ busy: false, result: { verdict: d.verdict }, message: msg });
+    } catch (e: any) {
+      setVaeProbe({ busy: false, result: { verdict: 'unknown' }, message: `Could not test: ${e?.message ?? e}` });
+    }
   };
 
   const handleBrowse = (key: string) => {
@@ -218,7 +277,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <EnvTextRow envKey="ACESTEPCPP_HOST" label={t('settings.env.engineHost')} description={t('settings.env.engineHostDesc')}
                 value={envValues.ACESTEPCPP_HOST || ''} onChange={handleEnvChange} placeholder="127.0.0.1" />
               <EnvTextRow envKey="ACESTEPCPP_VAE_CHUNK" label={t('settings.env.vaeChunk')} description={t('settings.env.vaeChunkDesc')}
-                value={envValues.ACESTEPCPP_VAE_CHUNK || ''} onChange={handleEnvChange} type="number" placeholder="1024" />
+                value={envValues.ACESTEPCPP_VAE_CHUNK || ''} onChange={handleEnvChange} type="number" placeholder="1024"
+                extra={
+                  <button
+                    type="button"
+                    className="env-probe-btn"
+                    onClick={runVaeProbe}
+                    disabled={vaeProbe.busy}
+                    title="Check whether this tile size fits in your GPU's memory, without generating a song"
+                  >
+                    {vaeProbe.busy ? 'Testing…' : 'Test'}
+                  </button>
+                } />
+              {vaeProbe.result && (
+                <div className={`env-probe-result env-probe-result--${vaeProbe.result.verdict}`}>
+                  {vaeProbe.message}
+                </div>
+              )}
               <EnvTextRow envKey="ACESTEPCPP_VAE_OVERLAP" label={t('settings.env.vaeOverlap')} description={t('settings.env.vaeOverlapDesc')}
                 value={envValues.ACESTEPCPP_VAE_OVERLAP || ''} onChange={handleEnvChange} type="number" placeholder="64" />
 
