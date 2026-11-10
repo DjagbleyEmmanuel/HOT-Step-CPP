@@ -21,7 +21,7 @@ import { generateApi } from '../../services/api';
 import type { GenerationJob } from '../../types';
 import { apiClient, ApiError } from '../../services/httpClient';
 import { useUpload } from '../../queries/writes';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
+import { createGenerationTimer } from '../../utils/generationTimer';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
 import {
   recombineStems,
@@ -1863,7 +1863,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
           if (tk.timedOut) {
             timedOut = true; outcome = 'timeout';
-            showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
+            showToast(`Generation timed out after ${timer.timeoutMinutes} minutes`);
             failManualQueueItem(qId, 'Generation timed out');
             return;
           }
@@ -1886,7 +1886,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             showToast(`Failed: ${s.error || 'Unknown error'}`);
             failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
           }
-        }, { timeoutMs: (getGenerationTimeoutMinutes() + 30) * 60_000, deliverRepeats: true });
+        }, { timeoutMs: (timer.timeoutMinutes + 30) * 60_000, deliverRepeats: true });
       await songsChanged();
     } catch (err) {
       failManualQueueItem(qId, err instanceof Error ? err.message : 'Generation status failed');

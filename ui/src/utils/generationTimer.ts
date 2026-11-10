@@ -24,17 +24,29 @@
  *  buy more than two hours). */
 const TIMEOUT_MIN_MINUTES = 10;
 const TIMEOUT_MAX_MINUTES = 360;
+/** The value Settings starts from. */
+export const DEFAULT_GENERATION_TIMEOUT_MINUTES = 30;
 
 export function getGenerationTimeoutMinutes(): number {
   try {
     const raw = localStorage.getItem('ace-settings');
     if (raw) {
       const parsed = JSON.parse(raw);
-      const val = parsed.generationTimeoutMinutes;
-      if (typeof val === 'number' && val >= TIMEOUT_MIN_MINUTES && val <= TIMEOUT_MAX_MINUTES) return val;
+      // A numeric string counts: settings written by an older build, or by a
+      // panel that handed the select's raw value through, must not be read as
+      // "no setting" — that silently ran every job on the 30 min default while
+      // the Settings page showed the new value.
+      const val = typeof parsed.generationTimeoutMinutes === 'string'
+        ? Number(parsed.generationTimeoutMinutes)
+        : parsed.generationTimeoutMinutes;
+      // Clamp rather than discard: a value outside the offered range is still
+      // an explicit choice, and dropping it is the same silent reset.
+      if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+        return Math.min(TIMEOUT_MAX_MINUTES, Math.max(TIMEOUT_MIN_MINUTES, Math.round(val)));
+      }
     }
   } catch { /* ignore parse errors */ }
-  return 30;
+  return DEFAULT_GENERATION_TIMEOUT_MINUTES;
 }
 
 /** Server job statuses that mean "still waiting in the queue, not yet running".
@@ -64,6 +76,10 @@ export interface GenerationTimerOptions {
 }
 
 export interface GenerationTimer {
+  /** The limit this timer enforces, in minutes. Messages must quote this rather
+   *  than re-reading Settings: a value changed mid-job does not move the timer,
+   *  so the old reading reported a limit that never fired. */
+  readonly timeoutMinutes: number;
   /** Feed the latest server job status. Call once per poll iteration. */
   tick(status: string | undefined): GenerationTimerTick;
 }
@@ -71,7 +87,8 @@ export interface GenerationTimer {
 /** Create a timer whose elapsed/timeout clock ignores server-queue wait time. */
 export function createGenerationTimer(options: GenerationTimerOptions = {}): GenerationTimer {
   const now = options.now ?? (() => Date.now());
-  const timeoutMs = (options.timeoutMinutes ?? getGenerationTimeoutMinutes()) * 60_000;
+  const timeoutMinutes = options.timeoutMinutes ?? getGenerationTimeoutMinutes();
+  const timeoutMs = timeoutMinutes * 60_000;
 
   let startedAt: number | null =
     options.resumeElapsedSec && options.resumeElapsedSec > 0
@@ -79,6 +96,7 @@ export function createGenerationTimer(options: GenerationTimerOptions = {}): Gen
       : null;
 
   return {
+    timeoutMinutes,
     tick(status: string | undefined): GenerationTimerTick {
       if (startedAt === null && !isQueued(status)) startedAt = now();
       if (startedAt === null) return { started: false, elapsed: 0, timedOut: false };

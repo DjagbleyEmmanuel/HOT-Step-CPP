@@ -176,6 +176,9 @@ export interface GenerationParams {
 
   // Batch
   batchSize: number;
+  /** Wall-clock budget for one rendered track, in minutes, from Settings.
+   *  The server clamps it and falls back to its own default when absent. */
+  generationTimeoutMinutes?: number;
 
   // Model selection
   ditModel: string;

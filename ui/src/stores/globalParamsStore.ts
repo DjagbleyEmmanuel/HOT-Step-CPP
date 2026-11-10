@@ -14,6 +14,7 @@ import { normalizeSeed, type Seed } from '../utils/seed';
 
 const STRING_SEED_BACKENDS = new Set(['heartmula', 'yue2']);
 import { apiClient } from '../services/httpClient';
+import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 
 // -- Types --
 
@@ -940,6 +941,13 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       randomSeed: s.randomSeed,
       lmSeed: s.lmSeed, lmSeedFollowsDit: s.lmSeedFollowsDit,
       batchSize: Math.min(s.batchSize, backendState.capabilities[backendState.activeBackendId]?.core.batch.max ?? s.batchSize),
+      // The per-track wall-clock budget from Settings. Every studio that
+      // renders through a workflow (Cover, Repaint, InstaGen) hands this object
+      // to the workflow as engineParams, so the value reaches both the render
+      // itself and the workflow's own deadline. Without it those renders ran on
+      // the server's fallback while the workflow cut them off at its 30-minute
+      // default, whatever Settings said.
+      generationTimeoutMinutes: getGenerationTimeoutMinutes(),
       storkSubsteps: (s.inferMethod === 'stork2' || s.inferMethod === 'stork4') ? s.storkSubsteps : undefined,
       beatStability: s.inferMethod === 'jkass_fast' ? s.beatStability : undefined,
       frequencyDamping: s.inferMethod === 'jkass_fast' ? s.frequencyDamping : undefined,

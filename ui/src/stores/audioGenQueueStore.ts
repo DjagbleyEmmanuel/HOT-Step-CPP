@@ -22,7 +22,7 @@ import type { Generation, AlbumPreset } from '../services/lireekApi';
 import { addToPlaylist } from '../components/lyric-studio/playlistStore';
 import type { GenerationParams, GenerationJob } from '../types';
 import { resolveDuration } from '../utils/estimateDuration';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
+import { createGenerationTimer } from '../utils/generationTimer';
 import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
 import {
   ensureYue2CaptionSource, yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID,
@@ -1571,7 +1571,7 @@ export async function enqueueSimpleGen(
         // Safety: configurable timeout (default 30 min), measured from
         // generation start — queue wait does not count.
         if (t.timedOut) {
-          throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
+          throw new Error(`Generation timed out after ${timer.timeoutMinutes} minutes`);
         }
       } catch (e) {
         if ((e as Error).message.includes('failed') || (e as Error).message.includes('timed out') || (e as Error).message.includes('Cancelled')) {
@@ -2449,7 +2449,7 @@ async function _pollUntilDone(item: AudioQueueItem): Promise<void> {
       // Safety: configurable timeout (default 30 min), measured from
       // generation start — queue wait does not count.
       if (t.timedOut) {
-        throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
+        throw new Error(`Generation timed out after ${timer.timeoutMinutes} minutes`);
       }
     } catch (e) {
       const msg = (e as Error).message;

@@ -54,6 +54,32 @@ const AUDIO_TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted
 const MAX_INPUT_BYTES = 16_000_000;
 const MAX_EVENT_BYTES = 64_000;
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
+/** Extra time a workflow needs around one render: staging, uploads, mastering,
+ *  and the steps before and after the audio wait. */
+const RENDER_GRACE_MS = 10 * 60_000;
+
+/** The generation-timeout minutes a captured workflow input carries, if any.
+ *
+ *  Render kinds capture the studio's engine params (or a ready request), so the
+ *  user's per-track budget from Settings is in there. A job that waits on a
+ *  render has to outlive that render's own wall clock, or the workflow's fixed
+ *  30-minute default kills a job the engine would still have finished — and
+ *  the setting the user changed never applied to it. */
+export function capturedTimeoutMinutes(input: unknown, depth = 0): number | null {
+  if (depth > 4 || input === null || typeof input !== 'object') return null;
+  if (Array.isArray(input)) {
+    for (const value of input) { const found = capturedTimeoutMinutes(value, depth + 1); if (found !== null) return found; }
+    return null;
+  }
+  const record = input as Record<string, unknown>;
+  const own = record.generationTimeoutMinutes;
+  if (typeof own === 'number' && Number.isFinite(own) && own > 0) return own;
+  for (const value of Object.values(record)) {
+    const found = capturedTimeoutMinutes(value, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
 
 export class WorkflowError extends Error {
   constructor(readonly status: 400 | 404 | 409, message: string, readonly extra: Record<string, unknown> = {}) { super(message); }
@@ -399,7 +425,8 @@ export class WorkflowJobs {
   private launch(def: WorkflowKind<any>, r: Row, claimId: string): void {
     const controller = new AbortController();
     this.running.set(r.id, { controller, kind: r.kind });
-    const timeoutMs = def.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const captured = capturedTimeoutMinutes(JSON.parse(r.input));
+    const timeoutMs = def.timeoutMs ?? Math.max(DEFAULT_TIMEOUT_MS, captured ? captured * 60_000 + RENDER_GRACE_MS : 0);
     const timer = setTimeout(() => controller.abort(new Error(`Timed out after ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
     timer.unref?.();
     const signal = controller.signal;

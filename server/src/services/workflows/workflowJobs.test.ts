@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { z } from 'zod/v4';
-import { WorkflowError, WorkflowJobs, type WorkflowDeps, type WorkflowKind } from './workflowJobs.js';
+import { WorkflowError, WorkflowJobs, capturedTimeoutMinutes, type WorkflowDeps, type WorkflowKind } from './workflowJobs.js';
 import { WorkflowDocuments, bumpRevision } from './revisions.js';
 import { startWorkflowTestServer } from './testServer.js';
 import { MAX_EVENTS_PER_JOB } from '../../contracts/workflow.js';
@@ -141,6 +141,20 @@ test('cancel racing completion: a step that ignores the signal and returns still
   await jobs.settled();
   const after = jobs.get(job.id);
   assert.deepEqual([after.status, after.result], ['cancelled', null]);
+});
+
+test('a workflow that waits on a render is sized by the generation timeout captured in its input', async () => {
+  // A cover/repaint render can legitimately run longer than the workflow's own
+  // 30-minute default. The captured engine params carry the user's per-track
+  // budget, so the job's deadline has to be at least that (plus the steps
+  // around the render) — otherwise the setting never applied to the workflow.
+  assert.equal(capturedTimeoutMinutes({ engineParams: { generationTimeoutMinutes: 90 } }), 90);
+  assert.equal(capturedTimeoutMinutes({ engineParams: { request: { generationTimeoutMinutes: 60 } } }), 60);
+  assert.equal(capturedTimeoutMinutes({ engineParams: { inferenceSteps: 8 }, nested: [[{ generationTimeoutMinutes: 45 }]] }), 45);
+  assert.equal(capturedTimeoutMinutes({ engineParams: { generationTimeoutMinutes: '90' } }), null, 'only numbers count');
+  assert.equal(capturedTimeoutMinutes({ engineParams: { generationTimeoutMinutes: -1 } }), null);
+  assert.equal(capturedTimeoutMinutes(null), null);
+  assert.equal(capturedTimeoutMinutes({ deep: { deeper: { deeper2: { deeper3: { deeper4: { generationTimeoutMinutes: 60 } } } } } }), null, 'the scan is bounded');
 });
 
 test('a timeout ends the run even when the step ignores the signal; its late result and writes are discarded', async () => {

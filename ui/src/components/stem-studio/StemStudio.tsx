@@ -13,7 +13,7 @@ import { queryManager } from '../../queries/invalidation';
 // Layout follows the same pattern as CoverStudio / LyricStudio:
 // flex columns with border dividers, resizable right sidebar.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AlertTriangle, Info, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -32,6 +32,9 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
+import {
+  isFinished, readStudioState, restoreStudioState, writeStudioState, type StudioState,
+} from './stemStudioState';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -46,6 +49,8 @@ export const StemStudio: React.FC = () => {
   const { t } = useTranslation();
   const client = useQueryClient();
   const selectedResult = React.useRef<string | null>(null);
+  // Read once: the restore below must not fight the persistence effect.
+  const [initial] = useState(() => restoreStudioState(readStudioState(localStorage)));
 
   // Narrow-screen (<1024px) pane switcher — which of the three columns is visible
   const [narrowPane, setNarrowPane] = useState<'source' | 'tracks' | 'recent'>('tracks');
@@ -68,18 +73,18 @@ export const StemStudio: React.FC = () => {
   const setSourceFileName = (name: string) => { localStorage.setItem('hs-stem-sourceFile', name); _setSourceFileName(name); };
 
   // Track selection
-  const [selectedTracks, setSelectedTracks] = useState<string[]>(['vocals', 'drums', 'bass', 'guitar']);
+  const [selectedTracks, setSelectedTracks] = useState<string[]>(initial.selectedTracks);
   // SuperSep is the default: it is the general-purpose separator. DiT extract
   // is the specialist path (needs a base/SFT model and disables adapters).
-  const [mode, setMode] = useState<'extract' | 'supersep'>('supersep');
+  const [mode, setMode] = useState<'extract' | 'supersep'>(initial.mode);
   const [sepLevel, setSepLevel] = useState<SeparationLevel>(() => {
     const stored = localStorage.getItem('hs-stem-sepLevel');
     return (stored != null ? parseInt(stored) : 1) as SeparationLevel;
   });
 
   // Optional enhancement
-  const [style, setStyle] = useState('');
-  const [lyrics, setLyrics] = useState('');
+  const [style, setStyle] = useState(initial.style);
+  const [lyrics, setLyrics] = useState(initial.lyrics);
 
   // Model selection — extract requires base/SFT model
   const modelsQuery = useQuery(modelsOptions());
@@ -89,12 +94,12 @@ export const StemStudio: React.FC = () => {
 
   // Extraction state
   const [isExtracting, setIsExtracting] = useState(false);
-  const [extractProgress, setExtractProgress] = useState<ExtractProgress | null>(null);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [extractProgress, setExtractProgress] = useState<ExtractProgress | null>(initial.extractProgress);
+  const [activeJobId, setActiveJobId] = useState<string | null>(initial.activeJobId);
 
   // Results
-  const [mixerStems, setMixerStems] = useState<MixerStemInfo[] | null>(null);
-  const [stemControls, setStemControls] = useState<StemControl[]>([]);
+  const [mixerStems, setMixerStems] = useState<MixerStemInfo[] | null>(initial.mixerStems);
+  const [stemControls, setStemControls] = useState<StemControl[]>(initial.stemControls);
 
   // Sidebar — shared width with other studio pages
   const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
@@ -232,6 +237,12 @@ export const StemStudio: React.FC = () => {
     setStemControls(stems.map(s => ({ index: s.index, volume: 1.0, muted: false })));
   }, []);
 
+  // Keep the working state for the next visit.
+  useEffect(() => {
+    const state: StudioState = { mode, selectedTracks, style, lyrics, activeJobId, extractProgress, mixerStems, stemControls };
+    writeStudioState(localStorage, state);
+  }, [mode, selectedTracks, style, lyrics, activeJobId, extractProgress, mixerStems, stemControls]);
+
   const handleSelectPastJob = useCallback(async (jobId: string) => {
     try {
       setActiveJobId(jobId);
@@ -242,6 +253,34 @@ export const StemStudio: React.FC = () => {
       console.error('Failed to load past job:', err);
     }
   }, [loadResultIntoMixer, client]);
+
+  // Reattach to a separation that was still running when this page was left:
+  // the job never stopped, so its progress and stems are still reachable.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current) return;
+    resumedRef.current = true;
+    const jobId = initial.activeJobId;
+    if (!jobId) return;
+    // It finished while the user was away — the stems are on disk, so show them
+    // instead of leaving an empty mixer beside a completed job.
+    if (isFinished(initial.extractProgress)) {
+      if (initial.extractProgress?.status === 'done' && !initial.mixerStems?.length) void handleSelectPastJob(jobId);
+      return;
+    }
+    setIsExtracting(true);
+    waitForExtraction(jobId, setExtractProgress)
+      .then(result => { loadResultIntoMixer(jobId, result); })
+      .catch((err: Error) => {
+        setExtractProgress({
+          status: 'failed', progress: 0, currentTrack: '', completedStems: [], totalTracks: 0,
+          error: err.message,
+        });
+      })
+      .finally(() => setIsExtracting(false));
+    // Once per mount: `initial` is the snapshot taken when this page opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDownloadStem = useCallback((stem: MixerStemInfo) => {
     if (!activeJobId) return;

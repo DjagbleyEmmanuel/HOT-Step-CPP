@@ -294,7 +294,9 @@ lines before `Process exited with code` in `node_console.log` say why; see
 `Generation timed out`, with the limit in minutes. The whole job took longer than
 **Generation Timeout** on the Performance tab of Settings (default 30 minutes, up to 6 hours).
 Raise it for long songs, high step counts or slow hardware. The first MiniMax-Music3 render
-with the TensorRT renderer also builds its engine once, which takes a few minutes.
+with the TensorRT renderer also builds its engine once, which takes a few minutes. A Cover,
+Repaint or InstaGen render runs inside a workflow job, which gets your Generation Timeout plus
+ten minutes for the steps around the render rather than a fixed 30 minutes.
 
 `Generation failed on ace-server`. The engine rejected or failed the job without saying why to
 the server. The reason is in `ace_engine.log`; look for `FATAL` or `failed` near the end.
