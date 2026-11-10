@@ -324,9 +324,13 @@ static bool run_dit(const std::string & models, const std::string & goldens, yyj
     }
 
     std::vector<float> got((size_t) n_out);
-    sa3_dit_forward(&dit, (const float *) raw[0].data(), *(const float *) raw[1].data(),
-                    (const float *) raw[2].data(), S_c, (const float *) raw[3].data(),
-                    (const float *) raw[4].data(), raw[5].data(), T, got.data());
+    if (!sa3_dit_forward(&dit, (const float *) raw[0].data(), *(const float *) raw[1].data(),
+                         (const float *) raw[2].data(), S_c, (const float *) raw[3].data(),
+                         (const float *) raw[4].data(), raw[5].data(), T, got.data())) {
+        fprintf(stderr, "[Test] dit: forward failed (graph does not fit)\n");
+        sa3_dit_free(&dit);
+        return false;
+    }
 
     if (env_stage && !dit.debug_out.empty()) {
         const char * dump = getenv("SA3_DIT_DUMP");

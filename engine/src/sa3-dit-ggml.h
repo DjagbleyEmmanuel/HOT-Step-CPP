@@ -773,7 +773,11 @@ static struct ggml_tensor * sa3_dit_build_layer(struct ggml_context * ctx, const
 //   local        [local_cond_dim, T]   (torch (1, 257, T))
 //   padding_mask [T] u8, 1 = valid
 //   out          [io_channels, T]      (torch (1, C, T))
-static void sa3_dit_forward(SA3DiT * m, const float * x_in_p, float t_val, const float * cross_p,
+// Returns false when the graph does not fit in the backend memory. The caller
+// (Sa3GgmlRefine::dit_forward) turns that into a failed render: exiting here
+// used to take the whole server down mid-request, which on a small card means
+// the app dies instead of reporting "clip too long".
+static bool sa3_dit_forward(SA3DiT * m, const float * x_in_p, float t_val, const float * cross_p,
                             int64_t S_c, const float * glob_p, const float * local_p,
                             const uint8_t * padding_mask, int64_t T, float * out_p) {
     const SA3DiTConfig & c = m->cfg;
@@ -876,8 +880,13 @@ static void sa3_dit_forward(SA3DiT * m, const float * x_in_p, float t_val, const
     }
 
     if (!ggml_backend_sched_alloc_graph(m->sched, graph)) {
-        fprintf(stderr, "[SA3-DiT] FATAL: failed to allocate graph (T=%lld)\n", (long long) T);
-        exit(1);
+        // At this length the activations, not the weights, are what does not
+        // fit: a shorter clip or a smaller DiT quant is the fix.
+        fprintf(stderr, "[SA3-DiT] FATAL: graph does not fit in backend memory (T=%lld). "
+                        "Shorten the clip or install a quantized (Q4_K_M/Q3_K_M) DiT.\n",
+                (long long) T);
+        ggml_free(ctx);
+        return false;
     }
 
     // ── upload inputs ──
@@ -962,6 +971,7 @@ static void sa3_dit_forward(SA3DiT * m, const float * x_in_p, float t_val, const
 
     ggml_backend_sched_reset(m->sched);
     ggml_free(ctx);
+    return true;
 }
 
 static void sa3_dit_free(SA3DiT * m) {

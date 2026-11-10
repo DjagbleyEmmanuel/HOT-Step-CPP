@@ -43,6 +43,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <random>
 #include <string>
@@ -103,6 +104,13 @@ struct Sa3Backend {
     virtual bool dit_forward(const float * x, float t, const float * cross,
                              const float * glob, const float * local,
                              const char * pad_mask, int T, float * v) = 0;
+    // Memory hooks. A backend whose four modules could not stay resident
+    // together loads one stage at a time, so the orchestration tells it when
+    // a stage is finished and its VRAM can be released. No-ops otherwise.
+    virtual void release_text_encoder() {}
+    virtual void release_same_encoder() {}
+    virtual void release_dit() {}
+    virtual void release_same_decoder() {}
 };
 
 // ── Schedule: LogSNRShift(rate=0, anchor_logsnr=-6.2, logsnr_end=2.0) ───
@@ -382,6 +390,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     // Conditioning
     std::vector<float> text_emb((size_t)SA3_TOK_LEN * SA3_COND_DIM);  // [256,768]
     if (!be->text_encode(token_ids, n_tokens, text_emb.data())) return false;
+    // The text encoder is dead weight from here on (a staged backend frees it).
+    be->release_text_encoder();
 
     std::vector<float> sec_emb(SA3_COND_DIM);  // [768]
     if (!be->seconds_embed(seconds_total, sec_emb.data())) return false;
@@ -459,6 +469,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         memcpy(padded.data(),     audio,       sizeof(float) * T44);
         memcpy(padded.data() + S, audio + T44, sizeof(float) * T44);
         if (!sa3_encode_tiled(be, padded.data(), S, x)) return false;
+        // The source is latent now; a staged backend can drop the encoder.
+        be->release_same_encoder();
 
         // Mix with noise: x = init*(1-s) + noise*s
         for (size_t i = 0; i < x.size(); i++) {
@@ -963,6 +975,11 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         }
     }
 
+    // The denoise loop is the DiT's last use; release it before the decoder
+    // graph asks for its own buffer (the difference between 4 GB fitting and
+    // not on a card where all four modules cannot be resident together).
+    be->release_dit();
+
     // Decode, zero the padded region, trim to input length. No saturation —
     // see the note on `out` above.
     //
@@ -1045,6 +1062,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     if (!decoded_ok) {
         if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples)) return false;
     }
+    be->release_same_decoder();
     int S_dec = L * SA3_DS;
     out.assign((size_t)2 * T44, 0.0f);
     int n_valid = 0;
@@ -1098,11 +1116,69 @@ struct Sa3GgmlRefine final : Sa3Backend {
     SA3Same            same_dec_m{};
     SA3DiT             dit_m{};
     bool               loaded = false;
+    // True when the four GGUFs could not be resident together. Each stage is
+    // then loaded on first use and freed when the orchestration is done with
+    // it, so the peak is one module instead of the sum of all four.
+    bool               staged = false;
     std::string        dir;
+    std::string        dit_file;
+    std::vector<Sa3AdapterSpec> adapters;
 
     const char * name() const override { return "gguf"; }
 
+    // The orchestration uses the modules strictly one after another, so in
+    // staged mode every stage load first drops whatever an earlier (possibly
+    // aborted) render left behind. Without this, a cancelled synth would keep
+    // the 2.7 GB DiT resident while the next refine tries to add the 1.6 GB
+    // SAME encoder — exactly the OOM this path exists to avoid.
+    //
+    // A failed load leaves the module's scheduler non-null, so free it here:
+    // otherwise the next call would take it for a loaded stage and run on
+    // half-initialised weights.
+    bool ensure_text_enc() {
+        if (text_enc_m.sched) return true;
+        if (staged) { release_same_encoder(); release_dit(); release_same_decoder(); }
+        fprintf(stderr, "[SA3] loading T5Gemma text encoder (staged)\n");
+        if (!sa3_t5gemma_load(&text_enc_m, (dir + "/sa3-text-enc-BF16.gguf").c_str())) {
+            sa3_t5gemma_free(&text_enc_m);
+            return false;
+        }
+        return true;
+    }
+    bool ensure_same_enc() {
+        if (same_enc_m.sched) return true;
+        if (staged) { release_text_encoder(); release_dit(); release_same_decoder(); }
+        fprintf(stderr, "[SA3] loading SAME encoder (staged)\n");
+        if (!sa3_same_load(&same_enc_m, (dir + "/sa3-same-enc-F16.gguf").c_str(), true)) {
+            sa3_same_free(&same_enc_m);
+            return false;
+        }
+        return true;
+    }
+    bool ensure_same_dec() {
+        if (same_dec_m.sched) return true;
+        if (staged) { release_text_encoder(); release_same_encoder(); release_dit(); }
+        fprintf(stderr, "[SA3] loading SAME decoder (staged)\n");
+        if (!sa3_same_load(&same_dec_m, (dir + "/sa3-same-dec-F16.gguf").c_str(), false)) {
+            sa3_same_free(&same_dec_m);
+            return false;
+        }
+        return true;
+    }
+    bool ensure_dit() {
+        if (dit_m.sched) return true;
+        if (staged) { release_text_encoder(); release_same_encoder(); release_same_decoder(); }
+        fprintf(stderr, "[SA3] loading DiT %s (staged)\n", dit_file.c_str());
+        if (!sa3_dit_load(&dit_m, (dir + "/" + dit_file).c_str(),
+                          adapters.empty() ? nullptr : &adapters)) {
+            sa3_dit_free(&dit_m);
+            return false;
+        }
+        return true;
+    }
+
     bool text_encode(const int64_t * ids, int n_tokens, float * out) override {
+        if (!ensure_text_enc()) return false;
         int32_t ids32[SA3_TOK_LEN];
         uint8_t mask[SA3_TOK_LEN];
         for (int i = 0; i < SA3_TOK_LEN; i++) {
@@ -1118,44 +1194,149 @@ struct Sa3GgmlRefine final : Sa3Backend {
         return true;
     }
     bool same_encode_chunk(const float * audio, float * latents) override {
+        if (!ensure_same_enc()) return false;
         // module I/O is torch-contiguous: audio planar [2,S], latents [256,128]
         sa3_same_forward(&same_enc_m, audio, latents, SA3_CHUNK_LAT);
         return true;
     }
     bool same_decode_chunk(const float * latents, float * audio) override {
+        if (!ensure_same_dec()) return false;
         sa3_same_forward(&same_dec_m, latents, audio, SA3_CHUNK_LAT);
         return true;
     }
     bool dit_forward(const float * x, float t, const float * cross, const float * glob,
                      const float * local, const char * pad_mask, int T, float * v) override {
+        if (!ensure_dit()) return false;
         // module I/O is torch-contiguous: x [256,T], cross [257,768] token-major,
         // local [257,T], out [256,T] — identical to the orchestration buffers.
-        sa3_dit_forward(&dit_m, x, t, cross, SA3_TOK_LEN + 1, glob, local,
-                        reinterpret_cast<const uint8_t *>(pad_mask), T, v);
+        if (!sa3_dit_forward(&dit_m, x, t, cross, SA3_TOK_LEN + 1, glob, local,
+                             reinterpret_cast<const uint8_t *>(pad_mask), T, v)) {
+            // A failed graph allocation leaves the scheduler unusable; drop the
+            // module so the next render starts from a clean load.
+            sa3_dit_free(&dit_m);
+            return false;
+        }
         return true;
     }
+
+    void release_text_encoder() override { if (staged && text_enc_m.sched) sa3_t5gemma_free(&text_enc_m); }
+    void release_same_encoder() override { if (staged && same_enc_m.sched) sa3_same_free(&same_enc_m); }
+    void release_dit()          override { if (staged && dit_m.sched)      sa3_dit_free(&dit_m); }
+    void release_same_decoder() override { if (staged && same_dec_m.sched) sa3_same_free(&same_dec_m); }
 };
 
-// Load all four GGUFs from `dir` (the models root, same place the pp-vae
+// Free VRAM on this process's backend device, or 0 when it cannot be queried
+// (CPU backend, or no device). Same pattern as vae_ggml_free_vram().
+static inline size_t sa3_free_vram_bytes() {
+    BackendPair bp = backend_init("SA3-MemProbe");
+    size_t     free_b = 0, total_b = 0;
+    ggml_backend_dev_t dev = bp.backend ? ggml_backend_get_device(bp.backend) : nullptr;
+    if (dev) {
+        ggml_backend_dev_memory(dev, &free_b, &total_b);
+    }
+    backend_release(bp.backend, bp.cpu_backend);
+    return free_b;
+}
+
+static inline size_t sa3_file_bytes(const std::string & path) {
+    std::error_code ec;
+    uintmax_t       n = std::filesystem::file_size(path, ec);
+    return ec ? 0 : (size_t) n;
+}
+
+// Load the four GGUFs from `dir` (the models root, same place the pp-vae
 // GGUFs live). `dit_file` = the generation DiT filename in `dir` (BF16 or a
 // quant). The seconds embedder reads its two tiny tensors from that DiT
 // GGUF (conditioner.* extras). `adapters` (optional) = StableStep DoRA
 // adapter GGUFs merged into the DiT weights at load (see sa3-dit-ggml.h).
+//
+// Residency: the preferred path keeps all four modules on the GPU, so later
+// renders reuse them. On a card that cannot hold them (the SAME halves expand
+// to F32, and the DiT alone wants ~2.7 GB at BF16) we switch to staged
+// loading: one module at a time, released as the render moves on. That is what
+// makes SA3 fit on 4 GB cards.
+//
+// The free-VRAM check runs first because a deliberately failed 2.7 GB
+// cudaMalloc is not free: ggml's CUDA allocator prints an alarming OOM and the
+// driver has to find the space again. The estimate below is the sum of the
+// four GGUF sizes, which happens to track VRAM well (SAME doubles F16 -> F32,
+// T5Gemma loads only its encoder half), plus headroom for the DiT graph. No
+// measurement (free == 0) means "just try": that is the CPU path and big cards.
+#define SA3_EAGER_VRAM_HEADROOM ((size_t) 1024 * 1024 * 1024)  // 1 GiB
+
 static inline bool sa3_ggml_load(Sa3GgmlRefine * m, const char * dir, const char * dit_file,
                                  const std::vector<Sa3AdapterSpec> * adapters = nullptr) {
     if (!m || !dir || !dit_file) return false;
-    m->dir = dir;
+    m->dir      = dir;
+    m->dit_file = dit_file;
+    m->adapters = adapters ? *adapters : std::vector<Sa3AdapterSpec>{};
+    m->staged   = false;
     std::string d   = dir;
     std::string dit = d + "/" + dit_file;
-    bool ok = sa3_t5gemma_load(&m->text_enc_m, (d + "/sa3-text-enc-BF16.gguf").c_str())
-           && sa3_seconds_embedder_load(&m->seconds_m, dit.c_str())
-           && sa3_same_load(&m->same_enc_m, (d + "/sa3-same-enc-F16.gguf").c_str(), true)
-           && sa3_same_load(&m->same_dec_m, (d + "/sa3-same-dec-F16.gguf").c_str(), false)
-           && sa3_dit_load(&m->dit_m, dit.c_str(), adapters);
-    m->loaded = ok;
-    fprintf(stderr, "[SA3] GGML backend loaded from %s, DiT %s (%zu adapters): %s\n", dir, dit_file,
-            adapters ? adapters->size() : 0, ok ? "OK" : "FAILED");
-    return ok;
+
+    // Staged loading defers every other read to the render, so check the pack
+    // is complete here: a missing file must fail at model load (and name
+    // itself) exactly as the eager path used to.
+    const std::string text_path = d + "/sa3-text-enc-BF16.gguf";
+    const std::string enc_path  = d + "/sa3-same-enc-F16.gguf";
+    const std::string dec_path  = d + "/sa3-same-dec-F16.gguf";
+    const size_t text_b = sa3_file_bytes(text_path);
+    const size_t enc_b  = sa3_file_bytes(enc_path);
+    const size_t dec_b  = sa3_file_bytes(dec_path);
+    const size_t dit_b  = sa3_file_bytes(dit);
+    if (!text_b || !enc_b || !dec_b || !dit_b) {
+        fprintf(stderr, "[SA3] GGML backend: missing %s: FAILED\n",
+                !text_b ? text_path.c_str() : !enc_b ? enc_path.c_str()
+              : !dec_b  ? dec_path.c_str()  : dit.c_str());
+        m->loaded = false;
+        return false;
+    }
+
+    // Tiny, CPU-side, and it reads the DiT GGUF: a broken DiT fails here with
+    // its own message instead of halfway through the render.
+    if (!sa3_seconds_embedder_load(&m->seconds_m, dit.c_str())) {
+        m->loaded = false;
+        fprintf(stderr, "[SA3] GGML backend: cannot read %s: FAILED\n", dit.c_str());
+        return false;
+    }
+
+    const size_t need   = text_b + enc_b + dec_b + dit_b;
+    const size_t free_b = sa3_free_vram_bytes();
+    if (free_b > 0 && need > 0 && need + SA3_EAGER_VRAM_HEADROOM > free_b) {
+        m->staged = true;
+        m->loaded = true;
+        fprintf(stderr,
+                "[SA3] GGML backend loaded from %s, DiT %s (%zu adapters): OK "
+                "(staged: %.0f MB of weights + headroom > %.0f MB free VRAM)\n",
+                dir, dit_file, adapters ? adapters->size() : 0,
+                (double) need / (1024.0 * 1024.0), (double) free_b / (1024.0 * 1024.0));
+        return true;
+    }
+
+    bool eager = sa3_t5gemma_load(&m->text_enc_m, (d + "/sa3-text-enc-BF16.gguf").c_str())
+              && sa3_same_load(&m->same_enc_m, (d + "/sa3-same-enc-F16.gguf").c_str(), true)
+              && sa3_same_load(&m->same_dec_m, (d + "/sa3-same-dec-F16.gguf").c_str(), false)
+              && sa3_dit_load(&m->dit_m, dit.c_str(), adapters);
+    if (eager) {
+        m->loaded = true;
+        fprintf(stderr, "[SA3] GGML backend loaded from %s, DiT %s (%zu adapters): OK (all resident)\n",
+                dir, dit_file, adapters ? adapters->size() : 0);
+        return true;
+    }
+
+    // The estimate was optimistic (or the device could not be measured). Free
+    // whatever did fit and defer the rest to ensure_*(). A corrupt file fails
+    // again in its own stage with a precise error; on a healthy install only a
+    // backend allocation failure reaches this path.
+    if (m->text_enc_m.sched) sa3_t5gemma_free(&m->text_enc_m);
+    if (m->same_enc_m.sched) sa3_same_free(&m->same_enc_m);
+    if (m->same_dec_m.sched) sa3_same_free(&m->same_dec_m);
+    if (m->dit_m.sched)      sa3_dit_free(&m->dit_m);
+    m->staged = true;
+    m->loaded = true;
+    fprintf(stderr, "[SA3] GGML backend loaded from %s, DiT %s (%zu adapters): OK (staged, one module resident at a time)\n",
+            dir, dit_file, adapters ? adapters->size() : 0);
+    return true;
 }
 
 static inline void sa3_ggml_free(Sa3GgmlRefine * m) {

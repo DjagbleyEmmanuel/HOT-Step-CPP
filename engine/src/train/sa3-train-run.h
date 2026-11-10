@@ -712,8 +712,10 @@ static int sa3_train_check(const std::string & dir, const std::string & base_dit
             ok = ok && sa3_dit_load(&inf, base_dit.c_str(), &specs);
             std::vector<float> out_cm((size_t) (SA3T_LAT * C));
             if (ok) {
-                sa3_dit_forward(&inf, in.x_t.data(), (float) in.t, cross.data(), m.S_c, sec.data(), in.local.data(), pmask.data(), C, out_cm.data());
+                ok = sa3_dit_forward(&inf, in.x_t.data(), (float) in.t, cross.data(), m.S_c, sec.data(), in.local.data(), pmask.data(), C, out_cm.data());
                 sa3_dit_free(&inf);
+            }
+            if (ok) {
                 std::vector<float> got((size_t) (SA3T_LAT * C));
                 for (int64_t j = 0; j < C; j++)
                     for (int c = 0; c < SA3T_LAT; c++) got[(size_t) (j * SA3T_LAT + c)] = out_cm[(size_t) (c * C + j)];
